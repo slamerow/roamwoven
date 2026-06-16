@@ -46,10 +46,21 @@ Live Supabase dev setup is partially complete:
 - The later table grants have now run successfully in Supabase.
 - Vercel project is created from `slamerow/roamwoven` on `main`.
 - Production deployment URL: `https://roamwoven.vercel.app`.
-- Vercel env vars set for Production and Preview: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_APP_URL=https://roamwoven.vercel.app`.
+- Vercel env vars set for Production and Preview: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_APP_URL=https://roamwoven.com`.
+- `roamwoven.com` has been purchased through Porkbun.
+- Vercel has been upgraded to Pro and `roamwoven.com` has been added to the Roamwoven project.
+- Porkbun DNS now points the apex domain at Vercel:
+  - A record: `roamwoven.com` -> `216.150.1.1`
+  - External DNS check returned `216.150.1.1`.
+  - `https://roamwoven.com` returns HTTP 200 from Vercel.
+  - `http://roamwoven.com` redirects to HTTPS.
+- The Porkbun email-forwarding MX/TXT records were left in place. The old root ALIAS to Porkbun parking was removed.
 - Supabase Auth URL configuration is updated:
-  - Site URL: `https://roamwoven.vercel.app`
+  - Site URL: `https://roamwoven.com`
   - Redirect URL allow-list: `https://roamwoven.vercel.app/auth/callback`
+  - Redirect URL allow-list: `https://roamwoven.com/auth/callback`
+- Vercel was redeployed after the `NEXT_PUBLIC_APP_URL` change. Deployment `3zmfrE3f5` is Ready, Current, and assigned to `roamwoven.com`.
+- `https://roamwoven.com/login?next=%2Fmaker` returns HTTP 200 and is open in the Codex browser for testing.
 - Magic-link email was received at `ekamerow@gmail.com`, and clicking it reached the app callback.
 - After callback, `/maker` hit `permission denied for table trips`, meaning auth worked but table grants were still insufficient.
 - A first grant patch was run, but `/maker` still showed permission denied.
@@ -81,22 +92,21 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 - Traveler app should be one hosted template backed by trip snapshots.
 - Photos are part of V1, with count/size/retention limits and no video.
 - Wren's Adventure remains the user's real trip app and the reference UX for legs, categories, calendar/day views, search, phrases, maps, and mobile cards.
-- Vercel deployment is deferred because Wren's Adventure may already use the available deployment slot.
+- Roamwoven is deployed on Vercel Pro and the custom domain is live at `https://roamwoven.com`.
 
 ## Recommended Next Task
 
 Finish Supabase auth/database verification, then move into upload persistence:
 
-1. Use the Vercel deployment for testing: `https://roamwoven.vercel.app/login?next=%2Fmaker`.
+1. Use the custom domain for testing: `https://roamwoven.com/login?next=%2Fmaker`.
 2. Wait for the Supabase magic-link email cooldown to clear, or test with a different email address.
 3. Click/open the magic link in the same browser session.
 4. Confirm `/maker` shows the signed-in dashboard rather than the old permission error.
 5. Create a real test trip and confirm it inserts with `owner_user_id`.
 6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
-7. Commit and push the local magic-link error logging change if desired; the current Vercel deployment is from `afbcc2c`.
-8. Create Stripe account/product/price when the business setup is ready.
-9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
-10. Add paid-trip upload records and Supabase Storage.
+7. Create Stripe account/product/price when the business setup is ready.
+8. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
+9. Add paid-trip upload records and Supabase Storage.
 
 Keep upload/extraction mocked until trip persistence is working.
 

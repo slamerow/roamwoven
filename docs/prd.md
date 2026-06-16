@@ -18,7 +18,7 @@ Wren's Adventure is the architectural and UX north star for the traveler app: le
 
 ### Core Promise
 
-Turn your trip details into a private travel app.
+Turn your trip details into your private travel app.
 
 ### What Roamwoven Is
 

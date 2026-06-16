@@ -5,7 +5,7 @@ const steps = [
   "Pay once for your trip",
   "Upload confirmations, screenshots, docs, and notes",
   "Answer a guided review",
-  "Publish a private mobile trip app"
+  "Publish your private mobile trip app"
 ];
 
 export default function HomePage() {
@@ -17,7 +17,7 @@ export default function HomePage() {
             Roamwoven
           </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-ink md:text-7xl">
-            Turn your trip details into a private travel app.
+            Turn your trip details into your private travel app.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
             Drop in the confirmations, screenshots, PDFs, spreadsheets, and notes

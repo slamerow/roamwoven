@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Roamwoven",
-  description: "Turn your trip details into a private travel app."
+  description: "Turn your trip details into your private travel app."
 };
 
 export default function RootLayout({
@@ -17,4 +17,3 @@ export default function RootLayout({
     </html>
   );
 }
-
