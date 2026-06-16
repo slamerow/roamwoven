@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Copy, ExternalLink, RefreshCw, RotateCcw, ShieldCheck, Smartphone } from "lucide-react";
+import { ExternalLink, RotateCcw, ShieldCheck, Smartphone } from "lucide-react";
+import { CopyLinkButton, RefreshAppButton } from "@/components/publish-actions";
 
 const shareUrl = "https://roamwoven.com/t/demo";
 
@@ -50,10 +51,7 @@ export default async function PublishPage({
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
-              <button className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper">
-                <Copy size={16} />
-                Copy link
-              </button>
+              <CopyLinkButton shareUrl={shareUrl} />
               <Link
                 href="/t/demo"
                 className="inline-flex items-center gap-2 rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink"
@@ -66,17 +64,11 @@ export default async function PublishPage({
 
           <aside className="space-y-4">
             <div className="rounded-md border border-ink/10 bg-white p-5">
-              <RefreshCw className="text-tide" size={22} />
+              <RotateCcw className="text-tide" size={22} />
               <h2 className="mt-4 text-lg font-semibold text-ink">
                 Refresh status
               </h2>
-              <p className="mt-2 text-sm leading-6 text-ink/60">
-                Published snapshot is current. Future maker edits will mark this
-                app as needing refresh.
-              </p>
-              <button className="mt-4 rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink">
-                Refresh app
-              </button>
+              <RefreshAppButton />
             </div>
 
             <div className="rounded-md border border-ink/10 bg-white p-5">
@@ -105,4 +97,3 @@ export default async function PublishPage({
     </main>
   );
 }
-
