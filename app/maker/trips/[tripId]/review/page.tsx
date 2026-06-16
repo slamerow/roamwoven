@@ -138,10 +138,10 @@ export default async function ReviewPage({
               items stay visible as placeholder cards.
             </p>
             <Link
-              href="/t/demo"
+              href={`/maker/trips/${tripId}/data`}
               className="mt-5 inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
             >
-              Preview app
+              View clean data
               <ArrowRight size={16} />
             </Link>
           </aside>
@@ -150,4 +150,3 @@ export default async function ReviewPage({
     </main>
   );
 }
-

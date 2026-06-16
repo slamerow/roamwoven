@@ -129,6 +129,8 @@ export function getAsiaDemoTrip() {
   return {
     name: trip.name,
     dateRange: trip.dateRange,
+    legs: trip.legs,
+    items: trip.items,
     dayCount: days.length,
     itemCount: trip.items.length,
     days,
