@@ -10,19 +10,19 @@ const steps = [
 
 const perfectFor = [
   {
-    title: "Big family trips",
+    title: "Solo travel",
     description:
-      "Keep flights, stays, activities, phrases, maps, and shared context easy for everyone to find."
+      "Stay oriented without relying on someone else to remember the plan, the address, or what comes next."
   },
   {
-    title: "Long sabbaticals",
+    title: "Couples trips",
     description:
-      "Turn months of moving parts into a calm daily app that still works when the plan gets complicated."
+      "Make the once-or-twice-a-year trip feel effortless, with reservations, ideas, and daily logistics in one shared place."
   },
   {
-    title: "Group adventures",
+    title: "Family adventures",
     description:
-      "Give friends and family one place to follow the plan without handing them your inbox or spreadsheets."
+      "Keep kids, grandparents, and follow-along family in the loop without forwarding every email or spreadsheet."
   }
 ];
 
