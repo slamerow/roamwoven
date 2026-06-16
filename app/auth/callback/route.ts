@@ -15,15 +15,21 @@ export async function GET(request: NextRequest) {
   const next = safeNext(url.searchParams.get("next"));
 
   if (!code) {
-    return NextResponse.redirect(new URL("/login?error=auth-failed", request.url));
+    return NextResponse.redirect(
+      new URL("/login?error=auth-failed", request.url),
+      303
+    );
   }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    return NextResponse.redirect(new URL("/login?error=auth-failed", request.url));
+    return NextResponse.redirect(
+      new URL("/login?error=auth-failed", request.url),
+      303
+    );
   }
 
-  return NextResponse.redirect(new URL(next, request.url));
+  return NextResponse.redirect(new URL(next, request.url), 303);
 }

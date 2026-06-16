@@ -33,6 +33,34 @@ Backend-ready pieces now exist:
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
 - The Stripe webhook route can mark trips paid after `checkout.session.completed` through a narrow service-role backend path.
 
+Live Supabase dev setup is partially complete:
+
+- Supabase project created: `roamwoven-dev`.
+- Project ref: `zijriyeydlupaqpxhiyb`.
+- Project URL: `https://zijriyeydlupaqpxhiyb.supabase.co`.
+- Local `.env.local` exists and is gitignored.
+- `.env.local` has `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- `SUPABASE_SERVICE_ROLE_KEY` is still blank because clipboard access from the Codex browser was blocked; it is only needed for trusted backend jobs like the Stripe webhook payment update.
+- `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3002` because local dev has been running on port 3002.
+- `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
+- Magic-link email was received at `ekamerow@gmail.com`, and clicking it reached the app callback.
+- After callback, `/maker` hit `permission denied for table trips`, meaning auth worked but table grants were still insufficient.
+- A first grant patch was run, but `/maker` still showed permission denied.
+- A second grant patch was attempted but pasted onto old SQL text and failed with syntax error near `usage`.
+
+Current Supabase SQL fix to run cleanly:
+
+```sql
+grant usage on schema public to anon, authenticated;
+
+grant select, insert, update, delete on trips to anon, authenticated;
+grant select, insert, update, delete on trip_uploads to anon, authenticated;
+grant select, insert, update, delete on trip_legs to anon, authenticated;
+grant select, insert, update, delete on trip_items to anon, authenticated;
+```
+
+Important: before running that SQL, clear the SQL editor with `Cmd+A` then Delete. The last failed attempt happened because new SQL was pasted after old SQL.
+
 ## Important Product Decisions
 
 - Beta should use real Stripe Checkout with promo codes/discounts for test users.
@@ -46,14 +74,18 @@ Backend-ready pieces now exist:
 
 ## Recommended Next Task
 
-Finish service setup and then move into upload persistence:
+Finish Supabase auth/database verification, then move into upload persistence:
 
-1. Create Stripe account/product/price when the business setup is ready.
-2. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
-3. Exercise test-mode Checkout with promotion codes.
-4. Configure Supabase env variables and apply `db/schema.sql`.
-5. Exercise magic-link auth and owner-scoped trip creation.
-6. Add paid-trip upload records and Supabase Storage.
+1. In Supabase SQL editor, clear the editor and run the clean grant SQL above.
+2. Restart or continue local dev with `npm run dev`; it will likely use port 3002 while another process owns 3000.
+3. Request a new magic link from `http://localhost:3002/login?next=%2Fmaker` for `ekamerow@gmail.com`.
+4. Click the email link in the same browser session.
+5. Confirm `/maker` shows the signed-in dashboard rather than the permission error.
+6. Create a real test trip and confirm it inserts with `owner_user_id`.
+7. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
+8. Create Stripe account/product/price when the business setup is ready.
+9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
+10. Add paid-trip upload records and Supabase Storage.
 
 Keep upload/extraction mocked until trip persistence is working.
 
