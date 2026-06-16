@@ -3,7 +3,7 @@ import {
   canStartStripeCheckout,
   createTripCheckoutSession,
 } from "@/lib/billing/stripe";
-import { getCurrentUser, hasSupabaseServerConfig } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { getMakerTrip } from "@/lib/trips";
 
 export async function POST(
@@ -12,15 +12,12 @@ export async function POST(
 ) {
   const { tripId } = await params;
   const tripUrl = new URL(`/maker/trips/${tripId}`, request.url);
+  const user = await getCurrentUser();
 
-  if (hasSupabaseServerConfig()) {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", `/maker/trips/${tripId}`);
-      return NextResponse.redirect(loginUrl, 303);
-    }
+  if (!user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", `/maker/trips/${tripId}`);
+    return NextResponse.redirect(loginUrl, 303);
   }
 
   const trip = await getMakerTrip(tripId);
@@ -41,7 +38,7 @@ export async function POST(
     return NextResponse.redirect(tripUrl, 303);
   }
 
-  const session = await createTripCheckoutSession(trip);
+  const session = await createTripCheckoutSession(trip, user);
 
   if (!session.url) {
     throw new Error("Stripe did not return a Checkout URL.");

@@ -34,6 +34,8 @@ Backend-ready pieces now exist:
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
 - The Stripe webhook route can mark trips paid after `checkout.session.completed` through a narrow service-role backend path.
+- Checkout sessions now include signed-in user metadata, prefill customer email when available, and return with `session_id` so the workspace can verify a completed payment immediately if the webhook is still catching up.
+- Stripe setup checklist lives in `docs/stripe-setup.md`.
 
 Live Supabase dev setup is partially complete:
 
@@ -121,8 +123,9 @@ Finish upload persistence verification, then move into payment/review plumbing:
 6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
 7. Rerun `db/schema.sql` in Supabase so the `trip-materials` bucket and storage policies exist.
 8. Create Stripe account/product/price when the business setup is ready.
-9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
-10. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
+9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, and `SUPABASE_SERVICE_ROLE_KEY`.
+10. Verify test checkout redirects back and marks a trip paid.
+11. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
 
 Keep upload/extraction mocked until trip persistence is working.
 
@@ -138,5 +141,6 @@ Small scaffold already exists:
 - `lib/billing/stripe.ts`
 - `app/maker/trips/[tripId]/checkout/route.ts`
 - `app/api/stripe/webhook/route.ts`
+- `docs/stripe-setup.md`
 - `lib/auth.ts`
 - `app/login/page.tsx`

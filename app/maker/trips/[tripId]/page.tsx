@@ -8,8 +8,12 @@ import {
   TableProperties,
   WandSparkles
 } from "lucide-react";
-import { getStripeSetupState } from "@/lib/billing/stripe";
-import { getMakerTrip } from "@/lib/trips";
+import { getCurrentUser } from "@/lib/auth";
+import {
+  getPaidCheckoutTripId,
+  getStripeSetupState,
+} from "@/lib/billing/stripe";
+import { getMakerTrip, markTripPaid } from "@/lib/trips";
 
 function getStages(isPaid: boolean) {
   return [
@@ -59,10 +63,40 @@ export default async function TripWorkspacePage({
   searchParams
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ checkout?: string; making?: string }>;
+  searchParams: Promise<{
+    checkout?: string;
+    making?: string;
+    session_id?: string;
+  }>;
 }) {
   const { tripId } = await params;
-  const { checkout, making } = await searchParams;
+  const { checkout, making, session_id: sessionId } = await searchParams;
+  let checkoutStatus: "verified" | "pending" | "cancelled" | null = null;
+
+  if (checkout === "success" && sessionId) {
+    try {
+      const [paidSession, user] = await Promise.all([
+        getPaidCheckoutTripId(sessionId),
+        getCurrentUser(),
+      ]);
+
+      if (
+        paidSession?.tripId === tripId &&
+        paidSession.userId &&
+        paidSession.userId === user?.id
+      ) {
+        await markTripPaid(tripId);
+        checkoutStatus = "verified";
+      } else {
+        checkoutStatus = "pending";
+      }
+    } catch {
+      checkoutStatus = "pending";
+    }
+  } else if (checkout === "cancelled") {
+    checkoutStatus = "cancelled";
+  }
+
   const trip = await getMakerTrip(tripId);
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
@@ -114,6 +148,26 @@ export default async function TripWorkspacePage({
                 </div>
               </div>
             </div>
+          </section>
+        ) : null}
+
+        {checkoutStatus ? (
+          <section
+            className={`mt-8 rounded-md border p-4 ${
+              checkoutStatus === "cancelled"
+                ? "border-clay/20 bg-clay/10 text-clay"
+                : checkoutStatus === "verified"
+                  ? "border-moss/20 bg-moss/10 text-moss"
+                  : "border-tide/20 bg-tide/10 text-tide"
+            }`}
+          >
+            <p className="text-sm font-semibold">
+              {checkoutStatus === "verified"
+                ? "Payment complete. Upload is unlocked."
+                : checkoutStatus === "cancelled"
+                  ? "Checkout was cancelled. You can try again when you are ready."
+                  : "Payment is still being confirmed. Refresh in a moment or continue once the webhook finishes."}
+            </p>
           </section>
         ) : null}
 
