@@ -10,9 +10,17 @@ create table if not exists trips (
   end_date date,
   destination_summary text,
   color_palette text,
+  theme_pack text not null default 'quiet_luxury',
+  traveler_password_enabled boolean not null default true,
+  traveler_password_hash text,
+  photo_password_hash text,
   cover_image_url text,
   published_app_token text unique,
+  token_rotated_at timestamptz,
   published_at timestamptz,
+  photo_count integer not null default 0,
+  photo_storage_bytes bigint not null default 0,
+  photo_sharing_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -67,6 +75,9 @@ create table if not exists trip_items (
   item_type text,
   location_name text,
   address text,
+  address_visibility text not null default 'traveler',
+  confirmation_number text,
+  confirmation_visibility text not null default 'maker_only',
   url text,
   notes text,
   status text not null default 'draft',
@@ -77,4 +88,3 @@ create table if not exists trip_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-

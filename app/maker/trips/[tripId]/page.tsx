@@ -8,6 +8,7 @@ import {
   TableProperties,
   WandSparkles
 } from "lucide-react";
+import { getMakerTrip } from "@/lib/trips";
 
 const stages = [
   {
@@ -50,6 +51,7 @@ export default async function TripWorkspacePage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
+  const trip = await getMakerTrip(tripId);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -59,11 +61,12 @@ export default async function TripWorkspacePage({
             Trip Workspace
           </p>
           <h1 className="mt-2 text-4xl font-semibold text-ink">
-            Japan Family Trip
+            {trip.name}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Trip ID `{tripId}` is in beta mode. Payment is bypassed for local
-            testing and friends-and-family beta runs.
+            {trip.isDemo
+              ? "Demo trip is seeded from Wren's Adventure so the traveler-app flow stays testable before live extraction exists."
+              : "Trip shell is saved. Next up is Stripe Checkout with promo-code support before upload processing begins."}
           </p>
         </header>
 
@@ -97,19 +100,31 @@ export default async function TripWorkspacePage({
         </section>
 
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
-          <h2 className="text-xl font-semibold text-ink">Beta bypass enabled</h2>
+          <h2 className="text-xl font-semibold text-ink">
+            {trip.isDemo ? "Demo flow enabled" : "Payment setup pending"}
+          </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Public launch should charge before extraction so customers cannot
-            run expensive document review and leave before purchasing. For beta,
-            this trip can continue straight to upload.
+            {trip.isDemo
+              ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
+              : "Real trips should go through Stripe Checkout before AI extraction. Beta users can receive promo codes instead of bypassing payment."}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            <Link
-              href={`/maker/trips/${tripId}/upload`}
-              className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-            >
-              Continue to upload
-            </Link>
+            {trip.isDemo ? (
+              <Link
+                href={`/maker/trips/${tripId}/upload`}
+                className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+              >
+                Continue to upload
+              </Link>
+            ) : (
+              <button
+                className="rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
+                disabled
+                type="button"
+              >
+                Stripe checkout next
+              </button>
+            )}
           </div>
         </section>
 
