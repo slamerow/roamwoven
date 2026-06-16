@@ -15,25 +15,31 @@ function getStages(isPaid: boolean) {
   return [
     {
       title: "Create trip",
-      description: "Trip shell is ready.",
+      description: "Name the app and add the first trip details.",
       state: "complete",
       icon: CheckCircle2
     },
     {
-      title: "Pay once",
-      description: "Required before AI review starts.",
+      title: "Unlock the build",
+      description: "A one-time checkout starts the full app build.",
       state: isPaid ? "complete" : "current",
       icon: CreditCard
     },
     {
-      title: "Upload materials",
-      description: "PDFs, screenshots, docs, sheets, and notes.",
+      title: "Upload info",
+      description: "Drop in confirmations, notes, docs, and screenshots.",
       state: isPaid ? "current" : "locked",
       icon: FileUp
     },
     {
-      title: "Generate app",
-      description: "Review questions, preview, and publish.",
+      title: "Confirm details",
+      description: "Answer quick prompts in a guided review.",
+      state: isPaid ? "available" : "locked",
+      icon: TableProperties
+    },
+    {
+      title: "Publish app",
+      description: "Generate the traveler app and you are ready to go.",
       state: isPaid ? "available" : "locked",
       icon: WandSparkles
     }
@@ -109,7 +115,7 @@ export default async function TripWorkspacePage({
           </section>
         ) : null}
 
-        <section className="mt-8 grid gap-4 md:grid-cols-4">
+        <section className="mt-8 grid gap-4 md:grid-cols-5">
           {stages.map((stage) => {
             const Icon = stage.icon;
             return (

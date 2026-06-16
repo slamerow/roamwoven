@@ -2,10 +2,11 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 const steps = [
-  "Pay once for your trip",
-  "Upload confirmations, screenshots, docs, and notes",
-  "Answer a guided review",
-  "Publish your private mobile trip app"
+  "Create your trip",
+  "Unlock the build",
+  "Upload your info",
+  "Confirm the details",
+  "Generate and publish your app"
 ];
 
 const perfectFor = [
@@ -186,7 +187,7 @@ export default function HomePage() {
       </section>
 
       <section className="border-t border-ink/10 bg-white">
-        <div className="mx-auto grid max-w-6xl gap-4 px-6 py-10 md:grid-cols-4 md:px-10">
+        <div className="mx-auto grid max-w-6xl gap-4 px-6 py-10 md:grid-cols-5 md:px-10">
           {steps.map((step, index) => (
             <div key={step} className="rounded-md border border-ink/10 p-4">
               <p className="text-sm font-semibold text-clay">0{index + 1}</p>
