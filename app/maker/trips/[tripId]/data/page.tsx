@@ -48,10 +48,10 @@ export default async function StructuredDataPage({
             </p>
           </div>
           <Link
-            href="/t/demo"
+            href={`/maker/trips/${tripId}/style`}
             className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
           >
-            Preview app
+            Choose style
             <ArrowRight size={16} />
           </Link>
         </header>
@@ -155,4 +155,3 @@ export default async function StructuredDataPage({
     </main>
   );
 }
-
