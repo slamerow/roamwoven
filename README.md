@@ -4,7 +4,7 @@ Roamwoven turns messy trip materials into a clean, private, mobile-friendly trip
 
 ## Current Status
 
-This repo is at product scaffold stage. The key planning docs live in `docs/`:
+This repo is at product scaffold stage with the first backend-ready lifecycle pieces in place. The key planning docs live in `docs/`:
 
 - `docs/prd.md`
 - `docs/technical-architecture.md`
@@ -17,14 +17,16 @@ npm install
 npm run dev
 ```
 
+Copy `.env.example` to `.env.local` when wiring real services. The app keeps a Wren's Adventure demo fallback when Supabase and Stripe env vars are missing.
+
 ## Initial Build Target
 
 The first visible beta target is:
 
 - Landing page with Asia app demo positioning.
 - Auth/payment-gated maker flow skeleton.
-- Trip dashboard and create-trip shell.
+- Trip dashboard and create-trip shell with Supabase-ready persistence.
+- Stripe Checkout scaffold with promotion-code support.
 - Upload page placeholder.
 - Traveler app route at `/t/[token]`.
 - Asia workbook importer prototype.
-

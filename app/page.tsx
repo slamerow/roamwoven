@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, FileText, Lock, Smartphone } from "lucide-react";
 
 const steps = [
-  "Pay $25 once for your trip",
+  "Pay once for your trip",
   "Upload confirmations, screenshots, docs, and notes",
   "Answer a guided review",
   "Publish a private mobile trip app"

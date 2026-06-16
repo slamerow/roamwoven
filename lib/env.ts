@@ -10,8 +10,21 @@ export function getSupabaseConfig() {
   };
 }
 
+export function getStripeConfig() {
+  return {
+    secretKey: getOptionalEnv("STRIPE_SECRET_KEY"),
+    webhookSecret: getOptionalEnv("STRIPE_WEBHOOK_SECRET"),
+    tripPriceId: getOptionalEnv("STRIPE_TRIP_PRICE_ID"),
+    appUrl: getOptionalEnv("NEXT_PUBLIC_APP_URL") ?? "http://localhost:3000",
+  };
+}
+
 export function hasSupabaseBrowserConfig() {
   const config = getSupabaseConfig();
   return Boolean(config.url && config.anonKey);
 }
 
+export function hasStripeCheckoutConfig() {
+  const config = getStripeConfig();
+  return Boolean(config.secretKey && config.tripPriceId);
+}

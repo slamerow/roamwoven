@@ -8,6 +8,7 @@ import {
   TableProperties,
   WandSparkles
 } from "lucide-react";
+import { getStripeSetupState } from "@/lib/billing/stripe";
 import { getMakerTrip } from "@/lib/trips";
 
 const stages = [
@@ -46,12 +47,17 @@ const betaLinks = [
 ];
 
 export default async function TripWorkspacePage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ checkout?: string }>;
 }) {
   const { tripId } = await params;
+  const { checkout } = await searchParams;
   const trip = await getMakerTrip(tripId);
+  const stripeSetup = getStripeSetupState();
+  const isPaid = trip.paymentStatus === "paid" || trip.isDemo;
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -101,15 +107,27 @@ export default async function TripWorkspacePage({
 
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">
-            {trip.isDemo ? "Demo flow enabled" : "Payment setup pending"}
+            {trip.isDemo
+              ? "Demo flow enabled"
+              : isPaid
+                ? "Payment complete"
+                : "Checkout required"}
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             {trip.isDemo
               ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
-              : "Real trips should go through Stripe Checkout before AI extraction. Beta users can receive promo codes instead of bypassing payment."}
+              : isPaid
+                ? "This trip is paid, so upload and processing can begin."
+                : "Real trips go through Stripe Checkout before AI extraction. Beta users can use promo codes instead of bypassing payment."}
           </p>
+          {checkout === "setup-required" ? (
+            <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+              Stripe Checkout is not configured yet. Add Stripe test keys and a
+              trip price ID to enable this button.
+            </p>
+          ) : null}
           <div className="mt-5 flex flex-wrap gap-3">
-            {trip.isDemo ? (
+            {isPaid ? (
               <Link
                 href={`/maker/trips/${tripId}/upload`}
                 className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
@@ -117,15 +135,26 @@ export default async function TripWorkspacePage({
                 Continue to upload
               </Link>
             ) : (
-              <button
-                className="rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
-                disabled
-                type="button"
-              >
-                Stripe checkout next
-              </button>
+              <form action={`/maker/trips/${tripId}/checkout`} method="post">
+                <button
+                  className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+                  type="submit"
+                >
+                  Continue to secure checkout
+                </button>
+              </form>
             )}
           </div>
+          {!trip.isDemo && !isPaid ? (
+            <div className="mt-5 grid gap-2 text-xs text-ink/50 md:grid-cols-3">
+              <p>Stripe key: {stripeSetup.hasSecretKey ? "set" : "missing"}</p>
+              <p>Price ID: {stripeSetup.hasTripPriceId ? "set" : "missing"}</p>
+              <p>
+                Webhook secret:{" "}
+                {stripeSetup.hasWebhookSecret ? "set" : "needed before launch"}
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">

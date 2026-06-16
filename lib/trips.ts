@@ -169,6 +169,26 @@ export async function createMakerTrip(input: {
   return String(data.id);
 }
 
+export async function markTripPaid(tripId: string) {
+  if (!hasSupabaseServerConfig()) {
+    return;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("trips")
+    .update({
+      status: "paid",
+      payment_status: "paid",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId);
+
+  if (error) {
+    throw new Error(`Unable to mark trip paid: ${error.message}`);
+  }
+}
+
 export function canPersistTrips() {
   return hasSupabaseServerConfig();
 }

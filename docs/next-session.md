@@ -2,7 +2,7 @@
 
 ## Current State
 
-Roamwoven has a complete static beta flow:
+Roamwoven has a static beta flow plus the first backend-ready trip lifecycle:
 
 `/maker` -> `/maker/trips/demo-trip` -> upload -> review -> clean data -> style -> publish -> `/t/demo`
 
@@ -20,7 +20,14 @@ Interactive local-only UI exists for:
 - Style settings.
 - Publish actions.
 
-No backend persistence is wired yet.
+Backend-ready pieces now exist:
+
+- `db/schema.sql` includes V1 trip fields for payment status, theme pack, password flags, photo metrics, and sensitive-field visibility.
+- `lib/trips.ts` lists, loads, and creates trips through Supabase when env vars are configured.
+- Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
+- Real trip upload is gated behind payment status.
+- Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
+- The Stripe webhook route can mark trips paid after `checkout.session.completed`.
 
 ## Important Product Decisions
 
@@ -35,17 +42,17 @@ No backend persistence is wired yet.
 
 ## Recommended Next Task
 
-Add Supabase minimally:
+Finish payment setup and then move into authenticated persistence:
 
-1. Configure Supabase env variables.
-2. Create `trips` table migration/schema.
-3. Add auth helpers.
-4. Make create-trip save a real trip.
-5. Render maker dashboard from saved trips.
+1. Create Stripe account/product/price when the business setup is ready.
+2. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
+3. Exercise test-mode Checkout with promotion codes.
+4. Configure Supabase env variables and apply `db/schema.sql`.
+5. Add auth/session enforcement around maker routes.
 
 Keep upload/extraction mocked until trip persistence is working.
 
-After trip persistence is working, wire Stripe Checkout in test mode before building expensive extraction. Promo-code beta should exercise the same paid-trip lifecycle as normal checkout.
+Promo-code beta should exercise the same paid-trip lifecycle as normal checkout. Keep expensive extraction mocked until payment and owner-scoped trip persistence are both working.
 
 Small scaffold already exists:
 
@@ -54,3 +61,6 @@ Small scaffold already exists:
 - `lib/supabase/server.ts`
 - `db/schema.sql`
 - `db/README.md`
+- `lib/billing/stripe.ts`
+- `app/maker/trips/[tripId]/checkout/route.ts`
+- `app/api/stripe/webhook/route.ts`
