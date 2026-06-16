@@ -47,7 +47,21 @@ Roamwoven is sold as a one-time per-trip purchase.
 
 Payment should happen before expensive AI extraction and structuring begins. The product should not allow users to upload large volumes of materials, consume expensive processing, and churn before paying.
 
-Exact pricing is TBD, but the working assumption is a low-cost consumer purchase, likely in the $10-20 range per trip. The PRD should not hard-code final price until costs and conversion are better understood.
+Launch pricing should position Roamwoven as a premium but accessible product, not a disposable utility. The current working assumption is a flat $25 per trip for most customers.
+
+Rationale:
+
+- Simple price communication is better than complex trip-length pricing at launch.
+- A $25 trip fee leaves room for AI, storage, payment, and support costs while still feeling reasonable for a meaningful personal trip.
+- If the trip is unusually short, the product can offer an automatic goodwill discount, such as $5 off for a three-day trip, without making pricing feel complicated.
+- Longer trips can still fit the flat fee if cost controls, upload limits, and refresh limits are explicit.
+
+Potential future pricing:
+
+- Short-trip automatic discount.
+- Referral credit: when a referred customer buys a trip, the referrer gets a free or discounted future trip.
+- Unlimited personal plan around $150-199/year, with terms that prohibit commercial resale, automated abuse, or travel-agent usage unless separately approved.
+- Travel-agent or small-business plan as a separate commercial tier.
 
 Potential future monetization:
 
@@ -87,7 +101,8 @@ The traveler app is the generated private trip app.
 
 The traveler app supports:
 
-- Private shareable URL.
+- Private shareable URL with a high-entropy unguessable token.
+- Optional traveler password, at minimum for trips or photo albums where the customer wants an extra privacy layer.
 - Mobile-first layout.
 - PWA/add-to-home-screen behavior.
 - Offline access to core itinerary content where feasible.
@@ -199,10 +214,20 @@ Because the customer has already paid, the preview is a quality-control step, no
 V1 customization should be intentionally limited:
 
 - App name.
-- Color palette.
-- Possibly cover image or visual theme.
+- Theme pack.
+- Color palette within the chosen theme.
+- Possibly cover image.
 
 V1 should not support arbitrary layout editing, custom templates, or complex design controls.
+
+Initial theme direction:
+
+- Standard Adventure: warm, grounded, outdoorsy, and clear.
+- Modern / Futuristic: crisp, dark, and precise without feeling gimmicky.
+- Whimsical / Storybook: more playful and fantasy-adjacent, but still polished.
+- Quiet Luxury: understated, premium, and "stealth wealth" rather than ornate.
+
+The default commercial feel should lean Quiet Luxury: restrained, confident, mobile-first, with fewer decorative flourishes and a high-quality editorial feel.
 
 ### Step 9: Publish
 
@@ -391,6 +416,15 @@ Reference fields:
 
 V1 can include phrasebook generation if cost and reliability are acceptable, but it should not block the core product.
 
+Phrasebook UX should use curated packs rather than a blank free-text field as the primary experience.
+
+Recommended model:
+
+- Each trip/language can include phrase packs of about 10-15 useful words or short phrases.
+- Initial packs might include basics, food, transit, lodging, kid/family, emergencies, courtesy, shopping, and allergies.
+- Users can optionally add their own phrase later, but the default flow should not make them invent the phrasebook from scratch.
+- Generated phrases should be marked for verification or omitted when confidence is weak.
+
 ## 9. Placeholder Strategy
 
 The app should avoid silent absences. If something important is known to be missing, create a placeholder card.
@@ -456,6 +490,19 @@ Users should be able to edit all trip content through the maker app:
 - Addresses.
 - URLs.
 - Confirmation details.
+
+The edit experience is a core product surface, not an admin fallback. Users will often want to add detail after seeing a bare-bones generated card.
+
+The maker editor should make it easy to:
+
+- Add or rewrite a short title.
+- Add a one- or two-line description.
+- Preserve or hide confirmation numbers.
+- Preserve or hide exact addresses.
+- Mark an item as intentionally skipped.
+- Keep a placeholder visible without making it feel broken.
+
+AI-generated titles and descriptions may be used to make cards feel complete, but they must err on the side of simple and factual. The system should not invent logistical facts, times, addresses, confirmation numbers, or booking details.
 
 The structured sheet can remain an internal output or power-user export.
 
@@ -586,7 +633,34 @@ Possible future features:
 - Calendar sync.
 - Native app wrapper if there is strong demand.
 
-## 16. Key Product Risks
+## 16. Privacy, Security, and Terms Principles
+
+Roamwoven handles sensitive travel information. Even if the traveler app is simple, the underlying product should be built with commercial-grade care from the beginning.
+
+V1 privacy/security requirements:
+
+- Maker app requires authenticated user access.
+- Traveler app uses high-entropy unguessable share tokens.
+- Share tokens can be rotated.
+- Traveler app can be unpublished.
+- Traveler app pages should not be indexed by search engines.
+- Optional traveler password should be available, especially for photo albums or sensitive trips.
+- Original uploads and extracted text should be private to the trip owner.
+- Confirmation numbers should not appear by default on public traveler cards unless the user explicitly exposes them.
+- Private residence addresses should be shielded more aggressively than hotels, rentals, restaurants, or public venues.
+- Photos should support album-level privacy controls before broad sharing.
+- Video should be out of scope for V1 unless there is a clear retention and cost policy.
+
+Terms and customer messaging should make clear:
+
+- Users are responsible for reviewing all trip details before relying on them.
+- Roamwoven is not responsible for missed flights, missed reservations, or travel issues caused by incorrect source material, extraction errors, user edits, or stale information.
+- Unlimited plans are for personal use unless commercial terms are separately agreed.
+- Roamwoven may limit abusive usage, excessive uploads, excessive refreshes, or commercial resale.
+
+Business formation, LLC choice, and bank account setup are important but should remain a parallel business/legal decision rather than a blocker for product architecture.
+
+## 17. Key Product Risks
 
 ### Cost Risk
 
@@ -608,18 +682,20 @@ The product can easily drift into itinerary planning. V1 must stay focused on st
 
 The Asia workbook is useful but may not be robust enough for broader customer input. The schema should evolve as implementation reveals new cases.
 
-## 17. Open Questions
+## 18. Open Questions
 
 1. Should phrasebook generation be included in V1 or treated as an enhancement if the trip involves non-English destinations?
-2. Should the generated app require login, a secret/private URL, or both?
-3. How many previews/refreshes should be included after payment before additional processing is throttled or limited?
-4. What exact payment provider should V1 use?
+2. Should the generated app require a traveler password by default, or should password protection be optional per trip?
+3. Should photos have a separate password from the itinerary?
+4. How many previews/refreshes should be included after payment before additional processing is throttled or limited?
 5. Should sheet export be included in the base purchase, premium only, or hidden entirely at launch?
 6. What should happen if a customer uploads too much material for the base price?
 7. Should the first beta be invite-only with manual support behind the scenes?
 8. Should Roamwoven store original uploaded documents long term, or delete/archive them after extraction?
+9. What retention promise should be made for photos, if any?
+10. Should the annual unlimited tier launch early or wait until per-trip economics are proven?
 
-## 18. Initial Build Milestones
+## 19. Initial Build Milestones
 
 ### Milestone 1: Product Skeleton
 
@@ -664,7 +740,7 @@ The Asia workbook is useful but may not be robust enough for broader customer in
 - Preview app before/after publish.
 - Beta QA using the Asia trip.
 
-## 19. Suggested First Implementation Slice
+## 20. Suggested First Implementation Slice
 
 The first build should prove the core loop with the least possible surface area:
 

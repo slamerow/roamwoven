@@ -16,6 +16,7 @@ The architecture should optimize for:
 - Easy maker-app edits after publish.
 - Reuse of the Asia trip app as the reference traveler app.
 - Room to evolve the schema after real beta inputs.
+- Commercial-grade privacy, access control, auditability, and cost controls from the beginning.
 
 The system should avoid overbuilding enterprise features before the core loop is proven.
 
@@ -77,7 +78,8 @@ If using Supabase:
 
 - Store original uploads in Supabase Storage.
 - Store extracted text/metadata in Postgres.
-- Consider retention controls later.
+- Define retention controls before public launch.
+- Keep video out of V1 unless a separate storage/retention policy exists.
 
 If not Supabase:
 
@@ -134,7 +136,7 @@ Authenticated pages:
 Private generated app:
 
 - Publicly reachable by hard-to-guess URL or share token.
-- Optional login can be added later if private URL is not enough.
+- Optional traveler password for trips or albums that need an extra privacy layer.
 - Mobile-first.
 - PWA-ready.
 - Reads published trip snapshot.
@@ -206,8 +208,12 @@ Fields:
 - end_date.
 - destination_summary.
 - color_palette.
+- theme_pack.
+- traveler_password_hash.
+- photo_password_hash.
 - cover_image_url.
 - published_app_token.
+- token_rotated_at.
 - published_at.
 - created_at.
 - updated_at.
@@ -324,6 +330,9 @@ Fields:
 - item_type.
 - location_name.
 - address.
+- address_visibility.
+- confirmation_number.
+- confirmation_visibility.
 - url.
 - notes.
 - status.
@@ -414,6 +423,8 @@ Fields:
 - published_by_user_id.
 
 The traveler app should read from a published snapshot so draft maker edits do not accidentally appear until preview/publish or refresh is intended.
+
+Published snapshots should include display-safe versions of sensitive fields. Raw confirmation numbers, exact private-residence addresses, and other sensitive source details can remain in maker data while the traveler snapshot stores only what is meant to be shown.
 
 ## 6. Processing Pipeline
 
@@ -547,11 +558,23 @@ The generated app should feel custom because of:
 
 - Trip name.
 - Dates and destinations.
+- Theme pack.
 - Color palette.
 - Cover visual.
 - Data-rich day cards.
 - Placeholder cards.
 - Optional phrasebook.
+
+Theme packs should be represented as controlled design tokens, not arbitrary user CSS.
+
+Initial packs:
+
+- Standard Adventure.
+- Modern / Futuristic.
+- Whimsical / Storybook.
+- Quiet Luxury.
+
+Each pack should define primary, secondary, accent, paper/background, card, border, and muted text colors. The product default should bias toward Quiet Luxury: restrained, high-contrast, premium, and not visually noisy.
 
 ## 9. PWA / Offline Strategy
 
@@ -609,9 +632,12 @@ V1 should include:
 - Auth for maker app.
 - Paid trip ownership checks.
 - Private share token for traveler app.
+- Optional traveler password.
 - Uploaded files scoped to trip owner.
 - No search indexing for traveler app.
 - Ability to unpublish or rotate share token.
+- Sensitive-field visibility controls for confirmation numbers and addresses.
+- Separate photo privacy controls before broad album sharing.
 
 Open question:
 
@@ -619,8 +645,12 @@ Open question:
 
 Recommendation:
 
-- Start with private unlisted URL plus optional share-token rotation.
+- Start with private unlisted URL plus optional share-token rotation and optional traveler password.
 - Add login-gated traveler apps later if beta users ask for it.
+
+Private residence addresses should be handled differently from hotels, rentals, restaurants, and public venues. A published traveler snapshot should support broad labels such as "Staying with family · Seattle, WA" while keeping the exact address private in maker data.
+
+Confirmation numbers should default to maker-only. If exposed in the traveler app, they should be behind an explicit visibility setting and ideally a password-protected trip.
 
 ## 12. Cost Controls
 
@@ -635,8 +665,12 @@ Recommended controls:
 - Internal per-trip AI/OCR cost tracking.
 - Retry limits.
 - Preview/refresh limits if refresh requires expensive regeneration.
+- Storage retention limits for original uploads and photos.
+- No V1 video storage unless pricing and retention are explicit.
 
 Most maker-app edits should not rerun full extraction. They should update structured data directly and regenerate the traveler snapshot cheaply.
+
+For a $25 per-trip launch price, the system should measure whether AI, OCR, storage, payment fees, and manual support stay comfortably below the target cost envelope. The app should be able to flag trips that threaten the margin before they become a support or compute problem.
 
 ## 13. Observability
 
@@ -720,4 +754,3 @@ The initial repo should be separate from the Asia trip app. The Asia app is a re
 6. Scaffold the app.
 7. Build the paid trip creation and upload skeleton.
 8. Prototype extraction against Asia trip source materials.
-

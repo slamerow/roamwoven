@@ -19,6 +19,8 @@ This backlog is ordered for momentum. It assumes we will create a new `roamwoven
 - Generated traveler apps use one deployed template plus trip snapshots.
 - V1 should prefer placeholders over missing cards.
 - Keep V1 consumer-simple; avoid travel-agent CRM scope.
+- Build with commercial-grade privacy, cost tracking, and sensitive-field defaults from the beginning.
+- Default visual direction should feel understated and premium, not ornate or gimmicky.
 
 ## Milestone 0: Project Setup
 
@@ -117,6 +119,12 @@ Acceptance criteria:
 ### M1.4 Stripe Checkout
 
 Add one-time per-trip payment.
+
+Pricing assumptions:
+
+- Launch target is a flat $25 per trip.
+- Short trips may get an automatic goodwill discount later.
+- Referral credit and an annual unlimited personal tier are future pricing experiments.
 
 Beta note:
 
@@ -237,6 +245,9 @@ Acceptance criteria:
 - Migrations exist.
 - Local dev database can be reset and seeded.
 - Row ownership is enforced or prepared for enforcement.
+- Trip records include theme pack, share token rotation, and optional traveler/photo password fields.
+- Item records include address visibility and confirmation visibility fields.
+- Published snapshots can omit or mask maker-only sensitive details.
 
 ### M3.2 Asia Workbook Importer
 
@@ -307,6 +318,7 @@ Acceptance criteria:
 - User sees overall progress.
 - User sees remaining question count.
 - User can answer, skip, or use placeholder where allowed.
+- Skipping never creates an empty broken card; it creates a calm placeholder or marks the item intentionally hidden.
 
 ### M4.3 Question Types
 
@@ -359,6 +371,9 @@ Acceptance criteria:
 - User can edit title, date, time, description, category/type, location, address, URL, and notes.
 - User can move item between days/legs.
 - User can create/delete items.
+- User can quickly add or rewrite a one- to two-line description.
+- User can hide or expose addresses and confirmation numbers.
+- AI-assisted title/description generation stays factual and reviewable.
 
 ### M5.3 Travel Detail Forms
 
@@ -377,8 +392,16 @@ Simple app customization.
 Acceptance criteria:
 
 - User can set app name.
-- User can choose color palette.
+- User can choose a theme pack.
+- User can choose color palette within the theme direction.
 - Optional cover image can be added or deferred.
+
+Initial theme packs:
+
+- Quiet Luxury.
+- Standard Adventure.
+- Modern / Futuristic.
+- Whimsical / Storybook.
 
 ## Milestone 6: Traveler App
 
@@ -426,6 +449,19 @@ Acceptance criteria:
 - User can publish private traveler app.
 - User can copy/share private URL.
 - User can unpublish or rotate token.
+- User can enable or change an optional traveler password.
+- Published snapshot respects address and confirmation visibility settings.
+
+### M6.5 Photo Privacy
+
+Add photo-sharing controls only after itinerary publishing is solid.
+
+Acceptance criteria:
+
+- Photos can be disabled entirely for a trip.
+- Photo albums can be password protected separately or inherit traveler password.
+- Photo storage has size and retention limits.
+- Video is not accepted in V1 unless pricing and retention are explicitly changed.
 
 ## Milestone 7: Beta Hardening
 
@@ -438,6 +474,19 @@ Acceptance criteria:
 - Store rough AI/OCR cost per processing job.
 - Admin/debug view can show cost by trip.
 - Large or repeated processing can be limited.
+- Track storage usage for uploads and photos.
+- Flag trips that threaten the $25 margin target.
+
+### M7.1a Terms and Plan Guardrails
+
+Prepare the minimum product/legal controls needed before public launch.
+
+Acceptance criteria:
+
+- Checkout or account flow links to terms.
+- Terms say users must review trip details before relying on them.
+- Terms reserve the right to limit abusive uploads, refreshes, storage, or commercial resale.
+- Unlimited personal plan is not enabled until usage limits and commercial-use restrictions are enforceable.
 
 ### M7.2 Failure Logging
 

@@ -4,25 +4,33 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 
-const palettes = [
+const themes = [
   {
-    name: "Forest Clay",
+    name: "Quiet Luxury",
+    description: "Understated, warm, and editorial.",
+    colors: ["#1f211d", "#6d735f", "#a8845d", "#f7f3ea"],
+  },
+  {
+    name: "Standard Adventure",
+    description: "Grounded, clear, and outdoorsy.",
     colors: ["#20211f", "#526247", "#a05b43", "#faf8f2"],
   },
   {
-    name: "Coastal",
-    colors: ["#19333a", "#3d7280", "#d38b5d", "#f7f2e8"],
+    name: "Modern / Futuristic",
+    description: "Crisp, dark, and precise.",
+    colors: ["#15191d", "#2f6f73", "#d1a35c", "#f4f7f6"],
   },
   {
-    name: "Market Day",
-    colors: ["#26312a", "#6f8b52", "#bd6648", "#fff8e7"],
+    name: "Whimsical / Storybook",
+    description: "Playful, soft, and still polished.",
+    colors: ["#292432", "#6a7f58", "#b96f57", "#fbf3df"],
   },
 ];
 
 export function StyleSettingsPanel({ tripId }: { tripId: string }) {
   const [appName, setAppName] = useState("Wren's Adventure");
-  const [paletteIndex, setPaletteIndex] = useState(0);
-  const palette = palettes[paletteIndex];
+  const [themeIndex, setThemeIndex] = useState(0);
+  const theme = themes[themeIndex];
 
   return (
     <section className="mt-8 grid gap-6 lg:grid-cols-[0.48fr_0.52fr]">
@@ -37,17 +45,20 @@ export function StyleSettingsPanel({ tripId }: { tripId: string }) {
         </label>
 
         <div className="mt-6">
-          <p className="text-sm font-semibold text-ink">Color palette</p>
+          <p className="text-sm font-semibold text-ink">Theme pack</p>
           <div className="mt-3 space-y-3">
-            {palettes.map((option, index) => (
+            {themes.map((option, index) => (
               <button
                 key={option.name}
                 className="flex w-full items-center justify-between rounded-md border border-ink/10 bg-paper p-3 text-left"
                 type="button"
-                onClick={() => setPaletteIndex(index)}
+                onClick={() => setThemeIndex(index)}
               >
                 <div>
                   <p className="text-sm font-semibold text-ink">{option.name}</p>
+                  <p className="mt-1 text-xs text-ink/55">
+                    {option.description}
+                  </p>
                   <div className="mt-2 flex gap-1">
                     {option.colors.map((color) => (
                       <span
@@ -58,7 +69,7 @@ export function StyleSettingsPanel({ tripId }: { tripId: string }) {
                     ))}
                   </div>
                 </div>
-                {index === paletteIndex ? (
+                {index === themeIndex ? (
                   <Check className="text-moss" size={20} />
                 ) : null}
               </button>
@@ -69,9 +80,9 @@ export function StyleSettingsPanel({ tripId }: { tripId: string }) {
 
       <div
         className="rounded-md border border-ink/10 p-5 text-paper"
-        style={{ backgroundColor: palette.colors[0] }}
+        style={{ backgroundColor: theme.colors[0] }}
       >
-        <p className="text-sm text-paper/70">Preview</p>
+        <p className="text-sm text-paper/70">{theme.name}</p>
         <h2 className="mt-2 text-4xl font-semibold leading-tight">
           {appName || "Untitled Trip"}
         </h2>
@@ -79,14 +90,14 @@ export function StyleSettingsPanel({ tripId }: { tripId: string }) {
           A private trip app generated from clean structured data.
         </p>
         <div className="mt-6 space-y-3">
-          <div className="rounded-md p-4 text-ink" style={{ backgroundColor: palette.colors[3] }}>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: palette.colors[2] }}>
+          <div className="rounded-md p-4 text-ink" style={{ backgroundColor: theme.colors[3] }}>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: theme.colors[2] }}>
               Travel
             </p>
             <p className="mt-2 text-sm font-semibold">Fly to Seattle</p>
           </div>
-          <div className="rounded-md p-4 text-ink" style={{ backgroundColor: palette.colors[3] }}>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: palette.colors[2] }}>
+          <div className="rounded-md p-4 text-ink" style={{ backgroundColor: theme.colors[3] }}>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: theme.colors[2] }}>
               Stay
             </p>
             <p className="mt-2 text-sm font-semibold">Airbnb Kihei</p>
@@ -95,7 +106,7 @@ export function StyleSettingsPanel({ tripId }: { tripId: string }) {
         <Link
           href={`/maker/trips/${tripId}/publish`}
           className="mt-6 inline-flex items-center gap-2 rounded-md px-4 py-3 text-sm font-semibold"
-          style={{ backgroundColor: palette.colors[3], color: palette.colors[0] }}
+          style={{ backgroundColor: theme.colors[3], color: theme.colors[0] }}
         >
           Publish app
           <ArrowRight size={16} />

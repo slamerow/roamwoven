@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, FileText, Lock, Smartphone } from "lucide-react";
 
 const steps = [
-  "Pay once for your trip",
+  "Pay $25 once for your trip",
   "Upload confirmations, screenshots, docs, and notes",
   "Answer a guided review",
   "Publish a private mobile trip app"
@@ -22,7 +22,8 @@ export default function HomePage() {
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
             Drop in the confirmations, screenshots, PDFs, spreadsheets, and notes
             you already have. Roamwoven structures the trip, asks what is unclear,
-            and builds a mobile app your family can actually use on the road.
+            and builds a private mobile app your family can actually use on the
+            road, from the planner in seat 12A to grandma following along at home.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
@@ -73,7 +74,7 @@ export default function HomePage() {
             </div>
             <div className="rounded-md bg-clay p-4 text-paper">
               <Lock size={22} />
-              <p className="mt-4 text-sm font-semibold">Paid processing</p>
+              <p className="mt-4 text-sm font-semibold">Private sharing</p>
             </div>
           </div>
         </div>
@@ -92,4 +93,3 @@ export default function HomePage() {
     </main>
   );
 }
-
