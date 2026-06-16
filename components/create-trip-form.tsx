@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ClipboardList,
   FileImage,
@@ -39,10 +39,22 @@ function iconForFile(file: QueuedFile) {
 
 export function CreateTripForm({ error }: { error?: string }) {
   const [files, setFiles] = useState<QueuedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const totalSize = useMemo(
     () => files.reduce((sum, file) => sum + file.size, 0),
     [files]
   );
+
+  function queueFiles(fileList: FileList | null) {
+    const selected = Array.from(fileList ?? []).map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type
+    }));
+
+    setFiles(selected);
+  }
 
   return (
     <form
@@ -68,10 +80,38 @@ export function CreateTripForm({ error }: { error?: string }) {
         />
       </label>
 
-      <label className="flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-ink/20 bg-paper px-4 py-8 text-center">
+      <label
+        className={`flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed px-4 py-8 text-center transition ${
+          isDragging
+            ? "border-moss bg-moss/10"
+            : "border-ink/20 bg-paper"
+        }`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          if (event.currentTarget === event.target) {
+            setIsDragging(false);
+          }
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          queueFiles(event.dataTransfer.files);
+
+          if (fileInputRef.current) {
+            fileInputRef.current.files = event.dataTransfer.files;
+          }
+        }}
+      >
         <UploadCloud className="text-tide" size={34} />
         <span className="mt-4 text-base font-semibold text-ink">
-          Drag files here or choose files
+          {isDragging ? "Drop them here" : "Drag files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
           Start with PDFs, screenshots, confirmations, docs, spreadsheets, or
@@ -79,20 +119,12 @@ export function CreateTripForm({ error }: { error?: string }) {
           provide.
         </span>
         <input
+          ref={fileInputRef}
           className="sr-only"
           multiple
           name="materials"
           type="file"
-          onChange={(event) => {
-            const selected = Array.from(event.target.files ?? []).map(
-              (file) => ({
-                name: file.name,
-                size: file.size,
-                type: file.type
-              })
-            );
-            setFiles(selected);
-          }}
+          onChange={(event) => queueFiles(event.target.files)}
         />
       </label>
 
@@ -154,10 +186,6 @@ export function CreateTripForm({ error }: { error?: string }) {
         >
           Make app
         </button>
-        <p className="text-sm leading-6 text-ink/55">
-          Next, Roamwoven simulates a first pass and moves you into secure
-          checkout before expensive processing begins.
-        </p>
       </div>
     </form>
   );
