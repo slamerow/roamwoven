@@ -45,8 +45,19 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
+    console.warn("Supabase magic-link send failed", {
+      code: error.code,
+      message: error.message,
+      status: error.status,
+    });
+
+    const errorCode =
+      error.code === "over_email_send_rate_limit"
+        ? "email-rate-limited"
+        : "send-failed";
+
     return NextResponse.redirect(
-      loginUrl(request, { error: "send-failed", next }),
+      loginUrl(request, { error: errorCode, next }),
       303
     );
   }

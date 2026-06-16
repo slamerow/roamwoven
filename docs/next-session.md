@@ -41,14 +41,25 @@ Live Supabase dev setup is partially complete:
 - Local `.env.local` exists and is gitignored.
 - `.env.local` has `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - `SUPABASE_SERVICE_ROLE_KEY` is still blank because clipboard access from the Codex browser was blocked; it is only needed for trusted backend jobs like the Stripe webhook payment update.
-- `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3002` because local dev has been running on port 3002.
+- `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000` because the current local dev server is running on port 3000.
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
+- The later table grants have now run successfully in Supabase.
+- Vercel project is created from `slamerow/roamwoven` on `main`.
+- Production deployment URL: `https://roamwoven.vercel.app`.
+- Vercel env vars set for Production and Preview: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_APP_URL=https://roamwoven.vercel.app`.
+- Supabase Auth URL configuration is updated:
+  - Site URL: `https://roamwoven.vercel.app`
+  - Redirect URL allow-list: `https://roamwoven.vercel.app/auth/callback`
 - Magic-link email was received at `ekamerow@gmail.com`, and clicking it reached the app callback.
 - After callback, `/maker` hit `permission denied for table trips`, meaning auth worked but table grants were still insufficient.
 - A first grant patch was run, but `/maker` still showed permission denied.
 - A second grant patch was attempted but pasted onto old SQL text and failed with syntax error near `usage`.
+- On 2026-06-16, a new magic-link request from the local app reached Supabase but failed because the local sandbox had no network access. Retrying with network access confirmed Supabase is reachable but currently returning `over_email_send_rate_limit` / HTTP 429 for `ekamerow@gmail.com`.
+- On 2026-06-16, the deployed Vercel app loaded at `https://roamwoven.vercel.app/login?next=%2Fmaker`, but requesting a magic link still returned `send-failed`. A direct Supabase OTP request using the Vercel callback URL confirmed the underlying cause is still `over_email_send_rate_limit` / HTTP 429 for `ekamerow@gmail.com`.
+- `app/auth/magic-link/route.ts` now logs non-secret Supabase error metadata on magic-link send failure so the next failure cause is visible in the dev server log.
+- Localhost testing from Codex is proving unreliable: the Next dev server can be listening while the in-app browser or shell cannot reach the local port. A Vercel preview deployment is likely the easiest way for the user to test auth and trip creation directly.
 
-Current Supabase SQL fix to run cleanly:
+Supabase grants that should be present:
 
 ```sql
 grant usage on schema public to anon, authenticated;
@@ -59,7 +70,7 @@ grant select, insert, update, delete on trip_legs to anon, authenticated;
 grant select, insert, update, delete on trip_items to anon, authenticated;
 ```
 
-Important: before running that SQL, clear the SQL editor with `Cmd+A` then Delete. The last failed attempt happened because new SQL was pasted after old SQL.
+The grants have now been run successfully. If the schema is recreated, rerun this block in a clean SQL editor.
 
 ## Important Product Decisions
 
@@ -76,13 +87,13 @@ Important: before running that SQL, clear the SQL editor with `Cmd+A` then Delet
 
 Finish Supabase auth/database verification, then move into upload persistence:
 
-1. In Supabase SQL editor, clear the editor and run the clean grant SQL above.
-2. Restart or continue local dev with `npm run dev`; it will likely use port 3002 while another process owns 3000.
-3. Request a new magic link from `http://localhost:3002/login?next=%2Fmaker` for `ekamerow@gmail.com`.
-4. Click the email link in the same browser session.
-5. Confirm `/maker` shows the signed-in dashboard rather than the permission error.
-6. Create a real test trip and confirm it inserts with `owner_user_id`.
-7. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
+1. Use the Vercel deployment for testing: `https://roamwoven.vercel.app/login?next=%2Fmaker`.
+2. Wait for the Supabase magic-link email cooldown to clear, or test with a different email address.
+3. Click/open the magic link in the same browser session.
+4. Confirm `/maker` shows the signed-in dashboard rather than the old permission error.
+5. Create a real test trip and confirm it inserts with `owner_user_id`.
+6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
+7. Commit and push the local magic-link error logging change if desired; the current Vercel deployment is from `afbcc2c`.
 8. Create Stripe account/product/price when the business setup is ready.
 9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
 10. Add paid-trip upload records and Supabase Storage.

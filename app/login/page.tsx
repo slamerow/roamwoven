@@ -46,7 +46,9 @@ export default async function LoginPage({
                 ? "Enter an email address to continue."
                 : error === "auth-not-configured"
                   ? "Supabase auth is not configured yet."
-                  : "Could not send the sign-in link."}
+                  : error === "email-rate-limited"
+                    ? "Supabase is rate-limiting sign-in emails right now. Try again later or configure custom SMTP."
+                    : "Could not send the sign-in link."}
             </p>
           ) : null}
           <button
