@@ -34,6 +34,7 @@ export type TravelerDay = {
   label: string;
   title: string;
   legName: string;
+  primaryCategory: string;
   items: Array<{
     id: string;
     category: string;
@@ -93,6 +94,19 @@ function titleForDay(date: string, items: SeedItem[]) {
   return [firstLeg.city, firstLeg.country].filter(Boolean).join(", ");
 }
 
+function primaryCategory(items: SeedItem[]) {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    const category = item.category?.replaceAll("_", " ") ?? "note";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+
+  return (
+    Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "plans"
+  );
+}
+
 export function getAsiaDemoTrip() {
   const itemsByDate = new Map<string, SeedItem[]>();
 
@@ -115,6 +129,7 @@ export function getAsiaDemoTrip() {
         label: date === "needs-placement" ? "Needs placement" : `Day ${index + 1}`,
         title: date === "needs-placement" ? "Needs placement" : formatDate(date),
         legName: date === "needs-placement" ? "" : titleForDay(date, sortedItems),
+        primaryCategory: primaryCategory(sortedItems),
         items: sortedItems.map((item) => ({
           id: item.id,
           category: item.category?.replaceAll("_", " ") ?? "note",
@@ -133,6 +148,9 @@ export function getAsiaDemoTrip() {
     items: trip.items,
     dayCount: days.length,
     itemCount: trip.items.length,
+    countries: Array.from(
+      new Set(trip.legs.map((leg) => leg.country).filter(Boolean))
+    ),
     days,
   };
 }
