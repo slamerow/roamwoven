@@ -1,11 +1,49 @@
 import Link from "next/link";
-import { ArrowRight, FileText, Lock, Smartphone } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const steps = [
   "Pay once for your trip",
   "Upload confirmations, screenshots, docs, and notes",
   "Answer a guided review",
   "Publish your private mobile trip app"
+];
+
+const demoPanels = [
+  {
+    eyebrow: "Today",
+    title: "Swipe through the day",
+    description:
+      "A clean daily feed keeps flights, stays, activities, meals, and notes in the order you need them.",
+    image: "/demo/example-today.jpg"
+  },
+  {
+    eyebrow: "Details",
+    title: "Tap a card for the full story",
+    description:
+      "Confirmation numbers, addresses, notes, links, and context live inside the card instead of buried in your inbox.",
+    image: "/demo/example-detail.jpg"
+  },
+  {
+    eyebrow: "Browse",
+    title: "Jump by leg, category, or date",
+    description:
+      "Find a city, all food plans, or a specific calendar day in a couple of taps.",
+    image: "/demo/example-calendar.jpg"
+  },
+  {
+    eyebrow: "Tools",
+    title: "Search, weather, phrases, and maps",
+    description:
+      "The top controls keep practical travel tools close without turning the app into clutter.",
+    image: "/demo/example-map.jpg"
+  },
+  {
+    eyebrow: "Photos",
+    title: "A follow-along album",
+    description:
+      "Friends and family can follow the trip through photos tagged by place, date, and moment.",
+    image: null
+  }
 ];
 
 export default function HomePage() {
@@ -20,17 +58,17 @@ export default function HomePage() {
             A Superapp for your trip
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
-            All the information you need, right at your fingertips. It's
-            vacation time, don't spend it worrying about logistics and admin.
-            Roamwoven is a custom one-stop shop for your travels: flight and
-            hotel details, itinerary info, useful phrases, and all the
+            All the information you need, right at your fingertips. It&apos;s
+            vacation time, don&apos;t spend it worrying about logistics and
+            admin. Roamwoven is a custom one-stop shop for your travels: flight
+            and hotel details, itinerary info, useful phrases, and all the
             information you need, never more than two or three clicks away.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
-            I'm a travel nerd. When I took my family on a five-month sabbatical
-            across 11 countries, I used AI to build the travel app of my
-            dreams. Roamwoven lets you build your own superapp in just 30 to 60
-            minutes.
+            I&apos;m a travel nerd. When I took my family on a five-month
+            sabbatical across 11 countries, I used AI to build the travel app
+            of my dreams. Roamwoven lets you build your own superapp in just 30
+            to 60 minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
@@ -49,40 +87,57 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="grid content-center gap-4">
-          <div className="rounded-md border border-ink/10 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between border-b border-ink/10 pb-4">
-              <div>
-                <p className="text-sm font-semibold text-ink">Wren's Adventure</p>
-                <p className="text-sm text-ink/60">Reference generated app</p>
-              </div>
-              <Smartphone className="text-tide" size={24} />
-            </div>
-            <div className="space-y-3">
-              {["Flight to Seattle", "Airbnb Kihei", "Kyoto day plan"].map(
-                (title) => (
-                  <div
-                    key={title}
-                    className="rounded-md border border-ink/10 bg-paper p-4"
-                  >
-                    <p className="text-sm font-semibold text-ink">{title}</p>
-                    <p className="mt-1 text-sm text-ink/60">
-                      Clean card generated from messy source details.
-                    </p>
-                  </div>
-                )
-              )}
-            </div>
+        <div className="flex flex-col items-center justify-center gap-4">
+          <DemoClip
+            alt="Example Today screen in a generated trip app"
+            image="/demo/example-today.jpg"
+          />
+          <p className="max-w-xs text-center text-sm leading-6 text-ink/60">
+            A real traveler-app style Today screen: the day&apos;s plans,
+            cards, tools, and trip navigation in one pocket-sized place.
+          </p>
+        </div>
+      </section>
+
+      <section className="border-t border-ink/10 bg-white">
+        <div className="mx-auto max-w-6xl px-6 py-14 md:px-10">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
+              What it can do
+            </p>
+            <h2 className="mt-3 text-4xl font-semibold leading-tight text-ink md:text-5xl">
+              The practical stuff stays close.
+            </h2>
+            <p className="mt-4 text-lg leading-8 text-ink/70">
+              The first screen sells the feeling. The next screens show the
+              specifics: tap into details, browse by the way your brain works,
+              search across the trip, check weather and phrases, visualize the
+              route, and share photos with people following along.
+            </p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-md bg-moss p-4 text-paper">
-              <FileText size={22} />
-              <p className="mt-4 text-sm font-semibold">Messy inputs</p>
-            </div>
-            <div className="rounded-md bg-clay p-4 text-paper">
-              <Lock size={22} />
-              <p className="mt-4 text-sm font-semibold">Private sharing</p>
-            </div>
+
+          <div className="mt-10 grid gap-5 lg:grid-cols-5">
+            {demoPanels.map((panel) => (
+              <article
+                className="rounded-md border border-ink/10 bg-paper p-4"
+                key={panel.title}
+              >
+                {panel.image ? (
+                  <DemoClip alt={`${panel.title} demo`} image={panel.image} />
+                ) : (
+                  <PhotoPlaceholder />
+                )}
+                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-clay">
+                  {panel.eyebrow}
+                </p>
+                <h3 className="mt-2 text-lg font-semibold text-ink">
+                  {panel.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-ink/65">
+                  {panel.description}
+                </p>
+              </article>
+            ))}
           </div>
         </div>
       </section>
@@ -98,5 +153,43 @@ export default function HomePage() {
         </div>
       </section>
     </main>
+  );
+}
+
+function DemoClip({ alt, image }: { alt: string; image: string }) {
+  return (
+    <div className="mx-auto aspect-[390/844] max-w-[210px] overflow-hidden rounded-[28px] border-[8px] border-ink bg-white shadow-xl">
+      <img alt={alt} className="h-full w-full object-cover" src={image} />
+    </div>
+  );
+}
+
+function PhotoPlaceholder() {
+  return (
+    <div className="mx-auto aspect-[390/844] max-w-[210px] overflow-hidden rounded-[28px] border-[8px] border-ink bg-white shadow-xl">
+      <div className="flex h-full flex-col bg-paper p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-moss">
+          Photo album
+        </p>
+        <h4 className="mt-1 text-lg font-semibold text-ink">
+          Follow along by place and date
+        </h4>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          {["Kyoto", "Hoi An", "Bangkok", "Tokyo"].map((label, index) => (
+            <div
+              className="aspect-square rounded-md bg-ink p-2 text-paper"
+              key={label}
+            >
+              <p className="text-[10px] font-semibold">Day {index + 12}</p>
+              <p className="mt-10 text-xs font-semibold">{label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-auto rounded-md bg-white px-3 py-2 text-[11px] leading-4 text-ink/60">
+          Dummy photo data will show friends and family a tagged, organized
+          album without exposing the maker dashboard.
+        </p>
+      </div>
+    </div>
   );
 }
