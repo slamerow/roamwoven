@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
 import { ClipboardList, FileImage, FileSpreadsheet, FileText, UploadCloud } from "lucide-react";
 
 type QueuedFile = {
@@ -34,7 +33,9 @@ function iconForFile(file: QueuedFile) {
 
 export function UploadIntakePanel({ tripId }: { tripId: string }) {
   const [files, setFiles] = useState<QueuedFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [notes, setNotes] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canStart = files.length > 0 || notes.trim().length > 0;
   const totalSize = useMemo(
@@ -42,8 +43,23 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
     [files]
   );
 
+  function queueFiles(fileList: FileList | null) {
+    const selected = Array.from(fileList ?? []).map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+    }));
+
+    setFiles(selected);
+  }
+
   return (
-    <div className="rounded-md border border-dashed border-ink/20 bg-white p-6">
+    <form
+      action={`/maker/trips/${tripId}/upload/materials`}
+      className="rounded-md border border-dashed border-ink/20 bg-white p-6"
+      encType="multipart/form-data"
+      method="post"
+    >
       <div className="flex items-center gap-3">
         <UploadCloud className="text-moss" size={26} />
         <div>
@@ -51,32 +67,55 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
             Upload trip materials
           </h2>
           <p className="mt-1 text-sm text-ink/60">
-            Beta mode skips payment and starts intake directly.
+            Saved materials stay attached to this trip for review.
           </p>
         </div>
       </div>
 
-      <label className="mt-6 flex min-h-52 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-ink/20 bg-paper px-4 py-8 text-center">
+      <label
+        className={`mt-6 flex min-h-52 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed px-4 py-8 text-center transition ${
+          isDragging
+            ? "border-moss bg-moss/10"
+            : "border-ink/20 bg-paper"
+        }`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setIsDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          if (event.currentTarget === event.target) {
+            setIsDragging(false);
+          }
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          queueFiles(event.dataTransfer.files);
+
+          if (fileInputRef.current) {
+            fileInputRef.current.files = event.dataTransfer.files;
+          }
+        }}
+      >
         <UploadCloud className="text-tide" size={34} />
         <span className="mt-4 text-base font-semibold text-ink">
-          Drop files here or choose files
+          {isDragging ? "Drop them here" : "Drop files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
           PDFs, screenshots, Word docs, spreadsheets, and saved confirmations all
           belong here.
         </span>
         <input
+          ref={fileInputRef}
           className="sr-only"
           multiple
+          name="materials"
           type="file"
-          onChange={(event) => {
-            const selected = Array.from(event.target.files ?? []).map((file) => ({
-              name: file.name,
-              size: file.size,
-              type: file.type,
-            }));
-            setFiles(selected);
-          }}
+          onChange={(event) => queueFiles(event.target.files)}
         />
       </label>
 
@@ -119,6 +158,7 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
         </span>
         <textarea
           className="mt-2 min-h-36 w-full rounded-md border border-ink/15 bg-white px-3 py-3 text-sm leading-6"
+          name="notes"
           placeholder="Paste itinerary notes, booking snippets, restaurant ideas, or anything that did not come as a file."
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
@@ -127,12 +167,12 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
         {canStart ? (
-          <Link
-            href={`/maker/trips/${tripId}/review`}
+          <button
             className="inline-flex justify-center rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+            type="submit"
           >
-            Start intake review
-          </Link>
+            Save materials
+          </button>
         ) : (
           <button
             className="rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
@@ -144,10 +184,10 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
         )}
         <p className="text-sm text-ink/55">
           {canStart
-            ? "Ready to simulate intake."
+            ? "Ready to save securely."
             : "Add at least one file or note to continue."}
         </p>
       </div>
-    </div>
+    </form>
   );
 }

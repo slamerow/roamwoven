@@ -181,6 +181,13 @@ Acceptance criteria:
 
 Store files and create database records.
 
+Implementation status:
+
+- Initial route/helper exists for paid-trip uploads.
+- Supabase SQL now creates a private `trip-materials` bucket and owner-scoped storage policies.
+- Upload rows include filename, MIME type, size, storage path, note text, status, and timestamp.
+- Real extraction remains mocked.
+
 Acceptance criteria:
 
 - Uploaded files are stored in object storage.

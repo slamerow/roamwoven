@@ -30,6 +30,7 @@ create table if not exists trip_uploads (
   trip_id uuid not null references trips(id) on delete cascade,
   original_filename text not null,
   file_type text,
+  file_size_bytes bigint,
   storage_path text,
   user_note text,
   detected_document_type text,
@@ -37,6 +38,9 @@ create table if not exists trip_uploads (
   processing_status text not null default 'pending',
   created_at timestamptz not null default now()
 );
+
+alter table if exists trip_uploads
+  add column if not exists file_size_bytes bigint;
 
 create table if not exists trip_legs (
   id uuid primary key default gen_random_uuid(),
@@ -183,6 +187,99 @@ create policy "Trip owners can manage items"
     exists (
       select 1 from trips
       where trips.id = trip_items.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+insert into storage.buckets (
+  id,
+  name,
+  public,
+  file_size_limit,
+  allowed_mime_types
+)
+values (
+  'trip-materials',
+  'trip-materials',
+  false,
+  26214400,
+  array[
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv',
+    'text/plain',
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ]
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Trip owners can read material files" on storage.objects;
+drop policy if exists "Trip owners can upload material files" on storage.objects;
+drop policy if exists "Trip owners can update material files" on storage.objects;
+drop policy if exists "Trip owners can delete material files" on storage.objects;
+
+create policy "Trip owners can read material files"
+  on storage.objects
+  for select
+  using (
+    bucket_id = 'trip-materials'
+    and exists (
+      select 1 from trips
+      where trips.id::text = (storage.foldername(name))[2]
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can upload material files"
+  on storage.objects
+  for insert
+  with check (
+    bucket_id = 'trip-materials'
+    and (storage.foldername(name))[1] = auth.uid()::text
+    and exists (
+      select 1 from trips
+      where trips.id::text = (storage.foldername(name))[2]
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can update material files"
+  on storage.objects
+  for update
+  using (
+    bucket_id = 'trip-materials'
+    and exists (
+      select 1 from trips
+      where trips.id::text = (storage.foldername(name))[2]
+        and trips.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    bucket_id = 'trip-materials'
+    and (storage.foldername(name))[1] = auth.uid()::text
+    and exists (
+      select 1 from trips
+      where trips.id::text = (storage.foldername(name))[2]
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can delete material files"
+  on storage.objects
+  for delete
+  using (
+    bucket_id = 'trip-materials'
+    and exists (
+      select 1 from trips
+      where trips.id::text = (storage.foldername(name))[2]
         and trips.owner_user_id = auth.uid()
     )
   );

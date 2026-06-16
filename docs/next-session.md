@@ -28,6 +28,8 @@ Backend-ready pieces now exist:
 - Maker pages require auth when Supabase env vars are configured.
 - `lib/trips.ts` lists, loads, and creates trips through Supabase when env vars are configured.
 - Real trip queries and inserts are scoped by `owner_user_id`.
+- `lib/uploads.ts` stores paid-trip materials in Supabase Storage and creates owner-scoped `trip_uploads` rows.
+- The upload page now posts real multipart uploads, shows saved materials after refresh, and keeps upload processing gated behind payment.
 - Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
@@ -43,6 +45,7 @@ Live Supabase dev setup is partially complete:
 - `SUPABASE_SERVICE_ROLE_KEY` is still blank because clipboard access from the Codex browser was blocked; it is only needed for trusted backend jobs like the Stripe webhook payment update.
 - `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000` because the current local dev server is running on port 3000.
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
+- `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`; rerun the schema SQL before testing real file uploads in Supabase.
 - The later table grants have now run successfully in Supabase.
 - Vercel project is created from `slamerow/roamwoven` on `main`.
 - Production deployment URL: `https://roamwoven.vercel.app`.
@@ -108,7 +111,7 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 ## Recommended Next Task
 
-Finish Supabase auth/database verification, then move into upload persistence:
+Finish upload persistence verification, then move into payment/review plumbing:
 
 1. Use the custom domain for testing: `https://roamwoven.com/login?next=%2Fmaker`.
 2. Deploy the password-login/callback patch.
@@ -116,9 +119,10 @@ Finish Supabase auth/database verification, then move into upload persistence:
 4. Confirm `/maker` shows the signed-in dashboard rather than the old permission error.
 5. Create a real test trip and confirm it inserts with `owner_user_id`.
 6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
-7. Create Stripe account/product/price when the business setup is ready.
-8. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
-9. Add paid-trip upload records and Supabase Storage.
+7. Rerun `db/schema.sql` in Supabase so the `trip-materials` bucket and storage policies exist.
+8. Create Stripe account/product/price when the business setup is ready.
+9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
+10. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
 
 Keep upload/extraction mocked until trip persistence is working.
 
