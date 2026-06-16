@@ -17,13 +17,20 @@ export default function HomePage() {
             Roamwoven
           </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-ink md:text-7xl">
-            Turn your trip details into your private travel app.
+            A Superapp for your trip
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
-            Drop in the confirmations, screenshots, PDFs, spreadsheets, and notes
-            you already have. Roamwoven structures the trip, asks what is unclear,
-            and builds a private mobile app your family can actually use on the
-            road, from the planner in seat 12A to grandma following along at home.
+            All the information you need, right at your fingertips. It is
+            vacation time, so do not spend it worrying about logistics and
+            admin. Roamwoven is a custom one-stop shop for your travels: flight
+            and hotel details, itinerary info, useful phrases, and everything
+            else you need, never more than two or three clicks away.
+          </p>
+          <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
+            When I took my family on a five-month sabbatical across 11
+            countries, I used AI to build the travel app of my dreams.
+            Roamwoven lets you build your own superapp in just 30 to 60
+            minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
