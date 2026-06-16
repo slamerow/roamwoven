@@ -102,10 +102,10 @@ export default async function StylePage({
               </div>
             </div>
             <Link
-              href="/t/demo"
+              href={`/maker/trips/${tripId}/publish`}
               className="mt-6 inline-flex items-center gap-2 rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink"
             >
-              Preview app
+              Publish app
               <ArrowRight size={16} />
             </Link>
           </div>
@@ -114,4 +114,3 @@ export default async function StylePage({
     </main>
   );
 }
-

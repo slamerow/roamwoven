@@ -504,4 +504,10 @@ If trying to make visible progress immediately, the best target is not full AI e
 - Asia workbook importer.
 - Traveler app route rendering imported Asia trip data.
 
+Deployment note:
+
+- Do not assume Vercel is immediately available for Roamwoven because Wren's Adventure may already occupy the user's available Vercel project/deployment slot.
+- Keep local/GitHub progress unblocked.
+- Revisit hosted beta when the product is useful enough to justify switching deployments, using another host, or upgrading.
+
 This would prove the platform direction while keeping the expensive, uncertain extraction pipeline isolated for the next pass.
