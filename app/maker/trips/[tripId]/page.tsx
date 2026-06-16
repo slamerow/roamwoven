@@ -67,6 +67,8 @@ export default async function TripWorkspacePage({
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
   const stages = getStages(isPaid);
+  const completedSteps = stages.filter((stage) => stage.state === "complete").length;
+  const progressPercent = Math.round((completedSteps / stages.length) * 100);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -81,7 +83,7 @@ export default async function TripWorkspacePage({
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             {trip.isDemo
               ? "Demo trip is seeded from Wren's Adventure so the traveler-app flow stays testable before live extraction exists."
-              : "Trip shell is saved. Next up is Stripe Checkout with promo-code support before upload processing begins."}
+              : "Your app workspace is ready. Follow the steps below to move from trip idea to live traveler app."}
           </p>
         </header>
 
@@ -115,35 +117,62 @@ export default async function TripWorkspacePage({
           </section>
         ) : null}
 
-        <section className="mt-8 grid gap-4 md:grid-cols-5">
-          {stages.map((stage) => {
-            const Icon = stage.icon;
-            return (
-              <div
-                key={stage.title}
-                className="rounded-md border border-ink/10 bg-white p-4"
-              >
-                <Icon
-                  className={
-                    stage.state === "complete"
-                      ? "text-moss"
-                      : stage.state === "current"
-                        ? "text-clay"
-                        : stage.state === "available"
-                          ? "text-tide"
-                          : "text-ink/30"
-                  }
-                  size={22}
-                />
-                <p className="mt-4 text-sm font-semibold text-ink">
-                  {stage.title}
+        <section className="mt-8">
+          <div className="mb-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+                  Five steps until your app is live
                 </p>
-                <p className="mt-2 text-sm leading-6 text-ink/60">
-                  {stage.description}
+                <h2 className="mt-2 text-2xl font-semibold text-ink">
+                  Build path
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
+                  Each step turns the materials you already have into a polished
+                  traveler app you can share.
                 </p>
               </div>
-            );
-          })}
+              <p className="rounded-md border border-moss/20 bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+                Step {completedSteps} of {stages.length} complete
+              </p>
+            </div>
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-ink/10">
+              <div
+                className="h-full rounded-full bg-moss"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-5">
+            {stages.map((stage) => {
+              const Icon = stage.icon;
+              return (
+                <div
+                  key={stage.title}
+                  className="rounded-md border border-ink/10 bg-white p-4"
+                >
+                  <Icon
+                    className={
+                      stage.state === "complete"
+                        ? "text-moss"
+                        : stage.state === "current"
+                          ? "text-clay"
+                          : stage.state === "available"
+                            ? "text-tide"
+                            : "text-ink/30"
+                    }
+                    size={22}
+                  />
+                  <p className="mt-4 text-sm font-semibold text-ink">
+                    {stage.title}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-ink/60">
+                    {stage.description}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
