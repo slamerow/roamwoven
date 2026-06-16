@@ -26,11 +26,19 @@ function safeNext(value: string | null) {
   return value;
 }
 
-function redirectToLogin(request: NextRequest, next: string, error: string) {
-  const loginUrl = new URL("/login", request.url);
-  loginUrl.searchParams.set("error", error);
-  loginUrl.searchParams.set("next", next);
-  return NextResponse.redirect(loginUrl, 303);
+function redirectToAuthError(request: NextRequest, next: string, error: string) {
+  const isPasswordReset = next.startsWith("/reset-password");
+  const redirectUrl = new URL(
+    isPasswordReset ? "/reset-password/update" : "/login",
+    request.url
+  );
+  redirectUrl.searchParams.set("error", error);
+
+  if (!isPasswordReset) {
+    redirectUrl.searchParams.set("next", next);
+  }
+
+  return NextResponse.redirect(redirectUrl, 303);
 }
 
 export async function GET(request: NextRequest) {
@@ -50,7 +58,7 @@ export async function GET(request: NextRequest) {
       errorDescription: supabaseErrorDescription,
     });
 
-    return redirectToLogin(request, next, "auth-failed");
+    return redirectToAuthError(request, next, "auth-failed");
   }
 
   if (!code && !tokenHash) {
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
       searchParamKeys: Array.from(url.searchParams.keys()),
     });
 
-    return redirectToLogin(request, next, "auth-failed");
+    return redirectToAuthError(request, next, "auth-failed");
   }
 
   const supabase = await createSupabaseServerClient();
@@ -82,7 +90,7 @@ export async function GET(request: NextRequest) {
       type,
     });
 
-    return redirectToLogin(request, next, "auth-failed");
+    return redirectToAuthError(request, next, "auth-failed");
   }
 
   return NextResponse.redirect(new URL(next, request.url), 303);

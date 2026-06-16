@@ -127,6 +127,12 @@ export default async function LoginPage({
               Create account
             </button>
           </div>
+          <Link
+            className="inline-flex text-sm font-semibold text-moss"
+            href="/reset-password"
+          >
+            Forgot password?
+          </Link>
         </form>
 
         <form
