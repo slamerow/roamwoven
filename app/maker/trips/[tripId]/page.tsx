@@ -53,10 +53,10 @@ export default async function TripWorkspacePage({
   searchParams
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ checkout?: string }>;
+  searchParams: Promise<{ checkout?: string; making?: string }>;
 }) {
   const { tripId } = await params;
-  const { checkout } = await searchParams;
+  const { checkout, making } = await searchParams;
   const trip = await getMakerTrip(tripId);
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
@@ -78,6 +78,36 @@ export default async function TripWorkspacePage({
               : "Trip shell is saved. Next up is Stripe Checkout with promo-code support before upload processing begins."}
           </p>
         </header>
+
+        {making ? (
+          <section className="mt-8 rounded-md border border-moss/20 bg-white p-5">
+            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+                  First pass queued
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-ink">
+                  Roamwoven is sketching the app shape.
+                </h2>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
+                  In beta this is a lightweight preview step: we show momentum,
+                  then move into secure checkout before any expensive processing
+                  starts.
+                </p>
+              </div>
+              <div className="w-full rounded-md bg-paper p-4 md:w-72">
+                <div className="h-2 overflow-hidden rounded-full bg-ink/10">
+                  <div className="h-full w-2/3 rounded-full bg-moss" />
+                </div>
+                <div className="mt-4 space-y-2 text-sm text-ink/65">
+                  <p>Reading trip context</p>
+                  <p>Grouping files and notes</p>
+                  <p>Preparing secure checkout</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="mt-8 grid gap-4 md:grid-cols-4">
           {stages.map((stage) => {
@@ -121,9 +151,9 @@ export default async function TripWorkspacePage({
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             {trip.isDemo
               ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
-              : isPaid
-                ? "This trip is paid, so upload and processing can begin."
-                : "Real trips go through Stripe Checkout before AI extraction. Beta users can use promo codes instead of bypassing payment."}
+                : isPaid
+                  ? "This trip is paid, so upload and processing can begin."
+                  : "Checkout unlocks the real build. Stripe can support cards and wallet-style express checkout once those payment methods are enabled."}
           </p>
           {checkout === "setup-required" ? (
             <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
@@ -145,7 +175,7 @@ export default async function TripWorkspacePage({
                   className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
                   type="submit"
                 >
-                  Continue to secure checkout
+                  Continue to payment
                 </button>
               </form>
             )}

@@ -5,8 +5,8 @@ import { canPersistTrips, createMakerTrip } from "@/lib/trips";
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const name = String(formData.get("name") ?? "").trim();
-  const destinationSummary = String(
-    formData.get("destinationSummary") ?? ""
+  const description = String(
+    formData.get("description") ?? formData.get("destinationSummary") ?? ""
   ).trim();
 
   if (!name) {
@@ -31,10 +31,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(loginUrl, 303);
   }
 
-  const tripId = await createMakerTrip({ name, destinationSummary });
+  const tripId = await createMakerTrip({
+    name,
+    destinationSummary: description
+  });
 
   return NextResponse.redirect(
-    new URL(`/maker/trips/${tripId}`, request.url),
+    new URL(`/maker/trips/${tripId}?making=1`, request.url),
     303
   );
 }

@@ -1,3 +1,5 @@
+import { CreateTripForm } from "@/components/create-trip-form";
+
 export default async function NewTripPage({
   searchParams
 }: {
@@ -14,41 +16,12 @@ export default async function NewTripPage({
         <h1 className="mt-2 text-4xl font-semibold text-ink">
           Create a trip app
         </h1>
-        <form
-          action="/maker/trips/create"
-          className="mt-8 space-y-5 rounded-md border border-ink/10 bg-white p-5"
-          method="post"
-        >
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">Trip name</span>
-            <input
-              className="mt-2 w-full rounded-md border border-ink/15 px-3 py-3 text-sm"
-              name="name"
-              placeholder="Wren's Adventure"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">
-              Destination summary
-            </span>
-            <input
-              className="mt-2 w-full rounded-md border border-ink/15 px-3 py-3 text-sm"
-              name="destinationSummary"
-              placeholder="Japan, Vietnam, Thailand..."
-            />
-          </label>
-          {error === "missing-name" ? (
-            <p className="rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-              Add a trip name before continuing.
-            </p>
-          ) : null}
-          <button
-            className="inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-            type="submit"
-          >
-            Continue to payment
-          </button>
-        </form>
+        <p className="mt-3 text-sm leading-6 text-ink/65">
+          Name the app, describe the trip, and drop in whatever materials you
+          have. The full upload pipeline comes next; this first screen gives the
+          flow its real shape.
+        </p>
+        <CreateTripForm error={error} />
       </div>
     </main>
   );

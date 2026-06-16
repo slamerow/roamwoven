@@ -102,6 +102,8 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 - The public demo should not remain the thin scaffold currently at `/t/demo`. It should use the Wren's Adventure traveler-app shell or at least screenshots/clickable captures of that richer experience, because the polished traveler app is the core proof point.
 - Landing page direction: tagline is "The superapp for your next adventure." Add a "Perfect for" section, and later show both finished app screenshots and shots of the prompt/building phase.
 - Future spinout idea after Roamwoven is solid: clone the core builder/template architecture into a separate bachelor/bachelorette party app with different marketing, custom UI, bill-splitting features, and likely higher pricing. Keep Roamwoven fully built first so this can be launched as a vertical clone rather than a distraction.
+- First app creation flow should feel like: trip name, short description, dump files/notes, visible queued uploads, "Make app," lightweight simulated processing/progress, then secure payment. Real expensive processing must still stay behind checkout.
+- Payment should be as frictionless as possible once Stripe is configured: cards plus express wallet-style checkout where available. Research PayPal support separately before promising it in-product.
 
 ## Recommended Next Task
 
