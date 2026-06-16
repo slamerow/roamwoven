@@ -77,9 +77,9 @@ export default function HomePage() {
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
             All the information you need, right at your fingertips. It&apos;s
-            vacation time, don&apos;t spend it worrying about logistics and
-            admin. Roamwoven is a custom one-stop shop for your travels: flight
-            and hotel details, itinerary info, useful phrases, and all the
+            vacation time. Don&apos;t spend it digging through emails and PDFs.
+            Roamwoven is a custom one-stop shop for your travels: flight and
+            hotel details, itinerary info, useful phrases, and all the
             information you need, never more than two or three clicks away.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
