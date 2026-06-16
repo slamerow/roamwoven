@@ -61,12 +61,15 @@ Use Stripe Checkout.
 
 Payment happens before expensive extraction.
 
+Beta should still exercise the real checkout path. Use Stripe promotion codes, coupons, or controlled discounts for beta testers rather than removing payment from the flow entirely.
+
 Stripe objects:
 
 - Customer.
 - Checkout Session.
 - Payment Intent.
 - Trip purchase record.
+- Promotion code or coupon metadata, where used.
 
 The trip should remain locked until payment succeeds.
 
@@ -136,7 +139,8 @@ Authenticated pages:
 Private generated app:
 
 - Publicly reachable by hard-to-guess URL or share token.
-- Optional traveler password for trips or albums that need an extra privacy layer.
+- Traveler password protection defaults on, but can be toggled off by the trip owner.
+- User-configurable traveler password for trips or albums that need an extra privacy layer.
 - Mobile-first.
 - PWA-ready.
 - Reads published trip snapshot.
@@ -174,6 +178,8 @@ The Asia workbook provides the starting shape:
 - Activities.
 - Categories.
 - Phrases.
+
+The current Wren's Adventure app also provides product architecture beyond the workbook: leg-based navigation, category filters, calendar/day browsing, search, phrasebook, map/location affordances, and a polished mobile-first card system should be treated as V1 reference behavior.
 
 V1 should preserve those concepts but add production fields for status, source, confidence, and publish behavior.
 
@@ -645,12 +651,24 @@ Open question:
 
 Recommendation:
 
-- Start with private unlisted URL plus optional share-token rotation and optional traveler password.
+- Start with private unlisted URL plus optional share-token rotation and default-on traveler password.
 - Add login-gated traveler apps later if beta users ask for it.
+
+Traveler passwords in V1 should be low-friction. The user can choose a simple password, and the app should avoid enterprise-style complexity rules. The system should still store passwords as hashes, never plaintext.
 
 Private residence addresses should be handled differently from hotels, rentals, restaurants, and public venues. A published traveler snapshot should support broad labels such as "Staying with family · Seattle, WA" while keeping the exact address private in maker data.
 
 Confirmation numbers should default to maker-only. If exposed in the traveler app, they should be behind an explicit visibility setting and ideally a password-protected trip.
+
+Photos are part of V1, but they should be constrained:
+
+- Compress client-side where practical.
+- Store originals only if the retention and pricing policy supports it.
+- Start with a generous included allowance, roughly 250-500 compressed photos per trip.
+- Track count, size, and bandwidth internally before showing hard limits to customers.
+- Allow photo sharing to be disabled.
+- Let albums inherit the traveler password or use a separate password.
+- Exclude video from V1.
 
 ## 12. Cost Controls
 
@@ -666,11 +684,16 @@ Recommended controls:
 - Retry limits.
 - Preview/refresh limits if refresh requires expensive regeneration.
 - Storage retention limits for original uploads and photos.
-- No V1 video storage unless pricing and retention are explicit.
+- No V1 video storage.
+- Per-trip photo count, size, and bandwidth tracking, with soft thresholds before hard caps for normal users.
 
 Most maker-app edits should not rerun full extraction. They should update structured data directly and regenerate the traveler snapshot cheaply.
 
 For a $25 per-trip launch price, the system should measure whether AI, OCR, storage, payment fees, and manual support stay comfortably below the target cost envelope. The app should be able to flag trips that threaten the margin before they become a support or compute problem.
+
+The working target is under $5 in platform, AI, storage, and routine admin cost per trip. This target excludes taxes, refunds, chargebacks, unusually high support, and founder time during beta.
+
+If usage data shows that the generous photo allowance compresses margin too much, prefer reducing expensive processing, adding a paid storage/video upgrade, or reserving video for a premium tier before raising the base price. $25 is the cleaner consumer price point and should be protected if possible. The default product should avoid making ordinary family travelers feel charged for every small addition.
 
 ## 13. Observability
 

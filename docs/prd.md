@@ -10,7 +10,9 @@ Roamwoven turns messy trip materials into a clean, private, mobile-friendly trip
 
 The customer has already planned, booked, or partially organized their trip. They may have flight PDFs, hotel confirmations, screenshots, notes, spreadsheets, Word documents, reservation emails saved as files, and half-finished itinerary docs. Roamwoven's job is not to plan the trip. Its job is to structure what already exists, identify what is missing, ask clear follow-up questions, and generate a polished private travel app.
 
-The Asia trip app, currently named "Wren's Adventure," is the reference example for the generated output. It is not the name of the product. Customers should be able to name their own generated app.
+The Asia trip app, currently named "Wren's Adventure," is both the user's real personal trip app and the reference example for generated output. It is not the name of the product. Customers should be able to name their own generated app.
+
+Wren's Adventure is the architectural and UX north star for the traveler app: legs, categories, calendar/day views, search, phrases, maps, and polished mobile cards should carry forward into Roamwoven rather than being treated as disposable demo details.
 
 ## 2. Positioning
 
@@ -52,9 +54,11 @@ Launch pricing should position Roamwoven as a premium but accessible product, no
 Rationale:
 
 - Simple price communication is better than complex trip-length pricing at launch.
+- $25 feels meaningfully easier to buy than $30; preserve this price unless real cost data forces a change.
 - A $25 trip fee leaves room for AI, storage, payment, and support costs while still feeling reasonable for a meaningful personal trip.
 - If the trip is unusually short, the product can offer an automatic goodwill discount, such as $5 off for a three-day trip, without making pricing feel complicated.
-- Longer trips can still fit the flat fee if cost controls, upload limits, and refresh limits are explicit.
+- Longer trips can still fit the flat fee if internal cost controls, upload limits, and refresh limits exist without making normal customers feel nickel-and-dimed.
+- The target unit economics are roughly under $5 in platform/AI/storage/admin cost per trip, leaving close to $20 gross profit before taxes, refunds, disputes, and unusual support.
 
 Potential future pricing:
 
@@ -62,6 +66,8 @@ Potential future pricing:
 - Referral credit: when a referred customer buys a trip, the referrer gets a free or discounted future trip.
 - Unlimited personal plan around $150-199/year, with terms that prohibit commercial resale, automated abuse, or travel-agent usage unless separately approved.
 - Travel-agent or small-business plan as a separate commercial tier.
+
+Beta payment should use real Stripe Checkout early. Beta testers can receive promo codes or discounts rather than bypassing checkout entirely, so the payment and fulfillment flow is tested before public launch.
 
 Potential future monetization:
 
@@ -535,6 +541,7 @@ The generated app should be a private mobile-first web app/PWA.
 - Address/map links.
 - External URLs.
 - Search or simple filtering, if practical.
+- Photo sharing with explicit privacy and retention controls.
 - App refresh after maker edits.
 
 ### Offline Scope
@@ -554,6 +561,7 @@ V1 offline support does not need to cover:
 - Newly edited data before sync.
 - External websites.
 - Live maps.
+- Full-resolution photo albums.
 
 ## 12. Admin / Dashboard Requirements
 
@@ -613,6 +621,7 @@ Explicitly out of scope for V1:
 - Gmail/Google Drive import.
 - Travel-agent CRM features.
 - Full two-way public sheet editing as the primary UX.
+- Video upload, storage, or sharing.
 
 Optional light reminder functionality may be considered, but it should not distract from the core product. If included, it should be simple: optional reminders attached to specific cards, such as "remind me two weeks before."
 
@@ -642,14 +651,19 @@ V1 privacy/security requirements:
 - Maker app requires authenticated user access.
 - Traveler app uses high-entropy unguessable share tokens.
 - Share tokens can be rotated.
+- Password protection defaults on during traveler app creation/publish, with plain wording such as "Recommended for private family trips."
+- Users can toggle password protection off easily.
+- Users can choose a simple password. V1 should not enforce complex password rules beyond basic length/empty-value handling.
 - Traveler app can be unpublished.
 - Traveler app pages should not be indexed by search engines.
 - Optional traveler password should be available, especially for photo albums or sensitive trips.
 - Original uploads and extracted text should be private to the trip owner.
 - Confirmation numbers should not appear by default on public traveler cards unless the user explicitly exposes them.
 - Private residence addresses should be shielded more aggressively than hotels, rentals, restaurants, or public venues.
+- Photos are part of V1 because they are a meaningful part of the premium value proposition.
 - Photos should support album-level privacy controls before broad sharing.
-- Video should be out of scope for V1 unless there is a clear retention and cost policy.
+- Photo storage should have clear compression, size, and retention limits, but the default customer experience should feel generous. A starting target is 250-500 compressed photos included per trip, with soft warnings or support review before hard limits for normal users.
+- Video should be out of scope for V1.
 
 Terms and customer messaging should make clear:
 
@@ -685,8 +699,8 @@ The Asia workbook is useful but may not be robust enough for broader customer in
 ## 18. Open Questions
 
 1. Should phrasebook generation be included in V1 or treated as an enhancement if the trip involves non-English destinations?
-2. Should the generated app require a traveler password by default, or should password protection be optional per trip?
-3. Should photos have a separate password from the itinerary?
+2. Should V1 enforce any minimum traveler password length beyond preventing an empty password when password protection is on?
+3. Should photo albums have a separate password by default, inherit the trip password, or let the user choose per album?
 4. How many previews/refreshes should be included after payment before additional processing is throttled or limited?
 5. Should sheet export be included in the base purchase, premium only, or hidden entirely at launch?
 6. What should happen if a customer uploads too much material for the base price?

@@ -21,6 +21,8 @@ This backlog is ordered for momentum. It assumes we will create a new `roamwoven
 - Keep V1 consumer-simple; avoid travel-agent CRM scope.
 - Build with commercial-grade privacy, cost tracking, and sensitive-field defaults from the beginning.
 - Default visual direction should feel understated and premium, not ornate or gimmicky.
+- Beta should use the real Stripe path with promo codes/discounts rather than skipping checkout.
+- Photos are part of V1, with strict storage/privacy limits; video is out.
 
 ## Milestone 0: Project Setup
 
@@ -123,13 +125,18 @@ Add one-time per-trip payment.
 Pricing assumptions:
 
 - Launch target is a flat $25 per trip.
+- Protect the $25 price point if possible; it is cleaner psychologically than $30.
+- $30 remains a fallback only if real usage data shows the margin cannot work through processing controls or add-ons.
 - Short trips may get an automatic goodwill discount later.
 - Referral credit and an annual unlimited personal tier are future pricing experiments.
+- Beta testers use promo codes or discounts.
+- Target routine cost is under $5 per trip before taxes, refunds, disputes, and unusual support.
 
 Beta note:
 
-- Local testing and friends-and-family beta can use a payment bypass.
-- Public launch should restore the hard payment gate before expensive extraction.
+- Local development can use test-mode Stripe and controlled test fixtures.
+- Friends-and-family beta should still exercise checkout, with promo codes where needed.
+- Avoid building the product around a payment bypass that has to be untangled later.
 
 Acceptance criteria:
 
@@ -137,7 +144,7 @@ Acceptance criteria:
 - Checkout metadata includes trip ID and user ID.
 - Successful webhook marks trip `paid`.
 - Expensive upload processing remains locked until payment succeeds.
-- Beta bypass is controlled intentionally, not by removing payment concepts from the product.
+- Promotion code metadata is captured for beta and referral analysis.
 
 ### M1.5 Post-Payment Upload Entry
 
@@ -258,12 +265,14 @@ Purpose:
 - Seed test data.
 - Validate traveler app rendering.
 - Provide a bridge between current app model and Roamwoven schema.
+- Preserve the Wren's Adventure traveler-app behaviors that matter: legs, categories, calendar/day views, search, phrases, maps, and polished mobile cards.
 
 Acceptance criteria:
 
 - Importer reads `Legs`, `Activities`, `Categories`, and `Phrases`.
 - Imported data maps into Roamwoven trip schema.
 - Imported Asia trip can render in the traveler app template.
+- Traveler app template can represent the Wren's Adventure reference UX, not just a simplified card list.
 
 ### M3.3 Draft Trip JSON
 
@@ -449,19 +458,26 @@ Acceptance criteria:
 - User can publish private traveler app.
 - User can copy/share private URL.
 - User can unpublish or rotate token.
-- User can enable or change an optional traveler password.
+- Traveler password protection defaults on with plain wording such as "Recommended for private family trips."
+- User can toggle password protection off.
+- User can set a simple password without complex password rules.
+- Traveler password is stored hashed, never plaintext.
 - Published snapshot respects address and confirmation visibility settings.
 
-### M6.5 Photo Privacy
+### M6.5 V1 Photo Sharing
 
-Add photo-sharing controls only after itinerary publishing is solid.
+Add bounded photo-sharing controls as part of the premium V1 value proposition.
 
 Acceptance criteria:
 
 - Photos can be disabled entirely for a trip.
 - Photo albums can be password protected separately or inherit traveler password.
 - Photo storage has size and retention limits.
-- Video is not accepted in V1 unless pricing and retention are explicitly changed.
+- Initial included allowance targets 250-500 compressed photos per trip.
+- Photo count and upload size are tracked internally.
+- Soft warnings/support review happen before hard caps for normal users.
+- Photos are compressed where practical before storage.
+- Video is not accepted in V1.
 
 ## Milestone 7: Beta Hardening
 
@@ -476,6 +492,7 @@ Acceptance criteria:
 - Large or repeated processing can be limited.
 - Track storage usage for uploads and photos.
 - Flag trips that threaten the $25 margin target.
+- Report estimated cost against the under-$5 routine cost target.
 
 ### M7.1a Terms and Plan Guardrails
 
@@ -518,7 +535,7 @@ Prepare invite-only beta flow.
 Acceptance criteria:
 
 - Beta users can create account.
-- Beta users can pay or use a comped test trip.
+- Beta users can pay through Stripe or use a promo code.
 - Support/admin can inspect processing state.
 - Manual support can correct data behind the scenes if needed.
 
