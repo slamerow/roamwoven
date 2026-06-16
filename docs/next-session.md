@@ -96,9 +96,12 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 - Traveler app should be one hosted template backed by trip snapshots.
 - Photos are part of V1, with count/size/retention limits and no video.
 - Wren's Adventure remains the user's real trip app and the reference UX for legs, categories, calendar/day views, search, phrases, maps, and mobile cards.
+- Generated apps should not force travel modules. If a customer does not include flights, the traveler app should not show a flight placeholder just to fill a template.
 - Roamwoven is deployed on Vercel Pro and the custom domain is live at `https://roamwoven.com`.
 - The landing page should be the public product homepage, not a login-first surface. It should explain what Roamwoven does, use real/generated traveler-app screenshots as the money piece, and can later include clickable demos or embedded previews. Login should be a clear action from the homepage, not the homepage itself.
 - The public demo should not remain the thin scaffold currently at `/t/demo`. It should use the Wren's Adventure traveler-app shell or at least screenshots/clickable captures of that richer experience, because the polished traveler app is the core proof point.
+- Landing page direction: tagline is "The superapp for your next adventure." Add a "Perfect for" section, and later show both finished app screenshots and shots of the prompt/building phase.
+- Future spinout idea after Roamwoven is solid: clone the core builder/template architecture into a separate bachelor/bachelorette party app with different marketing, custom UI, bill-splitting features, and likely higher pricing. Keep Roamwoven fully built first so this can be launched as a vertical clone rather than a distraction.
 
 ## Recommended Next Task
 

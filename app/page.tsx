@@ -8,6 +8,24 @@ const steps = [
   "Publish your private mobile trip app"
 ];
 
+const perfectFor = [
+  {
+    title: "Big family trips",
+    description:
+      "Keep flights, stays, activities, phrases, maps, and shared context easy for everyone to find."
+  },
+  {
+    title: "Long sabbaticals",
+    description:
+      "Turn months of moving parts into a calm daily app that still works when the plan gets complicated."
+  },
+  {
+    title: "Group adventures",
+    description:
+      "Give friends and family one place to follow the plan without handing them your inbox or spreadsheets."
+  }
+];
+
 const demoPanels = [
   {
     eyebrow: "Today",
@@ -55,7 +73,7 @@ export default function HomePage() {
             Roamwoven
           </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-ink md:text-7xl">
-            A Superapp for your trip
+            The superapp for your next adventure
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
             All the information you need, right at your fingertips. It&apos;s
@@ -96,6 +114,29 @@ export default function HomePage() {
             A real traveler-app style Today screen: the day&apos;s plans,
             cards, tools, and trip navigation in one pocket-sized place.
           </p>
+        </div>
+      </section>
+
+      <section className="border-t border-ink/10 bg-white">
+        <div className="mx-auto max-w-6xl px-6 py-14 md:px-10">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
+            Perfect for
+          </p>
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            {perfectFor.map((item) => (
+              <article
+                className="rounded-md border border-ink/10 bg-paper p-5"
+                key={item.title}
+              >
+                <h2 className="text-xl font-semibold text-ink">
+                  {item.title}
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-ink/65">
+                  {item.description}
+                </p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
