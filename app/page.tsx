@@ -20,16 +20,16 @@ export default function HomePage() {
             A Superapp for your trip
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
-            All the information you need, right at your fingertips. It is
-            vacation time, so do not spend it worrying about logistics and
-            admin. Roamwoven is a custom one-stop shop for your travels: flight
-            and hotel details, itinerary info, useful phrases, and everything
-            else you need, never more than two or three clicks away.
+            All the information you need, right at your fingertips. It's
+            vacation time, don't spend it worrying about logistics and admin.
+            Roamwoven is a custom one-stop shop for your travels: flight and
+            hotel details, itinerary info, useful phrases, and all the
+            information you need, never more than two or three clicks away.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
-            When I took my family on a five-month sabbatical across 11
-            countries, I used AI to build the travel app of my dreams.
-            Roamwoven lets you build your own superapp in just 30 to 60
+            I'm a travel nerd. When I took my family on a five-month sabbatical
+            across 11 countries, I used AI to build the travel app of my
+            dreams. Roamwoven lets you build your own superapp in just 30 to 60
             minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
