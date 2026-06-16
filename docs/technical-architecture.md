@@ -645,6 +645,14 @@ V1 should include:
 - Sensitive-field visibility controls for confirmation numbers and addresses.
 - Separate photo privacy controls before broad album sharing.
 
+Ownership must be enforced in layers:
+
+- Maker pages and route handlers require an authenticated Supabase user when Supabase is configured.
+- Normal trip reads and writes are filtered by `owner_user_id`.
+- Supabase Row Level Security is the database backstop so an app bug cannot casually expose another user's trip rows.
+- Service-role access is limited to trusted backend operations that cannot run as the user, such as Stripe webhooks marking a specific trip paid.
+- Database indexes should support owner-scoped dashboards and trip-scoped itinerary queries as the system grows to thousands of users and trips.
+
 Open question:
 
 - Should traveler apps require login?

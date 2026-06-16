@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, ClipboardCheck, FileUp, Smartphone } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth";
 import { listMakerTrips } from "@/lib/trips";
 
 export default async function MakerDashboardPage() {
+  const user = await getCurrentUser();
   const trips = await listMakerTrips();
 
   return (
@@ -25,7 +27,37 @@ export default async function MakerDashboardPage() {
           </Link>
         </header>
 
+        {user ? (
+          <section className="mt-5 flex flex-col gap-3 rounded-md border border-ink/10 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-sm text-ink/65">{user.email}</p>
+            <form action="/auth/sign-out" method="post">
+              <button
+                className="rounded-md border border-ink/15 px-3 py-2 text-sm font-semibold text-ink"
+                type="submit"
+              >
+                Sign out
+              </button>
+            </form>
+          </section>
+        ) : null}
+
         <div className="mt-8 space-y-5">
+          {trips.length === 0 ? (
+            <section className="rounded-md border border-ink/10 bg-white p-5">
+              <h2 className="text-2xl font-semibold text-ink">
+                Create your first trip
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
+                Your dashboard will show only trips owned by your account.
+              </p>
+              <Link
+                href="/maker/trips/new"
+                className="mt-5 inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+              >
+                Create trip
+              </Link>
+            </section>
+          ) : null}
           {trips.map((trip) => (
             <section
               key={trip.id}

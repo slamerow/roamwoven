@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { canPersistTrips, createMakerTrip } from "@/lib/trips";
 
 export async function POST(request: NextRequest) {
@@ -20,6 +21,14 @@ export async function POST(request: NextRequest) {
       new URL("/maker/trips/demo-trip", request.url),
       303
     );
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", "/maker/trips/new");
+    return NextResponse.redirect(loginUrl, 303);
   }
 
   const tripId = await createMakerTrip({ name, destinationSummary });

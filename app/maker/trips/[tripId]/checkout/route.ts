@@ -3,6 +3,7 @@ import {
   canStartStripeCheckout,
   createTripCheckoutSession,
 } from "@/lib/billing/stripe";
+import { getCurrentUser, hasSupabaseServerConfig } from "@/lib/auth";
 import { getMakerTrip } from "@/lib/trips";
 
 export async function POST(
@@ -10,8 +11,19 @@ export async function POST(
   { params }: { params: Promise<{ tripId: string }> }
 ) {
   const { tripId } = await params;
-  const trip = await getMakerTrip(tripId);
   const tripUrl = new URL(`/maker/trips/${tripId}`, request.url);
+
+  if (hasSupabaseServerConfig()) {
+    const user = await getCurrentUser();
+
+    if (!user) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", `/maker/trips/${tripId}`);
+      return NextResponse.redirect(loginUrl, 303);
+    }
+  }
+
+  const trip = await getMakerTrip(tripId);
 
   if (trip.isDemo) {
     return NextResponse.redirect(tripUrl, 303);

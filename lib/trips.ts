@@ -1,5 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseConfig } from "@/lib/env";
+import { getCurrentUser } from "@/lib/auth";
 
 export type MakerTrip = {
   id: string;
@@ -71,6 +73,12 @@ export async function listMakerTrips(): Promise<MakerTrip[]> {
     return [demoTrip];
   }
 
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return [];
+  }
+
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("trips")
@@ -89,6 +97,7 @@ export async function listMakerTrips(): Promise<MakerTrip[]> {
         "created_at",
       ].join(",")
     )
+    .eq("owner_user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -101,6 +110,12 @@ export async function listMakerTrips(): Promise<MakerTrip[]> {
 export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
   if (tripId === demoTrip.id || !hasSupabaseServerConfig()) {
     return demoTrip;
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to load this trip.");
   }
 
   const supabase = await createSupabaseServerClient();
@@ -122,6 +137,7 @@ export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
       ].join(",")
     )
     .eq("id", tripId)
+    .eq("owner_user_id", user.id)
     .single();
 
   if (error || !data) {
@@ -145,10 +161,17 @@ export async function createMakerTrip(input: {
   destinationSummary?: string;
 }) {
   const supabase = await createSupabaseServerClient();
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to create a trip.");
+  }
+
   const slug = `${slugify(input.name)}-${crypto.randomUUID().slice(0, 8)}`;
   const { data, error } = await supabase
     .from("trips")
     .insert({
+      owner_user_id: user.id,
       name: input.name,
       slug,
       destination_summary: input.destinationSummary || null,
@@ -174,7 +197,7 @@ export async function markTripPaid(tripId: string) {
     return;
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   const { error } = await supabase
     .from("trips")
     .update({

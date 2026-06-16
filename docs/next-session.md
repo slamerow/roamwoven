@@ -23,11 +23,15 @@ Interactive local-only UI exists for:
 Backend-ready pieces now exist:
 
 - `db/schema.sql` includes V1 trip fields for payment status, theme pack, password flags, photo metrics, and sensitive-field visibility.
+- `db/schema.sql` also includes owner-scoped RLS policies and owner/trip/date indexes for scale.
+- Magic-link auth scaffold exists at `/login`, `/auth/magic-link`, `/auth/callback`, and `/auth/sign-out`.
+- Maker pages require auth when Supabase env vars are configured.
 - `lib/trips.ts` lists, loads, and creates trips through Supabase when env vars are configured.
+- Real trip queries and inserts are scoped by `owner_user_id`.
 - Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
-- The Stripe webhook route can mark trips paid after `checkout.session.completed`.
+- The Stripe webhook route can mark trips paid after `checkout.session.completed` through a narrow service-role backend path.
 
 ## Important Product Decisions
 
@@ -42,13 +46,14 @@ Backend-ready pieces now exist:
 
 ## Recommended Next Task
 
-Finish payment setup and then move into authenticated persistence:
+Finish service setup and then move into upload persistence:
 
 1. Create Stripe account/product/price when the business setup is ready.
 2. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET`.
 3. Exercise test-mode Checkout with promotion codes.
 4. Configure Supabase env variables and apply `db/schema.sql`.
-5. Add auth/session enforcement around maker routes.
+5. Exercise magic-link auth and owner-scoped trip creation.
+6. Add paid-trip upload records and Supabase Storage.
 
 Keep upload/extraction mocked until trip persistence is working.
 
@@ -64,3 +69,5 @@ Small scaffold already exists:
 - `lib/billing/stripe.ts`
 - `app/maker/trips/[tripId]/checkout/route.ts`
 - `app/api/stripe/webhook/route.ts`
+- `lib/auth.ts`
+- `app/login/page.tsx`
