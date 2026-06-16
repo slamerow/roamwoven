@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { CheckCircle2, CreditCard, FileUp, WandSparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  CreditCard,
+  FileUp,
+  Palette,
+  Share2,
+  TableProperties,
+  WandSparkles
+} from "lucide-react";
 
 const stages = [
   {
@@ -26,6 +34,14 @@ const stages = [
     state: "locked",
     icon: WandSparkles
   }
+];
+
+const betaLinks = [
+  { label: "Upload", step: "upload", icon: FileUp },
+  { label: "Review", step: "review", icon: WandSparkles },
+  { label: "Clean data", step: "data", icon: TableProperties },
+  { label: "Style", step: "style", icon: Palette },
+  { label: "Publish", step: "publish", icon: Share2 }
 ];
 
 export default async function TripWorkspacePage({
@@ -94,6 +110,41 @@ export default async function TripWorkspacePage({
             >
               Continue to upload
             </Link>
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
+          <h2 className="text-xl font-semibold text-ink">Beta flow shortcuts</h2>
+          <p className="mt-2 text-sm leading-6 text-ink/60">
+            Jump to any step while the product is still using mocked beta state.
+          </p>
+          <div className="mt-5 grid gap-3 md:grid-cols-5">
+            {betaLinks.map((link) => {
+              const Icon = link.icon;
+              const href =
+                link.step === "upload"
+                  ? `/maker/trips/${tripId}/upload`
+                  : link.step === "review"
+                    ? `/maker/trips/${tripId}/review`
+                    : link.step === "data"
+                      ? `/maker/trips/${tripId}/data`
+                      : link.step === "style"
+                        ? `/maker/trips/${tripId}/style`
+                        : `/maker/trips/${tripId}/publish`;
+
+              return (
+                <Link
+                  key={link.step}
+                  href={href}
+                  className="rounded-md border border-ink/10 bg-paper p-4"
+                >
+                  <Icon className="text-tide" size={20} />
+                  <p className="mt-3 text-sm font-semibold text-ink">
+                    {link.label}
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </section>
       </div>
