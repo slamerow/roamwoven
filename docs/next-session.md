@@ -68,6 +68,9 @@ Live Supabase dev setup is partially complete:
 - On 2026-06-16, a new magic-link request from the local app reached Supabase but failed because the local sandbox had no network access. Retrying with network access confirmed Supabase is reachable but currently returning `over_email_send_rate_limit` / HTTP 429 for `ekamerow@gmail.com`.
 - On 2026-06-16, the deployed Vercel app loaded at `https://roamwoven.vercel.app/login?next=%2Fmaker`, but requesting a magic link still returned `send-failed`. A direct Supabase OTP request using the Vercel callback URL confirmed the underlying cause is still `over_email_send_rate_limit` / HTTP 429 for `ekamerow@gmail.com`.
 - `app/auth/magic-link/route.ts` now logs non-secret Supabase error metadata on magic-link send failure so the next failure cause is visible in the dev server log.
+- On 2026-06-16, a magic-link email sent successfully from `https://roamwoven.com`, but clicking it landed on `/login?error=auth-failed`. Magic links are now treated as fallback instead of the primary beta testing path.
+- `app/auth/callback/route.ts` now supports both Supabase `code` and `token_hash` callback shapes and logs non-secret callback failure metadata.
+- `app/auth/password/route.ts` adds Supabase email/password sign-in and account creation so beta testing is not blocked by magic-link delivery/callback fragility.
 - Localhost testing from Codex is proving unreliable: the Next dev server can be listening while the in-app browser or shell cannot reach the local port. A Vercel preview deployment is likely the easiest way for the user to test auth and trip creation directly.
 
 Supabase grants that should be present:
@@ -93,14 +96,15 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 - Photos are part of V1, with count/size/retention limits and no video.
 - Wren's Adventure remains the user's real trip app and the reference UX for legs, categories, calendar/day views, search, phrases, maps, and mobile cards.
 - Roamwoven is deployed on Vercel Pro and the custom domain is live at `https://roamwoven.com`.
+- The landing page should be the public product homepage, not a login-first surface. It should explain what Roamwoven does, use real/generated traveler-app screenshots as the money piece, and can later include clickable demos or embedded previews. Login should be a clear action from the homepage, not the homepage itself.
 
 ## Recommended Next Task
 
 Finish Supabase auth/database verification, then move into upload persistence:
 
 1. Use the custom domain for testing: `https://roamwoven.com/login?next=%2Fmaker`.
-2. Wait for the Supabase magic-link email cooldown to clear, or test with a different email address.
-3. Click/open the magic link in the same browser session.
+2. Deploy the password-login/callback patch.
+3. Create or sign into a Supabase password account.
 4. Confirm `/maker` shows the signed-in dashboard rather than the old permission error.
 5. Create a real test trip and confirm it inserts with `owner_user_id`.
 6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.

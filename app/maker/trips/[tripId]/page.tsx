@@ -11,32 +11,34 @@ import {
 import { getStripeSetupState } from "@/lib/billing/stripe";
 import { getMakerTrip } from "@/lib/trips";
 
-const stages = [
-  {
-    title: "Create trip",
-    description: "Trip shell is ready.",
-    state: "complete",
-    icon: CheckCircle2
-  },
-  {
-    title: "Pay once",
-    description: "Required before AI review starts.",
-    state: "current",
-    icon: CreditCard
-  },
-  {
-    title: "Upload materials",
-    description: "PDFs, screenshots, docs, sheets, and notes.",
-    state: "locked",
-    icon: FileUp
-  },
-  {
-    title: "Generate app",
-    description: "Review questions, preview, and publish.",
-    state: "locked",
-    icon: WandSparkles
-  }
-];
+function getStages(isPaid: boolean) {
+  return [
+    {
+      title: "Create trip",
+      description: "Trip shell is ready.",
+      state: "complete",
+      icon: CheckCircle2
+    },
+    {
+      title: "Pay once",
+      description: "Required before AI review starts.",
+      state: isPaid ? "complete" : "current",
+      icon: CreditCard
+    },
+    {
+      title: "Upload materials",
+      description: "PDFs, screenshots, docs, sheets, and notes.",
+      state: isPaid ? "current" : "locked",
+      icon: FileUp
+    },
+    {
+      title: "Generate app",
+      description: "Review questions, preview, and publish.",
+      state: isPaid ? "available" : "locked",
+      icon: WandSparkles
+    }
+  ];
+}
 
 const betaLinks = [
   { label: "Upload", step: "upload", icon: FileUp },
@@ -57,7 +59,8 @@ export default async function TripWorkspacePage({
   const { checkout } = await searchParams;
   const trip = await getMakerTrip(tripId);
   const stripeSetup = getStripeSetupState();
-  const isPaid = trip.paymentStatus === "paid" || trip.isDemo;
+  const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
+  const stages = getStages(isPaid);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -90,7 +93,9 @@ export default async function TripWorkspacePage({
                       ? "text-moss"
                       : stage.state === "current"
                         ? "text-clay"
-                        : "text-ink/30"
+                        : stage.state === "available"
+                          ? "text-tide"
+                          : "text-ink/30"
                   }
                   size={22}
                 />
