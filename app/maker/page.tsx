@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Upload, WalletCards } from "lucide-react";
+import { ArrowRight, ClipboardCheck, FileUp, Smartphone } from "lucide-react";
 
 export default function MakerDashboardPage() {
   return (
@@ -22,30 +22,61 @@ export default function MakerDashboardPage() {
           </Link>
         </header>
 
-        <section className="mt-8 grid gap-4 md:grid-cols-2">
-          <div className="rounded-md border border-ink/10 bg-white p-5">
-            <div className="flex items-center gap-3">
-              <WalletCards className="text-clay" size={22} />
-              <h2 className="text-lg font-semibold text-ink">Payment gate</h2>
+        <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-clay">
+                Beta demo trip
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-ink">
+                Wren's Adventure
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
+                Imported from the Asia workbook: 25 city/stay legs and 313
+                generated cards. Use this trip to test the Roamwoven creation
+                flow before live extraction exists.
+              </p>
             </div>
-            <p className="mt-3 text-sm leading-6 text-ink/65">
-              Trips must be paid before upload processing starts. This keeps
-              expensive extraction tied to a real purchase.
-            </p>
+            <Link
+              href="/maker/trips/demo-trip"
+              className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+            >
+              Continue
+              <ArrowRight size={16} />
+            </Link>
           </div>
-          <div className="rounded-md border border-ink/10 bg-white p-5">
-            <div className="flex items-center gap-3">
-              <Upload className="text-tide" size={22} />
-              <h2 className="text-lg font-semibold text-ink">Upload flow</h2>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-ink/65">
-              After payment, users can upload PDFs, screenshots, docs,
-              spreadsheets, and pasted notes for intake review.
-            </p>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            <Link
+              href="/maker/trips/demo-trip/upload"
+              className="rounded-md border border-ink/10 bg-paper p-4"
+            >
+              <FileUp className="text-tide" size={22} />
+              <p className="mt-3 text-sm font-semibold text-ink">
+                Upload and intake
+              </p>
+            </Link>
+            <Link
+              href="/maker/trips/demo-trip/review"
+              className="rounded-md border border-ink/10 bg-paper p-4"
+            >
+              <ClipboardCheck className="text-clay" size={22} />
+              <p className="mt-3 text-sm font-semibold text-ink">
+                Review questions
+              </p>
+            </Link>
+            <Link
+              href="/t/demo"
+              className="rounded-md border border-ink/10 bg-paper p-4"
+            >
+              <Smartphone className="text-moss" size={22} />
+              <p className="mt-3 text-sm font-semibold text-ink">
+                Traveler preview
+              </p>
+            </Link>
           </div>
         </section>
       </div>
     </main>
   );
 }
-
