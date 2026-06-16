@@ -43,3 +43,10 @@ Add Supabase minimally:
 
 Keep upload/extraction mocked until trip persistence is working.
 
+Small scaffold already exists:
+
+- `lib/env.ts`
+- `lib/supabase/client.ts`
+- `lib/supabase/server.ts`
+- `db/schema.sql`
+- `db/README.md`
