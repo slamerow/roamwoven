@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Hammer, Route, ShieldCheck } from "lucide-react";
 
 const steps = [
   "Create your trip",
@@ -24,6 +24,27 @@ const perfectFor = [
     title: "Family adventures",
     description:
       "Keep kids, grandparents, and follow-along family in the loop without forwarding every email or spreadsheet."
+  }
+];
+
+const craftNotes = [
+  {
+    title: "Hewn from your real plans",
+    description:
+      "Roamwoven starts with the confirmations, notes, and documents you already have.",
+    icon: Hammer
+  },
+  {
+    title: "Built for the road",
+    description:
+      "The finished app is practical first: quick to scan, easy to search, calm under travel stress.",
+    icon: Route
+  },
+  {
+    title: "Private by default",
+    description:
+      "Sensitive details stay maker-only unless you choose to expose them.",
+    icon: ShieldCheck
   }
 ];
 
@@ -71,7 +92,7 @@ export default function HomePage() {
       <section className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 content-center gap-10 px-6 py-10 md:grid-cols-[1.05fr_0.95fr] md:px-10">
         <div className="flex flex-col justify-center">
           <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-            Roamwoven
+            Roamwoven / travel app foundry
           </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-ink md:text-7xl">
             The superapp for your next adventure
@@ -117,6 +138,28 @@ export default function HomePage() {
             A real traveler-app style Today screen: the day&apos;s plans,
             cards, tools, and trip navigation in one pocket-sized place.
           </p>
+        </div>
+      </section>
+
+      <section className="border-y border-ink/10 bg-ink text-paper">
+        <div className="mx-auto grid max-w-6xl gap-4 px-6 py-8 md:grid-cols-3 md:px-10">
+          {craftNotes.map((note) => {
+            const Icon = note.icon;
+            return (
+              <article
+                className="rounded-md border border-paper/15 bg-paper/5 p-5"
+                key={note.title}
+              >
+                <Icon className="text-flax" size={22} />
+                <h2 className="mt-4 text-xl font-semibold text-paper">
+                  {note.title}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-paper/70">
+                  {note.description}
+                </p>
+              </article>
+            );
+          })}
         </div>
       </section>
 
@@ -202,7 +245,7 @@ export default function HomePage() {
 
 function DemoClip({ alt, image }: { alt: string; image: string }) {
   return (
-    <div className="mx-auto aspect-[390/844] max-w-[210px] overflow-hidden rounded-[28px] border-[8px] border-ink bg-white shadow-xl">
+    <div className="mx-auto aspect-[390/844] max-w-[210px] overflow-hidden rounded-[28px] border-[8px] border-ink bg-white shadow-xl ring-1 ring-flax/40">
       <img alt={alt} className="h-full w-full object-cover" src={image} />
     </div>
   );

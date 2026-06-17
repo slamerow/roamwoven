@@ -9,15 +9,19 @@ export default async function MakerDashboardPage() {
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-6xl">
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-              Maker App
+              Maker foundry
             </p>
             <h1 className="mt-2 text-4xl font-semibold text-ink">
               Trip dashboard
             </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
+              Shape raw trip materials into a private traveler app: sturdy,
+              organized, and ready for the road.
+            </p>
           </div>
           <Link
             href="/maker/trips/new"

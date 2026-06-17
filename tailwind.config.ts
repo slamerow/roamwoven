@@ -8,11 +8,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#20211f",
-        paper: "#faf8f2",
-        moss: "#526247",
-        clay: "#a05b43",
-        tide: "#3d7280"
+        ink: "#201c16",
+        paper: "#f4efe4",
+        canvas: "#fffaf0",
+        flax: "#d8c7a8",
+        moss: "#596449",
+        clay: "#9b5f43",
+        tide: "#2f6870",
+        brass: "#a87f3f"
       }
     }
   },
@@ -20,4 +23,3 @@ const config: Config = {
 };
 
 export default config;
-
