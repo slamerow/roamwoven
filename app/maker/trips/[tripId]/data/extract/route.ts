@@ -10,6 +10,8 @@ import { getTripExtractionMaterials } from "@/lib/extraction/trip-materials";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
 
+export const runtime = "nodejs";
+
 function redirectToData(
   request: NextRequest,
   tripId: string,

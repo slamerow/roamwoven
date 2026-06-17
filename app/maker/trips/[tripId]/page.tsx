@@ -47,12 +47,18 @@ function getStages(isPaid: boolean) {
       state: isPaid ? "available" : "locked",
       icon: TableProperties
     },
-    {
-      title: "Publish app",
-      description: "Generate the traveler app and you are ready to go.",
-      state: isPaid ? "available" : "locked",
-      icon: WandSparkles
-    }
+  {
+    title: "Review summary",
+    description: "Confirm the app shape before generating the traveler app.",
+    state: isPaid ? "available" : "locked",
+    icon: WandSparkles
+  },
+  {
+    title: "Publish app",
+    description: "Share the traveler app when the summary looks right.",
+    state: isPaid ? "available" : "locked",
+    icon: Share2
+  }
   ];
 }
 
@@ -121,6 +127,7 @@ const betaLinks = [
   { label: "Review", step: "review", icon: WandSparkles },
   { label: "Check data", step: "data", icon: TableProperties },
   { label: "Style", step: "style", icon: Palette },
+  { label: "Summary", step: "summary", icon: CheckCircle2 },
   { label: "Publish", step: "publish", icon: Share2 }
 ];
 
@@ -282,7 +289,7 @@ export default async function TripWorkspacePage({
               />
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
             {stages.map((stage) => {
               const Icon = stage.icon;
               return (
@@ -386,7 +393,7 @@ export default async function TripWorkspacePage({
           <p className="mt-2 text-sm leading-6 text-ink/60">
             Jump to any step while the product is still using mocked beta state.
           </p>
-          <div className="mt-5 grid gap-3 md:grid-cols-5">
+          <div className="mt-5 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
             {betaLinks.map((link) => {
               const Icon = link.icon;
               const href =
@@ -398,7 +405,9 @@ export default async function TripWorkspacePage({
                       ? `/maker/trips/${tripId}/data`
                       : link.step === "style"
                         ? `/maker/trips/${tripId}/style`
-                        : `/maker/trips/${tripId}/publish`;
+                        : link.step === "summary"
+                          ? `/maker/trips/${tripId}/summary`
+                          : `/maker/trips/${tripId}/publish`;
 
               return (
                 <Link

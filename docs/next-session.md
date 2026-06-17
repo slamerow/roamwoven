@@ -4,7 +4,7 @@
 
 Roamwoven has a static beta flow plus the first backend-ready trip lifecycle:
 
-`/maker` -> `/maker/trips/demo-trip` -> upload -> review -> clean data -> style -> publish -> `/t/demo`
+`/maker` -> `/maker/trips/demo-trip` -> upload -> review -> style -> draft review -> summary -> publish -> `/t/demo`
 
 The app uses the Asia workbook as seed data:
 
@@ -47,23 +47,23 @@ Backend-ready pieces now exist:
   - A notes-only intake item saved successfully and persisted after refresh as a real `trip_uploads` row.
 - The review step now uses the actual trip and saved upload state. Step 4 lets the maker choose optional app sections, confirm skipped modules stay hidden, and continue to the mocked clean-data step only after confirmation.
 - Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
-- The maker flow is now intended as three screens after upload: content scope -> design -> draft review. Design choices persist to `trip_style_settings` and the draft review screen renders a styled preview using those choices without extra AI work.
+- The maker flow is now intended as four screens after upload: content scope -> design -> draft review -> trip summary. Design choices persist to `trip_style_settings`; the draft review screen keeps uncertain/private items in a focused review queue, and the trip summary is the "does this look right?" gate before publish.
 - The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data for demo trips until extraction is connected.
-- The draft review / structured data screen now has the mocked review scaffold requested for overnight:
-  - Demo trips derive review sections from `data/asia-trip-seed.json`.
-  - Real paid trips do not show fake parsed review cards anymore. They show saved materials, selected modules, and a clear "parsing not connected yet" state.
-  - The eventual parsed sections should cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
-  - Demo review items have local UI controls for edit, add, delete, mark confirmed, and flag as needs review. These controls update browser state and counters, but do not persist yet.
-  - Sensitive details are represented as card-detail protection candidates in demo review data; no privacy model was finalized.
+- The draft review / structured data screen has been simplified:
+  - Demo trips show a compact scan summary and focused review queue instead of all extracted records.
+  - Real paid trips do not show fake parsed review cards. They show a parse action, a scan summary after parsing, and only missing/sensitive details that need a decision.
+  - Confident records should not be surfaced line-by-line in V1 review unless there is a meaningful question.
+  - Sensitive details are represented as card-detail protection candidates; the privacy model still needs refinement before launch.
 - The design picker keeps dropdowns for secondary/accent/soft colors and now also lets makers click the visible swatches.
 - OpenAI extraction setup scaffolding exists and is connected to a guarded maker action:
   - `lib/ai/openai.ts` wraps the Responses API behind `OPENAI_API_KEY` and `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`.
   - `lib/extraction/openai-trip-parser.ts` defines the first trip-draft structured output schema and prompt.
   - `.env.example` includes OpenAI extraction env vars with extraction disabled by default.
   - Setup and cost guardrails are documented in `docs/openai-extraction-setup.md`.
-- The first explicit paid `Build parsed draft` action now exists for pasted notes and small `.txt` uploads:
+- The first explicit paid `Build parsed draft` action now exists for pasted notes, small `.txt` uploads, and readable text-based PDFs:
   - Route: `app/maker/trips/[tripId]/data/extract/route.ts`.
-  - It requires a paid trip, OpenAI config, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and at least one text material.
+  - It requires a paid trip, OpenAI config, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and at least one parseable material.
+  - It extracts normal PDF text locally before the OpenAI call. It does not OCR scanned/image-only PDFs yet.
   - It logs `trip_processing_runs`, stores raw JSON in `trip_draft_snapshots`, and updates `trips.processing_status`.
   - Do not enable extraction in production until the additive DB SQL for those tables has run.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
@@ -72,6 +72,7 @@ Backend-ready pieces now exist:
   - uploads saved but no content settings -> content scope
   - content settings saved but no design settings -> design
   - design settings saved -> draft review
+  - parsed draft reviewed -> trip summary before publish
 - The Step 4 content-scope progress bar should stay fixed while the maker checks confirmations. Checkboxes can unlock the "Continue to design" action, but should not mark the top step track complete before the settings save succeeds.
 
 Live Supabase dev setup is partially complete:

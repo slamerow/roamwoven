@@ -2,9 +2,9 @@
 
 ## Current Status
 
-OpenAI extraction plumbing exists, and Roamwoven has a guarded maker action for the first text-only parse.
+OpenAI extraction plumbing exists, and Roamwoven has a guarded maker action for the first notes/text/PDF parse.
 
-The maker UI now has a guarded `Build parsed draft` action for the first text-only beta parser, but it is disabled unless extraction is configured. The API code is behind:
+The maker UI now has a guarded `Build parsed draft` action for the first beta parser, but it is disabled unless extraction is configured. The API code is behind:
 
 - `OPENAI_API_KEY`
 - `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`
@@ -60,11 +60,12 @@ Also keep it `false` until the production database has the additive extraction t
   - Roamwoven trip-draft schema and prompt.
   - Accepts extracted text materials, not raw uploaded files.
 - `lib/extraction/trip-materials.ts`
-  - Collects pasted notes and small `.txt` uploads for the first beta parser.
+  - Collects pasted notes, small `.txt` uploads, and readable text-based PDFs for the first beta parser.
+  - Does not OCR scanned/image-only PDFs yet.
 - `lib/extraction/processing-runs.ts`
   - Creates processing run logs and stores raw draft snapshots.
 - `app/maker/trips/[tripId]/data/extract/route.ts`
-  - Paid, explicit text-only parse action.
+  - Paid, explicit parse action.
   - Requires `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`.
 
 ## Still Needed Before Turning It On
@@ -72,19 +73,20 @@ Also keep it `false` until the production database has the additive extraction t
 1. Run the additive production SQL for `trip_processing_runs` and `trip_draft_snapshots`.
 2. Add the OpenAI API key to Vercel.
 3. Keep the flag disabled until ready for an intentional paid test.
-4. Test with pasted notes or a `.txt` file first.
+4. Test with pasted notes, a `.txt` file, or a readable text-based PDF first.
 5. Convert the raw draft JSON into editable review cards.
-6. Extract text from uploaded PDFs, Word docs, spreadsheets, and images.
+6. Extract text from Word docs, spreadsheets, images, and scanned PDFs.
 7. Add better per-run estimated or actual OpenAI cost display.
 
 ## First Beta Target
 
-The lowest-risk first pass is notes/text-only extraction:
+The lowest-risk first pass is notes, text files, and readable PDF extraction:
 
 - Pull `trip_uploads.user_note`.
 - Include small `.txt` uploads.
+- Extract text locally from normal text-based PDFs.
 - Send capped text to OpenAI.
 - Store the raw draft JSON and usage metadata.
 - Show the draft on `/maker/trips/[tripId]/data`.
 
-PDF/image parsing and OCR can follow once the review loop is proven.
+OCR for scanned PDFs and images can follow once the review loop is proven.

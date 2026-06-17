@@ -198,8 +198,10 @@ function RealTripFirstPass({
     (upload) =>
       upload.userNote?.trim() ||
       (upload.storagePath &&
-        upload.fileType === "text/plain" &&
-        Number(upload.fileSizeBytes ?? 0) <= 250 * 1024)
+        ((upload.fileType === "text/plain" &&
+          Number(upload.fileSizeBytes ?? 0) <= 250 * 1024) ||
+          (upload.fileType === "application/pdf" &&
+            Number(upload.fileSizeBytes ?? 0) <= 10 * 1024 * 1024)))
   ).length;
   const canExtract = extractionEnabled && textMaterialCount > 0;
   const draft = latestDraft?.draftJson ?? null;
@@ -221,7 +223,7 @@ function RealTripFirstPass({
           {error === "extraction-disabled"
             ? "AI extraction is disabled. Add the OpenAI key and enable the extraction flag before parsing."
             : error === "no-text-materials"
-              ? "No pasted notes or plain text files are available for this first parser pass."
+              ? "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass."
               : error === "checkout-required"
                 ? "Checkout must be complete before parsing."
                 : "Parsing failed. Check the processing run details and try again with a smaller text input."}
@@ -304,7 +306,7 @@ function RealTripFirstPass({
             </form>
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
-                ? "This first parser pass reads pasted notes and plain text files. PDF support is next."
+                ? "This first parser pass reads pasted notes, plain text files, and readable text-based PDFs."
                 : "AI extraction is still disabled in this environment."}
             </p>
           </>
@@ -381,7 +383,7 @@ function RealTripFirstPass({
           Back to design
         </Link>
         <Link
-          href={`/maker/trips/${tripId}/publish`}
+          href={`/maker/trips/${tripId}/summary`}
           className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
         >
           Continue to trip summary
@@ -564,7 +566,7 @@ function DemoStructuredData({ uploads }: { uploads: TripUpload[] }) {
           Back to design
         </Link>
         <Link
-          href="/maker/trips/demo-trip/publish"
+          href="/maker/trips/demo-trip/summary"
           className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
         >
           Continue to trip summary

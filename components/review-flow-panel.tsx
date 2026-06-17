@@ -84,7 +84,7 @@ export function ReviewFlowPanel({
   const canContinue =
     uploads.length > 0 && checkedCount === BUILD_CONFIRMATIONS.length;
   const settingsPayload = JSON.stringify({ enabledModules, confirmations: checked });
-  const percent = Math.round((3 / 7) * 100);
+  const percent = Math.round((3 / 8) * 100);
   const steps = [
     "Create trip",
     "Pay",
@@ -92,6 +92,7 @@ export function ReviewFlowPanel({
     "Confirm data",
     "Design",
     "Check data",
+    "Summary",
     "Publish",
   ];
 
@@ -119,7 +120,7 @@ export function ReviewFlowPanel({
               style={{ width: `${percent}%` }}
             />
           </div>
-          <div className="mt-2 grid grid-cols-7 gap-2 text-[11px] font-semibold text-ink/45">
+          <div className="mt-2 grid grid-cols-4 gap-2 text-[11px] font-semibold text-ink/45 md:grid-cols-8">
             {steps.map((step, index) => {
               const complete = index < 3;
               const current = index === 3;
