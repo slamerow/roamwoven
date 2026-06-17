@@ -14,6 +14,12 @@ import {
   getStripeSetupState,
 } from "@/lib/billing/stripe";
 import { getMakerTrip, markTripPaid } from "@/lib/trips";
+import {
+  BUILD_CONFIRMATIONS,
+  getTripBuildSettings,
+} from "@/lib/build-settings";
+import { getTripStyleSettings } from "@/lib/style-settings";
+import { listTripUploads } from "@/lib/uploads";
 
 function getStages(isPaid: boolean) {
   return [
@@ -58,6 +64,56 @@ function getCompletedStepCount(stages: ReturnType<typeof getStages>) {
   }
 
   return Math.max(0, currentIndex);
+}
+
+function getNextBuildStep({
+  hasBuildSettings,
+  hasStyleSettings,
+  isPaid,
+  uploadCount,
+}: {
+  hasBuildSettings: boolean;
+  hasStyleSettings: boolean;
+  isPaid: boolean;
+  uploadCount: number;
+}) {
+  if (!isPaid) {
+    return {
+      href: "",
+      label: "Continue to payment",
+      message: "Checkout unlocks upload and the app build workflow.",
+    };
+  }
+
+  if (uploadCount === 0) {
+    return {
+      href: "upload",
+      label: "Continue building",
+      message: "Step 2 is done. Upload your trip materials to begin intake.",
+    };
+  }
+
+  if (!hasBuildSettings) {
+    return {
+      href: "review",
+      label: "Continue building",
+      message: "Your materials are saved. Confirm what belongs in the app.",
+    };
+  }
+
+  if (!hasStyleSettings) {
+    return {
+      href: "style",
+      label: "Continue building",
+      message: "Content choices are saved. Choose the app's design direction.",
+    };
+  }
+
+  return {
+    href: "data",
+    label: "Continue building",
+    message: "Design choices are saved. Review the first structured draft.",
+  };
 }
 
 const betaLinks = [
@@ -110,6 +166,25 @@ export default async function TripWorkspacePage({
   const trip = await getMakerTrip(tripId);
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
+  const [uploads, buildSettings, styleSettings] = isPaid
+    ? await Promise.all([
+        listTripUploads(tripId),
+        getTripBuildSettings(tripId),
+        getTripStyleSettings({ fallbackAppName: trip.name, tripId }),
+      ])
+    : [[], null, null];
+  const hasBuildSettings =
+    Boolean(buildSettings?.updatedAt) &&
+    BUILD_CONFIRMATIONS.every(
+      (confirmation) => buildSettings?.confirmations[confirmation.key]
+    );
+  const hasStyleSettings = Boolean(styleSettings?.updatedAt);
+  const nextBuildStep = getNextBuildStep({
+    hasBuildSettings,
+    hasStyleSettings,
+    isPaid,
+    uploadCount: uploads.length,
+  });
   const stages = getStages(isPaid);
   const completedSteps = getCompletedStepCount(stages);
   const progressPercent = Math.round((completedSteps / stages.length) * 100);
@@ -249,15 +324,15 @@ export default async function TripWorkspacePage({
                     Checkout complete
                   </h2>
                   <p className="mt-1 text-sm leading-6 text-ink/65">
-                    Step 2 is done. Upload your trip materials to begin intake.
+                    {nextBuildStep.message}
                   </p>
                 </div>
               </div>
               <Link
-                href={`/maker/trips/${tripId}/upload`}
+                href={`/maker/trips/${tripId}/${nextBuildStep.href}`}
                 className="inline-flex justify-center rounded-md bg-moss px-4 py-3 text-sm font-semibold text-white"
               >
-                Continue to upload
+                {nextBuildStep.label}
               </Link>
             </div>
           </section>

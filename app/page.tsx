@@ -29,21 +29,21 @@ const perfectFor = [
 
 const craftNotes = [
   {
-    title: "Hewn from your real plans",
+    title: "Made from your real plans",
     description:
-      "Roamwoven starts with the confirmations, notes, and documents you already have.",
+      "Start with the confirmations, notes, screenshots, and documents you already have.",
     icon: Hammer
   },
   {
-    title: "Built for the road",
+    title: "Calm when travel gets busy",
     description:
-      "The finished app is practical first: quick to scan, easy to search, calm under travel stress.",
+      "The finished app is quick to scan, easy to search, and ready when plans get complicated.",
     icon: Route
   },
   {
     title: "Private by default",
     description:
-      "Sensitive details stay maker-only unless you choose to expose them.",
+      "Personal details stay maker-only unless you decide they belong in the traveler app.",
     icon: ShieldCheck
   }
 ];
@@ -125,6 +125,12 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 rounded-md border border-ink/20 px-5 py-3 text-sm font-semibold text-ink"
             >
               View demo app
+            </Link>
+            <Link
+              href="/login?next=%2Fmaker"
+              className="inline-flex items-center gap-2 rounded-md border border-ink/20 px-5 py-3 text-sm font-semibold text-ink"
+            >
+              Log in
             </Link>
           </div>
         </div>

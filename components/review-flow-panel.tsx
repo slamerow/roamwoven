@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -84,16 +84,13 @@ export function ReviewFlowPanel({
   const canContinue =
     uploads.length > 0 && checkedCount === BUILD_CONFIRMATIONS.length;
   const settingsPayload = JSON.stringify({ enabledModules, confirmations: checked });
-  const percent = useMemo(
-    () => Math.round(((2 + checkedCount) / 5) * 100),
-    [checkedCount]
-  );
+  const percent = 60;
   const steps = [
     "Create trip",
     "Pay once",
     "Upload info",
-    "Confirm build",
-    "Create app",
+    "Content scope",
+    "Design",
   ];
 
   return (
@@ -106,7 +103,7 @@ export function ReviewFlowPanel({
                 Step 4 of 5
               </p>
               <h2 className="text-base font-semibold text-ink">
-                Confirm build
+                Content scope
               </h2>
             </div>
             <p className="hidden text-sm text-ink/60 md:block">
@@ -122,8 +119,8 @@ export function ReviewFlowPanel({
           </div>
           <div className="mt-2 grid grid-cols-5 gap-2 text-[11px] font-semibold text-ink/45">
             {steps.map((step, index) => {
-              const complete = index < 3 || (index === 3 && canContinue);
-              const current = index === 3 && !canContinue;
+              const complete = index < 3;
+              const current = index === 3;
 
               return (
                 <span
@@ -147,13 +144,12 @@ export function ReviewFlowPanel({
       <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
         {saved ? (
           <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
-            Build choices saved.
+            Content choices saved.
           </p>
         ) : null}
         {error ? (
           <p className="mb-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-            Build choices could not be saved. Check the build settings table and
-            try again.
+            Content choices could not be saved. Try again in a moment.
           </p>
         ) : null}
         <div>
@@ -161,8 +157,8 @@ export function ReviewFlowPanel({
             Confirm what belongs in the app
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            This controls the first app build. Later edits should update the app,
-            not spend another extraction pass.
+            This sets the app scope before design. The actual structured draft
+            comes after the design choices are saved.
           </p>
         </div>
       </section>
@@ -243,6 +239,10 @@ export function ReviewFlowPanel({
             <h2 className="text-xl font-semibold text-ink">
               Confirm before build
             </h2>
+            <p className="mt-2 text-sm leading-6 text-ink/60">
+              These checks help keep the app focused before Roamwoven turns
+              source materials into the first structured draft.
+            </p>
             <div className="mt-5 space-y-3">
               {BUILD_CONFIRMATIONS.map((item) => (
                 <label
@@ -316,8 +316,8 @@ export function ReviewFlowPanel({
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-lg font-semibold text-ink">Next step</h2>
             <p className="mt-2 text-sm leading-6 text-ink/60">
-              Build the initial app from the materials and choices you confirmed.
-              Manual additions and corrections after this are app updates.
+              Save these content choices, then choose the app name, primary
+              color, and visual direction.
             </p>
             {canContinue ? (
               <form action={`/maker/trips/${trip.id}/review/settings`} method="post">
@@ -326,7 +326,7 @@ export function ReviewFlowPanel({
                   className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
                   type="submit"
                 >
-                  Build app draft
+                  Continue to design
                   <ArrowRight size={16} />
                 </button>
               </form>

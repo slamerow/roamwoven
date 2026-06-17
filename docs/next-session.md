@@ -49,6 +49,13 @@ Backend-ready pieces now exist:
 - Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
 - The maker flow is now intended as three screens after upload: content scope -> design -> draft review. Design choices persist to `trip_style_settings` and the draft review screen renders a styled preview using those choices without extra AI work.
 - The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
+- Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
+- The trip workspace now resumes from the next incomplete step instead of always sending paid trips back to upload:
+  - no uploads -> upload
+  - uploads saved but no content settings -> content scope
+  - content settings saved but no design settings -> design
+  - design settings saved -> draft review
+- The Step 4 content-scope progress bar should stay fixed while the maker checks confirmations. Checkboxes can unlock the "Continue to design" action, but should not mark the top step track complete before the settings save succeeds.
 
 Live Supabase dev setup is partially complete:
 
@@ -61,8 +68,9 @@ Live Supabase dev setup is partially complete:
 - `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000` because the current local dev server is running on port 3000.
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
 - `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`.
-- `db/schema.sql` now includes `trip_build_settings`; run the updated schema/grants in Supabase before testing persisted Step 4 settings on production.
-- `db/schema.sql` now includes `trip_style_settings`; run the updated schema/grants in Supabase before testing persisted design choices on production.
+- `db/schema.sql` now includes `trip_build_settings`; the production table/grants/RLS patch was run successfully in Supabase after the deployed review save failed.
+- `db/schema.sql` now includes `trip_style_settings`; the production table/grants/RLS patch was run successfully in Supabase with the same settings-table patch.
+- If production shows `Build choices could not be saved` or `Content choices could not be saved`, first verify `trip_build_settings` exists with grants and the owner-scoped RLS policy. If design choices fail next, verify `trip_style_settings` the same way.
 - Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `split_part(storage.objects.name, '/', 1) = auth.uid()::text` and match `trips.id::text = split_part(storage.objects.name, '/', 2)` with `trips.owner_user_id = auth.uid()`.
 - On 2026-06-16, PDF upload failed with Supabase Storage RLS error `new row violates row-level security policy`. The storage policies were rerun in production using the explicit `split_part(...)` checks above and Supabase returned `Success. No rows returned`.
 - The later table grants have now run successfully in Supabase.
