@@ -83,11 +83,6 @@ function RealTripFirstPass({
   );
   const theme = getThemeDirection(style.themeDirection);
   const palette = getStylePalette(style);
-  const sections = getMockReviewSections({
-    selectedModules,
-    tripName,
-    uploads,
-  });
 
   return (
     <>
@@ -98,24 +93,23 @@ function RealTripFirstPass({
         <div className="grid gap-5 md:grid-cols-[0.56fr_0.44fr] md:items-center">
           <div>
             <p className="text-sm font-semibold" style={{ color: palette.accent }}>
-              Draft review style
+              App style saved
             </p>
             <h2 className="mt-2 text-3xl font-semibold">
               {style.appName || tripName}
             </h2>
             <p className="mt-3 max-w-xl text-sm leading-6 opacity-75">
-              Review the draft in the same visual direction the traveler app will
-              use. Changing color or theme later is a rendering update, not
-              another parsing pass.
+              Your design choices are saved. The next real product step is
+              parsing the materials into structured trip data.
             </p>
           </div>
           <div className="rounded-md p-4" style={{ backgroundColor: theme.surface, color: theme.text }}>
             <p className="text-xs font-semibold uppercase" style={{ color: palette.primary }}>
-              Draft review
+              Parsing status
             </p>
-            <p className="mt-2 text-sm font-semibold">Draft card preview</p>
+            <p className="mt-2 text-sm font-semibold">Not connected yet</p>
             <p className="mt-1 text-sm opacity-65">
-              Missing details and manual additions will appear in this style.
+              No AI extraction has run against your uploaded file.
             </p>
           </div>
         </div>
@@ -149,27 +143,22 @@ function RealTripFirstPass({
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">
-            Structured draft is mocked for review
+            Your materials are saved, but not parsed yet
           </h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
-            Roamwoven has the materials for {tripName}. This scaffold shows the
-            review workflow using saved uploads and selected modules while
-            extraction stays off.
+            Roamwoven has the uploaded files and notes for {tripName}, but this
+            beta screen is not extracting structured data from them yet. The
+            review cards below should only appear after real parsing is wired up.
           </p>
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
-            {[
-              "Trip overview",
-              "Dates and places",
-              "Flights and transport",
-              "Stays and activities",
-            ].map((item) => (
-              <div key={item} className="rounded-md bg-paper p-4">
-                <p className="text-sm font-semibold text-ink">{item}</p>
-                <p className="mt-1 text-xs font-semibold text-clay">
-                  Mocked from current state
-                </p>
-              </div>
-            ))}
+          <div className="mt-5 rounded-md bg-clay/10 p-4">
+            <p className="text-sm font-semibold text-clay">
+              Expected for this build
+            </p>
+            <p className="mt-2 text-sm leading-6 text-ink/65">
+              You can verify upload, content scope, design choices, and saved
+              source materials. You should not expect your test document to be
+              parsed into flights, stays, dates, or activities yet.
+            </p>
           </div>
         </div>
 
@@ -200,7 +189,36 @@ function RealTripFirstPass({
         </div>
       </section>
 
-      <StructuredReviewPanel initialSections={sections} />
+      <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+        <h2 className="text-xl font-semibold text-ink">
+          Structured data review will appear here after parsing
+        </h2>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/60">
+          The real version of this screen should show parsed trip overview,
+          dates and places, flights, stays, daily cards, missing details,
+          sensitive details, and manual additions from your uploaded materials.
+          For now, this screen is intentionally stopping before fake data.
+        </p>
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {[
+            "Trip overview",
+            "Dates and places",
+            "Flights and transport",
+            "Stays",
+            "Daily activities/cards",
+            "Missing or ambiguous details",
+            "Sensitive card details",
+            "Manual additions",
+          ].map((item) => (
+            <div key={item} className="rounded-md bg-paper p-4">
+              <p className="text-sm font-semibold text-ink">{item}</p>
+              <p className="mt-1 text-xs font-semibold text-clay">
+                Waiting for real parsing
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <SourceMaterials uploads={uploads} />
 
@@ -215,179 +233,6 @@ function RealTripFirstPass({
       </section>
     </>
   );
-}
-
-function getMockReviewSections({
-  selectedModules,
-  tripName,
-  uploads,
-}: {
-  selectedModules: Array<(typeof APP_MODULES)[number]>;
-  tripName: string;
-  uploads: TripUpload[];
-}): ReviewSection[] {
-  const latestUpload = uploads[0];
-  const sourceLabel =
-    latestUpload?.originalFilename ?? `${uploads.length} saved material inputs`;
-
-  return [
-    {
-      id: "overview",
-      title: "Trip overview",
-      eyebrow: "Scope",
-      summary: "The top-level app identity and source bundle for this build.",
-      tone: "good",
-      items: [
-        {
-          id: "overview-name",
-          title: tripName,
-          meta: "App name",
-          detail: `${uploads.length} saved material${
-            uploads.length === 1 ? "" : "s"
-          } will feed the first structured draft.`,
-          status: "confirmed",
-        },
-        {
-          id: "overview-source",
-          title: "Primary source bundle",
-          meta: sourceLabel,
-          detail:
-            "Extraction is still mocked, but this review screen is shaped around the real paid-trip upload state.",
-          status: "draft",
-        },
-      ],
-    },
-    {
-      id: "places",
-      title: "Dates and places",
-      eyebrow: "Trip spine",
-      summary: "The city sequence and date range Roamwoven thinks it should build around.",
-      tone: "warning",
-      items: [
-        {
-          id: "places-dates",
-          title: "Trip dates need extraction",
-          meta: "Missing exact dates",
-          detail:
-            "Use this review section to confirm dates before the traveler app anchors Today, maps, weather, and daily cards.",
-          status: "needs_review",
-        },
-        {
-          id: "places-destinations",
-          title: "Destinations from materials",
-          meta: "Pending parser",
-          detail:
-            "Future extraction should produce ordered legs here instead of forcing the maker to type a full itinerary.",
-          status: "draft",
-        },
-      ],
-    },
-    {
-      id: "transport",
-      title: "Flights and transport",
-      eyebrow: "Logistics",
-      summary: "Travel records stay optional and only appear when relevant.",
-      tone: "manual",
-      items: [
-        {
-          id: "transport-flight",
-          title: selectedModules.some((module) => module.key === "travel")
-            ? "Transport module selected"
-            : "Transport module skipped",
-          meta: "Module choice",
-          detail:
-            "The final app should hide this section when no flights, trains, cars, or transfers are found.",
-          status: selectedModules.some((module) => module.key === "travel")
-            ? "draft"
-            : "confirmed",
-        },
-      ],
-    },
-    {
-      id: "stays",
-      title: "Stays",
-      eyebrow: "Lodging",
-      summary: "Hotels, rentals, and host notes will be reviewed separately from daily activities.",
-      tone: "sensitive",
-      items: [
-        {
-          id: "stays-sensitive",
-          title: "Exact stay details may need protection",
-          meta: "Privacy review",
-          detail:
-            "Private addresses, door codes, host phone numbers, and reservation numbers can sit behind a password while the public card remains useful.",
-          status: "protected",
-        },
-      ],
-    },
-    {
-      id: "activities",
-      title: "Daily activities/cards",
-      eyebrow: "Traveler app cards",
-      summary: "This is where dated plans, food, tours, reminders, and notes become cards.",
-      tone: "good",
-      items: [
-        {
-          id: "activities-anchor",
-          title: "Anchor activities",
-          meta: "Draft card shape",
-          detail:
-            "Broad arcs such as a full-day drive can stay as anchor cards, with important stops split out only when they need their own map, time, permit, or note.",
-          status: "draft",
-        },
-        {
-          id: "activities-count",
-          title: "Avoid filler cards",
-          meta: "Quality check",
-          detail:
-            "The review should preserve the traveler's mental model instead of maximizing card count.",
-          status: "confirmed",
-        },
-      ],
-    },
-    {
-      id: "missing",
-      title: "Missing or ambiguous details",
-      eyebrow: "Questions",
-      summary: "Only ask the maker for details that change the generated app.",
-      tone: "warning",
-      items: [
-        {
-          id: "missing-times",
-          title: "Confirm exact times where they matter",
-          meta: "Question prompt",
-          detail:
-            "Use prompts for flights, reservations, check-in windows, tours, and other time-sensitive logistics.",
-          status: "needs_review",
-        },
-        {
-          id: "missing-places",
-          title: "Resolve unnamed places",
-          meta: "Question prompt",
-          detail:
-            "Ask for enough context to choose the right place without making users edit raw data tables.",
-          status: "needs_review",
-        },
-      ],
-    },
-    {
-      id: "manual",
-      title: "Manual additions",
-      eyebrow: "Maker edits",
-      summary: "Makers can add details that were never present in the uploaded materials.",
-      tone: "manual",
-      items: [
-        {
-          id: "manual-add",
-          title: "Add a missing flight, stay, activity, restaurant, note, or placeholder",
-          meta: "Manual add",
-          detail:
-            "Manual additions should update structured data cheaply without requiring another paid extraction run.",
-          status: "draft",
-        },
-      ],
-    },
-  ];
 }
 
 function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {

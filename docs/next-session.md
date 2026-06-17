@@ -48,13 +48,13 @@ Backend-ready pieces now exist:
 - The review step now uses the actual trip and saved upload state. Step 4 lets the maker choose optional app sections, confirm skipped modules stay hidden, and continue to the mocked clean-data step only after confirmation.
 - Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
 - The maker flow is now intended as three screens after upload: content scope -> design -> draft review. Design choices persist to `trip_style_settings` and the draft review screen renders a styled preview using those choices without extra AI work.
-- The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
+- The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data for demo trips until extraction is connected.
 - The draft review / structured data screen now has the mocked review scaffold requested for overnight:
   - Demo trips derive review sections from `data/asia-trip-seed.json`.
-  - Real paid trips use saved uploads, selected modules, and mocked review records.
-  - Sections cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
-  - Each review item has local UI controls for edit, add, delete, mark confirmed, and flag as needs review. These controls update browser state and counters, but do not persist yet.
-  - Sensitive details are represented as card-detail protection candidates; no privacy model was finalized.
+  - Real paid trips do not show fake parsed review cards anymore. They show saved materials, selected modules, and a clear "parsing not connected yet" state.
+  - The eventual parsed sections should cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
+  - Demo review items have local UI controls for edit, add, delete, mark confirmed, and flag as needs review. These controls update browser state and counters, but do not persist yet.
+  - Sensitive details are represented as card-detail protection candidates in demo review data; no privacy model was finalized.
 - The design picker keeps dropdowns for secondary/accent/soft colors and now also lets makers click the visible swatches.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
 - The trip workspace now resumes from the next incomplete step instead of always sending paid trips back to upload:

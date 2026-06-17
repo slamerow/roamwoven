@@ -41,9 +41,9 @@ Status: built in this session. Extraction remains mocked, no database schema cha
 
 - `/maker/trips/[tripId]/data` now renders a draft-review scaffold.
 - Demo trips derive review sections from the Asia seed file.
-- Real paid trips use saved upload counts, selected app modules, selected style settings, and mocked review records.
-- Review sections cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
-- Each review item shows edit, add, delete, confirm, and flag controls with accessible labels, hover states, and local browser-state updates.
+- Real paid trips use saved upload counts, selected app modules, and selected style settings, but do not show fake parsed review records.
+- Real paid trips now clearly say parsing is not connected yet. The eventual review sections should cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
+- Demo review items show edit, add, delete, confirm, and flag controls with accessible labels, hover states, and local browser-state updates.
 - The workspace shortcut label now says `Check data`.
 - Secondary/accent/soft color swatches in the style picker are clickable while dropdowns remain available.
 
