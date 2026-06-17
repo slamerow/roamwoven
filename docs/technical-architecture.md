@@ -366,6 +366,23 @@ Suggested item types:
 - note.
 - placeholder.
 
+Activity grouping:
+
+- `trip_items` should eventually support anchor activities and child stops.
+- Add `parent_item_id` or a related-item join when the first extraction prototype needs it.
+- Add `display_mode` values such as `standalone`, `anchor`, `child_stop`, and `note_inside_activity`.
+- Add an explicit review status for ambiguous splits, rather than silently choosing between separate cards and nested stops.
+- The extractor should preserve the traveler's mental model. A day arc like "Road to Hana" can be the anchor activity, while a reservation-backed or map-critical stop like "Wai'anapanapa State Park" can become a child stop or its own card.
+- A scheduled time, reservation, permit, ticket, confirmation number, or check-in requirement should default to its own card, with rare intentional exceptions.
+- Loose advice belongs inside the anchor activity unless it has its own date/time/location/actionable detail.
+
+Historical/sample trips:
+
+- Trip dates may be in the past during dogfooding and closed beta.
+- The maker flow should accept historical itineraries without requiring the user to rewrite source docs.
+- The traveler app should anchor "Today" to the first trip day when real calendar dates do not line up with the current date.
+- Live-only modules such as forecast weather should hide, mock, or clearly degrade for historical trips.
+
 ### clarification_questions
 
 Questions generated for the user during review.

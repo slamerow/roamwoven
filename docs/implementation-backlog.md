@@ -301,6 +301,20 @@ Acceptance criteria:
 - High-risk fields include confidence/source refs.
 - Conflicts are represented explicitly.
 - Output can be written into draft trip tables.
+- Activity grouping preserves the traveler's mental model: broad day arcs can become anchor activities, while fixed bookings and map-critical stops can become standalone cards or child stops.
+- Scheduled times, reservations, permits, tickets, confirmation numbers, and check-in requirements default to standalone cards.
+- Ambiguous activity splits produce review questions instead of silently over-splitting or over-collapsing.
+
+### M3.5 Historical Trip Handling
+
+Support old itineraries as first-class beta fixtures.
+
+Acceptance criteria:
+
+- Maker flow accepts past-dated trips.
+- Traveler preview can anchor "Today" to the first trip day when the real calendar date is outside the trip range.
+- Live-only modules, especially forecast weather, do not show broken historical states.
+- Public/customer copy can still frame Roamwoven around upcoming trips later without blocking dogfooding.
 
 ## Milestone 4: Clarification Flow
 
@@ -315,6 +329,7 @@ Question sections:
 - Stays.
 - Bookings.
 - Activities.
+- Activity grouping.
 - Placeholders.
 - Style.
 
@@ -335,6 +350,7 @@ Acceptance criteria:
 - User sees remaining question count.
 - User can answer, skip, or use placeholder where allowed.
 - Skipping never creates an empty broken card; it creates a calm placeholder or marks the item intentionally hidden.
+- User can resolve grouping questions such as "own card," "keep inside the day activity," or "hide from traveler app."
 
 ### M4.3 Question Types
 

@@ -78,7 +78,7 @@ export default async function UploadPage({
           </h1>
           <p className="mt-3 text-sm leading-6 text-ink/65">
             {canUpload
-              ? "Upload confirmations, screenshots, documents, spreadsheets, and notes."
+              ? "Upload flight and hotel confirmations, screenshots, documents, spreadsheets, and notes."
               : "Upload unlocks after secure checkout so expensive processing stays gated."}
           </p>
         </header>

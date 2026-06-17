@@ -275,6 +275,22 @@ Roamwoven must extract trip facts from messy materials and map them into structu
 - Keep user-facing language natural.
 - Track confidence and source provenance internally.
 - Prefer asking the user over making risky guesses.
+- Preserve the traveler's mental model instead of maximizing card count.
+- Support historical/sample itineraries for dogfooding and closed beta. If the trip dates are in the past or do not line up with today, the traveler app can anchor "Today" to the first trip day rather than showing an empty live dashboard.
+
+### Activity Splitting Principles
+
+Some travel plans are naturally single reservations, like a flight or dinner booking. Others are day arcs, excursions, or loose plans that contain multiple stops. Roamwoven should treat these differently.
+
+- Use an anchor activity when the source material treats a plan as one big thing the traveler thinks they are doing.
+- Use child stops or related cards when a named place inside an anchor activity has its own reservation, permit, time window, address/map importance, ticket/check-in detail, or enough standalone detail to be searched later.
+- A scheduled time, reservation, permit, ticket, confirmation number, or check-in requirement is a strong default signal that the item deserves its own card. Exceptions should be rare and intentional.
+- Keep loose advice inside the anchor activity when it is guidance rather than a destination, such as packing notes, "start early," "download maps," or "bring snacks."
+- Ask the maker when a stop could reasonably be either standalone or nested.
+- Never split an activity only because multiple place names appear in a paragraph.
+- Never collapse a fixed booking into a broad day arc if it has its own time, confirmation, or admission requirement.
+
+Example: "Road to Hana" should usually be the anchor activity for the day. "Wai'anapanapa State Park" may become a child stop or separate card if it has a reservation/permit, time window, or map-critical details. The review UI should be able to ask: "Should Wai'anapanapa appear as its own stop, or stay inside Road to Hana?"
 
 ### Confidence Handling
 
@@ -377,6 +393,9 @@ Potential refinements:
 - Add confidence score.
 - Add review_required flag.
 - Add sort_order for same-day ordering.
+- Add parent_item_id or related_item_id for anchor activities and child stops.
+- Add display_mode for `standalone`, `anchor`, `child_stop`, or `note_inside_activity`.
+- Add split_review_status for ambiguous activity grouping decisions.
 
 ### Categories
 
