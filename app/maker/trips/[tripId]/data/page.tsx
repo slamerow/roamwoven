@@ -3,6 +3,12 @@ import { ArrowRight, CalendarDays, MapPin, Plane, TableProperties } from "lucide
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import { APP_MODULES, type TripBuildSettings } from "@/lib/build-settings-config";
 import { getTripBuildSettings } from "@/lib/build-settings";
+import {
+  derivePalette,
+  getThemeDirection,
+  type TripStyleSettings,
+} from "@/lib/style-settings-config";
+import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
@@ -47,20 +53,54 @@ function RealTripFirstPass({
   tripName,
   uploads,
   settings,
+  style,
 }: {
   tripId: string;
   tripName: string;
   uploads: TripUpload[];
   settings: TripBuildSettings;
+  style: TripStyleSettings;
 }) {
   const noteCount = uploads.filter((upload) => upload.storagePath === null).length;
   const fileCount = uploads.length - noteCount;
   const selectedModules = APP_MODULES.filter(
     (module) => settings.enabledModules[module.key]
   );
+  const theme = getThemeDirection(style.themeDirection);
+  const palette = derivePalette(style.primaryColor);
 
   return (
     <>
+      <section
+        className="mt-8 rounded-md border border-ink/10 p-5"
+        style={{ backgroundColor: theme.text, color: theme.surface }}
+      >
+        <div className="grid gap-5 md:grid-cols-[0.56fr_0.44fr] md:items-center">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: palette.accent }}>
+              Draft review style
+            </p>
+            <h2 className="mt-2 text-3xl font-semibold">
+              {style.appName || tripName}
+            </h2>
+            <p className="mt-3 max-w-xl text-sm leading-6 opacity-75">
+              Review the draft in the same visual direction the traveler app will
+              use. Changing color or theme later is a rendering update, not
+              another parsing pass.
+            </p>
+          </div>
+          <div className="rounded-md p-4" style={{ backgroundColor: theme.surface, color: theme.text }}>
+            <p className="text-xs font-semibold uppercase" style={{ color: palette.primary }}>
+              Today
+            </p>
+            <p className="mt-2 text-sm font-semibold">Draft card preview</p>
+            <p className="mt-1 text-sm opacity-65">
+              Missing details and manual additions will appear in this style.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section className="mt-8 grid gap-4 md:grid-cols-4">
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <TableProperties className="text-moss" size={22} />
@@ -335,6 +375,10 @@ export default async function StructuredDataPage({
   const canShowUploads = makerTrip.isDemo || makerTrip.paymentStatus === "paid";
   const uploads = canShowUploads ? await listTripUploads(tripId) : [];
   const settings = await getTripBuildSettings(tripId);
+  const style = await getTripStyleSettings({
+    fallbackAppName: makerTrip.name,
+    tripId,
+  });
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -370,6 +414,7 @@ export default async function StructuredDataPage({
             tripName={makerTrip.name}
             uploads={uploads}
             settings={settings}
+            style={style}
           />
         ) : (
           <DemoStructuredData tripId={tripId} uploads={uploads} />

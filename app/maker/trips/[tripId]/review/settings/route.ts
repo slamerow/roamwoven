@@ -34,10 +34,10 @@ export async function POST(
   const { tripId } = await params;
   const trip = await getMakerTrip(tripId);
   const reviewUrl = new URL(`/maker/trips/${tripId}/review`, request.url);
-  const dataUrl = new URL(`/maker/trips/${tripId}/data`, request.url);
+  const styleUrl = new URL(`/maker/trips/${tripId}/style`, request.url);
 
   if (trip.isDemo) {
-    return NextResponse.redirect(dataUrl, 303);
+    return NextResponse.redirect(styleUrl, 303);
   }
 
   if (trip.paymentStatus !== "paid") {
@@ -69,8 +69,8 @@ export async function POST(
       confirmations,
     });
 
-    dataUrl.searchParams.set("settings", "saved");
-    return NextResponse.redirect(dataUrl, 303);
+    styleUrl.searchParams.set("scope", "saved");
+    return NextResponse.redirect(styleUrl, 303);
   } catch {
     reviewUrl.searchParams.set("error", "settings-save-failed");
     return NextResponse.redirect(reviewUrl, 303);

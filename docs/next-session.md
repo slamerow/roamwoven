@@ -47,6 +47,7 @@ Backend-ready pieces now exist:
   - A notes-only intake item saved successfully and persisted after refresh as a real `trip_uploads` row.
 - The review step now uses the actual trip and saved upload state. Step 4 lets the maker choose optional app sections, confirm skipped modules stay hidden, and continue to the mocked clean-data step only after confirmation.
 - Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
+- The maker flow is now intended as three screens after upload: content scope -> design -> draft review. Design choices persist to `trip_style_settings` and the draft review screen renders a styled preview using those choices without extra AI work.
 - The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
 
 Live Supabase dev setup is partially complete:
@@ -61,6 +62,7 @@ Live Supabase dev setup is partially complete:
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
 - `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`.
 - `db/schema.sql` now includes `trip_build_settings`; run the updated schema/grants in Supabase before testing persisted Step 4 settings on production.
+- `db/schema.sql` now includes `trip_style_settings`; run the updated schema/grants in Supabase before testing persisted design choices on production.
 - Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `split_part(storage.objects.name, '/', 1) = auth.uid()::text` and match `trips.id::text = split_part(storage.objects.name, '/', 2)` with `trips.owner_user_id = auth.uid()`.
 - On 2026-06-16, PDF upload failed with Supabase Storage RLS error `new row violates row-level security policy`. The storage policies were rerun in production using the explicit `split_part(...)` checks above and Supabase returned `Success. No rows returned`.
 - The later table grants have now run successfully in Supabase.
