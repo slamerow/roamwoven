@@ -98,7 +98,7 @@ alter table trip_uploads enable row level security;
 alter table trip_legs enable row level security;
 alter table trip_items enable row level security;
 
-grant usage on schema public to anon, authenticated;
+grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on trips to anon;
 grant select, insert, update, delete on trip_uploads to anon;
 grant select, insert, update, delete on trip_legs to anon;
@@ -107,6 +107,10 @@ grant select, insert, update, delete on trips to authenticated;
 grant select, insert, update, delete on trip_uploads to authenticated;
 grant select, insert, update, delete on trip_legs to authenticated;
 grant select, insert, update, delete on trip_items to authenticated;
+grant select, insert, update, delete on trips to service_role;
+grant select, insert, update, delete on trip_uploads to service_role;
+grant select, insert, update, delete on trip_legs to service_role;
+grant select, insert, update, delete on trip_items to service_role;
 
 create index if not exists trips_owner_user_id_idx
   on trips(owner_user_id);

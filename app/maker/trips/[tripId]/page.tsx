@@ -50,6 +50,16 @@ function getStages(isPaid: boolean) {
   ];
 }
 
+function getCompletedStepCount(stages: ReturnType<typeof getStages>) {
+  const currentIndex = stages.findIndex((stage) => stage.state === "current");
+
+  if (currentIndex === -1) {
+    return stages.length;
+  }
+
+  return Math.max(0, currentIndex);
+}
+
 const betaLinks = [
   { label: "Upload", step: "upload", icon: FileUp },
   { label: "Review", step: "review", icon: WandSparkles },
@@ -101,7 +111,7 @@ export default async function TripWorkspacePage({
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
   const stages = getStages(isPaid);
-  const completedSteps = stages.filter((stage) => stage.state === "complete").length;
+  const completedSteps = getCompletedStepCount(stages);
   const progressPercent = Math.round((completedSteps / stages.length) * 100);
 
   return (
@@ -229,36 +239,45 @@ export default async function TripWorkspacePage({
           </div>
         </section>
 
-        <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
-          <h2 className="text-xl font-semibold text-ink">
-            {trip.isDemo
-              ? "Demo flow enabled"
-              : isPaid
-                ? "Payment complete"
-                : "Checkout required"}
-          </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            {trip.isDemo
-              ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
-                : isPaid
-                  ? "This trip is paid, so upload and processing can begin."
-                  : "Checkout unlocks the real build. Stripe can support cards and wallet-style express checkout once those payment methods are enabled."}
-          </p>
-          {checkout === "setup-required" ? (
-            <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-              Stripe Checkout is not configured yet. Add Stripe test keys and a
-              trip price ID to enable this button.
-            </p>
-          ) : null}
-          <div className="mt-5 flex flex-wrap gap-3">
-            {isPaid ? (
+        {isPaid ? (
+          <section className="mt-8 rounded-md border border-moss/20 bg-moss/10 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 shrink-0 text-moss" size={22} />
+                <div>
+                  <h2 className="text-base font-semibold text-moss">
+                    Checkout complete
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-ink/65">
+                    Step 2 is done. Upload your trip materials to begin intake.
+                  </p>
+                </div>
+              </div>
               <Link
                 href={`/maker/trips/${tripId}/upload`}
-                className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+                className="inline-flex justify-center rounded-md bg-moss px-4 py-3 text-sm font-semibold text-white"
               >
                 Continue to upload
               </Link>
-            ) : (
+            </div>
+          </section>
+        ) : (
+          <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+            <h2 className="text-xl font-semibold text-ink">
+              {trip.isDemo ? "Demo flow enabled" : "Checkout required"}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
+              {trip.isDemo
+                ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
+                : "Checkout unlocks the real build. Stripe can support cards and wallet-style express checkout once those payment methods are enabled."}
+            </p>
+            {checkout === "setup-required" ? (
+              <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+                Stripe Checkout is not configured yet. Add Stripe test keys and
+                a trip price ID to enable this button.
+              </p>
+            ) : null}
+            <div className="mt-5 flex flex-wrap gap-3">
               <form action={`/maker/trips/${tripId}/checkout`} method="post">
                 <button
                   className="rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
@@ -267,19 +286,25 @@ export default async function TripWorkspacePage({
                   Continue to payment
                 </button>
               </form>
-            )}
-          </div>
-          {!trip.isDemo && !isPaid ? (
-            <div className="mt-5 grid gap-2 text-xs text-ink/50 md:grid-cols-3">
-              <p>Stripe key: {stripeSetup.hasSecretKey ? "set" : "missing"}</p>
-              <p>Price ID: {stripeSetup.hasTripPriceId ? "set" : "missing"}</p>
-              <p>
-                Webhook secret:{" "}
-                {stripeSetup.hasWebhookSecret ? "set" : "needed before launch"}
-              </p>
             </div>
-          ) : null}
-        </section>
+            {!trip.isDemo ? (
+              <div className="mt-5 grid gap-2 text-xs text-ink/50 md:grid-cols-3">
+                <p>
+                  Stripe key: {stripeSetup.hasSecretKey ? "set" : "missing"}
+                </p>
+                <p>
+                  Price ID: {stripeSetup.hasTripPriceId ? "set" : "missing"}
+                </p>
+                <p>
+                  Webhook secret:{" "}
+                  {stripeSetup.hasWebhookSecret
+                    ? "set"
+                    : "needed before launch"}
+                </p>
+              </div>
+            ) : null}
+          </section>
+        )}
 
         <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">Beta flow shortcuts</h2>

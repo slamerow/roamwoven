@@ -36,6 +36,8 @@ Backend-ready pieces now exist:
 - The Stripe webhook route can mark trips paid after `checkout.session.completed` through a narrow service-role backend path.
 - Checkout sessions now include signed-in user metadata, prefill customer email when available, and return with `session_id` so the workspace can verify a completed payment immediately if the webhook is still catching up.
 - Stripe setup checklist lives in `docs/stripe-setup.md`.
+- Stripe test checkout has been verified end to end. A test payment redirected back to Roamwoven, and after adding `service_role` grants in Supabase the trip moved to paid, showed `Step 2 of 5 complete`, and unlocked upload.
+- The paid checkout workspace state is now designed as a collapsed green `Checkout complete` bar with `Continue to upload`.
 
 Live Supabase dev setup is partially complete:
 
@@ -88,9 +90,16 @@ grant select, insert, update, delete on trips to anon, authenticated;
 grant select, insert, update, delete on trip_uploads to anon, authenticated;
 grant select, insert, update, delete on trip_legs to anon, authenticated;
 grant select, insert, update, delete on trip_items to anon, authenticated;
+
+grant usage on schema public to service_role;
+
+grant select, insert, update, delete on trips to service_role;
+grant select, insert, update, delete on trip_uploads to service_role;
+grant select, insert, update, delete on trip_legs to service_role;
+grant select, insert, update, delete on trip_items to service_role;
 ```
 
-The grants have now been run successfully. If the schema is recreated, rerun this block in a clean SQL editor.
+The grants have now been run successfully. If the schema is recreated, rerun this block in a clean SQL editor. The `service_role` grants are required for Stripe webhooks and Checkout-return verification to mark trips paid.
 
 ## Important Product Decisions
 
@@ -124,8 +133,7 @@ Finish upload persistence verification, then move into payment/review plumbing:
 7. Rerun `db/schema.sql` in Supabase so the `trip-materials` bucket and storage policies exist.
 8. Create Stripe account/product/price when the business setup is ready.
 9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, and `SUPABASE_SERVICE_ROLE_KEY`.
-10. Verify test checkout redirects back and marks a trip paid.
-11. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
+10. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
 
 Keep upload/extraction mocked until trip persistence is working.
 
