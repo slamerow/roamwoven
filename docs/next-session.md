@@ -31,6 +31,7 @@ Backend-ready pieces now exist:
 - `lib/uploads.ts` stores paid-trip materials in Supabase Storage and creates owner-scoped `trip_uploads` rows.
 - The upload page now posts real multipart uploads, shows saved materials after refresh, and keeps upload processing gated behind payment.
 - Saved materials can be deleted before generation/processing starts, so bad test inputs can be removed and replaced. Material edits should lock once parsing/generation begins; future revisions should use a revision flow instead of mutating source inputs in place.
+- Source-material abuse caps are enforced in the app: 25 MB per file, 20 files per upload request, 100 saved materials per trip, 500 MB total source-material bytes per trip, and 250 KB pasted notes per upload.
 - Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
@@ -60,7 +61,8 @@ Live Supabase dev setup is partially complete:
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
 - `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`.
 - `db/schema.sql` now includes `trip_build_settings`; run the updated schema/grants in Supabase before testing persisted Step 4 settings on production.
-- Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `(storage.foldername(name))[1] = auth.uid()::text` and match `trips.id::text = (storage.foldername(name))[2]` with `trips.owner_user_id = auth.uid()`.
+- Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `split_part(storage.objects.name, '/', 1) = auth.uid()::text` and match `trips.id::text = split_part(storage.objects.name, '/', 2)` with `trips.owner_user_id = auth.uid()`.
+- On 2026-06-16, PDF upload failed with Supabase Storage RLS error `new row violates row-level security policy`. The storage policies were rerun in production using the explicit `split_part(...)` checks above and Supabase returned `Success. No rows returned`.
 - The later table grants have now run successfully in Supabase.
 - Vercel project is created from `slamerow/roamwoven` on `main`.
 - Production deployment URL: `https://roamwoven.vercel.app`.

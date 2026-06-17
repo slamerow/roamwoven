@@ -5,6 +5,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 const TRIP_MATERIALS_BUCKET = "trip-materials";
 const MAX_FILES_PER_UPLOAD = 20;
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOADS_PER_TRIP = 100;
+const MAX_TRIP_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_NOTE_BYTES = 250 * 1024;
 const NOTE_FILENAME = "Pasted notes";
 
 const allowedExtensions = new Set([
@@ -156,6 +159,50 @@ function validateFiles(files: File[]) {
   });
 }
 
+function getByteCount(value: string) {
+  return new Blob([value]).size;
+}
+
+async function validateTripUploadCapacity({
+  tripId,
+  incomingCount,
+  incomingBytes,
+}: {
+  tripId: string;
+  incomingCount: number;
+  incomingBytes: number;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("trip_uploads")
+    .select("file_size_bytes")
+    .eq("trip_id", tripId);
+
+  if (error) {
+    throw new Error(`Unable to check upload limits: ${error.message}`);
+  }
+
+  const existingUploads = data ?? [];
+  const existingBytes = existingUploads.reduce(
+    (sum, upload) => sum + Number(upload.file_size_bytes ?? 0),
+    0
+  );
+
+  if (existingUploads.length + incomingCount > MAX_UPLOADS_PER_TRIP) {
+    throw new UploadValidationError(
+      "trip-file-limit",
+      `This trip can include up to ${MAX_UPLOADS_PER_TRIP} saved materials.`
+    );
+  }
+
+  if (existingBytes + incomingBytes > MAX_TRIP_UPLOAD_BYTES) {
+    throw new UploadValidationError(
+      "trip-storage-limit",
+      "This trip has reached the beta upload storage limit."
+    );
+  }
+}
+
 export async function listTripUploads(tripId: string): Promise<TripUpload[]> {
   if (!hasSupabaseServerConfig() || tripId === "demo-trip") {
     return [];
@@ -206,6 +253,7 @@ export async function uploadTripMaterials({
   }
 
   const trimmedNotes = notes.trim();
+  const noteBytes = trimmedNotes ? getByteCount(trimmedNotes) : 0;
 
   if (files.length === 0 && !trimmedNotes) {
     throw new UploadValidationError(
@@ -215,6 +263,19 @@ export async function uploadTripMaterials({
   }
 
   validateFiles(files);
+  if (noteBytes > MAX_NOTE_BYTES) {
+    throw new UploadValidationError(
+      "notes-too-large",
+      "Pasted notes are too large for one upload."
+    );
+  }
+
+  await validateTripUploadCapacity({
+    tripId,
+    incomingCount: files.length + (trimmedNotes ? 1 : 0),
+    incomingBytes:
+      files.reduce((sum, file) => sum + file.size, 0) + noteBytes,
+  });
 
   const supabase = await createSupabaseServerClient();
   const createdUploads: TripUpload[] = [];
@@ -289,7 +350,7 @@ export async function uploadTripMaterials({
         trip_id: tripId,
         original_filename: NOTE_FILENAME,
         file_type: "text/plain",
-        file_size_bytes: new Blob([trimmedNotes]).size,
+        file_size_bytes: noteBytes,
         storage_path: null,
         user_note: trimmedNotes,
         processing_status: "uploaded",

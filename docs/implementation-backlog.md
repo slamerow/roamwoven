@@ -195,6 +195,7 @@ Acceptance criteria:
 - `trip_uploads` records are created.
 - Uploads are scoped to trip owner.
 - Basic file size/type limits exist.
+- Trip-level upload caps exist: 25 MB per file, 20 files per request, 100 saved materials per trip, 500 MB per trip, and 250 KB pasted notes per upload.
 - Materials lock once parsing/generation starts; later changes should use a revision flow.
 
 ### M2.3 Text Extraction Prototype

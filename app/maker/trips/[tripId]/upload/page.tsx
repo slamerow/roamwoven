@@ -24,7 +24,12 @@ const errorMessages: Record<string, string> = {
   "demo-upload": "The demo trip keeps uploads mocked for now.",
   "empty-upload": "Add at least one file or note before saving.",
   "file-too-large": "One file is over the 25 MB beta limit.",
+  "notes-too-large": "Pasted notes are too large for one upload.",
   "too-many-files": "Upload 20 files or fewer at a time.",
+  "trip-file-limit":
+    "This trip has reached the beta limit of 100 saved materials.",
+  "trip-storage-limit":
+    "This trip has reached the beta upload storage limit.",
   "unsupported-file": "One file is not a supported beta file type.",
   "delete-failed": "That material could not be deleted. Try again.",
   "materials-locked":

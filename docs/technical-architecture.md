@@ -722,6 +722,16 @@ Recommended controls:
 
 Most maker-app edits should not rerun full extraction. They should update structured data directly and regenerate the traveler snapshot cheaply.
 
+Current V1 source-material guardrails:
+
+- 25 MB max per uploaded file.
+- 20 files max per upload request.
+- 100 saved source materials max per trip.
+- 500 MB total source-material bytes max per trip.
+- 250 KB max pasted notes per upload.
+
+These are intentionally generous for normal itinerary documents but create a clear abuse boundary before AI/OCR and storage costs compound.
+
 For a $25 per-trip launch price, the system should measure whether AI, OCR, storage, payment fees, and manual support stay comfortably below the target cost envelope. The app should be able to flag trips that threaten the margin before they become a support or compute problem.
 
 The working target is under $5 in platform, AI, storage, and routine admin cost per trip. This target excludes taxes, refunds, chargebacks, unusually high support, and founder time during beta.

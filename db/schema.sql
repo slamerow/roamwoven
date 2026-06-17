@@ -268,7 +268,7 @@ create policy "Trip owners can read material files"
     bucket_id = 'trip-materials'
     and exists (
       select 1 from trips
-      where trips.id::text = (storage.foldername(name))[2]
+      where trips.id::text = split_part(storage.objects.name, '/', 2)
         and trips.owner_user_id = auth.uid()
     )
   );
@@ -278,10 +278,10 @@ create policy "Trip owners can upload material files"
   for insert
   with check (
     bucket_id = 'trip-materials'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and split_part(storage.objects.name, '/', 1) = auth.uid()::text
     and exists (
       select 1 from trips
-      where trips.id::text = (storage.foldername(name))[2]
+      where trips.id::text = split_part(storage.objects.name, '/', 2)
         and trips.owner_user_id = auth.uid()
     )
   );
@@ -293,16 +293,16 @@ create policy "Trip owners can update material files"
     bucket_id = 'trip-materials'
     and exists (
       select 1 from trips
-      where trips.id::text = (storage.foldername(name))[2]
+      where trips.id::text = split_part(storage.objects.name, '/', 2)
         and trips.owner_user_id = auth.uid()
     )
   )
   with check (
     bucket_id = 'trip-materials'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and split_part(storage.objects.name, '/', 1) = auth.uid()::text
     and exists (
       select 1 from trips
-      where trips.id::text = (storage.foldername(name))[2]
+      where trips.id::text = split_part(storage.objects.name, '/', 2)
         and trips.owner_user_id = auth.uid()
     )
   );
@@ -314,7 +314,7 @@ create policy "Trip owners can delete material files"
     bucket_id = 'trip-materials'
     and exists (
       select 1 from trips
-      where trips.id::text = (storage.foldername(name))[2]
+      where trips.id::text = split_part(storage.objects.name, '/', 2)
         and trips.owner_user_id = auth.uid()
     )
   );
