@@ -1,16 +1,24 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useMemo, useState } from "react";
 import {
   CalendarDays,
   Camera,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  CloudSun,
+  Images,
   ImagePlus,
+  Languages,
   LockKeyhole,
+  Map as MapIcon,
   MapPin,
   Search,
   Sparkles,
   Tags,
   Upload,
+  X,
 } from "lucide-react";
 import type { AsiaDemoTrip } from "@/lib/asia-trip";
 import {
@@ -32,13 +40,39 @@ type TravelerAppShellProps = {
   trip: AsiaDemoTrip;
 };
 
-function getCardSensitivity(item: AsiaDemoTrip["days"][number]["items"][number]) {
+type TravelerItem = AsiaDemoTrip["days"][number]["items"][number];
+type TravelerDay = AsiaDemoTrip["days"][number];
+type ActiveTab = "legs" | "categories" | "today" | "calendar";
+type OverlayKind = "unlock" | "photos" | "stay" | "search" | "map" | "phrases";
+
+function getCardSensitivity(item: TravelerItem) {
   return (
     classifyAddressSensitivity({
       address: item.address,
       context: `${item.title} ${item.description}`,
     }) ?? classifySensitiveText(`${item.title} ${item.description}`)
   );
+}
+
+function getItemSensitivity(item: TravelerItem) {
+  return classifySensitiveText(item.description) ?? getCardSensitivity(item);
+}
+
+function formatCount(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function categoriesForTrip(trip: AsiaDemoTrip) {
+  const counts = new Map<string, number>();
+
+  for (const item of trip.items) {
+    const category = item.category?.replaceAll("_", " ") ?? "note";
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
 }
 
 function LockedDetail({
@@ -52,64 +86,558 @@ function LockedDetail({
 }) {
   if (unlocked) {
     return (
-      <p className="mt-3 rounded-md bg-moss/10 px-3 py-2 text-xs leading-5 text-ink/70">
+      <p className="mt-4 whitespace-pre-line rounded-xl bg-[var(--color-sky)]/55 px-4 py-3 text-sm leading-6 text-[var(--color-ink)]">
         {children}
       </p>
     );
   }
 
   return (
-    <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
+    <div className="mt-4 rounded-xl border border-[var(--color-border)]/35 bg-[var(--color-app)] p-4">
       <div className="flex items-start gap-2">
-        <LockKeyhole className="mt-0.5 shrink-0 text-clay" size={16} />
+        <LockKeyhole className="mt-0.5 shrink-0 text-[var(--color-leather)]" size={17} />
         <div>
-          <p className="text-xs font-semibold text-ink">
+          <p className="text-sm font-bold text-[var(--color-ink)]">
             {classification.label} locked
           </p>
-          <p className="mt-1 text-xs leading-5 text-ink/55">
+          <p className="mt-1 text-xs leading-5 text-[var(--color-muted)]">
             {classification.reason}
           </p>
-          <div className="mt-2 h-5 max-w-56 rounded bg-ink/10 blur-[3px]" />
+          <div className="mt-3 h-6 max-w-64 rounded-md bg-[var(--color-muted)]/20 blur-[3px]" />
         </div>
       </div>
     </div>
   );
 }
 
+function IconButton({
+  children,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/70 bg-[var(--color-surface)] text-[var(--color-ink)] shadow-sm shadow-stone-950/10"
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Overlay({
+  children,
+  closeLabel,
+  onClose,
+}: {
+  children: ReactNode;
+  closeLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 bg-stone-950/35 backdrop-blur-sm">
+      <div className="mx-auto flex max-h-dvh min-h-dvh w-full max-w-[440px] flex-col overflow-y-auto overscroll-contain bg-[var(--color-app)] px-5 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-[calc(1.25rem+env(safe-area-inset-top))] shadow-2xl">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            aria-label={closeLabel}
+            className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface)] shadow-sm"
+            onClick={onClose}
+          >
+            <X size={22} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function UnlockForm({
+  error,
+  onSubmit,
+  password,
+  setPassword,
+}: {
+  error: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  password: string;
+  setPassword: (value: string) => void;
+}) {
+  return (
+    <form className="mt-5 flex gap-2" onSubmit={onSubmit}>
+      <input
+        className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)]/25 bg-white/70 px-3 py-3 text-sm text-[var(--color-ink)]"
+        placeholder="Trip password"
+        type="password"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+      />
+      <button
+        className="rounded-lg bg-[var(--color-green)] px-4 py-3 text-sm font-bold text-white"
+        type="submit"
+      >
+        Unlock
+      </button>
+      {error ? (
+        <p className="sr-only">Password did not unlock traveler mode.</p>
+      ) : null}
+    </form>
+  );
+}
+
+function ActivityCard({
+  item,
+  locked,
+  onSelect,
+}: {
+  item: TravelerItem;
+  locked: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="mx-2 flex h-[235px] shrink-0 basis-[78%] snap-center flex-col items-center justify-center rounded-xl border border-white/70 bg-[var(--color-surface)] p-5 text-center shadow-[var(--shadow-card)] outline outline-1 outline-black/5 transition hover:-translate-y-0.5"
+      onClick={onSelect}
+    >
+      {item.time ? (
+        <div className="flex items-center justify-center gap-2 text-sm font-medium text-[var(--color-muted)]">
+          <Clock size={16} />
+          <span>{item.time}</span>
+        </div>
+      ) : null}
+      <h2 className={item.time ? "mt-5 line-clamp-4 text-3xl font-semibold leading-tight" : "line-clamp-4 text-3xl font-semibold leading-tight"}>
+        {item.title}
+      </h2>
+      <p className="mt-5 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-muted)]">
+        {locked ? "Locked detail" : item.category}
+      </p>
+      <span className="mt-5 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-app)] text-[var(--color-muted)]">
+        {locked ? <LockKeyhole size={18} /> : <Sparkles size={18} />}
+      </span>
+    </button>
+  );
+}
+
+function PhotoPanel({
+  unlocked,
+}: {
+  unlocked: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-white/70 bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--color-leather)]">
+              Trip photos
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              Follow along
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">
+              Photos are the first stop for friends and family. Traveler mode
+              unlocks uploads.
+            </p>
+          </div>
+          {unlocked ? (
+            <button className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-green)] text-white shadow-sm">
+              <Upload size={18} />
+            </button>
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/35 text-[var(--color-muted)]">
+              <LockKeyhole size={18} />
+            </div>
+          )}
+        </div>
+      </section>
+
+      <div>
+        {samplePhotos.map((photo) => (
+          <button
+            type="button"
+            className="block w-full bg-stone-900 text-left"
+            key={photo.label}
+          >
+            <div className="flex min-h-[235px] flex-col justify-end bg-[var(--color-leather)] p-5 text-white">
+              <Camera className="text-flax" size={28} />
+              <p className="mt-20 text-xs font-black uppercase tracking-[0.16em] text-white/70">
+                {photo.day}
+              </p>
+              <h3 className="mt-1 text-3xl font-semibold">{photo.label}</h3>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {unlocked ? (
+        <button className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-green)] px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-950/20">
+          <ImagePlus size={18} />
+          Add trip photos
+        </button>
+      ) : (
+        <div className="rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 text-sm font-semibold text-[var(--color-muted)] shadow-sm">
+          Enter the trip password to upload photos.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TodayPanel({
+  day,
+  onSelect,
+  unlocked,
+}: {
+  day: TravelerDay;
+  onSelect: (item: TravelerItem) => void;
+  unlocked: boolean;
+}) {
+  return (
+    <div className="flex min-h-[calc(100dvh-15rem)] flex-col">
+      <div className="pb-2 pt-1">
+        <div className="flex items-center justify-between gap-3 px-1">
+          <button
+            type="button"
+            aria-label="Previous day"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-ink)] opacity-35"
+            disabled
+          >
+            <ChevronLeft size={22} />
+          </button>
+          <div className="min-w-0 flex-1 text-center">
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              {day.title}
+            </p>
+            <h2 className="mt-1 truncate text-4xl font-semibold leading-tight">
+              {day.legName || "Today"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Next day"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-ink)]"
+          >
+            <ChevronRight size={22} />
+          </button>
+        </div>
+      </div>
+
+      <div className="-mx-5 flex flex-1 items-center">
+        <div className="hide-scrollbar flex w-full snap-x snap-mandatory overflow-x-auto scroll-smooth pb-5 pt-6">
+          <div className="shrink-0 basis-[11%]" aria-hidden="true" />
+          {day.items.map((item) => (
+            <ActivityCard
+              item={item}
+              key={item.id}
+              locked={Boolean(getItemSensitivity(item)) && !unlocked}
+              onSelect={() => onSelect(item)}
+            />
+          ))}
+          <div className="shrink-0 basis-[11%]" aria-hidden="true" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegsPanel({ trip }: { trip: AsiaDemoTrip }) {
+  return (
+    <div className="space-y-3">
+      {trip.legs.map((leg, index) => (
+        <button
+          className="relative flex w-full items-center justify-between overflow-hidden rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 pl-5 text-left shadow-[var(--shadow-card)] outline outline-1 outline-black/5 transition hover:-translate-y-0.5"
+          key={leg.id}
+          type="button"
+        >
+          <span className="absolute bottom-0 right-0 top-0 w-2 bg-[var(--color-brass)]" />
+          <span className="min-w-0">
+            <span className="truncate text-lg font-semibold">{leg.city}</span>
+            <span className="mt-1 block text-sm text-[var(--color-muted)]">
+              {[leg.arriveDate, leg.leaveDate].filter(Boolean).join(" - ")} ·{" "}
+              {leg.country}
+            </span>
+            <span className="mt-1 block truncate text-sm text-[var(--color-muted)]">
+              {leg.stayName ?? "Stay details"}
+            </span>
+          </span>
+          {index === 0 ? (
+            <span className="mr-2 rounded-full bg-[var(--color-green)]/10 px-2 py-1 text-xs font-bold text-[var(--color-green)]">
+              Today
+            </span>
+          ) : null}
+          <ChevronRight className="ml-3 shrink-0 text-[var(--color-muted)]" size={20} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CategoriesPanel({
+  categories,
+}: {
+  categories: Array<[string, number]>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {categories.map(([category, count]) => (
+        <button
+          key={category}
+          type="button"
+          className="min-h-[170px] rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 text-left shadow-[var(--shadow-card)] outline outline-1 outline-black/5"
+        >
+          <span className="block text-4xl">•</span>
+          <span className="mt-4 block text-base font-semibold capitalize leading-snug">
+            {category}
+          </span>
+          <span className="mt-2 block text-sm text-[var(--color-muted)]">
+            {formatCount(count, "card")}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CalendarPanel({ days }: { days: TravelerDay[] }) {
+  const months = Array.from(new Set(days.map((day) => day.date.slice(0, 7))));
+
+  return (
+    <div className="space-y-4">
+      {months.slice(0, 5).map((month) => (
+        <section
+          className="rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]"
+          key={month}
+        >
+          <p className="text-lg font-semibold">
+            {new Intl.DateTimeFormat("en-US", {
+              month: "long",
+              timeZone: "UTC",
+              year: "numeric",
+            }).format(new Date(`${month}-01T00:00:00Z`))}
+          </p>
+          <div className="mt-4 grid grid-cols-7 gap-1">
+            {days
+              .filter((day) => day.date.startsWith(month))
+              .slice(0, 35)
+              .map((day) => (
+                <button
+                  className="flex min-h-[62px] flex-col justify-between rounded-md border border-white/45 bg-[var(--color-app)] px-2 py-1.5 text-left shadow-sm"
+                  key={day.date}
+                  type="button"
+                >
+                  <span className="text-[10px] font-semibold leading-none text-[var(--color-muted)]">
+                    {Number(day.date.slice(-2))}
+                  </span>
+                  <span className="line-clamp-2 text-[10px] font-bold leading-tight">
+                    {day.legName || day.primaryCategory}
+                  </span>
+                </button>
+              ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SearchTool({
+  items,
+  onSelect,
+}: {
+  items: TravelerItem[];
+  onSelect: (item: TravelerItem) => void;
+}) {
+  const results = items
+    .filter((item) =>
+      ["hotel", "airport", "train", "check", "dinner", "temple", "market"].some(
+        (term) =>
+          `${item.title} ${item.description} ${item.category}`
+            .toLowerCase()
+            .includes(term)
+      )
+    )
+    .slice(0, 8);
+
+  return (
+    <div className="mt-6">
+      <div className="rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
+        <div className="flex items-center gap-2 rounded-lg bg-white/45 px-3 py-3">
+          <Search className="text-[var(--color-blue)]" size={18} />
+          <span className="text-sm font-semibold text-[var(--color-muted)]">
+            Search flights, hotels, food, notes...
+          </span>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {results.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="w-full rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 text-left shadow-[var(--shadow-card)]"
+            onClick={() => onSelect(item)}
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-leather)]">
+              {[item.time, item.category].filter(Boolean).join(" · ")}
+            </p>
+            <p className="mt-2 text-lg font-semibold">{item.title}</p>
+            <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--color-muted)]">
+              {item.description}
+            </p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MapTool({ trip }: { trip: AsiaDemoTrip }) {
+  return (
+    <div className="mt-6 space-y-4">
+      <div className="rounded-xl border border-white/60 bg-[var(--color-sky)] p-5 shadow-[var(--shadow-card)]">
+        <p className="text-sm font-bold uppercase tracking-[0.14em] text-[var(--color-blue)]">
+          Route overview
+        </p>
+        <div className="mt-5 space-y-3">
+          {trip.legs.slice(0, 6).map((leg, index) => (
+            <div className="flex items-center gap-3" key={leg.id}>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-green)] text-sm font-bold text-white">
+                {index + 1}
+              </span>
+              <div>
+                <p className="text-base font-semibold">{leg.city}</p>
+                <p className="text-sm text-[var(--color-blue)]">
+                  {[leg.country, leg.stayName].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <p className="rounded-xl bg-[var(--color-app)] p-4 text-sm leading-6 text-[var(--color-muted)] shadow-sm">
+        The live version opens a full route map from the same header button, so
+        travelers can jump from any screen to where they are going next.
+      </p>
+    </div>
+  );
+}
+
+function PhraseTool() {
+  const phrases = [
+    ["Hello", "Konnichiwa / Annyeonghaseyo / Sabaidee"],
+    ["Thank you", "Arigato / Kamsahamnida / Khop chai"],
+    ["Where is the bathroom?", "Toilet wa doko desu ka?"],
+    ["No meat, please", "Meatなしでお願いします"],
+    ["For the baby", "Baby / child seat, please"],
+  ];
+
+  return (
+    <div className="mt-6 grid gap-3">
+      {phrases.map(([label, phrase]) => (
+        <div
+          key={label}
+          className="rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]"
+        >
+          <p className="text-sm font-bold uppercase tracking-[0.14em] text-[var(--color-leather)]">
+            {label}
+          </p>
+          <p className="mt-2 text-2xl font-semibold leading-snug">{phrase}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ActivityDetail({
+  item,
+  onClose,
+  unlocked,
+}: {
+  item: TravelerItem;
+  onClose: () => void;
+  unlocked: boolean;
+}) {
+  const detailSensitivity = classifySensitiveText(item.description);
+  const addressSensitivity = classifyAddressSensitivity({
+    address: item.address,
+    context: `${item.title} ${item.description}`,
+  });
+
+  return (
+    <Overlay closeLabel="Close activity" onClose={onClose}>
+      <p className="text-sm font-semibold text-[var(--color-muted)]">
+        {[item.time, item.category].filter(Boolean).join(" · ")}
+      </p>
+      <h2 className="mt-2 text-4xl font-semibold leading-tight">{item.title}</h2>
+      {detailSensitivity ? (
+        <LockedDetail classification={detailSensitivity} unlocked={unlocked}>
+          {item.description}
+        </LockedDetail>
+      ) : (
+        <p className="mt-6 whitespace-pre-line text-lg leading-8 text-[var(--color-ink)]">
+          {item.description}
+        </p>
+      )}
+      {item.address && addressSensitivity ? (
+        <LockedDetail classification={addressSensitivity} unlocked={unlocked}>
+          {item.address}
+        </LockedDetail>
+      ) : item.address ? (
+        <div className="mt-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]">
+          <p className="flex items-center gap-2 text-sm font-semibold text-[var(--color-muted)]">
+            <MapPin size={16} />
+            Address
+          </p>
+          <p className="mt-4 whitespace-pre-line text-2xl font-semibold leading-snug">
+            {item.address}
+          </p>
+        </div>
+      ) : null}
+    </Overlay>
+  );
+}
+
 export function TravelerAppShell({ trip }: TravelerAppShellProps) {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("today");
   const [unlocked, setUnlocked] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
-  const featuredDays = trip.days.slice(0, 8);
+  const [overlay, setOverlay] = useState<OverlayKind | null>(null);
+  const [selectedItem, setSelectedItem] = useState<TravelerItem | null>(null);
   const todayDay = trip.days[0];
+  const categories = useMemo(() => categoriesForTrip(trip), [trip]);
   const sensitiveCount = useMemo(
     () =>
       trip.days.reduce(
         (count, day) =>
-          count + day.items.filter((item) => getCardSensitivity(item)).length,
+          count + day.items.filter((item) => getItemSensitivity(item)).length,
         0
       ),
     [trip.days]
   );
-  const tabs = unlocked
-    ? [
-        { href: "#today", icon: Sparkles, label: "Today" },
-        { href: "#day-nav", icon: CalendarDays, label: "Days" },
-        { href: "#photos", icon: Camera, label: "Photos" },
-        { href: "#private", icon: LockKeyhole, label: "Details" },
-      ]
-    : [
-        { href: "#photos", icon: Camera, label: "Photos" },
-        { href: "#today", icon: Sparkles, label: "Today" },
-        { href: "#day-nav", icon: CalendarDays, label: "Days" },
-        { href: "#unlock", icon: LockKeyhole, label: "Unlock" },
-      ];
+  const tabs: Array<{ id: ActiveTab; label: string; icon: typeof Sparkles }> =
+    [
+      { id: "legs", label: "Legs", icon: MapPin },
+      { id: "categories", label: "Categories", icon: Tags },
+      { id: "today", label: "Today", icon: Sparkles },
+      { id: "calendar", label: "Calendar", icon: CalendarDays },
+    ];
 
   function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (password.trim().toLowerCase() === DEMO_TRAVELER_PASSWORD) {
       setUnlocked(true);
+      setActiveTab("today");
+      setOverlay(null);
       setError(false);
       return;
     }
@@ -120,298 +648,232 @@ export function TravelerAppShell({ trip }: TravelerAppShellProps) {
   return (
     <main className="journal-page min-h-screen text-[var(--color-ink)]">
       <div className="journal-app mx-auto flex min-h-screen w-full max-w-[440px] flex-col border-x border-black/10 shadow-2xl shadow-stone-950/25">
-      <section className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-app)]/95 px-4 pb-4 pt-5 backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
-              {unlocked ? "Traveler mode" : "Follow-along mode"}
-            </p>
-            <p className="text-base font-semibold text-[var(--color-ink)]">
-              {trip.name}
-            </p>
-          </div>
-          <a
-            href={unlocked ? "#today" : "#photos"}
-            className="rounded-lg bg-[var(--color-green)] px-3 py-2 text-xs font-semibold text-white shadow-sm"
-          >
-            {unlocked ? "Today" : "Photos"}
-          </a>
-        </div>
-      </section>
-
-      <section className="flex-1 px-5 pb-28 pt-5">
-        <header className="rounded-xl bg-[var(--color-green)] p-5 text-white shadow-[var(--shadow-card)]">
-          <p className="text-sm text-paper/70">{trip.dateRange}</p>
-          <h1 className="mt-2 text-4xl font-semibold leading-tight">
-            {trip.name}
-          </h1>
-          <p className="mt-4 text-sm leading-6 text-paper/70">
-            {trip.countries.slice(0, 6).join(" / ")}
-          </p>
-          <div className="mt-5 grid grid-cols-3 gap-3">
-            <div className="rounded-lg bg-white/10 p-3">
-              <p className="text-2xl font-semibold">{trip.dayCount}</p>
-              <p className="mt-1 text-xs text-paper/65">days</p>
-            </div>
-            <div className="rounded-lg bg-white/10 p-3">
-              <p className="text-2xl font-semibold">{trip.legs.length}</p>
-              <p className="mt-1 text-xs text-paper/65">stays</p>
-            </div>
-            <div className="rounded-lg bg-white/10 p-3">
-              <p className="text-2xl font-semibold">{trip.itemCount}</p>
-              <p className="mt-1 text-xs text-paper/65">cards</p>
+        <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-app)]/95 px-4 pb-4 pt-5 backdrop-blur min-[400px]:px-5">
+          <div className="flex items-start justify-between gap-2 min-[400px]:gap-3">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/65 bg-[var(--color-sky)] px-2.5 py-2 text-left shadow-sm"
+              onClick={() => (unlocked ? setActiveTab("today") : setOverlay("unlock"))}
+            >
+              {unlocked ? (
+                <CloudSun className="shrink-0 text-[var(--color-blue)]" size={22} />
+              ) : (
+                <LockKeyhole className="shrink-0 text-[var(--color-blue)]" size={22} />
+              )}
+              <span className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase leading-none text-[var(--color-muted)]">
+                  {unlocked ? "Traveler mode" : "Follow along"}
+                </span>
+                <span className="mt-1 block whitespace-nowrap text-sm font-bold leading-none">
+                  {unlocked ? "Private details" : "Photos first"}
+                </span>
+                <span className="mt-1 block max-w-32 truncate text-[11px] font-semibold leading-none text-[var(--color-blue)]">
+                  {unlocked ? "Unlocked" : "Tap to unlock"}
+                </span>
+              </span>
+            </button>
+            <div className="flex shrink-0 gap-1 min-[400px]:gap-1.5">
+              <IconButton label="Photos" onClick={() => setOverlay("photos")}>
+                <Images size={19} />
+              </IconButton>
+              <IconButton label="Stay" onClick={() => setOverlay("stay")}>
+                <MapPin size={19} />
+              </IconButton>
+              <IconButton label="Search" onClick={() => setOverlay("search")}>
+                <Search size={19} />
+              </IconButton>
+              <IconButton label="Map" onClick={() => setOverlay("map")}>
+                <MapIcon size={19} />
+              </IconButton>
+              <IconButton label="Phrases" onClick={() => setOverlay("phrases")}>
+                <Languages size={19} />
+              </IconButton>
             </div>
           </div>
         </header>
 
-        {!unlocked ? (
-          <section id="unlock" className="mt-4 scroll-mt-24 rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 shadow-[var(--shadow-card)]">
-            <div className="flex items-start gap-3">
-              <LockKeyhole className="mt-0.5 shrink-0 text-[var(--color-leather)]" size={18} />
-              <div>
-                <h2 className="text-base font-semibold text-[var(--color-ink)]">
-                  Traveler details are locked
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                  Follow along with photos and the trip shape. Enter the trip
-                  password to reveal private details and upload photos.
-                </p>
-              </div>
-            </div>
-            <form className="mt-4 flex gap-2" onSubmit={unlock}>
-              <input
-                className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)]/25 bg-white/70 px-3 py-2 text-sm text-[var(--color-ink)]"
-                placeholder="Trip password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-              <button
-                className="rounded-lg bg-[var(--color-green)] px-4 py-2 text-sm font-semibold text-white"
-                type="submit"
-              >
-                Unlock
-              </button>
-            </form>
-            {error ? (
-              <p className="mt-2 text-xs font-semibold text-clay">
-                That password did not unlock traveler mode. Demo password:
-                traveler.
-              </p>
-            ) : (
-              <p className="mt-2 text-xs text-ink/45">
-                Demo password: traveler
-              </p>
-            )}
-          </section>
-        ) : (
-          <section className="mt-4 rounded-xl border border-[var(--color-green)]/20 bg-[var(--color-green)]/10 p-4">
-            <p className="text-sm font-semibold text-[var(--color-green)]">
-              Traveler mode unlocked
-            </p>
-            <p className="mt-1 text-sm leading-6 text-ink/60">
-              Sensitive details and photo upload controls are now available.
-            </p>
-          </section>
-        )}
-
-        <section id="photos" className="mt-4 scroll-mt-24 rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 shadow-[var(--shadow-card)]">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
-                Photos
-              </p>
-              <h2 className="mt-1 text-xl font-semibold text-[var(--color-ink)]">
+        <section className="flex-1 px-5 pb-28 pt-5">
+          {!unlocked ? (
+            <button
+              type="button"
+              className="mb-5 w-full rounded-xl border border-white/70 bg-[var(--color-surface)] p-4 text-left shadow-[var(--shadow-card)]"
+              onClick={() => setOverlay("photos")}
+            >
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--color-leather)]">
                 Follow along
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-ink/60">
-                Photos are front and center for friends and family.
               </p>
-            </div>
-            {unlocked ? (
-              <button className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-green)] px-3 py-2 text-xs font-semibold text-white">
-                <Upload size={14} />
-                Upload
-              </button>
-            ) : (
-              <span className="rounded-lg bg-[var(--color-surface)] px-3 py-2 text-xs font-semibold text-[var(--color-muted)]">
-                Upload locked
-              </span>
-            )}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {samplePhotos.map((photo, index) => (
-              <div
-                className="aspect-square rounded-lg bg-[var(--color-leather)] p-3 text-white shadow-sm"
-                key={photo.label}
-              >
-                <Camera className="text-flax" size={18} />
-                <p className="mt-12 text-xs font-semibold">{photo.day}</p>
-                <p className="mt-1 text-sm font-semibold">{photo.label}</p>
-                {index === 0 && !unlocked ? (
-                  <p className="mt-2 rounded bg-paper/10 px-2 py-1 text-[10px] text-paper/70">
-                    New
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          {unlocked ? (
-            <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border)]/25 bg-[var(--color-surface)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)]">
-              <ImagePlus size={16} />
-              Add trip photos
+              <h2 className="mt-2 text-3xl font-semibold leading-tight">
+                View trip photos
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                Friends and family can start with photos. Traveler mode unlocks
+                private details and uploads.
+              </p>
             </button>
           ) : null}
+          {activeTab === "today" ? (
+            <TodayPanel
+              day={todayDay}
+              onSelect={setSelectedItem}
+              unlocked={unlocked}
+            />
+          ) : null}
+          {activeTab === "legs" ? <LegsPanel trip={trip} /> : null}
+          {activeTab === "categories" ? (
+            <CategoriesPanel categories={categories} />
+          ) : null}
+          {activeTab === "calendar" ? (
+            <CalendarPanel days={trip.days} />
+          ) : null}
+
+          <section className="mt-5 rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
+            <p className="text-sm font-semibold">
+              {formatCount(sensitiveCount, "private detail")} protected
+            </p>
+            <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
+              {unlocked
+                ? "Traveler mode reveals exact lodging, access notes, booking controls, and private contact details."
+                : "Follower mode keeps exact lodging, access notes, booking controls, and private contact details locked behind the trip password."}
+            </p>
+          </section>
         </section>
 
-        <section id="today" className="mt-4 scroll-mt-24 rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 shadow-[var(--shadow-card)]">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
-                Today
-              </p>
-              <h2 className="mt-1 text-xl font-semibold text-[var(--color-ink)]">
-                {todayDay.title}
-              </h2>
-              <p className="mt-1 text-sm text-ink/60">{todayDay.legName}</p>
-            </div>
-            <MapPin className="text-clay" size={20} />
-          </div>
-          <p className="mt-3 text-sm leading-6 text-ink/60">
-            {unlocked
-              ? "Traveler mode keeps the operational day view close."
-              : "Follower mode keeps today available without exposing private trip logistics."}
-          </p>
-        </section>
+        <nav className="fixed bottom-0 left-1/2 z-20 w-full max-w-[440px] -translate-x-1/2 border-t border-[var(--color-border)] bg-[var(--color-app)]/96 px-3 pb-3 pt-2 backdrop-blur">
+          <div className="grid grid-cols-4 gap-2">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
 
-        <nav id="day-nav" className="mt-4 scroll-mt-24 overflow-x-auto pb-2 hide-scrollbar">
-          <div className="flex gap-2">
-            {featuredDays.map((day) => (
-              <a
-                key={day.date}
-                href={`#day-${day.date}`}
-                className="min-w-28 rounded-lg border border-[var(--color-border)]/25 bg-[var(--color-app)] p-3 shadow-sm"
-              >
-                <p className="text-xs font-semibold text-[var(--color-muted)]">{day.label}</p>
-                <p className="mt-1 text-sm font-semibold text-[var(--color-ink)]">
-                  {day.title}
-                </p>
-              </a>
-            ))}
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-xs font-semibold transition ${
+                    isActive
+                      ? "bg-[var(--color-green)] text-white shadow-lg shadow-emerald-950/25"
+                      : "text-[var(--color-muted)] hover:bg-white/70"
+                  }`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  <Icon size={20} strokeWidth={2.2} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </nav>
 
-        <section id="private" className="mt-4 scroll-mt-24 rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 shadow-[var(--shadow-card)]">
-          <p className="text-sm font-semibold text-[var(--color-ink)]">
-            {sensitiveCount} private details protected
-          </p>
-          <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
-            Exact lodging, booking controls, access notes, and private contact
-            details stay locked unless traveler mode is unlocked.
-          </p>
-        </section>
+        {selectedItem ? (
+          <ActivityDetail
+            item={selectedItem}
+            onClose={() => setSelectedItem(null)}
+            unlocked={unlocked}
+          />
+        ) : null}
 
-        <div className="mt-4 space-y-5">
-          {trip.days.map((day) => (
-            <section
-              id={day.label === "Day 1" ? "today-list" : `day-${day.date}`}
-              key={day.date}
-              className="scroll-mt-24"
+        {overlay === "unlock" ? (
+          <Overlay closeLabel="Close unlock" onClose={() => setOverlay(null)}>
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              Trip password
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              Unlock traveler mode
+            </h2>
+            <p className="mt-4 text-base leading-7 text-[var(--color-muted)]">
+              One trip password reveals sensitive details and enables photo
+              uploads. Demo password: traveler.
+            </p>
+            <UnlockForm
+              error={error}
+              onSubmit={unlock}
+              password={password}
+              setPassword={setPassword}
+            />
+            {error ? (
+              <p className="mt-3 text-sm font-bold text-[var(--color-leather)]">
+                That password did not unlock traveler mode.
+              </p>
+            ) : null}
+          </Overlay>
+        ) : null}
+        {overlay === "photos" ? (
+          <Overlay closeLabel="Close photos" onClose={() => setOverlay(null)}>
+            <PhotoPanel unlocked={unlocked} />
+          </Overlay>
+        ) : null}
+
+        {overlay === "stay" ? (
+          <Overlay closeLabel="Close stay" onClose={() => setOverlay(null)}>
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              Stay
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              {todayDay.legName || "Today"}
+            </h2>
+            <LockedDetail
+              classification={{
+                kind: "private_residence",
+                label: "Exact stay detail",
+                reason:
+                  "Follower mode keeps exact lodging and private addresses behind the trip password.",
+              }}
+              unlocked={unlocked}
             >
-              <div className="mb-3">
-                <div className="flex items-end justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-moss">
-                      {day.label}
-                    </p>
-                    <h2 className="text-xl font-semibold text-ink">
-                      {day.title}
-                    </h2>
-                  </div>
-                  <p className="rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs font-semibold text-[var(--color-leather)]">
-                    {day.items.length} cards
-                  </p>
-                </div>
-                {day.legName ? (
-                  <p className="mt-1 text-sm text-ink/60">{day.legName}</p>
-                ) : null}
-                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/40">
-                  {day.primaryCategory}
-                </p>
-              </div>
-              <div className="space-y-3">
-                {day.items.map((item) => {
-                  const classification = getCardSensitivity(item);
-                  const descriptionClassification = classifySensitiveText(
-                    item.description
-                  );
+              Exact lodging address appears here in traveler mode.
+            </LockedDetail>
+          </Overlay>
+        ) : null}
 
-                  return (
-                    <article
-                      key={item.id}
-                      className="rounded-xl border border-[var(--color-border)]/25 bg-[var(--color-app)] p-4 shadow-sm"
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-leather)]">
-                        {[item.time, item.category].filter(Boolean).join(" · ")}
-                      </p>
-                      <h3 className="mt-2 text-base font-semibold text-[var(--color-ink)]">
-                        {item.title}
-                      </h3>
-                      {descriptionClassification && !unlocked ? (
-                        <LockedDetail
-                          classification={descriptionClassification}
-                          unlocked={unlocked}
-                        >
-                          {item.description}
-                        </LockedDetail>
-                      ) : (
-                        <p className="mt-2 text-sm leading-6 text-ink/65">
-                          {item.description}
-                        </p>
-                      )}
-                      {item.address && classification ? (
-                        <LockedDetail
-                          classification={classification}
-                          unlocked={unlocked}
-                        >
-                          {item.address}
-                        </LockedDetail>
-                      ) : item.address ? (
-                        <p className="mt-3 text-xs text-ink/45">
-                          {item.address}
-                        </p>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-      </section>
-      <nav className="fixed bottom-0 left-1/2 z-20 w-full max-w-[440px] -translate-x-1/2 border-t border-[var(--color-border)] bg-[var(--color-app)]/96 px-3 pb-3 pt-2 backdrop-blur">
-        <div className="grid grid-cols-4 gap-2">
-          {tabs.map((tab, index) => {
-            const Icon = tab.icon;
-            const active = index === 0;
-
-            return (
-              <a
-                key={tab.label}
-                href={tab.href}
-                className={
-                  active
-                    ? "flex h-14 flex-col items-center justify-center gap-1 rounded-lg bg-[var(--color-green)] text-xs font-semibold text-white shadow-lg shadow-emerald-950/25"
-                    : "flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-xs font-semibold text-[var(--color-muted)] hover:bg-white/70"
-                }
-              >
-                <Icon size={20} strokeWidth={2.2} />
-                <span>{tab.label}</span>
-              </a>
-            );
-          })}
-        </div>
-      </nav>
+        {overlay === "search" ? (
+          <Overlay closeLabel="Close tool" onClose={() => setOverlay(null)}>
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              Search
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              Find trip details
+            </h2>
+            <p className="mt-4 text-base leading-7 text-[var(--color-muted)]">
+              Search keeps every reservation, note, restaurant, and address a
+              couple taps away.
+            </p>
+            <SearchTool
+              items={trip.days.flatMap((day) => day.items)}
+              onSelect={(item) => {
+                setOverlay(null);
+                setSelectedItem(item);
+              }}
+            />
+          </Overlay>
+        ) : null}
+        {overlay === "map" ? (
+          <Overlay closeLabel="Close map" onClose={() => setOverlay(null)}>
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              Map
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              Route map
+            </h2>
+            <p className="mt-4 text-base leading-7 text-[var(--color-muted)]">
+              The route is always one tap away from the header.
+            </p>
+            <MapTool trip={trip} />
+          </Overlay>
+        ) : null}
+        {overlay === "phrases" ? (
+          <Overlay closeLabel="Close phrases" onClose={() => setOverlay(null)}>
+            <p className="text-sm font-semibold text-[var(--color-muted)]">
+              Phrases
+            </p>
+            <h2 className="mt-2 text-4xl font-semibold leading-tight">
+              Useful phrases
+            </h2>
+            <p className="mt-4 text-base leading-7 text-[var(--color-muted)]">
+              Practical phrases stay in the app, organized for the places on
+              the trip.
+            </p>
+            <PhraseTool />
+          </Overlay>
+        ) : null}
       </div>
     </main>
   );
