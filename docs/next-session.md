@@ -56,6 +56,12 @@ Backend-ready pieces now exist:
   - Demo review items have local UI controls for edit, add, delete, mark confirmed, and flag as needs review. These controls update browser state and counters, but do not persist yet.
   - Sensitive details are represented as card-detail protection candidates in demo review data; no privacy model was finalized.
 - The design picker keeps dropdowns for secondary/accent/soft colors and now also lets makers click the visible swatches.
+- OpenAI extraction setup scaffolding exists but is not called by the maker UI yet:
+  - `lib/ai/openai.ts` wraps the Responses API behind `OPENAI_API_KEY` and `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`.
+  - `lib/extraction/openai-trip-parser.ts` defines the first trip-draft structured output schema and prompt.
+  - `.env.example` includes OpenAI extraction env vars with extraction disabled by default.
+  - Setup and cost guardrails are documented in `docs/openai-extraction-setup.md`.
+  - Do not enable extraction in production until there is an explicit paid `Build parsed draft` action, extracted-text storage, run logging, and per-trip cost tracking.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
 - The trip workspace now resumes from the next incomplete step instead of always sending paid trips back to upload:
   - no uploads -> upload

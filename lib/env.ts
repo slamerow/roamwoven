@@ -23,6 +23,28 @@ export function getStripeConfig() {
   };
 }
 
+function getOptionalPositiveInteger(name: string, fallback: number) {
+  const value = Number(getOptionalEnv(name));
+
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+export function getOpenAIConfig() {
+  return {
+    apiKey: getOptionalEnv("OPENAI_API_KEY"),
+    extractionModel: getOptionalEnv("OPENAI_EXTRACTION_MODEL") ?? "gpt-5.4-mini",
+    extractionEnabled: getOptionalEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION") === "true",
+    maxInputChars: getOptionalPositiveInteger(
+      "OPENAI_EXTRACTION_MAX_INPUT_CHARS",
+      60000
+    ),
+    maxOutputTokens: getOptionalPositiveInteger(
+      "OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS",
+      4000
+    ),
+  };
+}
+
 export function hasSupabaseBrowserConfig() {
   const config = getSupabaseConfig();
   return Boolean(config.url && config.anonKey);
@@ -31,4 +53,9 @@ export function hasSupabaseBrowserConfig() {
 export function hasStripeCheckoutConfig() {
   const config = getStripeConfig();
   return Boolean(config.secretKey && config.tripPriceId);
+}
+
+export function hasOpenAIExtractionConfig() {
+  const config = getOpenAIConfig();
+  return Boolean(config.apiKey && config.extractionEnabled);
 }
