@@ -118,12 +118,36 @@ alter table if exists trip_style_settings
   add column if not exists accent_color text,
   add column if not exists soft_color text;
 
+create table if not exists trip_processing_runs (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references trips(id) on delete cascade,
+  run_type text not null default 'initial_parse',
+  status text not null default 'pending',
+  model text,
+  input_char_count integer not null default 0,
+  openai_usage jsonb,
+  error_message text,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create table if not exists trip_draft_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references trips(id) on delete cascade,
+  processing_run_id uuid references trip_processing_runs(id) on delete set null,
+  source text not null default 'openai_initial_parse',
+  draft_json jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 alter table trips enable row level security;
 alter table trip_uploads enable row level security;
 alter table trip_legs enable row level security;
 alter table trip_items enable row level security;
 alter table trip_build_settings enable row level security;
 alter table trip_style_settings enable row level security;
+alter table trip_processing_runs enable row level security;
+alter table trip_draft_snapshots enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on trips to anon;
@@ -132,18 +156,24 @@ grant select, insert, update, delete on trip_legs to anon;
 grant select, insert, update, delete on trip_items to anon;
 grant select, insert, update, delete on trip_build_settings to anon;
 grant select, insert, update, delete on trip_style_settings to anon;
+grant select, insert, update, delete on trip_processing_runs to anon;
+grant select, insert, update, delete on trip_draft_snapshots to anon;
 grant select, insert, update, delete on trips to authenticated;
 grant select, insert, update, delete on trip_uploads to authenticated;
 grant select, insert, update, delete on trip_legs to authenticated;
 grant select, insert, update, delete on trip_items to authenticated;
 grant select, insert, update, delete on trip_build_settings to authenticated;
 grant select, insert, update, delete on trip_style_settings to authenticated;
+grant select, insert, update, delete on trip_processing_runs to authenticated;
+grant select, insert, update, delete on trip_draft_snapshots to authenticated;
 grant select, insert, update, delete on trips to service_role;
 grant select, insert, update, delete on trip_uploads to service_role;
 grant select, insert, update, delete on trip_legs to service_role;
 grant select, insert, update, delete on trip_items to service_role;
 grant select, insert, update, delete on trip_build_settings to service_role;
 grant select, insert, update, delete on trip_style_settings to service_role;
+grant select, insert, update, delete on trip_processing_runs to service_role;
+grant select, insert, update, delete on trip_draft_snapshots to service_role;
 
 create index if not exists trips_owner_user_id_idx
   on trips(owner_user_id);
@@ -163,12 +193,20 @@ create index if not exists trip_items_trip_id_idx
 create index if not exists trip_items_trip_date_idx
   on trip_items(trip_id, date);
 
+create index if not exists trip_processing_runs_trip_id_idx
+  on trip_processing_runs(trip_id, created_at desc);
+
+create index if not exists trip_draft_snapshots_trip_id_idx
+  on trip_draft_snapshots(trip_id, created_at desc);
+
 drop policy if exists "Trip owners can manage trips" on trips;
 drop policy if exists "Trip owners can manage uploads" on trip_uploads;
 drop policy if exists "Trip owners can manage legs" on trip_legs;
 drop policy if exists "Trip owners can manage items" on trip_items;
 drop policy if exists "Trip owners can manage build settings" on trip_build_settings;
 drop policy if exists "Trip owners can manage style settings" on trip_style_settings;
+drop policy if exists "Trip owners can manage processing runs" on trip_processing_runs;
+drop policy if exists "Trip owners can manage draft snapshots" on trip_draft_snapshots;
 
 create policy "Trip owners can manage trips"
   on trips
@@ -262,6 +300,42 @@ create policy "Trip owners can manage style settings"
     exists (
       select 1 from trips
       where trips.id = trip_style_settings.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can manage processing runs"
+  on trip_processing_runs
+  for all
+  using (
+    exists (
+      select 1 from trips
+      where trips.id = trip_processing_runs.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from trips
+      where trips.id = trip_processing_runs.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can manage draft snapshots"
+  on trip_draft_snapshots
+  for all
+  using (
+    exists (
+      select 1 from trips
+      where trips.id = trip_draft_snapshots.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from trips
+      where trips.id = trip_draft_snapshots.trip_id
         and trips.owner_user_id = auth.uid()
     )
   );

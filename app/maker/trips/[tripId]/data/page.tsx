@@ -4,9 +4,16 @@ import {
   StructuredReviewPanel,
   type ReviewSection,
 } from "@/components/structured-review-panel";
+import { hasOpenAIExtractionConfig } from "@/lib/env";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import { APP_MODULES, type TripBuildSettings } from "@/lib/build-settings-config";
 import { getTripBuildSettings } from "@/lib/build-settings";
+import {
+  getLatestTripDraftSnapshot,
+  getLatestTripProcessingRun,
+  type TripDraftSnapshot,
+  type TripProcessingRun,
+} from "@/lib/extraction/processing-runs";
 import {
   derivePalette,
   getThemeDirection,
@@ -63,13 +70,43 @@ function getStylePalette(style: TripStyleSettings) {
   };
 }
 
+function getDraftCount(value: unknown, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return 0;
+  }
+
+  const record = value as Record<string, unknown>;
+  return Array.isArray(record[key]) ? record[key].length : 0;
+}
+
+function formatRunDate(value: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 function RealTripFirstPass({
+  error,
+  extractionEnabled,
+  extractionStatus,
+  latestDraft,
+  latestRun,
   tripId,
   tripName,
   uploads,
   settings,
   style,
 }: {
+  error?: string;
+  extractionEnabled: boolean;
+  extractionStatus?: string;
+  latestDraft: TripDraftSnapshot | null;
+  latestRun: TripProcessingRun | null;
   tripId: string;
   tripName: string;
   uploads: TripUpload[];
@@ -81,8 +118,17 @@ function RealTripFirstPass({
   const selectedModules = APP_MODULES.filter(
     (module) => settings.enabledModules[module.key]
   );
+  const textMaterialCount = uploads.filter(
+    (upload) =>
+      upload.userNote?.trim() ||
+      (upload.storagePath &&
+        upload.fileType === "text/plain" &&
+        Number(upload.fileSizeBytes ?? 0) <= 250 * 1024)
+  ).length;
+  const canExtract = extractionEnabled && textMaterialCount > 0;
   const theme = getThemeDirection(style.themeDirection);
   const palette = getStylePalette(style);
+  const draft = latestDraft?.draftJson ?? null;
 
   return (
     <>
@@ -107,13 +153,40 @@ function RealTripFirstPass({
             <p className="text-xs font-semibold uppercase" style={{ color: palette.primary }}>
               Parsing status
             </p>
-            <p className="mt-2 text-sm font-semibold">Not connected yet</p>
+            <p className="mt-2 text-sm font-semibold">
+              {latestRun?.status === "completed"
+                ? "Parsed draft saved"
+                : latestRun?.status === "failed"
+                  ? "Last parse failed"
+                  : extractionEnabled
+                    ? "Ready for text-only beta parse"
+                    : "Not connected yet"}
+            </p>
             <p className="mt-1 text-sm opacity-65">
-              No AI extraction has run against your uploaded file.
+              {extractionEnabled
+                ? "This first pass reads pasted notes and plain text files only."
+                : "No AI extraction has run against your uploaded file."}
             </p>
           </div>
         </div>
       </section>
+
+      {error ? (
+        <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+          {error === "extraction-disabled"
+            ? "AI extraction is disabled. Add the OpenAI key and enable the extraction flag before parsing."
+            : error === "no-text-materials"
+              ? "No pasted notes or plain text files are available for this first parser pass."
+              : error === "checkout-required"
+                ? "Checkout must be complete before parsing."
+                : "Parsing failed. Check the processing run details and try again with a smaller text input."}
+        </p>
+      ) : null}
+      {extractionStatus === "completed" ? (
+        <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+          Parsed draft saved.
+        </p>
+      ) : null}
 
       <section className="mt-8 grid gap-4 md:grid-cols-4">
         <div className="rounded-md border border-ink/10 bg-white p-5">
@@ -135,7 +208,9 @@ function RealTripFirstPass({
         </div>
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <MapPin className="text-ink/70" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">Pending</p>
+          <p className="mt-4 text-3xl font-semibold text-ink">
+            {latestRun?.status ?? "Pending"}
+          </p>
           <p className="mt-1 text-sm text-ink/60">Extraction status</p>
         </div>
       </section>
@@ -143,22 +218,41 @@ function RealTripFirstPass({
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">
-            Your materials are saved, but not parsed yet
+            {latestDraft
+              ? "A parsed draft is saved"
+              : "Your materials are saved, but not parsed yet"}
           </h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
-            Roamwoven has the uploaded files and notes for {tripName}, but this
-            beta screen is not extracting structured data from them yet. The
-            review cards below should only appear after real parsing is wired up.
+            {latestDraft
+              ? "This first parser pass stores raw structured JSON. The next step is turning that draft into editable review cards."
+              : `Roamwoven has the uploaded files and notes for ${tripName}. The first parser pass only reads pasted notes and plain text files until PDF/OCR extraction is wired up.`}
           </p>
           <div className="mt-5 rounded-md bg-clay/10 p-4">
             <p className="text-sm font-semibold text-clay">
-              Expected for this build
+              {canExtract ? "Ready to parse text materials" : "Expected for this build"}
             </p>
             <p className="mt-2 text-sm leading-6 text-ink/65">
-              You can verify upload, content scope, design choices, and saved
-              source materials. You should not expect your test document to be
-              parsed into flights, stays, dates, or activities yet.
+              {canExtract
+                ? "This will make one OpenAI API call and save a raw draft snapshot. It will not parse PDFs or screenshots yet."
+                : "You can verify upload, content scope, design choices, and saved source materials. Add pasted notes or a .txt file before running the first parser pass."}
             </p>
+            <form
+              action={`/maker/trips/${tripId}/data/extract`}
+              className="mt-4"
+              method="post"
+            >
+              <button
+                className={
+                  canExtract
+                    ? "inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+                    : "inline-flex rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
+                }
+                disabled={!canExtract}
+                type="submit"
+              >
+                Build parsed draft
+              </button>
+            </form>
           </div>
         </div>
 
@@ -191,33 +285,74 @@ function RealTripFirstPass({
 
       <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
         <h2 className="text-xl font-semibold text-ink">
-          Structured data review will appear here after parsing
+          {latestDraft
+            ? "Raw parsed draft"
+            : "Structured data review will appear here after parsing"}
         </h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/60">
-          The real version of this screen should show parsed trip overview,
-          dates and places, flights, stays, daily cards, missing details,
-          sensitive details, and manual additions from your uploaded materials.
-          For now, this screen is intentionally stopping before fake data.
-        </p>
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          {[
-            "Trip overview",
-            "Dates and places",
-            "Flights and transport",
-            "Stays",
-            "Daily activities/cards",
-            "Missing or ambiguous details",
-            "Sensitive card details",
-            "Manual additions",
-          ].map((item) => (
-            <div key={item} className="rounded-md bg-paper p-4">
-              <p className="text-sm font-semibold text-ink">{item}</p>
-              <p className="mt-1 text-xs font-semibold text-clay">
-                Waiting for real parsing
-              </p>
+        {latestDraft ? (
+          <>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/60">
+              Saved {formatRunDate(latestDraft.createdAt)} from{" "}
+              {latestDraft.source}. This is still raw parser output, not the
+              final review-card UI.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-4">
+              {[
+                ["Places", getDraftCount(draft, "places")],
+                ["Transport", getDraftCount(draft, "transport")],
+                ["Stays", getDraftCount(draft, "stays")],
+                ["Activities", getDraftCount(draft, "activities")],
+              ].map(([label, count]) => (
+                <div key={label} className="rounded-md bg-paper p-4">
+                  <p className="text-sm font-semibold text-ink">{label}</p>
+                  <p className="mt-2 text-2xl font-semibold text-moss">
+                    {count}
+                  </p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+            {latestRun ? (
+              <div className="mt-5 rounded-md bg-paper p-4">
+                <p className="text-sm font-semibold text-ink">
+                  Run metadata
+                </p>
+                <p className="mt-2 text-sm leading-6 text-ink/60">
+                  Model: {latestRun.model ?? "unknown"} · Input characters:{" "}
+                  {latestRun.inputCharCount}
+                </p>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-ink/60">
+              The real version of this screen should show parsed trip overview,
+              dates and places, flights, stays, daily cards, missing details,
+              sensitive details, and manual additions from your uploaded
+              materials. For now, this screen is intentionally stopping before
+              fake data.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {[
+                "Trip overview",
+                "Dates and places",
+                "Flights and transport",
+                "Stays",
+                "Daily activities/cards",
+                "Missing or ambiguous details",
+                "Sensitive card details",
+                "Manual additions",
+              ].map((item) => (
+                <div key={item} className="rounded-md bg-paper p-4">
+                  <p className="text-sm font-semibold text-ink">{item}</p>
+                  <p className="mt-1 text-xs font-semibold text-clay">
+                    Waiting for real parsing
+                  </p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <SourceMaterials uploads={uploads} />
@@ -482,19 +617,26 @@ function DemoStructuredData({ uploads }: { uploads: TripUpload[] }) {
 }
 
 export default async function StructuredDataPage({
-  params
+  params,
+  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ error?: string; extraction?: string; style?: string }>;
 }) {
   const { tripId } = await params;
+  const { error, extraction } = await searchParams;
   const makerTrip = await getMakerTrip(tripId);
   const canShowUploads = makerTrip.isDemo || makerTrip.paymentStatus === "paid";
   const uploads = canShowUploads ? await listTripUploads(tripId) : [];
-  const settings = await getTripBuildSettings(tripId);
-  const style = await getTripStyleSettings({
-    fallbackAppName: makerTrip.name,
-    tripId,
-  });
+  const [settings, style, latestRun, latestDraft] = await Promise.all([
+    getTripBuildSettings(tripId),
+    getTripStyleSettings({
+      fallbackAppName: makerTrip.name,
+      tripId,
+    }),
+    makerTrip.isDemo ? Promise.resolve(null) : getLatestTripProcessingRun(tripId),
+    makerTrip.isDemo ? Promise.resolve(null) : getLatestTripDraftSnapshot(tripId),
+  ]);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -526,6 +668,11 @@ export default async function StructuredDataPage({
 
         {!makerTrip.isDemo ? (
           <RealTripFirstPass
+            error={error}
+            extractionEnabled={hasOpenAIExtractionConfig()}
+            extractionStatus={extraction}
+            latestDraft={latestDraft}
+            latestRun={latestRun}
             tripId={tripId}
             tripName={makerTrip.name}
             uploads={uploads}

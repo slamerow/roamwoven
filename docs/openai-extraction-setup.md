@@ -2,9 +2,9 @@
 
 ## Current Status
 
-OpenAI extraction plumbing exists, but Roamwoven does not call it from the maker UI yet.
+OpenAI extraction plumbing exists, and Roamwoven has a guarded maker action for the first text-only parse.
 
-This is intentional. The API code is behind:
+The maker UI now has a guarded `Build parsed draft` action for the first text-only beta parser, but it is disabled unless extraction is configured. The API code is behind:
 
 - `OPENAI_API_KEY`
 - `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`
@@ -32,7 +32,12 @@ OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS=4000
 ROAMWOVEN_ENABLE_AI_EXTRACTION=false
 ```
 
-Keep `ROAMWOVEN_ENABLE_AI_EXTRACTION=false` until the paid, explicit build action is ready.
+Keep `ROAMWOVEN_ENABLE_AI_EXTRACTION=false` in production until the database and first paid test path are ready.
+
+Also keep it `false` until the production database has the additive extraction tables from `db/schema.sql`:
+
+- `trip_processing_runs`
+- `trip_draft_snapshots`
 
 ## Cost Guardrails
 
@@ -54,23 +59,30 @@ Keep `ROAMWOVEN_ENABLE_AI_EXTRACTION=false` until the paid, explicit build actio
 - `lib/extraction/openai-trip-parser.ts`
   - Roamwoven trip-draft schema and prompt.
   - Accepts extracted text materials, not raw uploaded files.
+- `lib/extraction/trip-materials.ts`
+  - Collects pasted notes and small `.txt` uploads for the first beta parser.
+- `lib/extraction/processing-runs.ts`
+  - Creates processing run logs and stores raw draft snapshots.
+- `app/maker/trips/[tripId]/data/extract/route.ts`
+  - Paid, explicit text-only parse action.
+  - Requires `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`.
 
 ## Still Needed Before Turning It On
 
-1. Extract text from uploaded PDFs, Word docs, spreadsheets, and notes.
-2. Store extracted text or references in a table such as `extracted_documents`.
-3. Add a processing job table or narrow processing fields for run tracking.
-4. Add a paid, explicit `Build parsed draft` action.
-5. Persist the returned draft structured records.
-6. Render persisted draft records on the review screen.
-7. Track per-run estimated or actual OpenAI cost.
+1. Run the additive production SQL for `trip_processing_runs` and `trip_draft_snapshots`.
+2. Add the OpenAI API key to Vercel.
+3. Keep the flag disabled until ready for an intentional paid test.
+4. Test with pasted notes or a `.txt` file first.
+5. Convert the raw draft JSON into editable review cards.
+6. Extract text from uploaded PDFs, Word docs, spreadsheets, and images.
+7. Add better per-run estimated or actual OpenAI cost display.
 
 ## First Beta Target
 
 The lowest-risk first pass is notes/text-only extraction:
 
 - Pull `trip_uploads.user_note`.
-- Optionally include text extracted from `.txt` uploads.
+- Include small `.txt` uploads.
 - Send capped text to OpenAI.
 - Store the raw draft JSON and usage metadata.
 - Show the draft on `/maker/trips/[tripId]/data`.

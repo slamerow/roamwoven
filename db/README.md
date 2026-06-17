@@ -10,6 +10,8 @@ Ownership is part of the schema, not just app code:
 - Owner/trip/date indexes are included so dashboard and itinerary queries can scale beyond a small beta.
 - Normal maker reads/writes should use the user-scoped Supabase server client.
 - Service-role access is reserved for trusted backend jobs, such as Stripe webhook payment updates.
+- `trip_processing_runs` logs explicit parsing attempts, model/usage metadata, and failure states.
+- `trip_draft_snapshots` stores raw parser JSON drafts before those drafts are converted into editable trip records.
 
 The next database step is to turn this into real Supabase migrations and wire:
 
@@ -18,5 +20,6 @@ The next database step is to turn this into real Supabase migrations and wire:
 3. Dashboard trip listing.
 4. Upload records.
 5. Published trip snapshots.
+6. Production-safe extraction migrations before enabling `ROAMWOVEN_ENABLE_AI_EXTRACTION`.
 
 The prototype must keep building without Supabase env vars. In that mode, maker routes use the Wren's Adventure demo trip while the production code paths remain Supabase-ready.
