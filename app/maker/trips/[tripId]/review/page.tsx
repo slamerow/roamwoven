@@ -1,4 +1,6 @@
 import { ReviewFlowPanel } from "@/components/review-flow-panel";
+import { getMakerTrip } from "@/lib/trips";
+import { listTripUploads } from "@/lib/uploads";
 
 export default async function ReviewPage({
   params
@@ -6,6 +8,9 @@ export default async function ReviewPage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
+  const trip = await getMakerTrip(tripId);
+  const canReview = trip.isDemo || trip.paymentStatus === "paid";
+  const uploads = canReview ? await listTripUploads(tripId) : [];
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -18,12 +23,12 @@ export default async function ReviewPage({
             Confirm the important stuff
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Trip `{tripId}` has a beta review queue. Public launch will generate
-            these questions from extraction confidence and conflicts.
+            Review the materials for {trip.name} and choose what belongs in the
+            traveler app before clean trip data is generated.
           </p>
         </header>
 
-        <ReviewFlowPanel tripId={tripId} />
+        <ReviewFlowPanel trip={trip} uploads={uploads} />
       </div>
     </main>
   );

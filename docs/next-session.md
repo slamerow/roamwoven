@@ -38,6 +38,13 @@ Backend-ready pieces now exist:
 - Stripe setup checklist lives in `docs/stripe-setup.md`.
 - Stripe test checkout has been verified end to end. A test payment redirected back to Roamwoven, and after adding `service_role` grants in Supabase the trip moved to paid, showed `Step 2 of 5 complete`, and unlocked upload.
 - The paid checkout workspace state is now designed as a collapsed green `Checkout complete` bar with `Continue to upload`.
+- Production upload setup has now been verified on the Stripe-paid trip `e50f7e93-b2e9-4b8c-9097-92fce402d885`.
+  - The first upload-page refresh failed because production was missing `trip_uploads.file_size_bytes`.
+  - The corrected storage migration was run in Supabase using `trips.owner_user_id` and the `userId/tripId/...` storage path shape.
+  - `https://roamwoven.com/maker/trips/e50f7e93-b2e9-4b8c-9097-92fce402d885/upload` now loads.
+  - A notes-only intake item saved successfully and persisted after refresh as a real `trip_uploads` row.
+- The review step now uses the actual trip and saved upload state. Step 4 lets the maker choose optional app sections, confirm skipped modules stay hidden, and continue to the mocked clean-data step only after confirmation.
+- The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
 
 Live Supabase dev setup is partially complete:
 
@@ -49,7 +56,8 @@ Live Supabase dev setup is partially complete:
 - `SUPABASE_SERVICE_ROLE_KEY` is still blank because clipboard access from the Codex browser was blocked; it is only needed for trusted backend jobs like the Stripe webhook payment update.
 - `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000` because the current local dev server is running on port 3000.
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
-- `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`; rerun the schema SQL before testing real file uploads in Supabase.
+- `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`.
+- Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `(storage.foldername(name))[1] = auth.uid()::text` and match `trips.id::text = (storage.foldername(name))[2]` with `trips.owner_user_id = auth.uid()`.
 - The later table grants have now run successfully in Supabase.
 - Vercel project is created from `slamerow/roamwoven` on `main`.
 - Production deployment URL: `https://roamwoven.vercel.app`.
@@ -122,20 +130,20 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 ## Recommended Next Task
 
-Finish upload persistence verification, then move into payment/review plumbing:
+Continue hardening the post-payment maker flow:
 
-1. Use the custom domain for testing: `https://roamwoven.com/login?next=%2Fmaker`.
-2. Deploy the password-login/callback patch.
-3. Create or sign into a Supabase password account.
-4. Confirm `/maker` shows the signed-in dashboard rather than the old permission error.
-5. Create a real test trip and confirm it inserts with `owner_user_id`.
+1. Push and deploy the checkout-complete polish plus Step 4 review updates.
+2. Re-test the paid trip on `https://roamwoven.com`:
+   - Checkout box is collapsed green after payment.
+   - Upload page loads.
+   - Notes save and persist.
+   - Review page shows the saved materials and module toggles.
+3. Add a real file-upload smoke test with a small PDF or text file from the browser.
+4. Add a real persisted review/intake answer model so Step 4 choices survive refresh and can drive generated app modules.
+5. Start shaping the simulated first-pass output into the eventual structured data records.
 6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
-7. Rerun `db/schema.sql` in Supabase so the `trip-materials` bucket and storage policies exist.
-8. Create Stripe account/product/price when the business setup is ready.
-9. Set `STRIPE_SECRET_KEY`, `STRIPE_TRIP_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, and `SUPABASE_SERVICE_ROLE_KEY`.
-10. Verify paid-trip uploads write both Supabase Storage objects and `trip_uploads` rows.
 
-Keep upload/extraction mocked until trip persistence is working.
+Keep extraction mocked until payment, owner-scoped trip persistence, and upload storage are stable.
 
 Promo-code beta should exercise the same paid-trip lifecycle as normal checkout. Keep expensive extraction mocked until payment and owner-scoped trip persistence are both working.
 

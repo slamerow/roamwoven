@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, CalendarDays, MapPin, Plane, TableProperties } from "lucide-react";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
+import { getMakerTrip } from "@/lib/trips";
+import { listTripUploads } from "@/lib/uploads";
 
 function formatDate(date?: string | null) {
   if (!date) {
@@ -21,8 +23,10 @@ export default async function StructuredDataPage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
+  const makerTrip = await getMakerTrip(tripId);
+  const canShowUploads = makerTrip.isDemo || makerTrip.paymentStatus === "paid";
+  const uploads = canShowUploads ? await listTripUploads(tripId) : [];
   const trip = getAsiaDemoTrip();
-  const travelItems = trip.items.filter((item) => item.category === "arrival_departure");
   const stayLegs = trip.legs.filter((leg) => leg.stayName);
   const reviewItems = trip.items.filter((item) =>
     [item.title, item.description, item.address].some((value) =>
@@ -42,9 +46,9 @@ export default async function StructuredDataPage({
               Clean trip output
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-              Trip `{tripId}` is currently showing the imported Asia workbook.
-              This is the maker-side view Roamwoven will produce after upload
-              and review.
+              First-pass structured data for {makerTrip.name}. This beta view
+              still uses reference trip data until extraction is connected, but
+              the flow is now grounded in the materials saved for this trip.
             </p>
           </div>
           <Link
@@ -81,9 +85,9 @@ export default async function StructuredDataPage({
           <div className="rounded-md border border-ink/10 bg-white p-5">
             <Plane className="text-ink/70" size={22} />
             <p className="mt-4 text-3xl font-semibold text-ink">
-              {travelItems.length}
+              {uploads.length}
             </p>
-            <p className="mt-1 text-sm text-ink/60">Travel cards</p>
+            <p className="mt-1 text-sm text-ink/60">Source materials</p>
           </div>
         </section>
 
@@ -121,7 +125,7 @@ export default async function StructuredDataPage({
 
           <div className="rounded-md border border-ink/10 bg-white p-5">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-ink">Needs review</h2>
+              <h2 className="text-xl font-semibold text-ink">Review queue</h2>
               <span className="text-sm font-semibold text-clay">
                 {reviewItems.length} possible
               </span>
@@ -150,6 +154,42 @@ export default async function StructuredDataPage({
               ) : null}
             </div>
           </div>
+        </section>
+
+        <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-ink">
+                Source materials
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-ink/60">
+                These are the saved inputs this trip will use once extraction is
+                connected.
+              </p>
+            </div>
+            <span className="text-sm font-semibold text-moss">
+              {uploads.length} saved
+            </span>
+          </div>
+
+          {uploads.length > 0 ? (
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {uploads.map((upload) => (
+                <div key={upload.id} className="rounded-md bg-paper p-4">
+                  <p className="truncate text-sm font-semibold text-ink">
+                    {upload.originalFilename}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold capitalize text-moss">
+                    {upload.processingStatus}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-5 rounded-md bg-paper p-4 text-sm text-ink/60">
+              No saved materials yet.
+            </p>
+          )}
         </section>
       </div>
     </main>
