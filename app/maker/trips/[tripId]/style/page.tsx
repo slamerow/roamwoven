@@ -1,4 +1,5 @@
 import { StyleSettingsPanel } from "@/components/style-settings-panel";
+import { getMakerTrip } from "@/lib/trips";
 
 export default async function StylePage({
   params
@@ -6,6 +7,7 @@ export default async function StylePage({
   params: Promise<{ tripId: string }>;
 }) {
   const { tripId } = await params;
+  const trip = await getMakerTrip(tripId);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -18,12 +20,12 @@ export default async function StylePage({
             Make it feel like your trip
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Trip `{tripId}` keeps customization intentionally simple for V1:
-            name, palette, and later a cover image.
+            Keep customization simple for V1: app name, primary color, and a
+            theme direction.
           </p>
         </header>
 
-        <StyleSettingsPanel tripId={tripId} />
+        <StyleSettingsPanel initialAppName={trip.name} tripId={tripId} />
       </div>
     </main>
   );

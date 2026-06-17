@@ -31,8 +31,14 @@ export const APP_MODULES = [
   },
   {
     key: "weather",
-    title: "Weather and maps",
-    copy: "Forecast context, location groupings, and map-ready places.",
+    title: "Weather",
+    copy: "Forecast context for upcoming trips, hidden or softened for old sample trips.",
+    defaultEnabled: true,
+  },
+  {
+    key: "maps",
+    title: "Maps",
+    copy: "Location groupings and map-ready places from the itinerary.",
     defaultEnabled: true,
   },
   {
@@ -40,12 +46,6 @@ export const APP_MODULES = [
     title: "Photo album",
     copy: "A private follow-along album with dates and locations.",
     defaultEnabled: false,
-  },
-  {
-    key: "places",
-    title: "Saved places",
-    copy: "Restaurants, shops, beaches, museums, and ideas worth keeping.",
-    defaultEnabled: true,
   },
 ] as const;
 
@@ -63,7 +63,7 @@ export const BUILD_CONFIRMATIONS = [
   {
     key: "sensitive",
     title: "Sensitive details should stay private by default",
-    copy: "Home addresses, confirmation numbers, and personal notes should be handled carefully.",
+    copy: "Private residences, confirmation numbers, and personal notes should start as maker-only unless you choose to show them.",
   },
 ] as const;
 

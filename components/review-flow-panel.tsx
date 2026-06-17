@@ -5,8 +5,6 @@ import Link from "next/link";
 import {
   ArrowRight,
   CalendarDays,
-  CheckCircle2,
-  Circle,
   CloudSun,
   Languages,
   Map,
@@ -32,8 +30,8 @@ const moduleIcons: Record<AppModuleKey, typeof CalendarDays> = {
   search: Search,
   phrases: Languages,
   weather: CloudSun,
+  maps: Map,
   photos: Images,
-  places: Map,
 };
 
 function formatSize(bytes: number | null) {
@@ -90,10 +88,63 @@ export function ReviewFlowPanel({
     () => Math.round(((2 + checkedCount) / 5) * 100),
     [checkedCount]
   );
+  const steps = [
+    "Create trip",
+    "Pay once",
+    "Upload info",
+    "Confirm build",
+    "Create app",
+  ];
 
   return (
     <>
-      <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+      <section className="sticky top-0 z-10 -mx-6 border-b border-ink/10 bg-paper/95 px-6 py-3 backdrop-blur md:-mx-10 md:px-10">
+        <div className="mx-auto max-w-6xl">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+                Step 4 of 5
+              </p>
+              <h2 className="text-base font-semibold text-ink">
+                Confirm build
+              </h2>
+            </div>
+            <p className="hidden text-sm text-ink/60 md:block">
+              {uploads.length} material{uploads.length === 1 ? "" : "s"} saved ·{" "}
+              {enabledCount} section{enabledCount === 1 ? "" : "s"} selected
+            </p>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-ink/10">
+            <div
+              className="h-2 rounded-full bg-moss"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <div className="mt-2 grid grid-cols-5 gap-2 text-[11px] font-semibold text-ink/45">
+            {steps.map((step, index) => {
+              const complete = index < 3 || (index === 3 && canContinue);
+              const current = index === 3 && !canContinue;
+
+              return (
+                <span
+                  key={step}
+                  className={
+                    complete
+                      ? "text-moss"
+                      : current
+                        ? "text-clay"
+                        : "text-ink/35"
+                  }
+                >
+                  {step}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
         {saved ? (
           <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
             Build choices saved.
@@ -105,57 +156,14 @@ export function ReviewFlowPanel({
             try again.
           </p>
         ) : null}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-xl font-semibold text-ink">
-              Step 4 of 5: confirm the build
-            </h2>
-            <p className="mt-1 text-sm text-ink/60">
-              {uploads.length} material{uploads.length === 1 ? "" : "s"} saved.
-              {` `}
-              {enabledCount} app section{enabledCount === 1 ? "" : "s"} selected.
-            </p>
-          </div>
-          <div className="h-3 w-full rounded-full bg-ink/10 md:w-72">
-            <div
-              className="h-3 rounded-full bg-moss"
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-5">
-          {[
-            "Create trip",
-            "Pay once",
-            "Upload info",
-            "Confirm build",
-            "Generate app",
-          ].map((step, index) => {
-            const complete = index < 3 || (index === 3 && canContinue);
-            const current = index === 3 && !canContinue;
-            const Icon = complete ? CheckCircle2 : Circle;
-
-            return (
-              <div
-                key={step}
-                className={
-                  current
-                    ? "rounded-md border border-clay/30 bg-clay/5 p-4"
-                    : "rounded-md border border-ink/10 bg-paper p-4"
-                }
-              >
-                <Icon
-                  className={complete ? "text-moss" : "text-ink/35"}
-                  size={20}
-                />
-                <p className="mt-3 text-sm font-semibold text-ink">{step}</p>
-                <p className="mt-1 text-xs text-ink/55">
-                  {complete ? "Complete" : current ? "Now" : "Next"}
-                </p>
-              </div>
-            );
-          })}
+        <div>
+          <h2 className="text-xl font-semibold text-ink">
+            Confirm what belongs in the app
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-ink/60">
+            This controls the first app build. Later edits should update the app,
+            not spend another extraction pass.
+          </p>
         </div>
       </section>
 
@@ -203,13 +211,20 @@ export function ReviewFlowPanel({
                         size={22}
                       />
                       <span
+                        aria-hidden="true"
                         className={
                           enabled
-                            ? "rounded-full bg-moss px-2 py-1 text-xs font-semibold text-paper"
-                            : "rounded-full bg-ink/10 px-2 py-1 text-xs font-semibold text-ink/55"
+                            ? "flex h-6 w-11 items-center rounded-full bg-moss p-1"
+                            : "flex h-6 w-11 items-center rounded-full bg-ink/20 p-1"
                         }
                       >
-                        {enabled ? "On" : "Off"}
+                        <span
+                          className={
+                            enabled
+                              ? "ml-auto h-4 w-4 rounded-full bg-white"
+                              : "h-4 w-4 rounded-full bg-white"
+                          }
+                        />
                       </span>
                     </div>
                     <p className="mt-3 text-sm font-semibold text-ink">
@@ -226,7 +241,7 @@ export function ReviewFlowPanel({
 
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-xl font-semibold text-ink">
-              Confirm before generation
+              Confirm before build
             </h2>
             <div className="mt-5 space-y-3">
               {BUILD_CONFIRMATIONS.map((item) => (
@@ -301,8 +316,8 @@ export function ReviewFlowPanel({
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-lg font-semibold text-ink">Next step</h2>
             <p className="mt-2 text-sm leading-6 text-ink/60">
-              Generate the first clean structure, then review the app data before
-              choosing the final look.
+              Build the initial app from the materials and choices you confirmed.
+              Manual additions and corrections after this are app updates.
             </p>
             {canContinue ? (
               <form action={`/maker/trips/${trip.id}/review/settings`} method="post">
@@ -311,7 +326,7 @@ export function ReviewFlowPanel({
                   className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
                   type="submit"
                 >
-                  Generate first pass
+                  Build app draft
                   <ArrowRight size={16} />
                 </button>
               </form>

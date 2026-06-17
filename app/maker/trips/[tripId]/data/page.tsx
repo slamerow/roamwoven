@@ -89,7 +89,7 @@ function RealTripFirstPass({
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">
-            First pass is ready to simulate
+            App build is ready to simulate
           </h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
             Roamwoven has the materials for {tripName}. The next backend step is
@@ -116,7 +116,7 @@ function RealTripFirstPass({
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">Selected app sections</h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
-            These choices were confirmed before generation and will eventually
+            These choices were confirmed before the app build and will eventually
             drive which modules appear in the traveler app.
           </p>
           <div className="mt-5 grid gap-2">
