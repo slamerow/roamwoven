@@ -212,6 +212,22 @@ export async function markTripPaid(tripId: string) {
   }
 }
 
+export function canEditTripMaterials(trip: Pick<MakerTrip, "isDemo" | "paymentStatus" | "processingStatus">) {
+  const lockedProcessingStates = new Set([
+    "processing",
+    "parsed",
+    "generated",
+    "publishing",
+    "published",
+  ]);
+
+  return (
+    !trip.isDemo &&
+    trip.paymentStatus === "paid" &&
+    !lockedProcessingStates.has(trip.processingStatus)
+  );
+}
+
 export function canPersistTrips() {
   return hasSupabaseServerConfig();
 }

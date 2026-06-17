@@ -93,24 +93,36 @@ create table if not exists trip_items (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists trip_build_settings (
+  trip_id uuid primary key references trips(id) on delete cascade,
+  enabled_modules jsonb not null default '{}'::jsonb,
+  confirmations jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table trips enable row level security;
 alter table trip_uploads enable row level security;
 alter table trip_legs enable row level security;
 alter table trip_items enable row level security;
+alter table trip_build_settings enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on trips to anon;
 grant select, insert, update, delete on trip_uploads to anon;
 grant select, insert, update, delete on trip_legs to anon;
 grant select, insert, update, delete on trip_items to anon;
+grant select, insert, update, delete on trip_build_settings to anon;
 grant select, insert, update, delete on trips to authenticated;
 grant select, insert, update, delete on trip_uploads to authenticated;
 grant select, insert, update, delete on trip_legs to authenticated;
 grant select, insert, update, delete on trip_items to authenticated;
+grant select, insert, update, delete on trip_build_settings to authenticated;
 grant select, insert, update, delete on trips to service_role;
 grant select, insert, update, delete on trip_uploads to service_role;
 grant select, insert, update, delete on trip_legs to service_role;
 grant select, insert, update, delete on trip_items to service_role;
+grant select, insert, update, delete on trip_build_settings to service_role;
 
 create index if not exists trips_owner_user_id_idx
   on trips(owner_user_id);
@@ -134,6 +146,7 @@ drop policy if exists "Trip owners can manage trips" on trips;
 drop policy if exists "Trip owners can manage uploads" on trip_uploads;
 drop policy if exists "Trip owners can manage legs" on trip_legs;
 drop policy if exists "Trip owners can manage items" on trip_items;
+drop policy if exists "Trip owners can manage build settings" on trip_build_settings;
 
 create policy "Trip owners can manage trips"
   on trips
@@ -191,6 +204,24 @@ create policy "Trip owners can manage items"
     exists (
       select 1 from trips
       where trips.id = trip_items.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can manage build settings"
+  on trip_build_settings
+  for all
+  using (
+    exists (
+      select 1 from trips
+      where trips.id = trip_build_settings.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from trips
+      where trips.id = trip_build_settings.trip_id
         and trips.owner_user_id = auth.uid()
     )
   );

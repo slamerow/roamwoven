@@ -288,3 +288,58 @@ export async function uploadTripMaterials({
 
   return createdUploads;
 }
+
+export async function deleteTripUpload({
+  tripId,
+  uploadId,
+}: {
+  tripId: string;
+  uploadId: string;
+}) {
+  if (!hasSupabaseServerConfig()) {
+    throw new Error("Supabase server config is missing.");
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new UploadValidationError(
+      "auth-required",
+      "You must be signed in to delete materials."
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error: loadError } = await supabase
+    .from("trip_uploads")
+    .select("id,storage_path")
+    .eq("id", uploadId)
+    .eq("trip_id", tripId)
+    .single();
+
+  if (loadError || !data) {
+    throw new Error(`Unable to load upload: ${loadError?.message ?? "No row"}`);
+  }
+
+  const { error: deleteError } = await supabase
+    .from("trip_uploads")
+    .delete()
+    .eq("id", uploadId)
+    .eq("trip_id", tripId);
+
+  if (deleteError) {
+    throw new Error(`Unable to delete upload: ${deleteError.message}`);
+  }
+
+  const storagePath = String(data.storage_path ?? "");
+
+  if (storagePath) {
+    const { error: storageError } = await supabase.storage
+      .from(TRIP_MATERIALS_BUCKET)
+      .remove([storagePath]);
+
+    if (storageError) {
+      throw new Error(`Unable to delete stored file: ${storageError.message}`);
+    }
+  }
+}

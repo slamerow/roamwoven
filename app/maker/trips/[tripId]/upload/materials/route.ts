@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMakerTrip } from "@/lib/trips";
+import { canEditTripMaterials, getMakerTrip } from "@/lib/trips";
 import {
   UploadValidationError,
   uploadTripMaterials,
@@ -20,6 +20,11 @@ export async function POST(
 
   if (trip.isDemo) {
     uploadUrl.searchParams.set("error", "demo-upload");
+    return NextResponse.redirect(uploadUrl, 303);
+  }
+
+  if (!canEditTripMaterials(trip)) {
+    uploadUrl.searchParams.set("error", "materials-locked");
     return NextResponse.redirect(uploadUrl, 303);
   }
 

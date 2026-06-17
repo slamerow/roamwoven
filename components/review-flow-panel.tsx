@@ -15,85 +15,26 @@ import {
   Search,
   Hotel,
 } from "lucide-react";
+import {
+  APP_MODULES,
+  BUILD_CONFIRMATIONS,
+  type AppModuleKey,
+  type BuildConfirmationKey,
+  type TripBuildSettings,
+} from "@/lib/build-settings-config";
 import type { MakerTrip } from "@/lib/trips";
 import type { TripUpload } from "@/lib/uploads";
 
-const appModules = [
-  {
-    key: "itinerary",
-    title: "Daily itinerary",
-    copy: "Today cards, timed plans, reservations, and notes.",
-    icon: CalendarDays,
-    defaultEnabled: true,
-  },
-  {
-    key: "stays",
-    title: "Stays",
-    copy: "Hotels, rentals, addresses, check-in details, and host notes.",
-    icon: Hotel,
-    defaultEnabled: true,
-  },
-  {
-    key: "travel",
-    title: "Flights and transport",
-    copy: "Flights, trains, transfers, rental cars, and transit notes.",
-    icon: Plane,
-    defaultEnabled: true,
-  },
-  {
-    key: "search",
-    title: "Trip search",
-    copy: "Fast lookup across dates, places, confirmations, and notes.",
-    icon: Search,
-    defaultEnabled: true,
-  },
-  {
-    key: "phrases",
-    title: "Useful phrases",
-    copy: "Short practical language help by destination.",
-    icon: Languages,
-    defaultEnabled: true,
-  },
-  {
-    key: "weather",
-    title: "Weather and maps",
-    copy: "Forecast context, location groupings, and map-ready places.",
-    icon: CloudSun,
-    defaultEnabled: true,
-  },
-  {
-    key: "photos",
-    title: "Photo album",
-    copy: "A private follow-along album with dates and locations.",
-    icon: Images,
-    defaultEnabled: false,
-  },
-  {
-    key: "places",
-    title: "Saved places",
-    copy: "Restaurants, shops, beaches, museums, and ideas worth keeping.",
-    icon: Map,
-    defaultEnabled: true,
-  },
-];
-
-const confirmations = [
-  {
-    key: "materials",
-    title: "Uploaded materials look complete enough for a first pass",
-    copy: "You can add more later, but this starts the review cleanly.",
-  },
-  {
-    key: "optional",
-    title: "Skipped modules should stay hidden",
-    copy: "If there are no flights, photos, or phrases, the traveler app should not show filler.",
-  },
-  {
-    key: "sensitive",
-    title: "Sensitive details should stay private by default",
-    copy: "Home addresses, confirmation numbers, and personal notes should be handled carefully.",
-  },
-];
+const moduleIcons: Record<AppModuleKey, typeof CalendarDays> = {
+  itinerary: CalendarDays,
+  stays: Hotel,
+  travel: Plane,
+  search: Search,
+  phrases: Languages,
+  weather: CloudSun,
+  photos: Images,
+  places: Map,
+};
 
 function formatSize(bytes: number | null) {
   if (!bytes) {
@@ -121,23 +62,30 @@ function formatDate(value: string | null) {
 export function ReviewFlowPanel({
   trip,
   uploads,
+  settings,
+  saved,
+  error,
 }: {
   trip: MakerTrip;
   uploads: TripUpload[];
+  settings: TripBuildSettings;
+  saved?: boolean;
+  error?: boolean;
 }) {
   const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(
-    () =>
-      Object.fromEntries(
-        appModules.map((module) => [module.key, module.defaultEnabled])
-      )
+    () => settings.enabledModules
   );
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [checked, setChecked] = useState<Record<string, boolean>>(
+    () => settings.confirmations
+  );
 
-  const checkedCount = confirmations.filter(
+  const checkedCount = BUILD_CONFIRMATIONS.filter(
     (item) => checked[item.key]
   ).length;
   const enabledCount = Object.values(enabledModules).filter(Boolean).length;
-  const canContinue = uploads.length > 0 && checkedCount === confirmations.length;
+  const canContinue =
+    uploads.length > 0 && checkedCount === BUILD_CONFIRMATIONS.length;
+  const settingsPayload = JSON.stringify({ enabledModules, confirmations: checked });
   const percent = useMemo(
     () => Math.round(((2 + checkedCount) / 5) * 100),
     [checkedCount]
@@ -146,6 +94,17 @@ export function ReviewFlowPanel({
   return (
     <>
       <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+        {saved ? (
+          <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+            Build choices saved.
+          </p>
+        ) : null}
+        {error ? (
+          <p className="mb-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+            Build choices could not be saved. Check the build settings table and
+            try again.
+          </p>
+        ) : null}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-xl font-semibold text-ink">
@@ -218,8 +177,8 @@ export function ReviewFlowPanel({
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
-              {appModules.map((module) => {
-                const Icon = module.icon;
+              {APP_MODULES.map((module) => {
+                const Icon = moduleIcons[module.key];
                 const enabled = enabledModules[module.key];
 
                 return (
@@ -270,7 +229,7 @@ export function ReviewFlowPanel({
               Confirm before generation
             </h2>
             <div className="mt-5 space-y-3">
-              {confirmations.map((item) => (
+              {BUILD_CONFIRMATIONS.map((item) => (
                 <label
                   key={item.key}
                   className="flex cursor-pointer gap-3 rounded-md bg-paper p-4"
@@ -346,20 +305,23 @@ export function ReviewFlowPanel({
               choosing the final look.
             </p>
             {canContinue ? (
-              <Link
-                href={`/maker/trips/${trip.id}/data`}
-                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-              >
-                Generate first pass
-                <ArrowRight size={16} />
-              </Link>
+              <form action={`/maker/trips/${trip.id}/review/settings`} method="post">
+                <input name="settings" type="hidden" value={settingsPayload} />
+                <button
+                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+                  type="submit"
+                >
+                  Generate first pass
+                  <ArrowRight size={16} />
+                </button>
+              </form>
             ) : (
               <button
                 className="mt-5 w-full rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
                 disabled
                 type="button"
               >
-                Confirm {confirmations.length - checkedCount} more
+                Confirm {BUILD_CONFIRMATIONS.length - checkedCount} more
               </button>
             )}
           </section>

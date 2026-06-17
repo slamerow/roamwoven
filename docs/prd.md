@@ -292,6 +292,17 @@ Some travel plans are naturally single reservations, like a flight or dinner boo
 
 Example: "Road to Hana" should usually be the anchor activity for the day. "Wai'anapanapa State Park" may become a child stop or separate card if it has a reservation/permit, time window, or map-critical details. The review UI should be able to ask: "Should Wai'anapanapa appear as its own stop, or stay inside Road to Hana?"
 
+### Review Editing Principles
+
+The review screen is not only for answering generated questions. It should also let the maker add missing information manually.
+
+- Before generation, the maker can add/delete source materials and add manual entries for legs, flights/transport, lodging, activities, restaurants, notes, and placeholders.
+- Manual entries should be cheap structured writes, not a reason to rerun full AI extraction.
+- Before generation, adding a new PDF/doc/screenshot can simply attach to source materials for the first pass.
+- After generation/parsing starts, source materials should lock. New files should become an explicit revision/reprocess action with clear cost controls.
+- After generation, manual edits should update structured trip data directly and regenerate the traveler snapshot cheaply where possible.
+- The UI should make the cost boundary feel natural: "edit this detail" is cheap; "process more documents" is a deliberate action.
+
 ### Confidence Handling
 
 Confidence should be field-specific rather than one global threshold.

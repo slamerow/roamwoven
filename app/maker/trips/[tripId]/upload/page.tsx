@@ -1,7 +1,7 @@
-import { FileImage, FileSpreadsheet, FileText } from "lucide-react";
+import { FileImage, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { UploadIntakePanel } from "@/components/upload-intake-panel";
-import { getMakerTrip } from "@/lib/trips";
+import { canEditTripMaterials, getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
 
 const uploadTypes = [
@@ -26,6 +26,9 @@ const errorMessages: Record<string, string> = {
   "file-too-large": "One file is over the 25 MB beta limit.",
   "too-many-files": "Upload 20 files or fewer at a time.",
   "unsupported-file": "One file is not a supported beta file type.",
+  "delete-failed": "That material could not be deleted. Try again.",
+  "materials-locked":
+    "Materials are locked after processing starts. Create a revision instead.",
   "upload-failed":
     "The upload could not be saved. Check storage setup and try again."
 };
@@ -58,12 +61,13 @@ export default async function UploadPage({
   searchParams
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string; saved?: string }>;
+  searchParams: Promise<{ deleted?: string; error?: string; saved?: string }>;
 }) {
   const { tripId } = await params;
-  const { error, saved } = await searchParams;
+  const { deleted, error, saved } = await searchParams;
   const trip = await getMakerTrip(tripId);
   const canUpload = trip.isDemo || trip.paymentStatus === "paid";
+  const canEditMaterials = canEditTripMaterials(trip);
   const uploads = canUpload ? await listTripUploads(tripId) : [];
 
   return (
@@ -108,6 +112,11 @@ export default async function UploadPage({
                     Saved {saved} upload{saved === "1" ? "" : "s"}.
                   </p>
                 ) : null}
+                {deleted ? (
+                  <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+                    Material deleted.
+                  </p>
+                ) : null}
                 {error ? (
                   <p className="mb-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
                     {errorMessages[error] ?? errorMessages["upload-failed"]}
@@ -149,6 +158,9 @@ export default async function UploadPage({
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-ink/60">
                     Files and notes saved for this trip will stay here after refresh.
+                    {canEditMaterials
+                      ? " You can remove anything before generation starts."
+                      : " Materials lock once generation starts."}
                   </p>
                 </div>
                 {uploads.length > 0 ? (
@@ -166,7 +178,7 @@ export default async function UploadPage({
                   {uploads.map((upload) => (
                     <div
                       key={upload.id}
-                      className="grid gap-3 rounded-md bg-paper px-4 py-3 md:grid-cols-[1fr_auto_auto]"
+                      className="grid gap-3 rounded-md bg-paper px-4 py-3 md:grid-cols-[1fr_auto_auto_auto]"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-ink">
@@ -182,6 +194,20 @@ export default async function UploadPage({
                       <p className="text-sm font-semibold capitalize text-moss">
                         {upload.processingStatus}
                       </p>
+                      {canEditMaterials ? (
+                        <form
+                          action={`/maker/trips/${tripId}/upload/materials/${upload.id}/delete`}
+                          method="post"
+                        >
+                          <button
+                            aria-label={`Delete ${upload.originalFilename}`}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-ink/10 bg-white text-ink/55 transition hover:border-clay/30 hover:text-clay"
+                            type="submit"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </form>
+                      ) : null}
                     </div>
                   ))}
                 </div>

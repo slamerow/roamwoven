@@ -383,6 +383,14 @@ Historical/sample trips:
 - The traveler app should anchor "Today" to the first trip day when real calendar dates do not line up with the current date.
 - Live-only modules such as forecast weather should hide, mock, or clearly degrade for historical trips.
 
+Review editing and cost control:
+
+- The review screen should support manual creation of legs, travel items, lodging, activities, restaurants, notes, and placeholders.
+- Manual review edits should write structured records directly and should not rerun extraction.
+- Before generation starts, new files/docs can still be added to `trip_uploads` for the first extraction pass.
+- Once parsing/generation starts, source materials should lock. Additional documents should enter a revision/reprocess flow with explicit cost controls.
+- Regenerating the traveler snapshot from edited structured data should be cheap and separate from expensive document processing.
+
 ### clarification_questions
 
 Questions generated for the user during review.

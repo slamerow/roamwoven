@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, CalendarDays, MapPin, Plane, TableProperties } from "lucide-react";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
+import { APP_MODULES, type TripBuildSettings } from "@/lib/build-settings-config";
+import { getTripBuildSettings } from "@/lib/build-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
@@ -44,13 +46,18 @@ function RealTripFirstPass({
   tripId,
   tripName,
   uploads,
+  settings,
 }: {
   tripId: string;
   tripName: string;
   uploads: TripUpload[];
+  settings: TripBuildSettings;
 }) {
   const noteCount = uploads.filter((upload) => upload.storagePath === null).length;
   const fileCount = uploads.length - noteCount;
+  const selectedModules = APP_MODULES.filter(
+    (module) => settings.enabledModules[module.key]
+  );
 
   return (
     <>
@@ -107,20 +114,46 @@ function RealTripFirstPass({
         </div>
 
         <div className="rounded-md border border-ink/10 bg-white p-5">
-          <h2 className="text-xl font-semibold text-ink">Review queue</h2>
+          <h2 className="text-xl font-semibold text-ink">Selected app sections</h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
-            Once extraction runs, this section should show only the uncertain,
-            conflicting, or missing details from this trip.
+            These choices were confirmed before generation and will eventually
+            drive which modules appear in the traveler app.
           </p>
-          <div className="mt-5 rounded-md bg-paper p-4">
-            <p className="text-sm font-semibold text-ink">
-              No generated questions yet.
-            </p>
-            <p className="mt-1 text-sm leading-5 text-ink/60">
-              The current build keeps AI processing off until the paid upload
-              and review plumbing is solid.
-            </p>
+          <div className="mt-5 grid gap-2">
+            {selectedModules.map((module) => (
+              <div
+                key={module.key}
+                className="flex items-center justify-between rounded-md bg-paper px-4 py-3"
+              >
+                <span className="text-sm font-semibold text-ink">
+                  {module.title}
+                </span>
+                <span className="text-xs font-semibold text-moss">On</span>
+              </div>
+            ))}
+            {selectedModules.length === 0 ? (
+              <p className="rounded-md bg-paper p-4 text-sm text-ink/60">
+                No modules selected.
+              </p>
+            ) : null}
           </div>
+        </div>
+      </section>
+
+      <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+        <h2 className="text-xl font-semibold text-ink">Review queue</h2>
+        <p className="mt-3 text-sm leading-6 text-ink/60">
+          Once extraction runs, this section should show only the uncertain,
+          conflicting, or missing details from this trip.
+        </p>
+        <div className="mt-5 rounded-md bg-paper p-4">
+          <p className="text-sm font-semibold text-ink">
+            No generated questions yet.
+          </p>
+          <p className="mt-1 text-sm leading-5 text-ink/60">
+            The current build keeps AI processing off until the paid upload and
+            review plumbing is solid.
+          </p>
         </div>
       </section>
 
@@ -301,6 +334,7 @@ export default async function StructuredDataPage({
   const makerTrip = await getMakerTrip(tripId);
   const canShowUploads = makerTrip.isDemo || makerTrip.paymentStatus === "paid";
   const uploads = canShowUploads ? await listTripUploads(tripId) : [];
+  const settings = await getTripBuildSettings(tripId);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -335,6 +369,7 @@ export default async function StructuredDataPage({
             tripId={tripId}
             tripName={makerTrip.name}
             uploads={uploads}
+            settings={settings}
           />
         ) : (
           <DemoStructuredData tripId={tripId} uploads={uploads} />

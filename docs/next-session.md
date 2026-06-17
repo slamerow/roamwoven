@@ -30,6 +30,7 @@ Backend-ready pieces now exist:
 - Real trip queries and inserts are scoped by `owner_user_id`.
 - `lib/uploads.ts` stores paid-trip materials in Supabase Storage and creates owner-scoped `trip_uploads` rows.
 - The upload page now posts real multipart uploads, shows saved materials after refresh, and keeps upload processing gated behind payment.
+- Saved materials can be deleted before generation/processing starts, so bad test inputs can be removed and replaced. Material edits should lock once parsing/generation begins; future revisions should use a revision flow instead of mutating source inputs in place.
 - Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
@@ -44,6 +45,7 @@ Backend-ready pieces now exist:
   - `https://roamwoven.com/maker/trips/e50f7e93-b2e9-4b8c-9097-92fce402d885/upload` now loads.
   - A notes-only intake item saved successfully and persisted after refresh as a real `trip_uploads` row.
 - The review step now uses the actual trip and saved upload state. Step 4 lets the maker choose optional app sections, confirm skipped modules stay hidden, and continue to the mocked clean-data step only after confirmation.
+- Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
 - The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
 
 Live Supabase dev setup is partially complete:
@@ -57,6 +59,7 @@ Live Supabase dev setup is partially complete:
 - `NEXT_PUBLIC_APP_URL` is set to `http://localhost:3000` because the current local dev server is running on port 3000.
 - `db/schema.sql` was pasted and run successfully in Supabase SQL editor.
 - `db/schema.sql` now includes the `trip-materials` private storage bucket, storage object policies, and `trip_uploads.file_size_bytes`.
+- `db/schema.sql` now includes `trip_build_settings`; run the updated schema/grants in Supabase before testing persisted Step 4 settings on production.
 - Important storage policy detail: uploaded files use `userId/tripId/uploadId/filename`, so storage policies should check `(storage.foldername(name))[1] = auth.uid()::text` and match `trips.id::text = (storage.foldername(name))[2]` with `trips.owner_user_id = auth.uid()`.
 - The later table grants have now run successfully in Supabase.
 - Vercel project is created from `slamerow/roamwoven` on `main`.
@@ -121,6 +124,7 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 - Generated apps should not force travel modules. If a customer does not include flights, the traveler app should not show a flight placeholder just to fill a template.
 - Historical/sample itineraries are valid beta inputs. Do not require old docs to be rewritten with future dates. If dates do not line up with the current day, the traveler app should anchor "Today" to the first trip day, like the Wren's Adventure behavior.
 - Activity extraction should preserve the traveler's mental model, not maximize card count. Broad day arcs such as "Road to Hana" can be anchor activities. Named stops such as "Wai'anapanapa State Park" can become child stops or separate cards when they have permits, time windows, map importance, or enough standalone detail. Ambiguous cases should generate review questions.
+- Review needs both generated questions and manual additions. Before generation, users can add/delete source docs and manually add legs, flights, stays, activities, restaurants, notes, or placeholders. After generation starts, manual edits should update structured data cheaply, while adding new docs should be an explicit revision/reprocess path with cost controls.
 - Roamwoven is deployed on Vercel Pro and the custom domain is live at `https://roamwoven.com`.
 - The landing page should be the public product homepage, not a login-first surface. It should explain what Roamwoven does, use real/generated traveler-app screenshots as the money piece, and can later include clickable demos or embedded previews. Login should be a clear action from the homepage, not the homepage itself.
 - The public demo should not remain the thin scaffold currently at `/t/demo`. It should use the Wren's Adventure traveler-app shell or at least screenshots/clickable captures of that richer experience, because the polished traveler app is the core proof point.

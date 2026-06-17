@@ -174,6 +174,7 @@ Acceptance criteria:
 
 - User can upload multiple files.
 - User can paste notes into a text area.
+- User can delete wrong saved materials before parsing/generation starts.
 - User can optionally add a note/context label per upload.
 - Upload list shows file name, type, size, and status.
 
@@ -194,6 +195,7 @@ Acceptance criteria:
 - `trip_uploads` records are created.
 - Uploads are scoped to trip owner.
 - Basic file size/type limits exist.
+- Materials lock once parsing/generation starts; later changes should use a revision flow.
 
 ### M2.3 Text Extraction Prototype
 
@@ -351,6 +353,20 @@ Acceptance criteria:
 - User can answer, skip, or use placeholder where allowed.
 - Skipping never creates an empty broken card; it creates a calm placeholder or marks the item intentionally hidden.
 - User can resolve grouping questions such as "own card," "keep inside the day activity," or "hide from traveler app."
+
+### M4.2a Manual Review Additions
+
+Let makers add missing structured details without rerunning extraction.
+
+Acceptance criteria:
+
+- User can manually add a leg/city.
+- User can manually add a flight/transport item.
+- User can manually add lodging.
+- User can manually add an activity, restaurant, note, or placeholder.
+- Manual additions are stored as structured draft records with source marked as manual.
+- Manual additions do not trigger expensive document processing.
+- If the user wants to add more files after generation starts, the app routes them into a deliberate revision/reprocess flow.
 
 ### M4.3 Question Types
 
