@@ -1,18 +1,9 @@
 import Link from "next/link";
+import { ArrowRight, CalendarDays, MapPin, Plane, TableProperties } from "lucide-react";
 import {
-  AlertTriangle,
-  ArrowRight,
-  CalendarDays,
-  CheckCircle2,
-  Flag,
-  ListPlus,
-  MapPin,
-  Pencil,
-  Plane,
-  Plus,
-  TableProperties,
-  Trash2,
-} from "lucide-react";
+  StructuredReviewPanel,
+  type ReviewSection,
+} from "@/components/structured-review-panel";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import { APP_MODULES, type TripBuildSettings } from "@/lib/build-settings-config";
 import { getTripBuildSettings } from "@/lib/build-settings";
@@ -24,25 +15,6 @@ import {
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
-
-type ReviewTone = "good" | "warning" | "sensitive" | "manual";
-
-type ReviewItem = {
-  id: string;
-  title: string;
-  meta: string;
-  detail: string;
-  status: "confirmed" | "needs_review" | "draft" | "protected";
-};
-
-type ReviewSection = {
-  id: string;
-  title: string;
-  eyebrow: string;
-  summary: string;
-  tone: ReviewTone;
-  items: ReviewItem[];
-};
 
 function formatDate(date?: string | null) {
   if (!date) {
@@ -78,182 +50,6 @@ function formatSize(bytes: number | null) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function statusLabel(status: ReviewItem["status"]) {
-  if (status === "confirmed") {
-    return "Confirmed";
-  }
-
-  if (status === "protected") {
-    return "Protect detail";
-  }
-
-  if (status === "needs_review") {
-    return "Needs review";
-  }
-
-  return "Draft";
-}
-
-function toneClasses(tone: ReviewTone) {
-  if (tone === "warning") {
-    return "border-clay/25 bg-clay/10 text-clay";
-  }
-
-  if (tone === "sensitive") {
-    return "border-tide/25 bg-tide/10 text-tide";
-  }
-
-  if (tone === "manual") {
-    return "border-ink/15 bg-paper text-ink/65";
-  }
-
-  return "border-moss/25 bg-moss/10 text-moss";
-}
-
-function ReviewControls({ itemTitle }: { itemTitle: string }) {
-  const controls = [
-    { label: "Edit item", icon: Pencil },
-    { label: "Add item", icon: Plus },
-    { label: "Delete item", icon: Trash2 },
-    { label: "Mark as confirmed", icon: CheckCircle2 },
-    { label: "Flag as needs review", icon: Flag },
-  ];
-
-  return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {controls.map((control) => {
-        const Icon = control.icon;
-
-        return (
-          <button
-            aria-label={`${control.label}: ${itemTitle}`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-ink/10 bg-white text-ink/55 transition hover:border-moss/30 hover:text-moss"
-            key={control.label}
-            title={control.label}
-            type="button"
-          >
-            <Icon size={15} />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function StructuredReviewSection({ section }: { section: ReviewSection }) {
-  return (
-    <section className="rounded-md border border-ink/10 bg-white p-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
-            {section.eyebrow}
-          </p>
-          <h2 className="mt-2 text-xl font-semibold text-ink">
-            {section.title}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-            {section.summary}
-          </p>
-        </div>
-        <span
-          className={`rounded-md border px-3 py-2 text-sm font-semibold ${toneClasses(
-            section.tone
-          )}`}
-        >
-          {section.items.length} item{section.items.length === 1 ? "" : "s"}
-        </span>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        {section.items.map((item) => (
-          <article
-            className="rounded-md border border-ink/10 bg-paper p-4"
-            key={item.id}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink">{item.title}</p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
-                  {item.meta}
-                </p>
-              </div>
-              <span
-                className={`shrink-0 rounded-sm px-2 py-1 text-xs font-semibold ${
-                  item.status === "confirmed"
-                    ? "bg-moss/10 text-moss"
-                    : item.status === "protected"
-                      ? "bg-tide/10 text-tide"
-                      : item.status === "needs_review"
-                        ? "bg-clay/10 text-clay"
-                        : "bg-ink/10 text-ink/55"
-                }`}
-              >
-                {statusLabel(item.status)}
-              </span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-ink/60">{item.detail}</p>
-            <ReviewControls itemTitle={item.title} />
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function StructuredReviewDeck({
-  sections,
-}: {
-  sections: ReviewSection[];
-}) {
-  const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);
-  const needsReview = sections.reduce(
-    (sum, section) =>
-      sum +
-      section.items.filter(
-        (item) => item.status === "needs_review" || item.status === "protected"
-      ).length,
-    0
-  );
-  const confirmed = sections.reduce(
-    (sum, section) =>
-      sum + section.items.filter((item) => item.status === "confirmed").length,
-    0
-  );
-
-  return (
-    <>
-      <section className="mt-8 grid gap-4 md:grid-cols-4">
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <TableProperties className="text-moss" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">{totalItems}</p>
-          <p className="mt-1 text-sm text-ink/60">Reviewable records</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <CheckCircle2 className="text-moss" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">{confirmed}</p>
-          <p className="mt-1 text-sm text-ink/60">Marked confirmed</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <AlertTriangle className="text-clay" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">{needsReview}</p>
-          <p className="mt-1 text-sm text-ink/60">Need review or protection</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <ListPlus className="text-tide" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">UI</p>
-          <p className="mt-1 text-sm text-ink/60">Mocked controls only</p>
-        </div>
-      </section>
-
-      <section className="mt-8 space-y-6">
-        {sections.map((section) => (
-          <StructuredReviewSection key={section.id} section={section} />
-        ))}
-      </section>
-    </>
-  );
 }
 
 function getStylePalette(style: TripStyleSettings) {
@@ -404,7 +200,7 @@ function RealTripFirstPass({
         </div>
       </section>
 
-      <StructuredReviewDeck sections={sections} />
+      <StructuredReviewPanel initialSections={sections} />
 
       <SourceMaterials uploads={uploads} />
 
@@ -834,7 +630,7 @@ function DemoStructuredData({ uploads }: { uploads: TripUpload[] }) {
 
   return (
     <>
-      <StructuredReviewDeck sections={sections} />
+      <StructuredReviewPanel initialSections={sections} />
       <SourceMaterials uploads={uploads} />
     </>
   );

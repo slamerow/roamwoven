@@ -53,7 +53,7 @@ Backend-ready pieces now exist:
   - Demo trips derive review sections from `data/asia-trip-seed.json`.
   - Real paid trips use saved uploads, selected modules, and mocked review records.
   - Sections cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
-  - Each review item shows UI-only controls for edit, add, delete, mark confirmed, and flag as needs review. These controls do not persist yet.
+  - Each review item has local UI controls for edit, add, delete, mark confirmed, and flag as needs review. These controls update browser state and counters, but do not persist yet.
   - Sensitive details are represented as card-detail protection candidates; no privacy model was finalized.
 - The design picker keeps dropdowns for secondary/accent/soft colors and now also lets makers click the visible swatches.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
@@ -169,7 +169,7 @@ Continue hardening the post-payment maker flow:
    - Design choices save and the swatches are clickable.
    - Draft review loads after design and shows the structured review sections.
 3. Add a real file-upload smoke test with a small PDF or text file from the browser.
-4. Decide which draft-review controls should persist first: item status, edits, deletion, or manual additions.
+4. Test the local draft-review controls and decide which actions should persist first: item status, edits, deletion, or manual additions.
 5. Add a real persisted review/intake answer model so choices survive refresh and can drive generated app modules.
 6. Start shaping the simulated first-pass output into the eventual structured data records.
 7. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
