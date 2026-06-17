@@ -105,10 +105,18 @@ create table if not exists trip_style_settings (
   trip_id uuid primary key references trips(id) on delete cascade,
   app_name text,
   primary_color text not null default '#526247',
+  secondary_color text,
+  accent_color text,
+  soft_color text,
   theme_direction text not null default 'rustic_adventure',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists trip_style_settings
+  add column if not exists secondary_color text,
+  add column if not exists accent_color text,
+  add column if not exists soft_color text;
 
 alter table trips enable row level security;
 alter table trip_uploads enable row level security;

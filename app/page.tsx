@@ -41,9 +41,9 @@ const craftNotes = [
     icon: Route
   },
   {
-    title: "Private by default",
+    title: "Share what you choose",
     description:
-      "Personal details stay maker-only unless you decide they belong in the traveler app.",
+      "Use no password, protect the whole app, or keep photo sharing behind its own password.",
     icon: ShieldCheck
   }
 ];
@@ -89,6 +89,19 @@ const demoPanels = [
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-paper">
+      <header className="absolute left-0 right-0 top-0 z-10">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5 md:px-10">
+          <Link className="text-sm font-semibold text-ink" href="/">
+            Roamwoven
+          </Link>
+          <Link
+            href="/login?next=%2Fmaker"
+            className="rounded-md border border-ink/20 bg-paper/80 px-4 py-2 text-sm font-semibold text-ink backdrop-blur"
+          >
+            Log in
+          </Link>
+        </div>
+      </header>
       <section className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 content-center gap-10 px-6 py-10 md:grid-cols-[1.05fr_0.95fr] md:px-10">
         <div className="flex flex-col justify-center">
           <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-moss">
@@ -125,12 +138,6 @@ export default function HomePage() {
               className="inline-flex items-center gap-2 rounded-md border border-ink/20 px-5 py-3 text-sm font-semibold text-ink"
             >
               View demo app
-            </Link>
-            <Link
-              href="/login?next=%2Fmaker"
-              className="inline-flex items-center gap-2 rounded-md border border-ink/20 px-5 py-3 text-sm font-semibold text-ink"
-            >
-              Log in
             </Link>
           </div>
         </div>

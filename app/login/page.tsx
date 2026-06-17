@@ -143,7 +143,7 @@ export default async function LoginPage({
           <input name="next" type="hidden" value={next} />
           <label className="block">
             <span className="text-sm font-semibold text-ink">
-              Email link fallback
+              Magic link
             </span>
             <input
               className="mt-2 w-full rounded-md border border-ink/15 px-3 py-3 text-sm"
@@ -167,7 +167,7 @@ export default async function LoginPage({
             disabled={!authConfigured}
             type="submit"
           >
-            Email me a sign-in link
+            Email me a login link
           </button>
         </form>
       </div>

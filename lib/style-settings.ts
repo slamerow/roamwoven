@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   DEFAULT_PRIMARY_COLOR,
   DEFAULT_THEME_DIRECTION,
+  derivePalette,
+  derivePaletteOptions,
   isHexColor,
   isThemeDirectionKey,
   type ThemeDirectionKey,
@@ -12,6 +14,9 @@ import {
 type TripStyleSettingsRow = {
   app_name: string | null;
   primary_color: string | null;
+  secondary_color: string | null;
+  accent_color: string | null;
+  soft_color: string | null;
   theme_direction: string | null;
   updated_at: string | null;
 };
@@ -22,9 +27,14 @@ function hasSupabaseServerConfig() {
 }
 
 export function getDefaultStyleSettings(appName: string): TripStyleSettings {
+  const palette = derivePalette(DEFAULT_PRIMARY_COLOR);
+
   return {
     appName,
     primaryColor: DEFAULT_PRIMARY_COLOR,
+    secondaryColor: palette.secondary,
+    accentColor: palette.accent,
+    softColor: palette.soft,
     themeDirection: DEFAULT_THEME_DIRECTION,
     updatedAt: null,
   };
@@ -36,10 +46,28 @@ function normalizeStyleSettings(
 ): TripStyleSettings {
   const themeDirection = row?.theme_direction ?? DEFAULT_THEME_DIRECTION;
   const primaryColor = row?.primary_color ?? DEFAULT_PRIMARY_COLOR;
+  const palette = derivePalette(primaryColor);
+  const paletteOptions = derivePaletteOptions(primaryColor);
+  const secondaryColor = row?.secondary_color ?? palette.secondary;
+  const accentColor = row?.accent_color ?? palette.accent;
+  const softColor = row?.soft_color ?? palette.soft;
 
   return {
     appName: row?.app_name?.trim() || fallbackAppName,
     primaryColor: isHexColor(primaryColor) ? primaryColor : DEFAULT_PRIMARY_COLOR,
+    secondaryColor:
+      isHexColor(secondaryColor) &&
+      paletteOptions.secondary.includes(secondaryColor)
+        ? secondaryColor
+        : palette.secondary,
+    accentColor:
+      isHexColor(accentColor) && paletteOptions.accent.includes(accentColor)
+        ? accentColor
+        : palette.accent,
+    softColor:
+      isHexColor(softColor) && paletteOptions.soft.includes(softColor)
+        ? softColor
+        : palette.soft,
     themeDirection: isThemeDirectionKey(themeDirection)
       ? themeDirection
       : DEFAULT_THEME_DIRECTION,
@@ -61,7 +89,9 @@ export async function getTripStyleSettings({
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("trip_style_settings")
-    .select("app_name,primary_color,theme_direction,updated_at")
+    .select(
+      "app_name,primary_color,secondary_color,accent_color,soft_color,theme_direction,updated_at"
+    )
     .eq("trip_id", tripId)
     .maybeSingle();
 
@@ -78,12 +108,18 @@ export async function getTripStyleSettings({
 
 export async function saveTripStyleSettings({
   appName,
+  accentColor,
   primaryColor,
+  secondaryColor,
+  softColor,
   themeDirection,
   tripId,
 }: {
   appName: string;
+  accentColor: string;
   primaryColor: string;
+  secondaryColor: string;
+  softColor: string;
   themeDirection: ThemeDirectionKey;
   tripId: string;
 }) {
@@ -95,6 +131,9 @@ export async function saveTripStyleSettings({
         trip_id: tripId,
         app_name: appName.trim(),
         primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        accent_color: accentColor,
+        soft_color: softColor,
         theme_direction: themeDirection,
         updated_at: new Date().toISOString(),
       },

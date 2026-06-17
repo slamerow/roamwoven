@@ -62,8 +62,8 @@ export const BUILD_CONFIRMATIONS = [
   },
   {
     key: "sensitive",
-    title: "Sensitive details should stay private by default",
-    copy: "Private residences, confirmation numbers, and personal notes should start as maker-only unless you choose to show them.",
+    title: "Sensitive card details should be reviewed before sharing",
+    copy: "Cards with exact private addresses, codes, confirmations, or personal notes can keep those details behind a password.",
   },
 ] as const;
 

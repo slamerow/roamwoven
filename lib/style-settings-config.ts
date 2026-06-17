@@ -2,23 +2,36 @@ export const THEME_DIRECTIONS = [
   {
     key: "modern_futuristic",
     name: "Modern / Futuristic",
-    description: "Crisp, precise, and high-contrast.",
-    surface: "#f5f7f4",
-    text: "#15191d",
+    description: "Glass, precision, slim type, and a sharper digital edge.",
+    surface: "#f6f8fb",
+    text: "#10161d",
+    fontFamily:
+      "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    headingClass: "font-semibold",
+    cardRadius: "24px",
+    cardShadow: "0 24px 80px rgba(16, 22, 29, 0.18)",
   },
   {
     key: "rustic_adventure",
     name: "Rustic / Adventure",
-    description: "Grounded, outdoorsy, and close to the current reference app.",
+    description: "Map-room warmth, sturdy cards, field notes, and worn-in texture.",
     surface: "#faf8f2",
     text: "#20211f",
+    fontFamily: "Georgia, 'Times New Roman', serif",
+    headingClass: "font-semibold",
+    cardRadius: "14px",
+    cardShadow: "0 18px 48px rgba(53, 43, 31, 0.2)",
   },
   {
     key: "whimsical_fantasy",
     name: "Whimsical / Fantasy",
-    description: "Storybook, soft, and playful without getting childish.",
-    surface: "#fbf3df",
+    description: "Storybook, ornate, softer edges, and a little enchanted.",
+    surface: "#fcf4e6",
     text: "#292432",
+    fontFamily: "Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif",
+    headingClass: "font-bold",
+    cardRadius: "30px",
+    cardShadow: "0 22px 64px rgba(41, 36, 50, 0.18)",
   },
 ] as const;
 
@@ -27,6 +40,9 @@ export type ThemeDirectionKey = (typeof THEME_DIRECTIONS)[number]["key"];
 export type TripStyleSettings = {
   appName: string;
   primaryColor: string;
+  secondaryColor: string | null;
+  accentColor: string | null;
+  softColor: string | null;
   themeDirection: ThemeDirectionKey;
   updatedAt: string | null;
 };
@@ -120,6 +136,33 @@ export function derivePalette(primary: string) {
     secondary: hslToHex(secondaryHue, Math.min(0.42, s * 0.72 + 0.08), 0.42),
     accent: hslToHex(accentHue, Math.min(0.5, s * 0.8 + 0.12), 0.56),
     soft: hslToHex(h, Math.min(0.22, s * 0.35), 0.94),
+  };
+}
+
+export function derivePaletteOptions(primary: string) {
+  const { h, s } = rgbToHsl(hexToRgb(primary));
+  const softened = Math.min(0.5, s * 0.75 + 0.1);
+  const grounded = Math.min(0.4, s * 0.55 + 0.08);
+
+  return {
+    secondary: [
+      hslToHex((h + 30) % 360, grounded, 0.4),
+      hslToHex((h + 60) % 360, grounded, 0.44),
+      hslToHex((h + 330) % 360, grounded, 0.42),
+      hslToHex((h + 210) % 360, Math.min(0.32, softened), 0.38),
+    ],
+    accent: [
+      hslToHex((h + 180) % 360, softened, 0.54),
+      hslToHex((h + 145) % 360, softened, 0.5),
+      hslToHex((h + 220) % 360, softened, 0.58),
+      hslToHex((h + 25) % 360, Math.min(0.58, s + 0.12), 0.56),
+    ],
+    soft: [
+      hslToHex(h, Math.min(0.2, s * 0.32), 0.94),
+      hslToHex((h + 35) % 360, Math.min(0.18, s * 0.25), 0.93),
+      hslToHex((h + 180) % 360, Math.min(0.16, s * 0.22), 0.95),
+      "#f7f2e8",
+    ],
   };
 }
 
