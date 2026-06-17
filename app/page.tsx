@@ -23,27 +23,27 @@ const perfectFor = [
   {
     title: "Family adventures",
     description:
-      "Keep kids, grandparents, and follow-along family in the loop without forwarding every email or spreadsheet."
+      "Keep kids, grandparents, and follow-along family in the loop, with an easy place to share pictures from the trip."
   }
 ];
 
 const craftNotes = [
   {
-    title: "Made from your real plans",
+    title: "Made from YOUR plans",
     description:
-      "Start with the confirmations, notes, screenshots, and documents you already have.",
+      "Simply drag and drop the confirmations, notes, screenshots, and documents you already have.",
     icon: Hammer
   },
   {
-    title: "Calm when travel gets busy",
+    title: "Organized for the actual trip",
     description:
-      "The finished app is quick to scan, easy to search, and ready when plans get complicated.",
+      "Roamwoven turns scattered trip details into a clear app organized by day, place, and type of plan.",
     icon: Route
   },
   {
-    title: "Share what you choose",
+    title: "Bring people along",
     description:
-      "Use no password, protect the whole app, or keep photo sharing behind its own password.",
+      "Let friends and family follow along, see updates, and share photos while your trip details stay protected.",
     icon: ShieldCheck
   }
 ];
@@ -51,37 +51,37 @@ const craftNotes = [
 const demoPanels = [
   {
     eyebrow: "Today",
-    title: "Swipe through the day",
+    title: "See what is happening today",
     description:
-      "A clean daily feed keeps flights, stays, activities, meals, and notes in the order you need them.",
+      "The Today screen shows flights, check-ins, activities, meals, and notes in the order you need them.",
     image: "/demo/example-today.jpg"
   },
   {
     eyebrow: "Details",
-    title: "Tap a card for the full story",
+    title: "Open the details when you need them",
     description:
-      "Confirmation numbers, addresses, notes, links, and context live inside the card instead of buried in your inbox.",
+      "Confirmation numbers, addresses, links, notes, and context live inside the right card instead of buried in your inbox.",
     image: "/demo/example-detail.jpg"
   },
   {
     eyebrow: "Browse",
-    title: "Jump by leg, category, or date",
+    title: "Find plans by day, place, or type",
     description:
-      "Find a city, all food plans, or a specific calendar day in a couple of taps.",
+      "Jump to a city, a travel day, every meal plan, or the one reservation you are trying to find.",
     image: "/demo/example-calendar.jpg"
   },
   {
     eyebrow: "Tools",
-    title: "Search, weather, phrases, and maps",
+    title: "Keep practical tools close",
     description:
-      "The top controls keep practical travel tools close without turning the app into clutter.",
+      "Search, weather, maps, useful phrases, and route context stay nearby without turning the app into clutter.",
     image: "/demo/example-map.jpg"
   },
   {
     eyebrow: "Photos",
-    title: "A follow-along album",
+    title: "Share photos with your people",
     description:
-      "Friends and family can follow the trip through photos tagged by place, date, and moment.",
+      "Friends and family can follow the trip through pictures organized by place, date, and moment.",
     image: null
   }
 ];
@@ -108,16 +108,16 @@ export default function HomePage() {
             The superapp for your next adventure
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
-            All the information you need, right at your fingertips. It&apos;s
-            vacation time. Don&apos;t spend it digging through emails and PDFs.
+            All the information you need, right at your fingertips. Don&apos;t
+            spend vacation time digging through emails and PDFs.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
             Roamwoven is a custom one-stop shop for your travels: flight and
-            hotel details, itinerary info, useful phrases, and all the
-            information you need, never more than two or three clicks away.
+            hotel info, itinerary details, useful phrases, and everything you
+            need, never more than two or three clicks away.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
-            I&apos;m a travel nerd. When I took my family on a five-month
+            I&apos;m a travel planning nerd. When I took my family on a five-month
             sabbatical across 11 countries, I used AI to build the travel app
             of my dreams. Roamwoven lets you build your own superapp in just 30
             to 60 minutes.
@@ -203,13 +203,12 @@ export default function HomePage() {
               What it can do
             </p>
             <h2 className="mt-3 text-4xl font-semibold leading-tight text-ink md:text-5xl">
-              The practical stuff stays close.
+              Know what is happening today.
             </h2>
             <p className="mt-4 text-lg leading-8 text-ink/70">
-              The first screen sells the feeling. The next screens show the
-              specifics: tap into details, browse by the way your brain works,
-              search across the trip, check weather and phrases, visualize the
-              route, and share photos with people following along.
+              Your app starts with the current day, then keeps the rest of the
+              trip easy to reach: details, dates, places, maps, phrases,
+              weather, and photos for friends and family following along.
             </p>
           </div>
 
@@ -283,8 +282,8 @@ function PhotoPlaceholder() {
           ))}
         </div>
         <p className="mt-auto rounded-md bg-white px-3 py-2 text-[11px] leading-4 text-ink/60">
-          Dummy photo data will show friends and family a tagged, organized
-          album without exposing the maker dashboard.
+          Friends and family can follow the trip through a simple, organized
+          album.
         </p>
       </div>
     </div>
