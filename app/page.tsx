@@ -104,9 +104,6 @@ export default function HomePage() {
       </header>
       <section className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 content-center gap-10 px-6 py-10 md:grid-cols-[1.05fr_0.95fr] md:px-10">
         <div className="flex flex-col justify-center">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-            Roamwoven / travel app foundry
-          </p>
           <h1 className="max-w-3xl text-5xl font-semibold leading-tight text-ink md:text-7xl">
             The superapp for your next adventure
           </h1>
