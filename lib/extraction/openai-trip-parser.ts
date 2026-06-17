@@ -151,6 +151,8 @@ const systemPrompt = [
   "Do not invent details. Use null when a date, time, address, provider, or confirmation is missing.",
   "Preserve the traveler's mental model: broad day arcs can remain anchor activities; split only reservation-backed, map-critical, permit-backed, or time-specific stops.",
   "Flag private addresses, door codes, confirmation numbers, personal notes, and host contact details as sensitiveDetails instead of exposing them casually.",
+  "Default sensitiveDetails should include exact private home addresses, exact rental or Airbnb addresses, door/gate/lockbox codes, Wi-Fi passwords, host phone numbers or emails, confirmation numbers, booking references, ticket numbers, passport/ID/payment details, and child/medical/personal safety notes.",
+  "Hotel names, public landmarks, restaurants, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
   "Create missingDetails only for questions that materially affect the generated traveler app.",
 ].join(" ");
 

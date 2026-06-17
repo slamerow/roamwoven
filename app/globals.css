@@ -13,6 +13,20 @@
   --rw-shadow: 0 18px 45px rgba(65, 46, 28, 0.08),
     0 2px 8px rgba(65, 46, 28, 0.06);
   --rw-shadow-soft: 0 10px 26px rgba(65, 46, 28, 0.06);
+  --color-page: #aeb99d;
+  --color-app: #f8e8c5;
+  --color-surface: #ead2a2;
+  --color-border: #9d7433;
+  --color-ink: #231f14;
+  --color-muted: #6f552e;
+  --color-green: #183823;
+  --color-leather: #4c2a18;
+  --color-brass: #a56f1e;
+  --color-sky: #cad8c4;
+  --color-blue: #245c62;
+  --shadow-card: 0 18px 34px rgb(49 31 12 / 0.25),
+    0 1px 0 rgb(255 255 255 / 0.58) inset,
+    0 -1px 0 rgb(99 63 23 / 0.09) inset;
 }
 
 * {
@@ -55,6 +69,35 @@ button {
 }
 
 @layer components {
+  .journal-page {
+    background:
+      radial-gradient(circle at 12% 8%, rgb(255 244 218 / 0.54), transparent 25rem),
+      radial-gradient(circle at 84% 24%, rgb(76 42 24 / 0.1), transparent 22rem),
+      radial-gradient(circle at 18% 86%, rgb(164 111 30 / 0.1), transparent 20rem),
+      linear-gradient(135deg, rgb(24 56 35 / 0.11), transparent 38%, rgb(255 238 197 / 0.2)),
+      var(--color-page);
+  }
+
+  .journal-app {
+    background-color: var(--color-app);
+    background-image:
+      radial-gradient(circle at 18% 16%, rgb(255 255 255 / 0.38), transparent 17rem),
+      radial-gradient(circle at 82% 78%, rgb(76 42 24 / 0.08), transparent 19rem),
+      repeating-linear-gradient(8deg, rgb(95 60 25 / 0.028) 0 1px, transparent 1px 9px),
+      repeating-linear-gradient(98deg, rgb(255 255 255 / 0.08) 0 1px, transparent 1px 14px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.22), transparent 18%, transparent 82%, rgb(91 57 24 / 0.09)),
+      linear-gradient(180deg, rgb(255 255 255 / 0.22), transparent 18rem);
+    background-size: auto, auto, auto, auto, auto, auto;
+  }
+
+  .hide-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .bg-paper {
     background-color: var(--rw-paper);
   }

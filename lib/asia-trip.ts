@@ -45,6 +45,8 @@ export type TravelerDay = {
   }>;
 };
 
+export type AsiaDemoTrip = ReturnType<typeof getAsiaDemoTrip>;
+
 const trip = asiaTripSeed as SeedTrip;
 
 const legById = new Map(trip.legs.map((leg) => [leg.id, leg]));
