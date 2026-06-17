@@ -34,6 +34,20 @@ const allowedMimeTypes = new Set([
   "text/plain",
 ]);
 
+const mimeTypeByExtension: Record<string, string> = {
+  csv: "text/csv",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  pdf: "application/pdf",
+  png: "image/png",
+  txt: "text/plain",
+  webp: "image/webp",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
 export type TripUpload = {
   id: string;
   tripId: string;
@@ -107,6 +121,14 @@ function getStoredFilename(filename: string) {
 function isSupportedFile(file: File) {
   const extension = getExtension(file.name);
   return allowedMimeTypes.has(file.type) || allowedExtensions.has(extension);
+}
+
+function getUploadContentType(file: File) {
+  if (allowedMimeTypes.has(file.type)) {
+    return file.type;
+  }
+
+  return mimeTypeByExtension[getExtension(file.name)] ?? null;
 }
 
 function validateFiles(files: File[]) {
@@ -199,6 +221,7 @@ export async function uploadTripMaterials({
 
   for (const file of files) {
     const uploadId = crypto.randomUUID();
+    const contentType = getUploadContentType(file);
     const storagePath = [
       user.id,
       tripId,
@@ -209,11 +232,18 @@ export async function uploadTripMaterials({
     const { error: storageError } = await supabase.storage
       .from(TRIP_MATERIALS_BUCKET)
       .upload(storagePath, file, {
-        contentType: file.type || undefined,
+        contentType: contentType ?? undefined,
         upsert: false,
       });
 
     if (storageError) {
+      console.error("trip_material_storage_upload_failed", {
+        tripId,
+        fileName: file.name,
+        fileType: file.type || null,
+        contentType,
+        message: storageError.message,
+      });
       throw new Error(`Unable to store ${file.name}: ${storageError.message}`);
     }
 
@@ -222,7 +252,7 @@ export async function uploadTripMaterials({
       .insert({
         trip_id: tripId,
         original_filename: file.name,
-        file_type: file.type || null,
+        file_type: contentType,
         file_size_bytes: file.size,
         storage_path: storagePath,
         processing_status: "uploaded",

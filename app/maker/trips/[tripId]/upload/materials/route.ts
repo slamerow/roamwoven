@@ -38,6 +38,11 @@ export async function POST(
     const uploads = await uploadTripMaterials({ tripId, files, notes });
     uploadUrl.searchParams.set("saved", String(uploads.length));
   } catch (error) {
+    console.error("trip_material_upload_failed", {
+      tripId,
+      message: error instanceof Error ? error.message : "Unknown error",
+      name: error instanceof Error ? error.name : "UnknownError",
+    });
     uploadUrl.searchParams.set(
       "error",
       error instanceof UploadValidationError ? error.code : "upload-failed"

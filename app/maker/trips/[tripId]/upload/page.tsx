@@ -30,7 +30,7 @@ const errorMessages: Record<string, string> = {
   "materials-locked":
     "Materials are locked after processing starts. Create a revision instead.",
   "upload-failed":
-    "The upload could not be saved. Check storage setup and try again."
+    "The upload could not be saved. Try a PDF, Word doc, spreadsheet, image, or pasted notes."
 };
 
 function formatSize(bytes: number | null) {
