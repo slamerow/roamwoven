@@ -1,5 +1,18 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, MapPin, Plane, TableProperties } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarDays,
+  CheckCircle2,
+  Flag,
+  ListPlus,
+  MapPin,
+  Pencil,
+  Plane,
+  Plus,
+  TableProperties,
+  Trash2,
+} from "lucide-react";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import { APP_MODULES, type TripBuildSettings } from "@/lib/build-settings-config";
 import { getTripBuildSettings } from "@/lib/build-settings";
@@ -11,6 +24,25 @@ import {
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
+
+type ReviewTone = "good" | "warning" | "sensitive" | "manual";
+
+type ReviewItem = {
+  id: string;
+  title: string;
+  meta: string;
+  detail: string;
+  status: "confirmed" | "needs_review" | "draft" | "protected";
+};
+
+type ReviewSection = {
+  id: string;
+  title: string;
+  eyebrow: string;
+  summary: string;
+  tone: ReviewTone;
+  items: ReviewItem[];
+};
 
 function formatDate(date?: string | null) {
   if (!date) {
@@ -48,6 +80,193 @@ function formatSize(bytes: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function statusLabel(status: ReviewItem["status"]) {
+  if (status === "confirmed") {
+    return "Confirmed";
+  }
+
+  if (status === "protected") {
+    return "Protect detail";
+  }
+
+  if (status === "needs_review") {
+    return "Needs review";
+  }
+
+  return "Draft";
+}
+
+function toneClasses(tone: ReviewTone) {
+  if (tone === "warning") {
+    return "border-clay/25 bg-clay/10 text-clay";
+  }
+
+  if (tone === "sensitive") {
+    return "border-tide/25 bg-tide/10 text-tide";
+  }
+
+  if (tone === "manual") {
+    return "border-ink/15 bg-paper text-ink/65";
+  }
+
+  return "border-moss/25 bg-moss/10 text-moss";
+}
+
+function ReviewControls({ itemTitle }: { itemTitle: string }) {
+  const controls = [
+    { label: "Edit item", icon: Pencil },
+    { label: "Add item", icon: Plus },
+    { label: "Delete item", icon: Trash2 },
+    { label: "Mark as confirmed", icon: CheckCircle2 },
+    { label: "Flag as needs review", icon: Flag },
+  ];
+
+  return (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {controls.map((control) => {
+        const Icon = control.icon;
+
+        return (
+          <button
+            aria-label={`${control.label}: ${itemTitle}`}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-ink/10 bg-white text-ink/55 transition hover:border-moss/30 hover:text-moss"
+            key={control.label}
+            title={control.label}
+            type="button"
+          >
+            <Icon size={15} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StructuredReviewSection({ section }: { section: ReviewSection }) {
+  return (
+    <section className="rounded-md border border-ink/10 bg-white p-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+            {section.eyebrow}
+          </p>
+          <h2 className="mt-2 text-xl font-semibold text-ink">
+            {section.title}
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
+            {section.summary}
+          </p>
+        </div>
+        <span
+          className={`rounded-md border px-3 py-2 text-sm font-semibold ${toneClasses(
+            section.tone
+          )}`}
+        >
+          {section.items.length} item{section.items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {section.items.map((item) => (
+          <article
+            className="rounded-md border border-ink/10 bg-paper p-4"
+            key={item.id}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink">{item.title}</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+                  {item.meta}
+                </p>
+              </div>
+              <span
+                className={`shrink-0 rounded-sm px-2 py-1 text-xs font-semibold ${
+                  item.status === "confirmed"
+                    ? "bg-moss/10 text-moss"
+                    : item.status === "protected"
+                      ? "bg-tide/10 text-tide"
+                      : item.status === "needs_review"
+                        ? "bg-clay/10 text-clay"
+                        : "bg-ink/10 text-ink/55"
+                }`}
+              >
+                {statusLabel(item.status)}
+              </span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-ink/60">{item.detail}</p>
+            <ReviewControls itemTitle={item.title} />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StructuredReviewDeck({
+  sections,
+}: {
+  sections: ReviewSection[];
+}) {
+  const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);
+  const needsReview = sections.reduce(
+    (sum, section) =>
+      sum +
+      section.items.filter(
+        (item) => item.status === "needs_review" || item.status === "protected"
+      ).length,
+    0
+  );
+  const confirmed = sections.reduce(
+    (sum, section) =>
+      sum + section.items.filter((item) => item.status === "confirmed").length,
+    0
+  );
+
+  return (
+    <>
+      <section className="mt-8 grid gap-4 md:grid-cols-4">
+        <div className="rounded-md border border-ink/10 bg-white p-5">
+          <TableProperties className="text-moss" size={22} />
+          <p className="mt-4 text-3xl font-semibold text-ink">{totalItems}</p>
+          <p className="mt-1 text-sm text-ink/60">Reviewable records</p>
+        </div>
+        <div className="rounded-md border border-ink/10 bg-white p-5">
+          <CheckCircle2 className="text-moss" size={22} />
+          <p className="mt-4 text-3xl font-semibold text-ink">{confirmed}</p>
+          <p className="mt-1 text-sm text-ink/60">Marked confirmed</p>
+        </div>
+        <div className="rounded-md border border-ink/10 bg-white p-5">
+          <AlertTriangle className="text-clay" size={22} />
+          <p className="mt-4 text-3xl font-semibold text-ink">{needsReview}</p>
+          <p className="mt-1 text-sm text-ink/60">Need review or protection</p>
+        </div>
+        <div className="rounded-md border border-ink/10 bg-white p-5">
+          <ListPlus className="text-tide" size={22} />
+          <p className="mt-4 text-3xl font-semibold text-ink">UI</p>
+          <p className="mt-1 text-sm text-ink/60">Mocked controls only</p>
+        </div>
+      </section>
+
+      <section className="mt-8 space-y-6">
+        {sections.map((section) => (
+          <StructuredReviewSection key={section.id} section={section} />
+        ))}
+      </section>
+    </>
+  );
+}
+
+function getStylePalette(style: TripStyleSettings) {
+  const derived = derivePalette(style.primaryColor);
+
+  return {
+    primary: style.primaryColor,
+    secondary: style.secondaryColor ?? derived.secondary,
+    accent: style.accentColor ?? derived.accent,
+    soft: style.softColor ?? derived.soft,
+  };
+}
+
 function RealTripFirstPass({
   tripId,
   tripName,
@@ -67,7 +286,12 @@ function RealTripFirstPass({
     (module) => settings.enabledModules[module.key]
   );
   const theme = getThemeDirection(style.themeDirection);
-  const palette = derivePalette(style.primaryColor);
+  const palette = getStylePalette(style);
+  const sections = getMockReviewSections({
+    selectedModules,
+    tripName,
+    uploads,
+  });
 
   return (
     <>
@@ -91,7 +315,7 @@ function RealTripFirstPass({
           </div>
           <div className="rounded-md p-4" style={{ backgroundColor: theme.surface, color: theme.text }}>
             <p className="text-xs font-semibold uppercase" style={{ color: palette.primary }}>
-              Today
+              Draft review
             </p>
             <p className="mt-2 text-sm font-semibold">Draft card preview</p>
             <p className="mt-1 text-sm opacity-65">
@@ -129,24 +353,24 @@ function RealTripFirstPass({
       <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
         <div className="rounded-md border border-ink/10 bg-white p-5">
           <h2 className="text-xl font-semibold text-ink">
-            App build is ready to simulate
+            Structured draft is mocked for review
           </h2>
           <p className="mt-3 text-sm leading-6 text-ink/60">
-            Roamwoven has the materials for {tripName}. The next backend step is
-            to turn these uploads into trip legs, dated cards, stays, travel
-            details, phrases, map points, and review questions.
+            Roamwoven has the materials for {tripName}. This scaffold shows the
+            review workflow using saved uploads and selected modules while
+            extraction stays off.
           </p>
           <div className="mt-5 grid gap-3 md:grid-cols-2">
             {[
-              "Trip spine",
-              "Stays and logistics",
-              "Daily itinerary",
-              "Review questions",
+              "Trip overview",
+              "Dates and places",
+              "Flights and transport",
+              "Stays and activities",
             ].map((item) => (
               <div key={item} className="rounded-md bg-paper p-4">
                 <p className="text-sm font-semibold text-ink">{item}</p>
                 <p className="mt-1 text-xs font-semibold text-clay">
-                  Waiting for extraction
+                  Mocked from current state
                 </p>
               </div>
             ))}
@@ -180,36 +404,194 @@ function RealTripFirstPass({
         </div>
       </section>
 
-      <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
-        <h2 className="text-xl font-semibold text-ink">Review queue</h2>
-        <p className="mt-3 text-sm leading-6 text-ink/60">
-          Once extraction runs, this section should show only the uncertain,
-          conflicting, or missing details from this trip.
-        </p>
-        <div className="mt-5 rounded-md bg-paper p-4">
-          <p className="text-sm font-semibold text-ink">
-            No generated questions yet.
-          </p>
-          <p className="mt-1 text-sm leading-5 text-ink/60">
-            The current build keeps AI processing off until the paid upload and
-            review plumbing is solid.
-          </p>
-        </div>
-      </section>
+      <StructuredReviewDeck sections={sections} />
 
       <SourceMaterials uploads={uploads} />
 
       <section className="mt-8 flex justify-end">
         <Link
-          href={`/maker/trips/${tripId}/style`}
+          href={`/maker/trips/${tripId}/publish`}
           className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
         >
-          Choose style
+          Continue to publish
           <ArrowRight size={16} />
         </Link>
       </section>
     </>
   );
+}
+
+function getMockReviewSections({
+  selectedModules,
+  tripName,
+  uploads,
+}: {
+  selectedModules: Array<(typeof APP_MODULES)[number]>;
+  tripName: string;
+  uploads: TripUpload[];
+}): ReviewSection[] {
+  const latestUpload = uploads[0];
+  const sourceLabel =
+    latestUpload?.originalFilename ?? `${uploads.length} saved material inputs`;
+
+  return [
+    {
+      id: "overview",
+      title: "Trip overview",
+      eyebrow: "Scope",
+      summary: "The top-level app identity and source bundle for this build.",
+      tone: "good",
+      items: [
+        {
+          id: "overview-name",
+          title: tripName,
+          meta: "App name",
+          detail: `${uploads.length} saved material${
+            uploads.length === 1 ? "" : "s"
+          } will feed the first structured draft.`,
+          status: "confirmed",
+        },
+        {
+          id: "overview-source",
+          title: "Primary source bundle",
+          meta: sourceLabel,
+          detail:
+            "Extraction is still mocked, but this review screen is shaped around the real paid-trip upload state.",
+          status: "draft",
+        },
+      ],
+    },
+    {
+      id: "places",
+      title: "Dates and places",
+      eyebrow: "Trip spine",
+      summary: "The city sequence and date range Roamwoven thinks it should build around.",
+      tone: "warning",
+      items: [
+        {
+          id: "places-dates",
+          title: "Trip dates need extraction",
+          meta: "Missing exact dates",
+          detail:
+            "Use this review section to confirm dates before the traveler app anchors Today, maps, weather, and daily cards.",
+          status: "needs_review",
+        },
+        {
+          id: "places-destinations",
+          title: "Destinations from materials",
+          meta: "Pending parser",
+          detail:
+            "Future extraction should produce ordered legs here instead of forcing the maker to type a full itinerary.",
+          status: "draft",
+        },
+      ],
+    },
+    {
+      id: "transport",
+      title: "Flights and transport",
+      eyebrow: "Logistics",
+      summary: "Travel records stay optional and only appear when relevant.",
+      tone: "manual",
+      items: [
+        {
+          id: "transport-flight",
+          title: selectedModules.some((module) => module.key === "travel")
+            ? "Transport module selected"
+            : "Transport module skipped",
+          meta: "Module choice",
+          detail:
+            "The final app should hide this section when no flights, trains, cars, or transfers are found.",
+          status: selectedModules.some((module) => module.key === "travel")
+            ? "draft"
+            : "confirmed",
+        },
+      ],
+    },
+    {
+      id: "stays",
+      title: "Stays",
+      eyebrow: "Lodging",
+      summary: "Hotels, rentals, and host notes will be reviewed separately from daily activities.",
+      tone: "sensitive",
+      items: [
+        {
+          id: "stays-sensitive",
+          title: "Exact stay details may need protection",
+          meta: "Privacy review",
+          detail:
+            "Private addresses, door codes, host phone numbers, and reservation numbers can sit behind a password while the public card remains useful.",
+          status: "protected",
+        },
+      ],
+    },
+    {
+      id: "activities",
+      title: "Daily activities/cards",
+      eyebrow: "Traveler app cards",
+      summary: "This is where dated plans, food, tours, reminders, and notes become cards.",
+      tone: "good",
+      items: [
+        {
+          id: "activities-anchor",
+          title: "Anchor activities",
+          meta: "Draft card shape",
+          detail:
+            "Broad arcs such as a full-day drive can stay as anchor cards, with important stops split out only when they need their own map, time, permit, or note.",
+          status: "draft",
+        },
+        {
+          id: "activities-count",
+          title: "Avoid filler cards",
+          meta: "Quality check",
+          detail:
+            "The review should preserve the traveler's mental model instead of maximizing card count.",
+          status: "confirmed",
+        },
+      ],
+    },
+    {
+      id: "missing",
+      title: "Missing or ambiguous details",
+      eyebrow: "Questions",
+      summary: "Only ask the maker for details that change the generated app.",
+      tone: "warning",
+      items: [
+        {
+          id: "missing-times",
+          title: "Confirm exact times where they matter",
+          meta: "Question prompt",
+          detail:
+            "Use prompts for flights, reservations, check-in windows, tours, and other time-sensitive logistics.",
+          status: "needs_review",
+        },
+        {
+          id: "missing-places",
+          title: "Resolve unnamed places",
+          meta: "Question prompt",
+          detail:
+            "Ask for enough context to choose the right place without making users edit raw data tables.",
+          status: "needs_review",
+        },
+      ],
+    },
+    {
+      id: "manual",
+      title: "Manual additions",
+      eyebrow: "Maker edits",
+      summary: "Makers can add details that were never present in the uploaded materials.",
+      tone: "manual",
+      items: [
+        {
+          id: "manual-add",
+          title: "Add a missing flight, stay, activity, restaurant, note, or placeholder",
+          meta: "Manual add",
+          detail:
+            "Manual additions should update structured data cheaply without requiring another paid extraction run.",
+          status: "draft",
+        },
+      ],
+    },
+  ];
 }
 
 function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {
@@ -253,7 +635,7 @@ function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {
   );
 }
 
-function DemoStructuredData({ tripId, uploads }: { tripId: string; uploads: TripUpload[] }) {
+function DemoStructuredData({ uploads }: { uploads: TripUpload[] }) {
   const trip = getAsiaDemoTrip();
   const stayLegs = trip.legs.filter((leg) => leg.stayName);
   const reviewItems = trip.items.filter((item) =>
@@ -261,105 +643,198 @@ function DemoStructuredData({ tripId, uploads }: { tripId: string; uploads: Trip
       value?.toLowerCase().includes("tbd")
     )
   );
+  const transportItems = trip.items.filter((item) =>
+    ["flight", "transport", "transfer", "train", "rental"].some((token) =>
+      `${item.category ?? ""} ${item.title}`.toLowerCase().includes(token)
+    )
+  );
+  const sensitiveItems = [
+    ...stayLegs
+      .filter((leg) => leg.stayAddress)
+      .slice(0, 4)
+      .map((leg) => ({
+        id: `sensitive-${leg.id}`,
+        title: leg.stayName ?? `${leg.city} stay`,
+        meta: `${leg.city ?? "Stay"} address`,
+        detail:
+          "Exact lodging address can be password-protected inside the card details.",
+        status: "protected" as const,
+      })),
+    ...trip.items
+      .filter((item) =>
+        `${item.title} ${item.description ?? ""}`.toLowerCase().includes("code")
+      )
+      .slice(0, 2)
+      .map((item) => ({
+        id: `sensitive-${item.id}`,
+        title: item.title,
+        meta: item.category ?? "card detail",
+        detail:
+          "Codes, private notes, and confirmation details should be reviewed before sharing.",
+        status: "protected" as const,
+      })),
+  ];
+  const sections: ReviewSection[] = [
+    {
+      id: "overview",
+      title: "Trip overview",
+      eyebrow: "Scope",
+      summary: "The seed data gives the review screen realistic trip scale.",
+      tone: "good",
+      items: [
+        {
+          id: "overview-name",
+          title: trip.name,
+          meta: trip.dateRange,
+          detail: `${trip.countries.join(", ")} with ${trip.dayCount} days and ${
+            trip.itemCount
+          } imported cards.`,
+          status: "confirmed",
+        },
+      ],
+    },
+    {
+      id: "places",
+      title: "Dates and places",
+      eyebrow: "Trip spine",
+      summary: "Ordered legs are the backbone for Today, maps, weather, and search.",
+      tone: "good",
+      items: trip.legs.slice(0, 8).map((leg) => ({
+        id: `place-${leg.id}`,
+        title: [leg.city, leg.country].filter(Boolean).join(", "),
+        meta: `${formatDate(leg.arriveDate)} / ${formatDate(leg.leaveDate)}`,
+        detail: leg.stayName ?? "Stay details still need review.",
+        status: leg.stayName ? "confirmed" : "needs_review",
+      })),
+    },
+    {
+      id: "transport",
+      title: "Flights and transport",
+      eyebrow: "Logistics",
+      summary: "Travel records should stay reviewable without forcing a module when none exists.",
+      tone: transportItems.length > 0 ? "good" : "manual",
+      items:
+        transportItems.length > 0
+          ? transportItems.slice(0, 6).map((item) => ({
+              id: `transport-${item.id}`,
+              title: item.title,
+              meta: item.date ?? "Needs date",
+              detail: item.description ?? "Transport details need review.",
+              status: item.date ? "draft" : "needs_review",
+            }))
+          : [
+              {
+                id: "transport-none",
+                title: "No obvious transport records in seed sample",
+                meta: "Module check",
+                detail:
+                  "The final traveler app should not show a flight placeholder just to fill the template.",
+                status: "confirmed",
+              },
+            ],
+    },
+    {
+      id: "stays",
+      title: "Stays",
+      eyebrow: "Lodging",
+      summary: "Stays are separate from daily cards so addresses and check-in notes can be protected.",
+      tone: "sensitive",
+      items: stayLegs.slice(0, 8).map((leg) => ({
+        id: `stay-${leg.id}`,
+        title: leg.stayName ?? `${leg.city} stay`,
+        meta: [leg.city, leg.country].filter(Boolean).join(", "),
+        detail: leg.stayAddress
+          ? "Address is present and should be privacy-reviewed."
+          : "Stay name exists, but address details still need review.",
+        status: leg.stayAddress ? "protected" : "needs_review",
+      })),
+    },
+    {
+      id: "activities",
+      title: "Daily activities/cards",
+      eyebrow: "Cards",
+      summary: "A few representative cards show how the imported itinerary becomes traveler app content.",
+      tone: "good",
+      items: trip.days
+        .flatMap((day) =>
+          day.items.slice(0, 2).map((item) => ({
+            id: `activity-${item.id}`,
+            title: item.title,
+            meta: `${day.label} / ${item.category}`,
+            detail: item.description,
+            status: "draft" as const,
+          }))
+        )
+        .slice(0, 10),
+    },
+    {
+      id: "missing",
+      title: "Missing or ambiguous details",
+      eyebrow: "Questions",
+      summary: "Generated prompts should focus on details that change the final app.",
+      tone: "warning",
+      items:
+        reviewItems.length > 0
+          ? reviewItems.slice(0, 6).map((item) => ({
+              id: `missing-${item.id}`,
+              title: item.title,
+              meta: item.category ?? "review",
+              detail: item.description ?? "Needs clearer details before publish.",
+              status: "needs_review",
+            }))
+          : [
+              {
+                id: "missing-sample",
+                title: "No obvious TBD markers found",
+                meta: "Seed scan",
+                detail:
+                  "This section is still useful for extraction conflicts, missing dates, and unclear place matches.",
+                status: "draft",
+              },
+            ],
+    },
+    {
+      id: "sensitive",
+      title: "Sensitive card details",
+      eyebrow: "Privacy",
+      summary: "Specific private details can be protected while the card remains visible.",
+      tone: "sensitive",
+      items:
+        sensitiveItems.length > 0
+          ? sensitiveItems
+          : [
+              {
+                id: "sensitive-sample",
+                title: "Sensitive details need maker review",
+                meta: "Password protection",
+                detail:
+                  "Door codes, private addresses, confirmation numbers, and personal notes can be kept behind the app password.",
+                status: "protected",
+              },
+            ],
+    },
+    {
+      id: "manual",
+      title: "Manual additions",
+      eyebrow: "Maker edits",
+      summary: "The maker can add records that were not in the imported workbook.",
+      tone: "manual",
+      items: [
+        {
+          id: "manual-add",
+          title: "Add a flight, stay, activity, restaurant, note, or placeholder",
+          meta: "Manual add",
+          detail:
+            "This scaffold keeps additions visible without making extraction the only way to improve the app.",
+          status: "draft",
+        },
+      ],
+    },
+  ];
 
   return (
     <>
-      <section className="mt-8 grid gap-4 md:grid-cols-4">
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <CalendarDays className="text-moss" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">
-            {trip.dayCount}
-          </p>
-          <p className="mt-1 text-sm text-ink/60">Trip days</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <MapPin className="text-tide" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">
-            {trip.legs.length}
-          </p>
-          <p className="mt-1 text-sm text-ink/60">City/stay legs</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <TableProperties className="text-clay" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">
-            {trip.itemCount}
-          </p>
-          <p className="mt-1 text-sm text-ink/60">Generated cards</p>
-        </div>
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <Plane className="text-ink/70" size={22} />
-          <p className="mt-4 text-3xl font-semibold text-ink">
-            {uploads.length}
-          </p>
-          <p className="mt-1 text-sm text-ink/60">Source materials</p>
-        </div>
-      </section>
-
-      <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-ink">Trip spine</h2>
-            <span className="text-sm font-semibold text-clay">
-              {stayLegs.length} stays
-            </span>
-          </div>
-          <div className="space-y-3">
-            {trip.legs.slice(0, 10).map((leg) => (
-              <article
-                key={leg.id}
-                className="rounded-md border border-ink/10 bg-paper p-4"
-              >
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="text-base font-semibold text-ink">
-                      {leg.city}, {leg.country}
-                    </p>
-                    <p className="mt-1 text-sm text-ink/60">
-                      {leg.stayName ?? "Stay needed"}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-moss">
-                    {formatDate(leg.arriveDate)} / {formatDate(leg.leaveDate)}
-                  </p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-md border border-ink/10 bg-white p-5">
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-ink">Review queue</h2>
-            <span className="text-sm font-semibold text-clay">
-              {reviewItems.length} possible
-            </span>
-          </div>
-          <div className="space-y-3">
-            {reviewItems.slice(0, 8).map((item) => (
-              <article
-                key={item.id}
-                className="rounded-md border border-ink/10 bg-paper p-4"
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-clay">
-                  {item.category ?? "review"}
-                </p>
-                <p className="mt-2 text-sm font-semibold text-ink">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-sm text-ink/60">
-                  {item.date ?? "Needs date"}
-                </p>
-              </article>
-            ))}
-            {reviewItems.length === 0 ? (
-              <p className="text-sm text-ink/60">
-                No obvious TBD markers found in the imported seed.
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </section>
-
+      <StructuredReviewDeck sections={sections} />
       <SourceMaterials uploads={uploads} />
     </>
   );
@@ -386,15 +861,15 @@ export default async function StructuredDataPage({
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-              Structured Data
+              Draft Review
             </p>
             <h1 className="mt-2 text-4xl font-semibold text-ink">
-              Clean trip output
+              Check the structured trip data
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
               {makerTrip.isDemo
-                ? "Reference structured data from the demo traveler app."
-                : `First-pass structured data for ${makerTrip.name}.`}
+                ? "Review the seeded Wren's Adventure data as if Roamwoven had extracted it."
+                : `Review the mocked first structured draft for ${makerTrip.name}.`}
             </p>
           </div>
           {makerTrip.isDemo ? (
@@ -417,7 +892,7 @@ export default async function StructuredDataPage({
             style={style}
           />
         ) : (
-          <DemoStructuredData tripId={tripId} uploads={uploads} />
+          <DemoStructuredData uploads={uploads} />
         )}
       </div>
     </main>

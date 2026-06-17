@@ -141,15 +141,18 @@ export function StyleSettingsPanel({
                 </select>
                 <span className="grid grid-cols-4 gap-2">
                   {paletteOptions[field.key].map((color) => (
-                    <span
-                      aria-hidden="true"
+                    <button
+                      aria-label={`Use ${color} for ${field.label.toLowerCase()}`}
                       className={
                         color === palette[field.key]
-                          ? "h-6 rounded-sm ring-2 ring-ink ring-offset-2"
-                          : "h-6 rounded-sm ring-1 ring-ink/10"
+                          ? "h-7 rounded-sm ring-2 ring-ink ring-offset-2"
+                          : "h-7 rounded-sm ring-1 ring-ink/10 transition hover:ring-2 hover:ring-ink/35"
                       }
                       key={color}
                       style={{ backgroundColor: color }}
+                      title={`${field.label}: ${color}`}
+                      type="button"
+                      onClick={() => setPaletteValue(field.key, color)}
                     />
                   ))}
                 </span>

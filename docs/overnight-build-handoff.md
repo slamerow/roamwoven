@@ -14,6 +14,8 @@ Build the structured data review framework using mocked/seeded data.
 
 Do not wire paid AI extraction yet. Do not introduce background jobs yet. Do not make irreversible visual direction decisions. The goal is to make the review workflow real enough for product testing tomorrow.
 
+Status: built in this session. Extraction remains mocked, no database schema changes were made, and the review controls are UI-only.
+
 ## Scope To Build
 
 - Replace the placeholder structured data screen with reviewable sections:
@@ -34,6 +36,16 @@ Do not wire paid AI extraction yet. Do not introduce background jobs yet. Do not
 - Keep the data mocked or derived from existing demo/reference data for now.
 - Make the UI compatible with the selected design settings where reasonable, but do not spend the night perfecting design packs.
 - Add swatch-click support for secondary/accent/soft colors in the design picker, while keeping dropdowns.
+
+## Completed Overnight
+
+- `/maker/trips/[tripId]/data` now renders a draft-review scaffold.
+- Demo trips derive review sections from the Asia seed file.
+- Real paid trips use saved upload counts, selected app modules, selected style settings, and mocked review records.
+- Review sections cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
+- Each review item shows edit, add, delete, confirm, and flag controls with accessible labels and hover states.
+- The workspace shortcut label now says `Check data`.
+- Secondary/accent/soft color swatches in the style picker are clickable while dropdowns remain available.
 
 ## Guardrails
 

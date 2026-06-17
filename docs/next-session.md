@@ -49,6 +49,13 @@ Backend-ready pieces now exist:
 - Step 4 build choices now persist to `trip_build_settings` before moving to clean data. The table is owner-scoped through the parent trip, and the clean-data screen can show selected modules.
 - The maker flow is now intended as three screens after upload: content scope -> design -> draft review. Design choices persist to `trip_style_settings` and the draft review screen renders a styled preview using those choices without extra AI work.
 - The clean-data step now names the actual trip and shows saved source materials, while still using reference structured data until extraction is connected.
+- The draft review / structured data screen now has the mocked review scaffold requested for overnight:
+  - Demo trips derive review sections from `data/asia-trip-seed.json`.
+  - Real paid trips use saved uploads, selected modules, and mocked review records.
+  - Sections cover trip overview, dates and places, flights and transport, stays, daily cards, missing or ambiguous details, sensitive card details, and manual additions.
+  - Each review item shows UI-only controls for edit, add, delete, mark confirmed, and flag as needs review. These controls do not persist yet.
+  - Sensitive details are represented as card-detail protection candidates; no privacy model was finalized.
+- The design picker keeps dropdowns for secondary/accent/soft colors and now also lets makers click the visible swatches.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.
 - The trip workspace now resumes from the next incomplete step instead of always sending paid trips back to upload:
   - no uploads -> upload
@@ -153,16 +160,19 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 Continue hardening the post-payment maker flow:
 
-1. Push and deploy the checkout-complete polish plus Step 4 review updates.
+1. Test the newly scaffolded draft-review screen on the paid trip and the demo trip.
 2. Re-test the paid trip on `https://roamwoven.com`:
    - Checkout box is collapsed green after payment.
    - Upload page loads.
    - Notes save and persist.
    - Review page shows the saved materials and module toggles.
+   - Design choices save and the swatches are clickable.
+   - Draft review loads after design and shows the structured review sections.
 3. Add a real file-upload smoke test with a small PDF or text file from the browser.
-4. Add a real persisted review/intake answer model so Step 4 choices survive refresh and can drive generated app modules.
-5. Start shaping the simulated first-pass output into the eventual structured data records.
-6. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
+4. Decide which draft-review controls should persist first: item status, edits, deletion, or manual additions.
+5. Add a real persisted review/intake answer model so choices survive refresh and can drive generated app modules.
+6. Start shaping the simulated first-pass output into the eventual structured data records.
+7. Verify a logged-in user only sees their own trips; direct RLS two-user testing can wait until a second test account exists.
 
 Keep extraction mocked until payment, owner-scoped trip persistence, and upload storage are stable.
 

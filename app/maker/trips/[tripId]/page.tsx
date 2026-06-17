@@ -119,7 +119,7 @@ function getNextBuildStep({
 const betaLinks = [
   { label: "Upload", step: "upload", icon: FileUp },
   { label: "Review", step: "review", icon: WandSparkles },
-  { label: "Clean data", step: "data", icon: TableProperties },
+  { label: "Check data", step: "data", icon: TableProperties },
   { label: "Style", step: "style", icon: Palette },
   { label: "Publish", step: "publish", icon: Share2 }
 ];
