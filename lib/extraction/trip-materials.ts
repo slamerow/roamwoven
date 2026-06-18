@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { TripUpload } from "@/lib/uploads";
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
 
@@ -47,6 +48,51 @@ export function getNoteExtractionMaterials(
     }));
 }
 
+async function downloadMaterialFile(upload: TripUpload) {
+  if (!upload.storagePath) {
+    return null;
+  }
+
+  try {
+    const supabase = createSupabaseAdminClient();
+    const { data, error } = await supabase.storage
+      .from(TRIP_MATERIALS_BUCKET)
+      .download(upload.storagePath);
+
+    if (!error && data) {
+      return data;
+    }
+
+    console.warn("trip_material_admin_download_failed", {
+      fileName: upload.originalFilename,
+      message: error?.message ?? "No file data returned.",
+      tripId: upload.tripId,
+    });
+  } catch (error) {
+    console.warn("trip_material_admin_download_unavailable", {
+      fileName: upload.originalFilename,
+      message: error instanceof Error ? error.message : "Unknown error.",
+      tripId: upload.tripId,
+    });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.storage
+    .from(TRIP_MATERIALS_BUCKET)
+    .download(upload.storagePath);
+
+  if (error || !data) {
+    console.warn("trip_material_download_failed", {
+      fileName: upload.originalFilename,
+      message: error?.message ?? "No file data returned.",
+      tripId: upload.tripId,
+    });
+    return null;
+  }
+
+  return data;
+}
+
 export async function getTextFileExtractionMaterials(
   uploads: TripUpload[]
 ): Promise<TripExtractionMaterial[]> {
@@ -61,19 +107,12 @@ export async function getTextFileExtractionMaterials(
     return [];
   }
 
-  const supabase = await createSupabaseServerClient();
   const materials: TripExtractionMaterial[] = [];
 
   for (const upload of textUploads) {
-    if (!upload.storagePath) {
-      continue;
-    }
+    const data = await downloadMaterialFile(upload);
 
-    const { data, error } = await supabase.storage
-      .from(TRIP_MATERIALS_BUCKET)
-      .download(upload.storagePath);
-
-    if (error || !data) {
+    if (!data) {
       continue;
     }
 
@@ -116,19 +155,12 @@ export async function getPdfExtractionMaterials(
     return [];
   }
 
-  const supabase = await createSupabaseServerClient();
   const materials: TripExtractionMaterial[] = [];
 
   for (const upload of pdfUploads) {
-    if (!upload.storagePath) {
-      continue;
-    }
+    const data = await downloadMaterialFile(upload);
 
-    const { data, error } = await supabase.storage
-      .from(TRIP_MATERIALS_BUCKET)
-      .download(upload.storagePath);
-
-    if (error || !data) {
+    if (!data) {
       continue;
     }
 
@@ -142,7 +174,12 @@ export async function getPdfExtractionMaterials(
           type: "pdf_text",
         });
       }
-    } catch {
+    } catch (error) {
+      console.warn("trip_material_pdf_text_extract_failed", {
+        fileName: upload.originalFilename,
+        message: error instanceof Error ? error.message : "Unknown error.",
+        tripId: upload.tripId,
+      });
       continue;
     }
   }
