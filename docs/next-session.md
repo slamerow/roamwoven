@@ -95,6 +95,12 @@ Backend-ready pieces now exist:
 - The trip summary page now reads from applied structured records rather than raw `draft_json` arrays. `lib/generated-trip-summary.ts` produces the title, destination/date range, active record counts, and unresolved-review status after saved review decisions are applied.
 - Published traveler snapshots now have a first backend contract: `published_trip_snapshots` in `db/schema.sql`, `lib/published-snapshots.ts`, `app/maker/trips/[tripId]/publish/snapshot/route.ts`, and token rendering in `app/t/[token]/page.tsx`. `SUPABASE_SERVICE_ROLE_KEY` is configured in Vercel for Production and Preview; `/t/demo` remains the local fallback.
 - Production QA validation passed on a disposable trip `82e1834c-efaf-4409-929e-542aa881c24e`: Confirm, Protect, Mark answered, summary update, publish snapshot creation, and real `/t/[token]` rendering all worked. The disposable trip was deleted afterward, and its generated token returned 404 after cleanup.
+- OpenAI extraction is now ready for a controlled first production test once Vercel env vars are added:
+  - `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS` gates extraction to selected trip IDs when set.
+  - The server POST route rejects non-allowlisted trips even if someone bypasses the disabled button.
+  - The draft-review page checks trip-specific extraction eligibility before enabling `Build parsed draft`.
+  - Use the paid Central Europe trip `e50f7e93-b2e9-4b8c-9097-92fce402d885` as the first allowlisted trip.
+  - Vercel did not show OpenAI env vars during the latest check, so add `OPENAI_API_KEY`, `OPENAI_EXTRACTION_MODEL`, caps, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885` before testing.
 
 Live Supabase dev setup is partially complete:
 
@@ -206,7 +212,7 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
 4. Decide whether to turn on OpenAI extraction now. The backend write/publish path is validated, so extraction is now worth enabling once the OpenAI key/model/cost guardrails are confirmed.
-5. Test extraction on the real paid Central Europe upload, then review the generated records and publish a real snapshot.
+5. Add the OpenAI env vars in Vercel with `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885`, redeploy, and test extraction on the real paid Central Europe upload.
 6. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.
 7. Return to Design preview only after it can render the real shared traveler architecture.
 
@@ -245,6 +251,12 @@ Latest checks after published snapshot foundation:
 - `npm test`
 - `npm run typecheck`
 - `npm run build`
+
+Latest checks after the OpenAI extraction allowlist guardrail:
+
+- `npm test`
+- `npm run build`
+- `npm run typecheck` after build regenerated `.next/types`
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { parseOptionalEnvList } from "@/lib/env";
 import {
   applyReviewDecision,
   applyReviewDecisions,
@@ -559,4 +560,13 @@ test("published snapshot payload compiles traveler app view model", () => {
     payload.travelerApp.privacy.privateDetailCount
   );
   assert.ok(payload.travelerApp.days.length > 80);
+});
+
+test("env allowlist parser trims empty values", () => {
+  assert.deepEqual(parseOptionalEnvList(null), []);
+  assert.deepEqual(parseOptionalEnvList(" trip-1,trip-2, , trip-3 "), [
+    "trip-1",
+    "trip-2",
+    "trip-3",
+  ]);
 });

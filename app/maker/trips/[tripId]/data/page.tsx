@@ -14,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
-import { hasOpenAIExtractionConfig } from "@/lib/env";
+import { hasOpenAIExtractionConfigForTrip } from "@/lib/env";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import {
   getLatestTripDraftSnapshot,
@@ -724,6 +724,8 @@ function RealTripFirstPass({
         <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
           {error === "extraction-disabled"
             ? "AI extraction is disabled. Add the OpenAI key and enable the extraction flag before parsing."
+            : error === "extraction-not-allowed"
+              ? "AI extraction is enabled only for selected test trips in this environment."
             : error === "no-text-materials"
               ? "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass."
               : error === "checkout-required"
@@ -822,7 +824,7 @@ function RealTripFirstPass({
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
                 ? "This first parser pass reads pasted notes, plain text files, and readable text-based PDFs."
-                : "AI extraction is still disabled in this environment."}
+                : "AI extraction is not enabled for this trip in this environment."}
               {" "}Once a trip spine exists, later docs should update that spine instead of rebuilding from scratch.
             </p>
           </>
@@ -1168,7 +1170,7 @@ export default async function StructuredDataPage({
         {!makerTrip.isDemo ? (
           <RealTripFirstPass
             error={error}
-            extractionEnabled={hasOpenAIExtractionConfig()}
+            extractionEnabled={hasOpenAIExtractionConfigForTrip(tripId)}
             extractionStatus={extraction}
             latestDraft={latestDraft}
             latestRun={latestRun}

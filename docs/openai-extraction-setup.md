@@ -8,6 +8,7 @@ The maker UI now has a guarded `Build parsed draft` action for the first beta pa
 
 - `OPENAI_API_KEY`
 - `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`
+- Optional `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS` allowlist
 
 If either is missing, extraction helper calls fail before contacting OpenAI.
 
@@ -30,9 +31,12 @@ OPENAI_EXTRACTION_MODEL=gpt-5.4-mini
 OPENAI_EXTRACTION_MAX_INPUT_CHARS=60000
 OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS=4000
 ROAMWOVEN_ENABLE_AI_EXTRACTION=false
+ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885
 ```
 
 Keep `ROAMWOVEN_ENABLE_AI_EXTRACTION=false` in production until the database and first paid test path are ready.
+
+For the first production test, keep `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS` set to the single paid test trip. If the allowlist is empty, every paid trip can use extraction once the key and flag are enabled, so do not leave it empty during early cost testing.
 
 Also keep it `false` until the production database has the additive extraction tables from `db/schema.sql`:
 
@@ -44,6 +48,7 @@ Also keep it `false` until the production database has the additive extraction t
 - Never run AI extraction before checkout is complete.
 - Never run AI extraction just because a user uploaded files.
 - Require an explicit maker action such as `Build parsed draft`.
+- During early production testing, allowlist only the intended paid test trip.
 - Log model, token usage, trip ID, upload count, run number, and success/failure.
 - Cap input characters/pages/files for the first beta.
 - Treat reprocessing as explicit and limited.

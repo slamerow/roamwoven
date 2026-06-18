@@ -29,11 +29,23 @@ function getOptionalPositiveInteger(name: string, fallback: number) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+export function parseOptionalEnvList(value: string | null) {
+  return (
+    value
+      ?.split(",")
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
+}
+
 export function getOpenAIConfig() {
   return {
     apiKey: getOptionalEnv("OPENAI_API_KEY"),
     extractionModel: getOptionalEnv("OPENAI_EXTRACTION_MODEL") ?? "gpt-5.4-mini",
     extractionEnabled: getOptionalEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION") === "true",
+    extractionAllowedTripIds: parseOptionalEnvList(
+      getOptionalEnv("ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS")
+    ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",
       60000
@@ -58,4 +70,17 @@ export function hasStripeCheckoutConfig() {
 export function hasOpenAIExtractionConfig() {
   const config = getOpenAIConfig();
   return Boolean(config.apiKey && config.extractionEnabled);
+}
+
+export function isTripAllowedForOpenAIExtraction(tripId: string) {
+  const { extractionAllowedTripIds } = getOpenAIConfig();
+
+  return (
+    extractionAllowedTripIds.length === 0 ||
+    extractionAllowedTripIds.includes(tripId)
+  );
+}
+
+export function hasOpenAIExtractionConfigForTrip(tripId: string) {
+  return hasOpenAIExtractionConfig() && isTripAllowedForOpenAIExtraction(tripId);
 }

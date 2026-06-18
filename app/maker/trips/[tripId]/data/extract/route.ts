@@ -1,6 +1,9 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { hasOpenAIExtractionConfig } from "@/lib/env";
+import {
+  hasOpenAIExtractionConfig,
+  isTripAllowedForOpenAIExtraction,
+} from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
 import {
   completeTripProcessingRun,
@@ -66,6 +69,10 @@ export async function POST(
 
   if (!hasOpenAIExtractionConfig()) {
     return redirectToData(request, tripId, { error: "extraction-disabled" });
+  }
+
+  if (!isTripAllowedForOpenAIExtraction(tripId)) {
+    return redirectToData(request, tripId, { error: "extraction-not-allowed" });
   }
 
   const uploads = await listTripUploads(tripId);
