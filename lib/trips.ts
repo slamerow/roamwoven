@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseConfig } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth";
+import { syncTripStyleAppNameAfterTripRename } from "@/lib/style-settings";
 
 export type MakerTrip = {
   id: string;
@@ -194,9 +195,11 @@ export async function createMakerTrip(input: {
 
 export async function updateMakerTripName({
   name,
+  previousName,
   tripId,
 }: {
   name: string;
+  previousName: string;
   tripId: string;
 }) {
   if (!hasSupabaseServerConfig()) {
@@ -228,6 +231,12 @@ export async function updateMakerTripName({
   if (error) {
     throw new Error(`Unable to rename trip: ${error.message}`);
   }
+
+  await syncTripStyleAppNameAfterTripRename({
+    newTripName: trimmedName,
+    oldTripName: previousName,
+    tripId,
+  });
 }
 
 export async function markTripPaid(tripId: string) {

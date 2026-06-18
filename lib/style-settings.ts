@@ -144,3 +144,51 @@ export async function saveTripStyleSettings({
     throw new Error(`Unable to save style settings: ${error.message}`);
   }
 }
+
+export async function syncTripStyleAppNameAfterTripRename({
+  newTripName,
+  oldTripName,
+  tripId,
+}: {
+  newTripName: string;
+  oldTripName: string;
+  tripId: string;
+}) {
+  if (!hasSupabaseServerConfig() || tripId === "demo-trip") {
+    return;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("trip_style_settings")
+    .select("app_name")
+    .eq("trip_id", tripId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return;
+    }
+
+    throw new Error(`Unable to load style app name: ${error.message}`);
+  }
+
+  const currentAppName = (data as Pick<TripStyleSettingsRow, "app_name"> | null)
+    ?.app_name;
+
+  if (currentAppName?.trim() && currentAppName.trim() !== oldTripName.trim()) {
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from("trip_style_settings")
+    .update({
+      app_name: newTripName.trim(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("trip_id", tripId);
+
+  if (updateError) {
+    throw new Error(`Unable to sync style app name: ${updateError.message}`);
+  }
+}

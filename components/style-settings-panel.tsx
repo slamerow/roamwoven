@@ -1,17 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  ArrowRight,
-  CalendarDays,
-  Check,
-  Images,
-  Languages,
-  MapPin,
-  Search,
-  Sparkles,
-  Tags,
-} from "lucide-react";
+import { CSSProperties, useMemo, useState } from "react";
+import { ArrowRight, Check } from "lucide-react";
+import { TravelerAppShell } from "@/components/traveler-app-shell";
+import type { AsiaDemoTrip } from "@/lib/asia-trip";
 import {
   THEME_DIRECTIONS,
   derivePalette,
@@ -27,45 +19,12 @@ const paletteFields = [
   { key: "soft", label: "Soft" },
 ] as const;
 
-const themePreviewCopy = {
-  modern_futuristic: {
-    material: "Glass itinerary OS",
-    cards: ["Transit window", "Hotel access", "Rooftop dinner"],
-    detail:
-      "Clean rails, crisp surfaces, and quick tools for moving through the day.",
-  },
-  rustic_adventure: {
-    material: "Field journal",
-    cards: ["Morning route", "Lodge check-in", "Trailside dinner"],
-    detail:
-      "Grounded cards, map-room warmth, and practical notes close to the plan.",
-  },
-  whimsical_fantasy: {
-    material: "Storybook journey",
-    cards: ["Morning chapter", "Hidden doorway", "Lantern dinner"],
-    detail:
-      "Soft storybook atmosphere with restrained contrast and readable cards.",
-  },
-} satisfies Record<
-  ThemeDirectionKey,
-  { cards: [string, string, string]; detail: string; material: string }
->;
-
-function getReadableTextColor(backgroundColor: string) {
-  const hex = backgroundColor.replace("#", "");
-  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
-  const luminance =
-    0.2126 * red ** 2.2 + 0.7152 * green ** 2.2 + 0.0722 * blue ** 2.2;
-
-  return luminance > 0.52 ? "#201c16" : "#fffaf0";
-}
-
 export function StyleSettingsPanel({
+  previewTrip,
   settings,
   tripId,
 }: {
+  previewTrip: AsiaDemoTrip;
   settings: TripStyleSettings;
   tripId: string;
 }) {
@@ -89,7 +48,6 @@ export function StyleSettingsPanel({
     settings.softColor ?? derivedPalette.soft
   );
   const theme = getThemeDirection(themeDirection);
-  const isWhimsical = themeDirection === "whimsical_fantasy";
   const palette = {
     primary: primaryColor,
     secondary: paletteOptions.secondary.includes(secondaryColor)
@@ -102,17 +60,59 @@ export function StyleSettingsPanel({
       ? softColor
       : derivedPalette.soft,
   };
-  const heroBackground = isWhimsical
-    ? `linear-gradient(135deg, ${palette.soft} 0%, #fffaf0 48%, ${palette.accent} 180%)`
-    : themeDirection === "modern_futuristic"
-      ? `linear-gradient(145deg, ${palette.primary}, ${theme.text} 62%, ${palette.accent})`
-      : `linear-gradient(135deg, ${palette.secondary}, ${theme.text})`;
-  const heroTextColor = isWhimsical
-    ? theme.text
-    : getReadableTextColor(palette.primary);
-  const themeCopy = themePreviewCopy[themeDirection];
-  const isModern = themeDirection === "modern_futuristic";
-  const isRustic = themeDirection === "rustic_adventure";
+  const previewVars = useMemo<CSSProperties>(() => {
+    if (themeDirection === "modern_futuristic") {
+      return {
+        "--color-page": "#d9e4e8",
+        "--color-app": "#f8fbfd",
+        "--color-surface": "#e7eff4",
+        "--color-border": palette.accent,
+        "--color-ink": "#10161d",
+        "--color-muted": "#5a6873",
+        "--color-green": palette.primary,
+        "--color-leather": palette.secondary,
+        "--color-brass": palette.accent,
+        "--color-sky": palette.soft,
+        "--color-blue": palette.secondary,
+        "--shadow-card": "0 18px 42px rgb(16 22 29 / 0.16)",
+        fontFamily: theme.fontFamily,
+      } as CSSProperties;
+    }
+
+    if (themeDirection === "whimsical_fantasy") {
+      return {
+        "--color-page": "#d6cbc5",
+        "--color-app": "#fff7e8",
+        "--color-surface": palette.soft,
+        "--color-border": palette.accent,
+        "--color-ink": "#292432",
+        "--color-muted": "#6d5d75",
+        "--color-green": palette.primary,
+        "--color-leather": palette.secondary,
+        "--color-brass": palette.accent,
+        "--color-sky": "#f5edf8",
+        "--color-blue": palette.secondary,
+        "--shadow-card": "0 22px 54px rgb(41 36 50 / 0.2)",
+        fontFamily: theme.fontFamily,
+      } as CSSProperties;
+    }
+
+    return {
+      "--color-page": "#aeb99d",
+      "--color-app": "#f8e8c5",
+      "--color-surface": "#ead2a2",
+      "--color-border": palette.secondary,
+      "--color-ink": "#231f14",
+      "--color-muted": "#6f552e",
+      "--color-green": palette.primary,
+      "--color-leather": palette.secondary,
+      "--color-brass": palette.accent,
+      "--color-sky": palette.soft,
+      "--color-blue": palette.secondary,
+      "--shadow-card": "0 18px 34px rgb(49 31 12 / 0.25)",
+      fontFamily: theme.fontFamily,
+    } as CSSProperties;
+  }, [palette.accent, palette.primary, palette.secondary, palette.soft, theme.fontFamily, themeDirection]);
 
   function updatePrimaryColor(value: string) {
     const nextPalette = derivePalette(value);
@@ -275,290 +275,27 @@ export function StyleSettingsPanel({
         </button>
       </form>
 
-      <div
-        className="overflow-hidden rounded-md border border-ink/10 p-5"
-        style={{ backgroundColor: theme.text, color: theme.surface }}
-      >
+      <div className="overflow-hidden rounded-md border border-ink/10 bg-ink p-5 text-paper">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <p
-              className="text-xs font-semibold uppercase tracking-[0.14em]"
-              style={{ color: palette.accent }}
-            >
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-flax">
               Traveler app preview
             </p>
             <h2 className="mt-1 text-xl font-semibold">
-              Traveler app structure
+              Live traveler shell
             </h2>
           </div>
-          <div
-            className="rounded-full px-3 py-1 text-xs font-semibold"
-            style={{ backgroundColor: palette.soft, color: theme.text }}
-          >
-            Today
+          <div className="rounded-full bg-paper px-3 py-1 text-xs font-semibold text-ink">
+            {theme.name}
           </div>
         </div>
 
-        <div
-          className={
-            isModern
-              ? "rounded-[26px] border p-4"
-              : isRustic
-                ? "rounded-[18px] border p-4"
-                : "rounded-[34px] border p-4"
-          }
-          style={{
-            backgroundColor: theme.surface,
-            backgroundImage: isModern
-              ? `linear-gradient(90deg, ${palette.soft} 1px, transparent 1px), linear-gradient(180deg, ${palette.soft} 1px, transparent 1px)`
-              : isRustic
-                ? `linear-gradient(180deg, ${palette.soft}, ${theme.surface})`
-                : `radial-gradient(circle at 18% 10%, ${palette.soft}, transparent 34%), linear-gradient(180deg, #fffaf0, ${theme.surface})`,
-            backgroundSize: isModern ? "26px 26px" : undefined,
-            borderColor: palette.secondary,
-            boxShadow: theme.cardShadow,
-            color: theme.text,
-            fontFamily: theme.fontFamily,
-          }}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div
-              className="min-w-0 rounded-lg px-3 py-2"
-              style={{ backgroundColor: palette.soft }}
-            >
-              <p className="text-[10px] font-bold uppercase leading-none opacity-65">
-                Traveler mode
-              </p>
-              <p className="mt-1 truncate text-sm font-bold">
-                {themeCopy.material}
-              </p>
-            </div>
-            <div className="flex gap-1">
-              {[Images, MapPin, Search, Languages].map((Icon, index) => (
-                <span
-                  className="flex h-9 w-9 items-center justify-center rounded-lg"
-                  key={index}
-                  style={{
-                    backgroundColor: index === 0 ? palette.primary : palette.soft,
-                    color: index === 0 ? getReadableTextColor(palette.primary) : theme.text,
-                  }}
-                >
-                  <Icon size={17} />
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {isModern ? (
-            <div className="mt-5">
-              <div
-                className="rounded-[22px] border p-5"
-                style={{
-                  background: heroBackground,
-                  borderColor: palette.accent,
-                  color: heroTextColor,
-                }}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em]">
-                    {theme.name}
-                  </p>
-                  <span className="h-px flex-1 opacity-40" style={{ backgroundColor: heroTextColor }} />
-                  <p className="text-xs font-semibold">09:20</p>
-                </div>
-                <h2 className={`mt-5 text-4xl leading-tight ${theme.headingClass}`}>
-                  {appName || "Untitled Trip"}
-                </h2>
-                <p className="mt-3 max-w-sm text-sm leading-6 opacity-80">
-                  {themeCopy.detail}
-                </p>
-              </div>
-              <div className="mt-5 space-y-3">
-                {themeCopy.cards.map((label, index) => (
-                  <div
-                    className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-[18px] border bg-white/80 p-3 backdrop-blur"
-                    key={label}
-                    style={{ borderColor: index === 0 ? palette.primary : palette.soft }}
-                  >
-                    <span
-                      className="h-10 w-1.5 rounded-full"
-                      style={{ backgroundColor: index === 0 ? palette.primary : palette.accent }}
-                    />
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-55">
-                        {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold">{label}</p>
-                    </div>
-                    <span
-                      className="rounded-full px-2 py-1 text-[10px] font-semibold"
-                      style={{
-                        backgroundColor: palette.soft,
-                        color: theme.text,
-                      }}
-                    >
-                      Open
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : isRustic ? (
-            <div className="mt-5">
-              <div
-                className="rounded-[14px] border-l-4 p-5"
-                style={{
-                  background: heroBackground,
-                  borderColor: palette.accent,
-                  color: heroTextColor,
-                }}
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.14em]">
-                  {theme.name}
-                </p>
-                <h2 className={`mt-4 text-4xl leading-tight ${theme.headingClass}`}>
-                  {appName || "Untitled Trip"}
-                </h2>
-                <p className="mt-3 text-sm leading-6 opacity-80">
-                  {themeCopy.detail}
-                </p>
-              </div>
-              <div className="mt-5 space-y-3 border-l-2 pl-4" style={{ borderColor: palette.secondary }}>
-                {themeCopy.cards.map((label, index) => (
-                  <div
-                    className="relative rounded-[12px] border p-4"
-                    key={label}
-                    style={{
-                      backgroundColor: index === 2 ? palette.primary : "#fffaf0",
-                      borderColor: palette.secondary,
-                      color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
-                    }}
-                  >
-                    <span
-                      className="absolute -left-[23px] top-5 h-3 w-3 rounded-full ring-4"
-                      style={{
-                        backgroundColor: palette.accent,
-                        boxShadow: `0 0 0 4px ${theme.surface}`,
-                      }}
-                    />
-                    <p className="text-xs font-semibold uppercase">
-                      {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
-                    </p>
-                    <p className={`mt-5 text-xl ${theme.headingClass}`}>{label}</p>
-                    <p className="mt-2 text-xs leading-5 opacity-70">
-                      Notes, timing, and private details stay tucked into the card.
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-5">
-              <div
-                className="rounded-t-[54px] rounded-b-[26px] border p-6"
-                style={{
-                  background: heroBackground,
-                  borderColor: palette.accent,
-                  color: heroTextColor,
-                }}
-              >
-                <p
-                  className="text-xs font-semibold uppercase tracking-[0.16em]"
-                  style={{ color: palette.secondary }}
-                >
-                  {theme.name}
-                </p>
-                <h2 className={`mt-5 text-4xl leading-tight ${theme.headingClass}`}>
-                  {appName || "Untitled Trip"}
-                </h2>
-                <p className="mt-3 text-sm leading-6 opacity-80">
-                  {themeCopy.detail}
-                </p>
-              </div>
-              <div className="mt-5 grid gap-3">
-                {themeCopy.cards.map((label, index) => (
-                  <div
-                    className="rounded-[26px] border p-4"
-                    key={label}
-                    style={{
-                      backgroundColor:
-                        index === 0
-                          ? "#fffaf0"
-                          : index === 1
-                            ? palette.soft
-                            : palette.primary,
-                      borderColor: palette.accent,
-                      color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold"
-                        style={{
-                          backgroundColor: index === 2 ? palette.accent : palette.primary,
-                          color: getReadableTextColor(index === 2 ? palette.accent : palette.primary),
-                        }}
-                      >
-                        {index + 1}
-                      </span>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.12em] opacity-65">
-                          {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
-                        </p>
-                        <p className={`mt-1 text-lg ${theme.headingClass}`}>{label}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-5 grid grid-cols-4 gap-2">
-            {[
-              ["Legs", MapPin],
-              ["Categories", Tags],
-              ["Today", Sparkles],
-              ["Calendar", CalendarDays],
-            ].map(([label, Icon], index) => {
-              const ActiveIcon = Icon as typeof Sparkles;
-
-              return (
-                <div
-                  className="flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-xs font-semibold"
-                  key={label as string}
-                  style={{
-                    backgroundColor: index === 2 ? palette.primary : palette.soft,
-                    color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
-                  }}
-                >
-                  <ActiveIcon size={18} />
-                  <span>{label as string}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-3" style={{ fontFamily: theme.fontFamily }}>
-          {[
-            ["Palette", palette.primary],
-            ["Accent", palette.accent],
-            ["Soft", palette.soft],
-          ].map(([label, color]) => (
-            <div
-              key={label}
-              className="rounded-md border border-white/10 p-3"
-              style={{
-                backgroundColor: color,
-                color: getReadableTextColor(color),
-              }}
-            >
-              <p className="text-xs font-semibold uppercase">{label}</p>
-              <p className="mt-1 text-sm font-bold">{color}</p>
-            </div>
-          ))}
-        </div>
+        <TravelerAppShell
+          displayName={appName || "Untitled Trip"}
+          mode="preview"
+          style={previewVars}
+          trip={previewTrip}
+        />
       </div>
     </section>
   );

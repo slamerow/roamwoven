@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useMemo, useState } from "react";
 import {
   CalendarDays,
   Camera,
@@ -26,6 +26,12 @@ import {
   classifySensitiveText,
   type SensitiveDetailClassification,
 } from "@/lib/traveler-privacy";
+import {
+  TRAVELER_TABS,
+  TRAVELER_TOOLS,
+  type TravelerTabId,
+  type TravelerToolId,
+} from "@/lib/traveler-app-architecture";
 
 const DEMO_TRAVELER_PASSWORD = "traveler";
 
@@ -37,13 +43,31 @@ const samplePhotos = [
 ];
 
 type TravelerAppShellProps = {
+  displayName?: string;
+  mode?: "standalone" | "preview";
+  style?: CSSProperties;
   trip: AsiaDemoTrip;
 };
 
 type TravelerItem = AsiaDemoTrip["days"][number]["items"][number];
 type TravelerDay = AsiaDemoTrip["days"][number];
-type ActiveTab = "legs" | "categories" | "today" | "calendar";
-type OverlayKind = "unlock" | "photos" | "stay" | "search" | "map" | "phrases";
+type ActiveTab = TravelerTabId;
+type OverlayKind = "unlock" | TravelerToolId;
+
+const travelerToolIcons: Record<TravelerToolId, typeof Sparkles> = {
+  map: MapIcon,
+  photos: Images,
+  phrases: Languages,
+  search: Search,
+  stay: MapPin,
+};
+
+const travelerTabIcons: Record<TravelerTabId, typeof Sparkles> = {
+  calendar: CalendarDays,
+  categories: Tags,
+  legs: MapPin,
+  today: Sparkles,
+};
 
 function getCardSensitivity(item: TravelerItem) {
   return (
@@ -605,7 +629,12 @@ function ActivityDetail({
   );
 }
 
-export function TravelerAppShell({ trip }: TravelerAppShellProps) {
+export function TravelerAppShell({
+  displayName,
+  mode = "standalone",
+  style,
+  trip,
+}: TravelerAppShellProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("today");
   const [unlocked, setUnlocked] = useState(false);
   const [password, setPassword] = useState("");
@@ -623,14 +652,6 @@ export function TravelerAppShell({ trip }: TravelerAppShellProps) {
       ),
     [trip.days]
   );
-  const tabs: Array<{ id: ActiveTab; label: string; icon: typeof Sparkles }> =
-    [
-      { id: "legs", label: "Legs", icon: MapPin },
-      { id: "categories", label: "Categories", icon: Tags },
-      { id: "today", label: "Today", icon: Sparkles },
-      { id: "calendar", label: "Calendar", icon: CalendarDays },
-    ];
-
   function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -645,9 +666,24 @@ export function TravelerAppShell({ trip }: TravelerAppShellProps) {
     setError(true);
   }
 
+  const isPreview = mode === "preview";
+
   return (
-    <main className="journal-page min-h-screen text-[var(--color-ink)]">
-      <div className="journal-app mx-auto flex min-h-screen w-full max-w-[440px] flex-col border-x border-black/10 shadow-2xl shadow-stone-950/25">
+    <main
+      className={
+        isPreview
+          ? "journal-page h-[720px] overflow-hidden rounded-[28px] text-[var(--color-ink)]"
+          : "journal-page min-h-screen text-[var(--color-ink)]"
+      }
+      style={style}
+    >
+      <div
+        className={
+          isPreview
+            ? "journal-app relative mx-auto flex h-full w-full max-w-[440px] flex-col overflow-hidden border-x border-black/10 shadow-2xl shadow-stone-950/25"
+            : "journal-app mx-auto flex min-h-screen w-full max-w-[440px] flex-col border-x border-black/10 shadow-2xl shadow-stone-950/25"
+        }
+      >
         <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-app)]/95 px-4 pb-4 pt-5 backdrop-blur min-[400px]:px-5">
           <div className="flex items-start justify-between gap-2 min-[400px]:gap-3">
             <button
@@ -673,26 +709,34 @@ export function TravelerAppShell({ trip }: TravelerAppShellProps) {
               </span>
             </button>
             <div className="flex shrink-0 gap-1 min-[400px]:gap-1.5">
-              <IconButton label="Photos" onClick={() => setOverlay("photos")}>
-                <Images size={19} />
-              </IconButton>
-              <IconButton label="Stay" onClick={() => setOverlay("stay")}>
-                <MapPin size={19} />
-              </IconButton>
-              <IconButton label="Search" onClick={() => setOverlay("search")}>
-                <Search size={19} />
-              </IconButton>
-              <IconButton label="Map" onClick={() => setOverlay("map")}>
-                <MapIcon size={19} />
-              </IconButton>
-              <IconButton label="Phrases" onClick={() => setOverlay("phrases")}>
-                <Languages size={19} />
-              </IconButton>
+              {TRAVELER_TOOLS.map((tool) => {
+                const Icon = travelerToolIcons[tool.id];
+
+                return (
+                  <IconButton
+                    key={tool.id}
+                    label={tool.label}
+                    onClick={() => setOverlay(tool.id)}
+                  >
+                    <Icon size={19} />
+                  </IconButton>
+                );
+              })}
             </div>
           </div>
         </header>
 
         <section className="flex-1 px-5 pb-28 pt-5">
+          {displayName ? (
+            <section className="mb-5 rounded-xl border border-white/70 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--color-leather)]">
+                Trip app
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold leading-tight">
+                {displayName}
+              </h1>
+            </section>
+          ) : null}
           {!unlocked ? (
             <button
               type="button"
@@ -738,10 +782,16 @@ export function TravelerAppShell({ trip }: TravelerAppShellProps) {
           </section>
         </section>
 
-        <nav className="fixed bottom-0 left-1/2 z-20 w-full max-w-[440px] -translate-x-1/2 border-t border-[var(--color-border)] bg-[var(--color-app)]/96 px-3 pb-3 pt-2 backdrop-blur">
+        <nav
+          className={
+            isPreview
+              ? "absolute bottom-0 left-0 z-20 w-full border-t border-[var(--color-border)] bg-[var(--color-app)]/96 px-3 pb-3 pt-2 backdrop-blur"
+              : "fixed bottom-0 left-1/2 z-20 w-full max-w-[440px] -translate-x-1/2 border-t border-[var(--color-border)] bg-[var(--color-app)]/96 px-3 pb-3 pt-2 backdrop-blur"
+          }
+        >
           <div className="grid grid-cols-4 gap-2">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
+            {TRAVELER_TABS.map((tab) => {
+              const Icon = travelerTabIcons[tab.id];
               const isActive = activeTab === tab.id;
 
               return (

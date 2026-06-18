@@ -19,7 +19,7 @@ export async function POST(
     const formData = await request.formData();
     const name = String(formData.get("name") ?? "");
 
-    await updateMakerTripName({ name, tripId });
+    await updateMakerTripName({ name, previousName: trip.name, tripId });
     workspaceUrl.searchParams.set("renamed", "1");
 
     return NextResponse.redirect(workspaceUrl, 303);
