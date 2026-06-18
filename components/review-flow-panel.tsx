@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
+  ArrowLeft,
   ArrowRight,
   CalendarDays,
   CloudSun,
@@ -226,7 +227,7 @@ export function ReviewFlowPanel({
           </section>
         </div>
 
-        <aside className="space-y-6">
+        <aside>
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-lg font-semibold text-ink">{trip.name}</h2>
             {trip.destinationSummary ? (
@@ -264,35 +265,37 @@ export function ReviewFlowPanel({
               )}
             </div>
           </section>
-
-          <section className="rounded-md border border-ink/10 bg-white p-5">
-            <h2 className="text-lg font-semibold text-ink">Next step</h2>
-            <p className="mt-2 text-sm leading-6 text-ink/60">
-              Save these content choices, then choose the app name, primary
-              color, and visual direction.
-            </p>
-            {canContinue ? (
-              <form action={`/maker/trips/${trip.id}/review/settings`} method="post">
-                <input name="settings" type="hidden" value={settingsPayload} />
-                <button
-                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-                  type="submit"
-                >
-                  Continue to design
-                  <ArrowRight size={16} />
-                </button>
-              </form>
-            ) : (
-              <button
-                className="mt-5 w-full rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
-                disabled
-                type="button"
-              >
-                Confirm {BUILD_CONFIRMATIONS.length - checkedCount} more
-              </button>
-            )}
-          </section>
         </aside>
+      </section>
+
+      <section className="mt-8 flex flex-col gap-3 border-t border-ink/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <Link
+          className="inline-flex items-center gap-2 rounded-md border border-ink/10 bg-white px-4 py-3 text-sm font-semibold text-ink"
+          href={`/maker/trips/${trip.id}/upload`}
+        >
+          <ArrowLeft size={16} />
+          Back to materials
+        </Link>
+        {canContinue ? (
+          <form action={`/maker/trips/${trip.id}/review/settings`} method="post">
+            <input name="settings" type="hidden" value={settingsPayload} />
+            <button
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper sm:w-auto"
+              type="submit"
+            >
+              Continue to design
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        ) : (
+          <button
+            className="rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
+            disabled
+            type="button"
+          >
+            Confirm {BUILD_CONFIRMATIONS.length - checkedCount} more
+          </button>
+        )}
       </section>
     </>
   );

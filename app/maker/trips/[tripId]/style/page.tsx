@@ -35,8 +35,8 @@ export default async function StylePage({
         </header>
 
         <MakerProgress
-          completedSteps={settings.updatedAt ? 5 : 4}
-          currentStep={5}
+          completedSteps={settings.updatedAt ? 4 : 3}
+          currentStep={4}
           detail="Color choices should show up immediately in previews and carry into draft review before the final traveler app is published."
           isPaid={trip.isDemo || trip.paymentStatus === "paid"}
           tripId={tripId}

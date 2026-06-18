@@ -15,10 +15,7 @@ import {
   type TripDraftSnapshot,
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
-import {
-  getThemeDirection,
-  type TripStyleSettings,
-} from "@/lib/style-settings-config";
+import { type TripStyleSettings } from "@/lib/style-settings-config";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
@@ -92,119 +89,6 @@ function getTransportLabel(value: unknown) {
 
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function getReadableTextColor(backgroundColor: string) {
-  const hex = backgroundColor.replace("#", "");
-  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
-  const luminance =
-    0.2126 * red ** 2.2 + 0.7152 * green ** 2.2 + 0.0722 * blue ** 2.2;
-
-  return luminance > 0.52 ? "#201c16" : "#fffaf0";
-}
-
-function DraftDesignPreview({
-  style,
-  tripId,
-}: {
-  style: TripStyleSettings;
-  tripId: string;
-}) {
-  const theme = getThemeDirection(style.themeDirection);
-  const primary = style.primaryColor;
-  const secondary = style.secondaryColor ?? primary;
-  const accent = style.accentColor ?? secondary;
-  const soft = style.softColor ?? theme.surface;
-
-  return (
-    <section
-      className="mt-8 overflow-hidden rounded-md border border-ink/10 p-5"
-      style={{ backgroundColor: theme.text, color: theme.surface }}
-    >
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p
-            className="text-xs font-semibold uppercase tracking-[0.14em]"
-            style={{ color: accent }}
-          >
-            Design applied
-          </p>
-          <h2 className="mt-2 text-2xl font-semibold">
-            {style.appName}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 opacity-75">
-            Draft review now shows the selected palette inside the Wren-style
-            traveler shell before the final app is published.
-          </p>
-        </div>
-        <Link
-          className="inline-flex justify-center rounded-md px-4 py-3 text-sm font-semibold"
-          href={`/maker/trips/${tripId}/style`}
-          style={{ backgroundColor: soft, color: theme.text }}
-        >
-          Edit design
-        </Link>
-      </div>
-
-      <div
-        className="mt-5 rounded-[26px] border p-4"
-        style={{
-          backgroundColor: theme.surface,
-          borderColor: secondary,
-          color: theme.text,
-          fontFamily: theme.fontFamily,
-        }}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span
-            className="rounded-lg px-3 py-2 text-xs font-bold uppercase"
-            style={{ backgroundColor: soft }}
-          >
-            Traveler mode
-          </span>
-          <div className="flex gap-1">
-            {["Photos", "Stay", "Search", "Map"].map((label, index) => (
-              <span
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[10px] font-bold"
-                key={label}
-                style={{
-                  backgroundColor: index === 0 ? primary : soft,
-                  color: index === 0 ? getReadableTextColor(primary) : theme.text,
-                }}
-              >
-                {label.slice(0, 1)}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {["Today", "Stay", "Dinner"].map((label, index) => (
-            <div
-              className="rounded-[20px] border p-4"
-              key={label}
-              style={{
-                backgroundColor:
-                  index === 0 ? soft : index === 1 ? theme.surface : primary,
-                borderColor: index === 2 ? accent : secondary,
-                color: index === 2 ? getReadableTextColor(primary) : theme.text,
-              }}
-            >
-              <p className="text-xs font-bold uppercase">{label}</p>
-              <p className="mt-8 text-lg font-semibold">
-                {index === 0
-                  ? "Morning plan"
-                  : index === 1
-                    ? "Check-in details"
-                    : "Reservation card"}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function formatScannedSummary(draft: unknown) {
@@ -573,13 +457,7 @@ function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {
   );
 }
 
-function DemoStructuredData({
-  style,
-  uploads,
-}: {
-  style: TripStyleSettings;
-  uploads: TripUpload[];
-}) {
+function DemoStructuredData({ uploads }: { uploads: TripUpload[] }) {
   const trip = getAsiaDemoTrip();
   const stayLegs = trip.legs.filter((leg) => leg.stayName);
   const missingItems = trip.items.filter((item) =>
@@ -700,8 +578,6 @@ function DemoStructuredData({
         </div>
       </section>
 
-      <DraftDesignPreview style={style} tripId="demo-trip" />
-
       {uploads.length > 0 ? <SourceMaterials uploads={uploads} /> : null}
       <section className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row">
@@ -758,7 +634,7 @@ export default async function StructuredDataPage({
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-              Draft Review
+              Process & Review
             </p>
             <h1 className="mt-2 text-4xl font-semibold text-ink">
               Review what needs attention
@@ -766,51 +642,24 @@ export default async function StructuredDataPage({
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
               {makerTrip.isDemo
                 ? "Review the details that need a decision before the trip app is built."
-                : `Check the review queue for ${makerTrip.name}.`}
+                : latestDraft
+                  ? `Resolve the questions and flagged details for ${makerTrip.name}.`
+                  : `Process ${makerTrip.name} into the first structured trip draft.`}
             </p>
           </div>
         </header>
 
         <MakerProgress
-          completedSteps={5}
-          currentStep={6}
-          detail="Review the draft, jump back to app setup or design if needed, then continue to summary and publish."
+          completedSteps={latestDraft || makerTrip.isDemo ? 5 : 4}
+          currentStep={latestDraft || makerTrip.isDemo ? 6 : 5}
+          detail={
+            latestDraft || makerTrip.isDemo
+              ? "Review the questions and flagged details before continuing."
+              : "Create the first structured draft from the confirmed materials."
+          }
           isPaid={makerTrip.isDemo || makerTrip.paymentStatus === "paid"}
           tripId={tripId}
         />
-
-        <section className="mt-6 grid gap-3 md:grid-cols-3">
-          <Link
-            href={`/maker/trips/${tripId}/upload`}
-            className="rounded-md border border-ink/10 bg-white p-4 text-sm font-semibold text-ink"
-          >
-            Add or review source materials
-            <span className="mt-2 block text-sm font-normal leading-6 text-ink/60">
-              Use this before the first build; later docs should be treated as
-              limited updates.
-            </span>
-          </Link>
-          <Link
-            href={`/maker/trips/${tripId}/review`}
-            className="rounded-md border border-ink/10 bg-white p-4 text-sm font-semibold text-ink"
-          >
-            Edit app setup
-            <span className="mt-2 block text-sm font-normal leading-6 text-ink/60">
-              Change sections like photos, phrases, maps, or travel.
-            </span>
-          </Link>
-          <Link
-            href={`/maker/trips/${tripId}/style`}
-            className="rounded-md border border-ink/10 bg-white p-4 text-sm font-semibold text-ink"
-          >
-            Edit design
-            <span className="mt-2 block text-sm font-normal leading-6 text-ink/60">
-              Update colors and see them applied in the Wren-style shell.
-            </span>
-          </Link>
-        </section>
-
-        <DraftDesignPreview style={style} tripId={tripId} />
 
         {!makerTrip.isDemo ? (
           <RealTripFirstPass
@@ -825,7 +674,7 @@ export default async function StructuredDataPage({
             style={style}
           />
         ) : (
-          <DemoStructuredData style={style} uploads={uploads} />
+          <DemoStructuredData uploads={uploads} />
         )}
       </div>
     </main>

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import {
+  ArrowLeft,
   CheckCircle2,
-  CreditCard,
   FileUp,
   Palette,
   Share2,
   TableProperties,
+  WandSparkles,
 } from "lucide-react";
 
 const MAKER_STEPS = [
@@ -14,12 +15,6 @@ const MAKER_STEPS = [
     description: "Name the app and create the workspace.",
     href: "",
     icon: CheckCircle2,
-  },
-  {
-    title: "Unlock build",
-    description: "Complete checkout before expensive processing starts.",
-    href: "",
-    icon: CreditCard,
   },
   {
     title: "Add materials",
@@ -40,9 +35,21 @@ const MAKER_STEPS = [
     icon: Palette,
   },
   {
-    title: "Review & publish",
-    description: "Check the draft, summary, and shareable app.",
+    title: "Process",
+    description: "Turn confirmed materials into the first app draft.",
     href: "data",
+    icon: WandSparkles,
+  },
+  {
+    title: "Review",
+    description: "Answer questions and resolve flagged details.",
+    href: "data",
+    icon: TableProperties,
+  },
+  {
+    title: "Publish",
+    description: "Share the finished traveler app.",
+    href: "publish",
     icon: Share2,
   },
 ] as const;
@@ -71,7 +78,23 @@ export function MakerProgress({
   );
 
   return (
-    <section className="mt-8 rounded-md border border-ink/10 bg-white p-4">
+    <section className="mt-8 overflow-hidden rounded-md border border-moss/25 bg-white shadow-[var(--rw-shadow)]">
+      <div className="flex flex-col gap-3 border-b border-moss/15 bg-moss/10 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <Link
+          className="inline-flex items-center gap-2 text-sm font-semibold text-moss"
+          href="/maker"
+        >
+          <ArrowLeft size={16} />
+          Dashboard
+        </Link>
+        <Link
+          className="text-sm font-semibold text-ink/65 transition hover:text-ink"
+          href={`/maker/trips/${tripId}`}
+        >
+          Trip workspace
+        </Link>
+      </div>
+      <div className="p-4">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
@@ -88,19 +111,19 @@ export function MakerProgress({
         </div>
       </div>
 
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink/10">
+      <div className="mt-4 h-3 overflow-hidden rounded-full bg-moss/15">
         <div
-          className="h-full rounded-full bg-moss"
+          className="h-full rounded-full bg-gradient-to-r from-moss via-tide to-clay"
           style={{ width: `${progressPercent}%` }}
         />
       </div>
 
-      <div className="mt-4 grid gap-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="mt-4 grid gap-2 md:grid-cols-3 lg:grid-cols-7">
         {MAKER_STEPS.map((step, index) => {
           const stepNumber = index + 1;
           const complete = stepNumber <= boundedCompletedSteps;
           const current = stepNumber === currentStep;
-          const available = isPaid || stepNumber <= 2;
+          const available = isPaid || stepNumber === 1;
           const Icon = step.icon;
           const content = (
             <>
@@ -125,7 +148,7 @@ export function MakerProgress({
             </>
           );
           const className = current
-            ? "rounded-md border border-clay/25 bg-clay/10 p-3 text-left"
+            ? "rounded-md border border-clay/35 bg-clay/10 p-3 text-left shadow-sm"
             : "rounded-md border border-ink/10 bg-paper p-3 text-left transition hover:border-moss/25";
 
           if (!available) {
@@ -146,6 +169,7 @@ export function MakerProgress({
             </Link>
           );
         })}
+      </div>
       </div>
     </section>
   );

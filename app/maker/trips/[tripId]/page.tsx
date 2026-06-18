@@ -1,13 +1,4 @@
 import Link from "next/link";
-import {
-  CheckCircle2,
-  CreditCard,
-  FileUp,
-  Palette,
-  Share2,
-  TableProperties,
-  WandSparkles
-} from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -37,38 +28,38 @@ function getNextBuildStep({
     return {
       href: "",
       label: "Continue to payment",
-      message: "Checkout unlocks upload and the app build workflow.",
+      message: "Complete checkout to start building the private trip app.",
     };
   }
 
   if (uploadCount === 0) {
     return {
       href: "upload",
-      label: "Continue building",
-      message: "Step 2 is done. Upload your trip materials to begin intake.",
+      label: "Continue building: Add materials",
+      message: "Next: add the materials Roamwoven should use.",
     };
   }
 
   if (!hasBuildSettings) {
     return {
       href: "review",
-      label: "Continue building",
-      message: "Your materials are saved. Confirm what belongs in the app.",
+      label: "Continue building: App setup",
+      message: "Next: choose what belongs in the traveler app.",
     };
   }
 
   if (!hasStyleSettings) {
     return {
       href: "style",
-      label: "Continue building",
-      message: "Content choices are saved. Choose the app's design direction.",
+      label: "Continue building: Design",
+      message: "Next: choose the app's design direction.",
     };
   }
 
   return {
     href: "data",
-    label: "Continue building",
-    message: "Design choices are saved. Review the first structured draft.",
+    label: "Continue building: Process draft",
+    message: "Next: process the first draft and review what needs attention.",
   };
 }
 
@@ -88,28 +79,19 @@ function getProgressState({
   }
 
   if (uploadCount === 0) {
-    return { completedSteps: 2, currentStep: 3 };
+    return { completedSteps: 1, currentStep: 2 };
   }
 
   if (!hasBuildSettings) {
-    return { completedSteps: 3, currentStep: 4 };
+    return { completedSteps: 2, currentStep: 3 };
   }
 
   if (!hasStyleSettings) {
-    return { completedSteps: 4, currentStep: 5 };
+    return { completedSteps: 3, currentStep: 4 };
   }
 
-  return { completedSteps: 5, currentStep: 6 };
+  return { completedSteps: 4, currentStep: 5 };
 }
-
-const betaLinks = [
-  { label: "Upload", step: "upload", icon: FileUp },
-  { label: "Review", step: "review", icon: WandSparkles },
-  { label: "Check data", step: "data", icon: TableProperties },
-  { label: "Style", step: "style", icon: Palette },
-  { label: "Summary", step: "summary", icon: CheckCircle2 },
-  { label: "Publish", step: "publish", icon: Share2 }
-];
 
 export default async function TripWorkspacePage({
   params,
@@ -208,8 +190,7 @@ export default async function TripWorkspacePage({
                 </h2>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
                   In beta this is a lightweight preview step: we show momentum,
-                  then move into secure checkout before any expensive processing
-                  starts.
+                  then move into secure checkout before the app build begins.
                 </p>
               </div>
               <div className="w-full rounded-md bg-paper p-4 md:w-72">
@@ -255,22 +236,19 @@ export default async function TripWorkspacePage({
         />
 
         {isPaid ? (
-          <section className="mt-8 rounded-md border border-moss/20 bg-moss/10 p-4">
+          <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 shrink-0 text-moss" size={22} />
-                <div>
-                  <h2 className="text-base font-semibold text-moss">
-                    Checkout complete
-                  </h2>
-                  <p className="mt-1 text-sm leading-6 text-ink/65">
-                    {nextBuildStep.message}
-                  </p>
-                </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+                  Next up
+                </p>
+                <h2 className="mt-2 text-xl font-semibold text-ink">
+                  {nextBuildStep.message}
+                </h2>
               </div>
               <Link
                 href={`/maker/trips/${tripId}/${nextBuildStep.href}`}
-                className="inline-flex justify-center rounded-md bg-moss px-4 py-3 text-sm font-semibold text-white"
+                className="inline-flex justify-center rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
               >
                 {nextBuildStep.label}
               </Link>
@@ -279,12 +257,12 @@ export default async function TripWorkspacePage({
         ) : (
           <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-xl font-semibold text-ink">
-              {trip.isDemo ? "Demo flow enabled" : "Checkout required"}
+              {trip.isDemo ? "Demo flow enabled" : "Start building"}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
               {trip.isDemo
                 ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
-                : "Checkout unlocks the real build. Stripe can support cards and wallet-style express checkout once those payment methods are enabled."}
+                : "Complete checkout once, then add the trip materials Roamwoven will turn into a private traveler app."}
             </p>
             {checkout === "setup-required" ? (
               <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
@@ -321,42 +299,6 @@ export default async function TripWorkspacePage({
           </section>
         )}
 
-        <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
-          <h2 className="text-xl font-semibold text-ink">Beta flow shortcuts</h2>
-          <p className="mt-2 text-sm leading-6 text-ink/60">
-            Jump to any step while the product is still using mocked beta state.
-          </p>
-          <div className="mt-5 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-            {betaLinks.map((link) => {
-              const Icon = link.icon;
-              const href =
-                link.step === "upload"
-                  ? `/maker/trips/${tripId}/upload`
-                  : link.step === "review"
-                    ? `/maker/trips/${tripId}/review`
-                    : link.step === "data"
-                      ? `/maker/trips/${tripId}/data`
-                      : link.step === "style"
-                        ? `/maker/trips/${tripId}/style`
-                        : link.step === "summary"
-                          ? `/maker/trips/${tripId}/summary`
-                          : `/maker/trips/${tripId}/publish`;
-
-              return (
-                <Link
-                  key={link.step}
-                  href={href}
-                  className="rounded-md border border-ink/10 bg-paper p-4"
-                >
-                  <Icon className="text-tide" size={20} />
-                  <p className="mt-3 text-sm font-semibold text-ink">
-                    {link.label}
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
       </div>
     </main>
   );

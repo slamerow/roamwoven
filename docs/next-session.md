@@ -76,8 +76,9 @@ Backend-ready pieces now exist:
   - design settings saved -> draft review
   - parsed draft reviewed -> trip summary before publish
 - The Step 4 content-scope progress bar should stay fixed while the maker checks confirmations. Checkboxes can unlock the "Continue to design" action, but should not mark the top step track complete before the settings save succeeds.
-- Maker progress is now a shared six-step component shown across the workspace, upload, app setup, design, draft review, summary, and publish pages: Start trip -> Unlock build -> Add materials -> App setup -> Design -> Review & publish.
+- Maker progress is now a shared seven-step component shown across the workspace, upload, app setup, design, process/review, summary, and publish pages: Start trip -> Add materials -> App setup -> Design -> Process -> Review -> Publish. Checkout/payment should not be presented as one of the traveler-app build steps.
 - Later maker pages now provide direct navigation back to app setup and design, so Draft Review is not a one-way funnel.
+- Every maker step should include a dashboard/workspace navigation path. The shared progress component now includes Dashboard and Trip workspace links.
 - The design page must preview the actual Wren-style traveler app architecture, not generic sample cards. The Wren-style shell is the source of truth for generated app structure.
 - The whimsical/fantasy preview had a contrast bug where light text could sit on a light hero background. Keep theme previews accessible regardless of primary/accent color choices.
 - Document-update rule: before the first build, the maker can add/delete source materials freely. After the trip spine exists, late documents should be treated as limited app updates that append/modify structured trip records, not a full rebuild. V1 can frame this as a small update lane, such as up to 3 simple late docs.

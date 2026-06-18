@@ -91,13 +91,13 @@ export default async function UploadPage({
           <p className="mt-3 text-sm leading-6 text-ink/65">
             {canUpload
               ? "Upload flight and hotel confirmations, screenshots, documents, spreadsheets, and notes."
-              : "Upload unlocks after secure checkout so expensive processing stays gated."}
+              : "Complete checkout to start adding trip materials."}
           </p>
         </header>
 
         <MakerProgress
-          completedSteps={canUpload ? 2 : 1}
-          currentStep={3}
+          completedSteps={uploads.length > 0 ? 2 : 1}
+          currentStep={2}
           detail={
             canEditMaterials
               ? "Add and remove source materials freely before the first app build starts."
@@ -113,8 +113,8 @@ export default async function UploadPage({
               Checkout required
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-              This keeps the premium trip-building workflow protected before AI
-              review and photo storage begin.
+              Complete checkout once, then upload the documents and notes for
+              this trip.
             </p>
             <Link
               href={`/maker/trips/${tripId}`}

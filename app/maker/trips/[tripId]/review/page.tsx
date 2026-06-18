@@ -35,8 +35,8 @@ export default async function ReviewPage({
         </header>
 
         <MakerProgress
-          completedSteps={uploads.length > 0 ? 3 : 2}
-          currentStep={4}
+          completedSteps={uploads.length > 0 ? 2 : 1}
+          currentStep={3}
           detail="Choose the traveler-app sections before design. You can return here later from draft review if the app structure needs to change."
           isPaid={canReview}
           tripId={tripId}
