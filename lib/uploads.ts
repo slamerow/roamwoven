@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getSupabaseConfig } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -57,7 +58,9 @@ export type TripUpload = {
   originalFilename: string;
   fileType: string | null;
   fileSizeBytes: number | null;
+  contentSha256: string | null;
   storagePath: string | null;
+  sourceKind: string;
   userNote: string | null;
   processingStatus: string;
   createdAt: string | null;
@@ -69,7 +72,9 @@ type TripUploadRow = {
   original_filename: string;
   file_type: string | null;
   file_size_bytes: number | null;
+  content_sha256: string | null;
   storage_path: string | null;
+  source_kind: string | null;
   user_note: string | null;
   processing_status: string | null;
   created_at: string | null;
@@ -99,7 +104,9 @@ function normalizeUpload(row: TripUploadRow): TripUpload {
     originalFilename: row.original_filename,
     fileType: row.file_type,
     fileSizeBytes: row.file_size_bytes,
+    contentSha256: row.content_sha256,
     storagePath: row.storage_path,
+    sourceKind: row.source_kind ?? (row.storage_path ? "file" : "note"),
     userNote: row.user_note,
     processingStatus: row.processing_status ?? "pending",
     createdAt: row.created_at,
@@ -163,23 +170,42 @@ function getByteCount(value: string) {
   return new Blob([value]).size;
 }
 
+function sha256Hex(buffer: Buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+async function getFileHash(file: File) {
+  return sha256Hex(Buffer.from(await file.arrayBuffer()));
+}
+
+function getNoteHash(value: string) {
+  return sha256Hex(Buffer.from(value, "utf8"));
+}
+
+type IncomingFileIdentity = {
+  file: File;
+  sha256: string;
+};
+
 async function validateTripUploadCapacity({
   tripId,
-  files,
+  fileIdentities,
   incomingCount,
   incomingBytes,
+  noteHash,
   notes,
 }: {
-  files: File[];
+  fileIdentities: IncomingFileIdentity[];
   tripId: string;
   incomingCount: number;
   incomingBytes: number;
+  noteHash: string | null;
   notes: string;
 }) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("trip_uploads")
-    .select("original_filename,file_size_bytes,user_note")
+    .select("original_filename,file_size_bytes,content_sha256,user_note")
     .eq("trip_id", tripId);
 
   if (error) {
@@ -201,12 +227,27 @@ async function validateTripUploadCapacity({
           )}`
       )
   );
+  const existingHashes = new Set(
+    existingUploads
+      .map((upload) =>
+        typeof upload.content_sha256 === "string"
+          ? upload.content_sha256.trim()
+          : ""
+      )
+      .filter(Boolean)
+  );
   const incomingFileKeys = new Set<string>();
+  const incomingHashes = new Set<string>();
 
-  for (const file of files) {
+  for (const { file, sha256 } of fileIdentities) {
     const key = `${file.name.trim().toLowerCase()}:${file.size}`;
 
-    if (incomingFileKeys.has(key) || existingFileKeys.has(key)) {
+    if (
+      incomingHashes.has(sha256) ||
+      existingHashes.has(sha256) ||
+      incomingFileKeys.has(key) ||
+      existingFileKeys.has(key)
+    ) {
       throw new UploadValidationError(
         "duplicate-material",
         `${file.name} already appears to be attached to this trip.`
@@ -214,6 +255,17 @@ async function validateTripUploadCapacity({
     }
 
     incomingFileKeys.add(key);
+    incomingHashes.add(sha256);
+  }
+
+  if (
+    noteHash &&
+    (existingHashes.has(noteHash) || incomingHashes.has(noteHash))
+  ) {
+    throw new UploadValidationError(
+      "duplicate-material",
+      "These pasted notes already appear to be attached to this trip."
+    );
   }
 
   if (
@@ -258,7 +310,9 @@ export async function listTripUploads(tripId: string): Promise<TripUpload[]> {
         "original_filename",
         "file_type",
         "file_size_bytes",
+        "content_sha256",
         "storage_path",
+        "source_kind",
         "user_note",
         "processing_status",
         "created_at",
@@ -310,19 +364,25 @@ export async function uploadTripMaterials({
     );
   }
 
+  const fileIdentities = await Promise.all(
+    files.map(async (file) => ({ file, sha256: await getFileHash(file) }))
+  );
+  const noteHash = trimmedNotes ? getNoteHash(trimmedNotes) : null;
+
   await validateTripUploadCapacity({
-    files,
+    fileIdentities,
     tripId,
     incomingCount: files.length + (trimmedNotes ? 1 : 0),
     incomingBytes:
       files.reduce((sum, file) => sum + file.size, 0) + noteBytes,
+    noteHash,
     notes: trimmedNotes,
   });
 
   const supabase = await createSupabaseServerClient();
   const createdUploads: TripUpload[] = [];
 
-  for (const file of files) {
+  for (const { file, sha256 } of fileIdentities) {
     const uploadId = crypto.randomUUID();
     const contentType = getUploadContentType(file);
     const storagePath = [
@@ -357,7 +417,9 @@ export async function uploadTripMaterials({
         original_filename: file.name,
         file_type: contentType,
         file_size_bytes: file.size,
+        content_sha256: sha256,
         storage_path: storagePath,
+        source_kind: "file",
         processing_status: "uploaded",
       })
       .select(
@@ -367,7 +429,9 @@ export async function uploadTripMaterials({
           "original_filename",
           "file_type",
           "file_size_bytes",
+          "content_sha256",
           "storage_path",
+          "source_kind",
           "user_note",
           "processing_status",
           "created_at",
@@ -377,6 +441,12 @@ export async function uploadTripMaterials({
 
     if (rowError || !data) {
       await supabase.storage.from(TRIP_MATERIALS_BUCKET).remove([storagePath]);
+      if (rowError?.code === "23505") {
+        throw new UploadValidationError(
+          "duplicate-material",
+          `${file.name} already appears to be attached to this trip.`
+        );
+      }
       throw new Error(
         `Unable to save upload record: ${rowError?.message ?? "No row"}`
       );
@@ -393,7 +463,9 @@ export async function uploadTripMaterials({
         original_filename: NOTE_FILENAME,
         file_type: "text/plain",
         file_size_bytes: noteBytes,
+        content_sha256: noteHash,
         storage_path: null,
+        source_kind: "note",
         user_note: trimmedNotes,
         processing_status: "uploaded",
       })
@@ -404,7 +476,9 @@ export async function uploadTripMaterials({
           "original_filename",
           "file_type",
           "file_size_bytes",
+          "content_sha256",
           "storage_path",
+          "source_kind",
           "user_note",
           "processing_status",
           "created_at",
@@ -413,6 +487,12 @@ export async function uploadTripMaterials({
       .single();
 
     if (error || !data) {
+      if (error?.code === "23505") {
+        throw new UploadValidationError(
+          "duplicate-material",
+          "These pasted notes already appear to be attached to this trip."
+        );
+      }
       throw new Error(`Unable to save notes: ${error?.message ?? "No row"}`);
     }
 

@@ -6,9 +6,11 @@ export type TripProcessingRun = {
   createdAt: string | null;
   errorMessage: string | null;
   inputCharCount: number;
+  idempotencyKey: string | null;
   model: string | null;
   openaiUsage: unknown;
   runType: string;
+  sourceUploadIds: string[];
   status: string;
   tripId: string;
 };
@@ -28,9 +30,11 @@ type TripProcessingRunRow = {
   created_at: string | null;
   error_message: string | null;
   input_char_count: number | null;
+  idempotency_key: string | null;
   model: string | null;
   openai_usage: unknown;
   run_type: string | null;
+  source_upload_ids: unknown;
   status: string | null;
   trip_id: string;
 };
@@ -51,9 +55,15 @@ function normalizeRun(row: TripProcessingRunRow): TripProcessingRun {
     createdAt: row.created_at,
     errorMessage: row.error_message,
     inputCharCount: row.input_char_count ?? 0,
+    idempotencyKey: row.idempotency_key,
     model: row.model,
     openaiUsage: row.openai_usage ?? null,
     runType: row.run_type ?? "initial_parse",
+    sourceUploadIds: Array.isArray(row.source_upload_ids)
+      ? row.source_upload_ids.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [],
     status: row.status ?? "pending",
     tripId: row.trip_id,
   };
@@ -71,18 +81,24 @@ function normalizeSnapshot(row: TripDraftSnapshotRow): TripDraftSnapshot {
 }
 
 export async function createTripProcessingRun({
+  idempotencyKey,
   inputCharCount,
+  sourceUploadIds,
   tripId,
 }: {
+  idempotencyKey: string;
   inputCharCount: number;
+  sourceUploadIds: string[];
   tripId: string;
 }) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("trip_processing_runs")
     .insert({
+      idempotency_key: idempotencyKey,
       input_char_count: inputCharCount,
       run_type: "initial_parse",
+      source_upload_ids: sourceUploadIds,
       status: "processing",
       trip_id: tripId,
     })
@@ -92,10 +108,12 @@ export async function createTripProcessingRun({
         "completed_at",
         "created_at",
         "error_message",
+        "idempotency_key",
         "input_char_count",
         "model",
         "openai_usage",
         "run_type",
+        "source_upload_ids",
         "status",
         "trip_id",
       ].join(",")
@@ -103,6 +121,10 @@ export async function createTripProcessingRun({
     .single();
 
   if (error || !data) {
+    if (error?.code === "23505") {
+      throw new Error("A processing run for these exact materials already exists.");
+    }
+
     throw new Error(`Unable to create processing run: ${error?.message ?? "No row"}`);
   }
 
@@ -215,10 +237,12 @@ export async function getLatestTripProcessingRun(tripId: string) {
         "completed_at",
         "created_at",
         "error_message",
+        "idempotency_key",
         "input_char_count",
         "model",
         "openai_usage",
         "run_type",
+        "source_upload_ids",
         "status",
         "trip_id",
       ].join(",")

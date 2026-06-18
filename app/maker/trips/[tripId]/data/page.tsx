@@ -343,7 +343,13 @@ function RealTripFirstPass({
               ? "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass."
               : error === "checkout-required"
                 ? "Checkout must be complete before parsing."
-                : "Parsing failed. Check the processing run details and try again with a smaller text input."}
+                : error === "processing-active"
+                  ? "This trip is already processing. Wait for the current run to finish before starting another update."
+                  : error === "spine-exists"
+                    ? "The first trip spine already exists. Late documents should update the existing trip, not rebuild it from scratch."
+                    : error === "missing-spine-basics"
+                      ? "Roamwoven could not find enough basics to build a V1 trip spine. Add the missing dates, destinations, stays, transport, or anchor plans before trying again."
+                      : "Parsing failed. Check the processing run details and try again with a smaller text input."}
         </p>
       ) : null}
       {extractionStatus === "completed" ? (

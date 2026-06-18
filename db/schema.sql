@@ -31,7 +31,9 @@ create table if not exists trip_uploads (
   original_filename text not null,
   file_type text,
   file_size_bytes bigint,
+  content_sha256 text,
   storage_path text,
+  source_kind text not null default 'file',
   user_note text,
   detected_document_type text,
   classification_confidence numeric,
@@ -40,7 +42,9 @@ create table if not exists trip_uploads (
 );
 
 alter table if exists trip_uploads
-  add column if not exists file_size_bytes bigint;
+  add column if not exists file_size_bytes bigint,
+  add column if not exists content_sha256 text,
+  add column if not exists source_kind text not null default 'file';
 
 create table if not exists trip_legs (
   id uuid primary key default gen_random_uuid(),
@@ -122,6 +126,8 @@ create table if not exists trip_processing_runs (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references trips(id) on delete cascade,
   run_type text not null default 'initial_parse',
+  idempotency_key text,
+  source_upload_ids jsonb not null default '[]'::jsonb,
   status text not null default 'pending',
   model text,
   input_char_count integer not null default 0,
@@ -130,6 +136,10 @@ create table if not exists trip_processing_runs (
   created_at timestamptz not null default now(),
   completed_at timestamptz
 );
+
+alter table if exists trip_processing_runs
+  add column if not exists idempotency_key text,
+  add column if not exists source_upload_ids jsonb not null default '[]'::jsonb;
 
 create table if not exists trip_draft_snapshots (
   id uuid primary key default gen_random_uuid(),
@@ -184,6 +194,10 @@ create index if not exists trips_owner_status_idx
 create index if not exists trip_uploads_trip_id_idx
   on trip_uploads(trip_id);
 
+create unique index if not exists trip_uploads_trip_content_sha256_idx
+  on trip_uploads(trip_id, content_sha256)
+  where content_sha256 is not null;
+
 create index if not exists trip_legs_trip_id_idx
   on trip_legs(trip_id);
 
@@ -195,6 +209,10 @@ create index if not exists trip_items_trip_date_idx
 
 create index if not exists trip_processing_runs_trip_id_idx
   on trip_processing_runs(trip_id, created_at desc);
+
+create unique index if not exists trip_processing_runs_trip_idempotency_idx
+  on trip_processing_runs(trip_id, idempotency_key)
+  where idempotency_key is not null;
 
 create index if not exists trip_draft_snapshots_trip_id_idx
   on trip_draft_snapshots(trip_id, created_at desc);
