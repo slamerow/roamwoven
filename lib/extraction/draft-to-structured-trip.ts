@@ -64,6 +64,33 @@ function normalizeTransportType(value: string | null): TripTransportType {
   return "other";
 }
 
+function isIsoDate(value: string | null): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function datesBetweenExclusiveEnd(startDate: string | null, endDate: string | null) {
+  if (!isIsoDate(startDate)) {
+    return [];
+  }
+
+  if (!isIsoDate(endDate) || endDate <= startDate) {
+    return [startDate];
+  }
+
+  const dates: string[] = [];
+  for (let date = startDate; date < endDate; date = addDays(date, 1)) {
+    dates.push(date);
+  }
+
+  return dates;
+}
+
 function createTripRecord({
   draft,
   fallbackTripName,
@@ -381,7 +408,9 @@ function createDayRecords({
       [
         ...items.map((item) => item.date),
         ...transport.map((item) => item.date),
-        ...legs.flatMap((leg) => [leg.arriveDate, leg.leaveDate]),
+        ...legs.flatMap((leg) =>
+          datesBetweenExclusiveEnd(leg.arriveDate, leg.leaveDate)
+        ),
       ].filter(Boolean) as string[]
     )
   ).sort();
@@ -510,4 +539,3 @@ export function createStructuredTripRecordsFromDraft({
     weatherHooks,
   };
 }
-

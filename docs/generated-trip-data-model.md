@@ -560,9 +560,9 @@ Use:
 1. Define TypeScript types for structured trip records and `TravelerAppViewModel`. Done in `lib/generated-trip-model.ts` and `lib/traveler-view-model.ts`.
 2. Build a Wren workbook/seed adapter into those types. First seed adapter exists in `getAsiaDemoStructuredTripRecords()`.
 3. Change `/t/demo` to render `TravelerAppViewModel` instead of Asia-demo-specific rows. Done; `TravelerAppShell` now consumes `TravelerAppViewModel`.
-4. Build a draft parser adapter from current `trip_draft_snapshots.draft_json` into those records. First adapter exists in `lib/extraction/draft-to-structured-trip.ts`, and the draft review page now derives scan/review summaries through it. The maker-facing summary should stay human: legs across days, including flights/stays/activities/restaurants, plus the count of things to confirm before the traveler app is assembled.
+4. Build a draft parser adapter from current `trip_draft_snapshots.draft_json` into those records. First adapter exists in `lib/extraction/draft-to-structured-trip.ts`. Draft day generation now follows Wren's leave-date-exclusive rule, so a Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
 5. Add adapter fixture tests. Done in `tests/generated-trip-model.test.ts`; run with `npm test`.
-6. Build review/edit forms around records and review questions. The first grouped review surface now exists for Places, Stays, Transport, Cards, Private details, and Questions; the next step is editable confirm/fix actions that persist.
+6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions. The next step is editable confirm/fix actions that persist.
 7. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions

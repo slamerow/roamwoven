@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
+  formatStructuredDiscoverySummary,
+  getStructuredReviewCount,
+  getStructuredReviewSections,
+} from "@/lib/generated-trip-review";
+import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
   getAsiaDemoTravelerAppViewModel,
@@ -157,4 +162,72 @@ test("draft parser output compiles into structured records", () => {
   assert.ok(records.days.length >= 2, "expected days from records");
   assert.equal(viewModel.trip.title, "Central Europe");
   assert.equal(viewModel.cards.length, 2);
+});
+
+test("structured review summary uses maker-facing counts", () => {
+  const draft = {
+    activities: [
+      {
+        date: "2026-09-02",
+        title: "Museum visit",
+      },
+      {
+        date: null,
+        title: "Dinner TBD",
+      },
+    ],
+    missingDetails: [
+      {
+        prompt: "Which day is Dinner TBD?",
+        reason: "The traveler app needs a date to place the card.",
+        relatedTitle: "Dinner TBD",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Paris",
+        country: "France",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    stays: [
+      {
+        checkIn: "2026-09-01",
+        checkOut: "2026-09-03",
+        name: "Left Bank Hotel",
+      },
+    ],
+    transport: [
+      {
+        date: "2026-09-01",
+        departure: "New York",
+        arrival: "Paris",
+        title: "Fly to Paris",
+        type: "flight",
+      },
+    ],
+    tripOverview: {
+      title: "Paris test",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-2",
+  });
+  const reviewCount = getStructuredReviewCount(records);
+  const summary = formatStructuredDiscoverySummary(records, reviewCount);
+  const sections = getStructuredReviewSections(records);
+
+  assert.equal(
+    summary,
+    "We found 1 leg across 2 days, including 1 flight, 1 stay, 2 activities. We need you to confirm 2 things before this becomes the traveler app."
+  );
+  assert.equal(reviewCount, 2);
+  assert.equal(sections.length, 6);
+  assert.deepEqual(
+    sections.map((section) => section.id),
+    ["places", "stays", "transport", "cards", "private-details", "questions"]
+  );
 });
