@@ -102,6 +102,10 @@ Backend-ready pieces now exist:
   - Use the paid Central Europe trip `e50f7e93-b2e9-4b8c-9097-92fce402d885` as the first allowlisted trip.
   - Vercel now has `OPENAI_EXTRACTION_MODEL`, `OPENAI_EXTRACTION_MAX_INPUT_CHARS`, `OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS`, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885`.
   - Vercel still does not have `OPENAI_API_KEY`. Do not add the key until the allowlist code is pushed and deployed.
+- First extraction QA on the paid Andalucia dummy trip `bc773119-703b-4292-8fe1-fa7dbe46de0f` found PDF ingestion issues before any OpenAI call:
+  - The first deployed attempt failed with `DOMMatrix is not defined`; this was fixed by adding a minimal server-side `DOMMatrix` shim before loading PDF tooling.
+  - The next deployed attempt failed with `Cannot find module '/var/task/.next/server/chunks/pdf.worker.mjs'` while trying to read the uploaded PDF; this was a PDF worker/bundling problem, not a storage or OpenAI problem.
+  - The extraction material reader now uses `pdfjs-dist/legacy/build/pdf.mjs` directly for text-only PDF extraction and removes the unused `pdf-parse` dependency. This should be deployed before asking the user to click `Build parsed draft` again.
 
 Live Supabase dev setup is partially complete:
 

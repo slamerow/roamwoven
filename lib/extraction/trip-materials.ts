@@ -129,15 +129,35 @@ export async function getTextFileExtractionMaterials(
 async function extractPdfText(file: Blob) {
   ensurePdfParserGlobals();
 
-  const { PDFParse } = await import("pdf-parse");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const buffer = await file.arrayBuffer();
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const task = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    isEvalSupported: false,
+  });
+  const document = await task.promise;
 
   try {
-    const result = await parser.getText();
-    return result.text.trim();
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .trim();
+
+      if (text) {
+        pages.push(text);
+      }
+
+      page.cleanup();
+    }
+
+    return pages.join("\n\n").trim();
   } finally {
-    await parser.destroy();
+    await document.destroy();
   }
 }
 
