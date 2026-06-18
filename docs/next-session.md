@@ -86,6 +86,8 @@ Backend-ready pieces now exist:
 - Document-update rule: before the first build, the maker can add/delete source materials freely. After the trip spine exists, late documents should be treated as limited app updates that append/modify structured trip records, not a full rebuild. V1 can frame this as a small update lane, such as up to 3 simple late docs.
 - Do not rebuild a trip from scratch after the core/spine is built. Updates should patch the existing structured trip data and refresh the app snapshot. If source materials are not enough to build the V1 trip spine, do not produce a thin app; stop and ask for the missing basics such as dates, destinations, stays, transport, or anchor plans.
 - The initial parse route now refuses to run if the trip is already processing or a draft/spine already exists. The first parsed draft is validated for V1 spine basics before a snapshot is saved.
+- The draft-review screen now derives its first review surface from the generated trip model instead of a flat parser queue. When a parsed draft exists, it says what Roamwoven found in human terms, such as legs across days plus flights/stays/activities/restaurants, and shows the number of things the maker needs to confirm before the traveler app is assembled.
+- The model-backed draft-review sections are Places, Stays, Transport, Cards, Private details, and Questions. Confident records stay summarized; only records/questions marked for review expand into confirmation cards.
 
 Live Supabase dev setup is partially complete:
 
@@ -199,6 +201,12 @@ Continue the generated-trip foundation before returning to Design page iteration
 4. Build review/edit forms around structured records and review questions.
 5. Add persistence tables only after the adapter contract is stable enough to justify the DB surface.
 6. Return to Design preview only after it can render the real shared traveler architecture.
+
+Latest checks run after the model-backed draft-review update:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 

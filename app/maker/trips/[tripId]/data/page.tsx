@@ -3,8 +3,13 @@ import {
   ArrowLeft,
   ArrowRight,
   AlertCircle,
+  BedDouble,
+  CheckCircle2,
   FileText,
   LockKeyhole,
+  MapPinned,
+  Route,
+  Sparkles,
 } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
 import { hasOpenAIExtractionConfig } from "@/lib/env";
@@ -16,6 +21,7 @@ import {
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import { type TripStyleSettings } from "@/lib/style-settings-config";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -211,6 +217,354 @@ function getStructuredReviewItems(
   return [...questions, ...sensitive];
 }
 
+function getStructuredReviewCount(records: StructuredTripRecords | null) {
+  if (!records) {
+    return 0;
+  }
+
+  return (
+    records.reviewQuestions.length +
+    records.privateDetails.filter((detail) => detail.reviewRequired).length +
+    records.legs.filter((leg) => leg.reviewRequired).length +
+    records.stays.filter((stay) => stay.reviewRequired).length +
+    records.transport.filter((item) => item.reviewRequired).length +
+    records.items.filter((item) => item.reviewRequired).length
+  );
+}
+
+function getStructuredFoundParts(records: StructuredTripRecords | null) {
+  if (!records) {
+    return [];
+  }
+
+  const flights = records.transport.filter(
+    (item) => item.transportType === "flight"
+  ).length;
+  const otherTransport = records.transport.length - flights;
+  const restaurants = records.items.filter(
+    (item) => item.itemType === "restaurant"
+  ).length;
+  const activities = records.items.filter(
+    (item) => item.itemType === "activity"
+  ).length;
+
+  return [
+    flights ? pluralize(flights, "flight") : null,
+    otherTransport ? pluralize(otherTransport, "transport item") : null,
+    records.stays.length ? pluralize(records.stays.length, "stay") : null,
+    restaurants ? pluralize(restaurants, "restaurant") : null,
+    activities ? pluralize(activities, "activity", "activities") : null,
+  ].filter(Boolean);
+}
+
+function formatStructuredDiscoverySummary(
+  records: StructuredTripRecords | null,
+  reviewCount: number
+) {
+  if (!records) {
+    return null;
+  }
+
+  const tripSpan =
+    records.legs.length > 0 && records.days.length > 0
+      ? `${pluralize(records.legs.length, "leg")} across ${pluralize(records.days.length, "day")}`
+      : records.days.length > 0
+        ? pluralize(records.days.length, "day")
+        : records.legs.length > 0
+          ? pluralize(records.legs.length, "leg")
+          : null;
+  const foundParts = getStructuredFoundParts(records);
+  const foundText = tripSpan
+    ? `We found ${tripSpan}${foundParts.length > 0 ? `, including ${foundParts.join(", ")}` : ""}.`
+    : foundParts.length > 0
+      ? `We found ${foundParts.join(", ")}.`
+      : "We found a parsed trip draft.";
+  const reviewText =
+    reviewCount > 0
+      ? `We need you to confirm ${pluralize(reviewCount, "thing")} before this becomes the traveler app.`
+      : "Nothing needs confirmation before this becomes the traveler app.";
+
+  return `${foundText} ${reviewText}`;
+}
+
+type StructuredReviewItem = {
+  detail: string;
+  id: string;
+  meta: string;
+  title: string;
+  tone: "question" | "sensitive" | "warning";
+};
+
+type StructuredReviewSection = {
+  count: number;
+  description: string;
+  emptyDetail: string;
+  id: string;
+  items: StructuredReviewItem[];
+  title: string;
+};
+
+function getStructuredReviewSections(
+  records: StructuredTripRecords
+): StructuredReviewSection[] {
+  return [
+    {
+      count: records.legs.length,
+      description: "Route spine, dates, cities, languages, and map/weather anchors.",
+      emptyDetail: "No route questions found.",
+      id: "places",
+      items: records.legs
+        .filter((leg) => leg.reviewRequired)
+        .map((leg) => ({
+          detail:
+            leg.summary ??
+            "This place is missing a route-spine detail needed for the traveler app.",
+          id: leg.id,
+          meta: [leg.arriveDate, leg.leaveDate].filter(Boolean).join(" to "),
+          title: leg.displayName,
+          tone: "warning" as const,
+        })),
+      title: "Places",
+    },
+    {
+      count: records.stays.length,
+      description: "Lodging records with dates, public labels, addresses, and access privacy.",
+      emptyDetail: "Stay records look usable for this draft.",
+      id: "stays",
+      items: records.stays
+        .filter((stay) => stay.reviewRequired)
+        .map((stay) => ({
+          detail: "This stay needs enough check-in or location detail to support the Stay tool.",
+          id: stay.id,
+          meta: [stay.checkInDate, stay.checkOutDate].filter(Boolean).join(" to "),
+          title: stay.name,
+          tone: "warning" as const,
+        })),
+      title: "Stays",
+    },
+    {
+      count: records.transport.length,
+      description: "Flights, trains, transfers, drives, and other critical movement.",
+      emptyDetail: "Transport records look usable for this draft.",
+      id: "transport",
+      items: records.transport
+        .filter((item) => item.reviewRequired)
+        .map((item) => ({
+          detail:
+            item.description ??
+            "This transport record needs a date or route detail before it can be placed cleanly.",
+          id: item.id,
+          meta: item.transportType,
+          title: item.routeLabel,
+          tone: "warning" as const,
+        })),
+      title: "Transport",
+    },
+    {
+      count: records.items.length,
+      description: "Activities, restaurants, notes, rest days, and other traveler cards.",
+      emptyDetail: "Traveler cards look usable for this draft.",
+      id: "cards",
+      items: records.items
+        .filter((item) => item.reviewRequired)
+        .map((item) => ({
+          detail:
+            item.description ??
+            "This card needs a date or enough detail to place it in the traveler app.",
+          id: item.id,
+          meta: item.itemType,
+          title: item.title,
+          tone: "warning" as const,
+        })),
+      title: "Cards",
+    },
+    {
+      count: records.privateDetails.length,
+      description: "Sensitive addresses, confirmations, access notes, and private details.",
+      emptyDetail: "Private details have default protection decisions.",
+      id: "private-details",
+      items: records.privateDetails
+        .filter((detail) => detail.reviewRequired)
+        .map((detail) => ({
+          detail:
+            detail.reason ??
+            "This private detail should be reviewed before the app is shared.",
+          id: detail.id,
+          meta: detail.detailType,
+          title: detail.label,
+          tone: "sensitive" as const,
+        })),
+      title: "Private details",
+    },
+    {
+      count: records.reviewQuestions.length,
+      description: "Generated questions that materially affect the traveler app.",
+      emptyDetail: "No missing-detail questions found.",
+      id: "questions",
+      items: records.reviewQuestions.map((question) => ({
+        detail: question.reason,
+        id: question.id,
+        meta: "Missing detail",
+        title: question.prompt,
+        tone: "question" as const,
+      })),
+      title: "Questions",
+    },
+  ];
+}
+
+const sectionIcons: Record<string, typeof Sparkles> = {
+  cards: Sparkles,
+  places: MapPinned,
+  "private-details": LockKeyhole,
+  questions: AlertCircle,
+  stays: BedDouble,
+  transport: Route,
+};
+
+function toneIcon(tone: StructuredReviewItem["tone"]) {
+  if (tone === "sensitive") {
+    return LockKeyhole;
+  }
+
+  if (tone === "question") {
+    return AlertCircle;
+  }
+
+  return FileText;
+}
+
+function StructuredRecordReview({
+  sections,
+}: {
+  sections: StructuredReviewSection[];
+}) {
+  const reviewCount = sections.reduce(
+    (count, section) => count + section.items.length,
+    0
+  );
+
+  return (
+    <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-ink">
+            Confirm what needs attention
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-ink/60">
+            Roamwoven keeps confident details quiet and only asks about the
+            records that need a decision.
+          </p>
+        </div>
+        <span className="text-sm font-semibold text-moss">
+          {pluralize(reviewCount, "item")} to review
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        {sections.map((section) => {
+          const Icon = sectionIcons[section.id] ?? Sparkles;
+
+          return (
+            <section
+              className="rounded-md border border-ink/10 bg-paper p-4"
+              key={section.id}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-ink">
+                    {section.title}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-ink/55">
+                    {section.description}
+                  </p>
+                </div>
+                <Icon className="shrink-0 text-moss" size={18} />
+              </div>
+              <p className="mt-4 text-2xl font-semibold text-ink">
+                {section.count}
+              </p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+                {section.items.length > 0
+                  ? `${section.items.length} to confirm`
+                  : section.emptyDetail}
+              </p>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 space-y-4">
+        {sections.map((section) =>
+          section.items.length > 0 ? (
+            <section
+              className="rounded-md border border-ink/10 bg-white p-4"
+              key={section.id}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-ink">
+                  {section.title}
+                </p>
+                <span className="text-xs font-semibold text-moss">
+                  {pluralize(section.items.length, "item")}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-3">
+                {section.items.map((item) => {
+                  const ItemIcon = toneIcon(item.tone);
+
+                  return (
+                    <div
+                      className="flex gap-3 rounded-md bg-paper p-4"
+                      key={item.id}
+                    >
+                      <ItemIcon
+                        className={
+                          item.tone === "sensitive"
+                            ? "mt-0.5 shrink-0 text-tide"
+                            : "mt-0.5 shrink-0 text-clay"
+                        }
+                        size={18}
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-ink">
+                          {item.title}
+                        </p>
+                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+                          {item.meta}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-ink/60">
+                          {item.detail}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null
+        )}
+      </div>
+
+      {reviewCount === 0 ? (
+        <div className="mt-6 flex gap-3 rounded-md bg-paper p-4">
+          <CheckCircle2 className="mt-0.5 shrink-0 text-moss" size={18} />
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              No model-backed questions found
+            </p>
+            <p className="mt-2 text-sm leading-6 text-ink/60">
+              The adapter found enough structure to continue to the trip
+              summary. The summary still needs to be the final shape check
+              before publish.
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function formatRunDate(value: string | null) {
   if (!value) {
     return "";
@@ -267,6 +621,14 @@ function RealTripFirstPass({
   const reviewItems = structuredDraft
     ? getStructuredReviewItems(structuredDraft)
     : getReviewItems(draft);
+  const structuredSections = structuredDraft
+    ? getStructuredReviewSections(structuredDraft)
+    : [];
+  const structuredReviewCount = getStructuredReviewCount(structuredDraft);
+  const structuredDiscoverySummary = formatStructuredDiscoverySummary(
+    structuredDraft,
+    structuredReviewCount
+  );
   const scannedParts = structuredDraft
     ? formatStructuredScannedSummary(structuredDraft)
     : formatScannedSummary(draft);
@@ -323,8 +685,9 @@ function RealTripFirstPass({
                   {overviewTitle}
                 </h2>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
-                  We scanned {pluralize(scannedCount, "item")} and found{" "}
-                  {pluralize(reviewItems.length, "thing")} to review.
+                  {structuredDiscoverySummary
+                    ? structuredDiscoverySummary
+                    : `We scanned ${pluralize(scannedCount, "item")} and found ${pluralize(reviewItems.length, "thing")} to review.`}
                 </p>
               </div>
               <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
@@ -396,12 +759,14 @@ function RealTripFirstPass({
         )}
       </section>
 
-      {latestDraft ? (
+      {latestDraft && structuredDraft ? (
+        <StructuredRecordReview sections={structuredSections} />
+      ) : latestDraft ? (
         <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-ink">
-                Review queue
+                Confirm what needs attention
               </h2>
               <p className="mt-2 text-sm leading-6 text-ink/60">
                 Only details that need a decision are shown here.
