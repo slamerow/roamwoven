@@ -10,6 +10,10 @@ import {
   getStructuredReviewSections,
 } from "@/lib/generated-trip-review";
 import {
+  normalizeTripReviewDecisionRow,
+  serializeTripReviewDecision,
+} from "@/lib/review-decisions";
+import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
   getAsiaDemoTravelerAppViewModel,
@@ -395,4 +399,66 @@ test("review decisions update structured records", () => {
     deleted.items.find((item) => item.id === targetItem.id)?.status,
     "ignored"
   );
+});
+
+test("review decisions serialize through the persistence payload contract", () => {
+  const serialized = serializeTripReviewDecision({
+    action: "combine",
+    createdAt: null,
+    id: "decision-1",
+    mergedChanges: {
+      description: "Merged dinner plan.",
+      title: "Dinner reservation",
+    },
+    note: "Duplicate parser output.",
+    sourceIds: ["item-2"],
+    subjectId: "item-1",
+    subjectType: "item",
+    targetId: "item-1",
+    tripId: "trip-4",
+  });
+
+  assert.deepEqual(serialized, {
+    action: "combine",
+    id: "decision-1",
+    note: "Duplicate parser output.",
+    payload_json: {
+      mergedChanges: {
+        description: "Merged dinner plan.",
+        title: "Dinner reservation",
+      },
+      sourceIds: ["item-2"],
+      targetId: "item-1",
+    },
+    subject_id: "item-1",
+    subject_type: "item",
+    trip_id: "trip-4",
+  });
+
+  const normalized = normalizeTripReviewDecisionRow({
+    action: "combine",
+    created_at: "2026-06-18T13:00:00.000Z",
+    id: "decision-1",
+    note: "Duplicate parser output.",
+    payload_json: serialized.payload_json,
+    subject_id: "item-1",
+    subject_type: "item",
+    trip_id: "trip-4",
+  });
+
+  assert.deepEqual(normalized, {
+    action: "combine",
+    createdAt: "2026-06-18T13:00:00.000Z",
+    id: "decision-1",
+    mergedChanges: {
+      description: "Merged dinner plan.",
+      title: "Dinner reservation",
+    },
+    note: "Duplicate parser output.",
+    sourceIds: ["item-2"],
+    subjectId: "item-1",
+    subjectType: "item",
+    targetId: "item-1",
+    tripId: "trip-4",
+  });
 });

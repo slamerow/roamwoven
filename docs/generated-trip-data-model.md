@@ -388,6 +388,8 @@ Allowed `action` values:
 Current code:
 
 - `lib/generated-trip-decisions.ts` defines the decision union and pure apply helpers.
+- `lib/review-decisions.ts` serializes decisions into `payload_json`, loads saved decisions, and applies them to structured records.
+- `db/schema.sql` includes the owner-scoped `trip_review_decisions` table, grants, indexes, and RLS policy.
 - The first test coverage applies edit, protect, combine, answer-question, and delete decisions to parser-generated records.
 
 ### `trip_photos`
@@ -594,8 +596,9 @@ Use:
 5. Add adapter fixture tests. Done in `tests/generated-trip-model.test.ts`; run with `npm test`.
 6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions.
 7. Define review decisions before wiring persistent forms. Done in `lib/generated-trip-decisions.ts`: confirm, edit, protect, delete/ignore, combine, and answer-question apply to structured records in a testable way.
-8. Next: add the persistence table/action layer for review decisions, then wire card controls to write decisions and re-render the applied structured records.
-9. Return to Design preview only after it can render the real traveler view model.
+8. Add the persistence table/action layer for review decisions. The additive schema and data-access helper now exist in `db/schema.sql` and `lib/review-decisions.ts`.
+9. Next: wire card controls to write decisions and re-render the applied structured records.
+10. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions
 
