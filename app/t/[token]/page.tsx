@@ -1,6 +1,6 @@
 import { TravelerAppShell } from "@/components/traveler-app-shell";
-import { getAsiaDemoTrip } from "@/lib/asia-trip";
+import { getAsiaDemoTravelerAppViewModel } from "@/lib/traveler-view-model";
 
 export default function TravelerAppPage() {
-  return <TravelerAppShell trip={getAsiaDemoTrip()} />;
+  return <TravelerAppShell trip={getAsiaDemoTravelerAppViewModel()} />;
 }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
 import { StyleSettingsPanel } from "@/components/style-settings-panel";
-import { getAsiaDemoTrip } from "@/lib/asia-trip";
+import { getAsiaDemoTravelerAppViewModel } from "@/lib/traveler-view-model";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 
@@ -61,7 +61,7 @@ export default async function StylePage({
         </Link>
 
         <StyleSettingsPanel
-          previewTrip={getAsiaDemoTrip()}
+          previewTrip={getAsiaDemoTravelerAppViewModel()}
           settings={settings}
           tripId={tripId}
         />

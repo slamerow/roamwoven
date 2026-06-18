@@ -3,7 +3,7 @@
 import { CSSProperties, useMemo, useState } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import { TravelerAppShell } from "@/components/traveler-app-shell";
-import type { AsiaDemoTrip } from "@/lib/asia-trip";
+import type { TravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   THEME_DIRECTIONS,
   derivePalette,
@@ -24,7 +24,7 @@ export function StyleSettingsPanel({
   settings,
   tripId,
 }: {
-  previewTrip: AsiaDemoTrip;
+  previewTrip: TravelerAppViewModel;
   settings: TripStyleSettings;
   tripId: string;
 }) {

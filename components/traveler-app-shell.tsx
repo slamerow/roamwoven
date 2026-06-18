@@ -20,7 +20,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { AsiaDemoTrip } from "@/lib/asia-trip";
+import type { TravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   classifyAddressSensitivity,
   classifySensitiveText,
@@ -47,11 +47,11 @@ type TravelerAppShellProps = {
   initialUnlocked?: boolean;
   mode?: "standalone" | "preview";
   style?: CSSProperties;
-  trip: AsiaDemoTrip;
+  trip: TravelerAppViewModel;
 };
 
-type TravelerItem = AsiaDemoTrip["days"][number]["items"][number];
-type TravelerDay = AsiaDemoTrip["days"][number];
+type TravelerItem = TravelerAppViewModel["cards"][number];
+type TravelerDay = TravelerAppViewModel["days"][number];
 type ActiveTab = TravelerTabId;
 type OverlayKind = "unlock" | TravelerToolId;
 
@@ -113,15 +113,9 @@ function categoryEmoji(category: string | null | undefined) {
   return "•";
 }
 
-function categoriesForTrip(trip: AsiaDemoTrip) {
-  const counts = new Map<string, number>();
-
-  for (const item of trip.items) {
-    const category = item.category?.replaceAll("_", " ") ?? "note";
-    counts.set(category, (counts.get(category) ?? 0) + 1);
-  }
-
-  return Array.from(counts.entries())
+function categoriesForTrip(trip: TravelerAppViewModel) {
+  return trip.categories
+    .map((category) => [category.label, category.count] as [string, number])
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
 }
@@ -289,7 +283,7 @@ function ActivityCard({
       <h2 className={item.time ? "mt-5 line-clamp-4 text-3xl font-semibold leading-tight" : "line-clamp-4 text-3xl font-semibold leading-tight"}>
         {item.title}
       </h2>
-      <p className="mt-6 text-3xl leading-none">{categoryEmoji(item.category)}</p>
+      <p className="mt-6 text-3xl leading-none">{categoryEmoji(item.categoryId)}</p>
     </button>
   );
 }
@@ -409,7 +403,7 @@ function TodayPanel({
       <div className="-mx-5 flex flex-1 items-center">
         <div className="hide-scrollbar flex w-full snap-x snap-mandatory overflow-x-auto scroll-smooth pb-5 pt-6">
           <div className="shrink-0 basis-[11%]" aria-hidden="true" />
-          {day.items.map((item) => (
+          {day.cards.map((item) => (
             <ActivityCard
               item={item}
               key={item.id}
@@ -423,7 +417,7 @@ function TodayPanel({
   );
 }
 
-function LegsPanel({ trip }: { trip: AsiaDemoTrip }) {
+function LegsPanel({ trip }: { trip: TravelerAppViewModel }) {
   return (
     <div className="space-y-3">
       {trip.legs.map((leg, index) => (
@@ -534,7 +528,7 @@ function SearchTool({
     .filter((item) =>
       ["hotel", "airport", "train", "check", "dinner", "temple", "market"].some(
         (term) =>
-          `${item.title} ${item.description} ${item.category}`
+          `${item.title} ${item.description} ${item.categoryLabel}`
             .toLowerCase()
             .includes(term)
       )
@@ -560,7 +554,7 @@ function SearchTool({
             onClick={() => onSelect(item)}
           >
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-leather)]">
-              {[item.time, item.category].filter(Boolean).join(" · ")}
+              {[item.time, item.categoryLabel].filter(Boolean).join(" · ")}
             </p>
             <p className="mt-2 text-lg font-semibold">{item.title}</p>
             <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--color-muted)]">
@@ -573,7 +567,7 @@ function SearchTool({
   );
 }
 
-function MapTool({ trip }: { trip: AsiaDemoTrip }) {
+function MapTool({ trip }: { trip: TravelerAppViewModel }) {
   return (
     <div className="mt-6 space-y-4">
       <div className="rounded-xl border border-white/60 bg-[var(--color-sky)] p-5 shadow-[var(--shadow-card)]">
@@ -648,7 +642,7 @@ function ActivityDetail({
   return (
     <Overlay closeLabel="Close activity" onClose={onClose}>
       <p className="text-sm font-semibold text-[var(--color-muted)]">
-        {[item.time, item.category].filter(Boolean).join(" · ")}
+        {[item.time, item.categoryLabel].filter(Boolean).join(" · ")}
       </p>
       <h2 className="mt-2 text-4xl font-semibold leading-tight">{item.title}</h2>
       {detailSensitivity ? (
@@ -695,13 +689,8 @@ export function TravelerAppShell({
   const todayDay = trip.days[0];
   const categories = useMemo(() => categoriesForTrip(trip), [trip]);
   const sensitiveCount = useMemo(
-    () =>
-      trip.days.reduce(
-        (count, day) =>
-          count + day.items.filter((item) => getItemSensitivity(item)).length,
-        0
-      ),
-    [trip.days]
+    () => trip.privacy.privateDetailCount,
+    [trip.privacy.privateDetailCount]
   );
   function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -941,7 +930,7 @@ export function TravelerAppShell({
               couple taps away.
             </p>
             <SearchTool
-              items={trip.days.flatMap((day) => day.items)}
+              items={trip.days.flatMap((day) => day.cards)}
               onSelect={(item) => {
                 setOverlay(null);
                 setSelectedItem(item);

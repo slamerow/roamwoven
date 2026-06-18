@@ -159,6 +159,7 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 - Collaboration rule: operate like a founding CTO, not a purely obedient implementation assistant. When feedback points to a deeper dependency, likely rework, or a missing architecture decision, pause and name that issue before patching the surface. Separate interim polish from foundational work, label interim fixes clearly, and push back when the requested path is likely to waste time.
 - Current design-preview decision: put a pin in further Design page tuning until the generated traveler-app data contract, adapter/view-model layer, and shared traveler component architecture are stable. Wren's Adventure is the UX/layout/interaction architecture reference, not a visual skin to copy wholesale. Roamwoven design packs should theme the shared architecture once it exists.
+- Generated trip data-model decision: use the uploaded Asia/Wren workbook as the concrete structural reference for pieces and columns, but do not make a spreadsheet the final Roamwoven source of truth. The sheet/editor shape should be a human-readable staging/editing surface; durable scale comes from database records plus published traveler snapshots and a traveler-app view model. See `docs/generated-trip-data-model.md`.
 - Beta should use real Stripe Checkout with promo codes/discounts for test users.
 - Public launch and beta should charge or explicitly discount before expensive AI extraction.
 - Maker app is the user-facing source of truth.
@@ -185,7 +186,20 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 ## Recommended Next Task
 
-Continue hardening the post-payment maker flow:
+Continue the generated-trip foundation before returning to Design page iteration:
+
+1. Read `docs/generated-trip-data-model.md`.
+2. Continue from the new record/view-model foundation:
+   - `lib/generated-trip-model.ts`
+   - `lib/traveler-view-model.ts`
+   - `lib/extraction/draft-to-structured-trip.ts`
+   - `components/traveler-app-shell.tsx`
+   - `app/t/[token]/page.tsx`
+3. Build review/edit forms around structured records and review questions.
+4. Add persistence tables only after the adapter contract is stable enough to justify the DB surface.
+5. Return to Design preview only after it can render the real shared traveler architecture.
+
+After that foundation is moving, continue hardening the post-payment maker flow:
 
 1. Test the newly scaffolded draft-review screen on the paid trip and the demo trip.
 2. Re-test the paid trip on `https://roamwoven.com`:

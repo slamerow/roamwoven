@@ -15,6 +15,7 @@ import {
   type TripDraftSnapshot,
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
+import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import { type TripStyleSettings } from "@/lib/style-settings-config";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -111,6 +112,25 @@ function formatScannedSummary(draft: unknown) {
   ].filter(Boolean);
 }
 
+function formatStructuredScannedSummary(
+  records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null
+) {
+  if (!records) {
+    return [];
+  }
+
+  return [
+    records.transport.length
+      ? pluralize(records.transport.length, "transport item")
+      : null,
+    records.stays.length ? pluralize(records.stays.length, "stay") : null,
+    records.items.length
+      ? pluralize(records.items.length, "activity", "activities")
+      : null,
+    records.legs.length ? pluralize(records.legs.length, "place") : null,
+  ].filter(Boolean);
+}
+
 function getReviewItems(draft: unknown) {
   const missing = getDraftArray(draft, "missingDetails").map((item, index) => {
     const record =
@@ -161,6 +181,36 @@ function getReviewItems(draft: unknown) {
   return [...missing, ...sensitive];
 }
 
+function getStructuredReviewItems(
+  records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null
+) {
+  if (!records) {
+    return [];
+  }
+
+  const questions = records.reviewQuestions.map((question) => ({
+    detail: question.reason,
+    id: question.id,
+    meta: "Missing detail",
+    title: question.prompt,
+    tone: "question" as const,
+  }));
+
+  const sensitive = records.privateDetails
+    .filter((detail) => detail.reviewRequired)
+    .map((detail) => ({
+      detail:
+        detail.reason ??
+        "This may need privacy protection before sharing.",
+      id: detail.id,
+      meta: detail.detailType,
+      title: detail.label,
+      tone: "sensitive" as const,
+    }));
+
+  return [...questions, ...sensitive];
+}
+
 function formatRunDate(value: string | null) {
   if (!value) {
     return "";
@@ -206,15 +256,34 @@ function RealTripFirstPass({
   ).length;
   const canExtract = extractionEnabled && textMaterialCount > 0;
   const draft = latestDraft?.draftJson ?? null;
+  const structuredDraft = draft
+    ? createStructuredTripRecordsFromDraft({
+        draft,
+        fallbackTripName: tripName,
+        tripId,
+      })
+    : null;
   const overview = getDraftObject(draft, "tripOverview");
-  const reviewItems = getReviewItems(draft);
-  const scannedParts = formatScannedSummary(draft);
-  const scannedCount =
-    getDraftCount(draft, "places") +
-    getDraftCount(draft, "transport") +
-    getDraftCount(draft, "stays") +
-    getDraftCount(draft, "activities");
-  const overviewTitle = getDraftString(overview, "title") ?? style.appName ?? tripName;
+  const reviewItems = structuredDraft
+    ? getStructuredReviewItems(structuredDraft)
+    : getReviewItems(draft);
+  const scannedParts = structuredDraft
+    ? formatStructuredScannedSummary(structuredDraft)
+    : formatScannedSummary(draft);
+  const scannedCount = structuredDraft
+    ? structuredDraft.legs.length +
+      structuredDraft.transport.length +
+      structuredDraft.stays.length +
+      structuredDraft.items.length
+    : getDraftCount(draft, "places") +
+      getDraftCount(draft, "transport") +
+      getDraftCount(draft, "stays") +
+      getDraftCount(draft, "activities");
+  const overviewTitle =
+    structuredDraft?.trip.travelerAppTitle ??
+    getDraftString(overview, "title") ??
+    style.appName ??
+    tripName;
   const dateRange = getDraftString(overview, "dateRange");
 
   return (
