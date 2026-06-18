@@ -90,10 +90,11 @@ Backend-ready pieces now exist:
 - The model-backed draft-review sections are Places, Stays, Transport, Cards, Private details, and Questions. Confident records stay summarized; only records/questions marked for review expand into confirmation cards.
 - Draft day generation in `lib/extraction/draft-to-structured-trip.ts` now follows Wren's leave-date-exclusive rule. A Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
 - The generated-trip review decision contract now exists in `lib/generated-trip-decisions.ts`. Decisions are confirm, edit, protect, delete/ignore, combine, and answer-question. Delete/ignore marks records as `ignored`; protect changes visibility; answer-question records the answer and should resolve into one of the other structured operations.
-- Review-decision persistence now exists in `db/schema.sql` and `lib/review-decisions.ts`. The table is `trip_review_decisions`, with action/subject columns plus `payload_json` for action-specific fields. Run the additive production SQL before deploying UI that writes review decisions.
+- Review-decision persistence now exists in `db/schema.sql` and `lib/review-decisions.ts`. The table is `trip_review_decisions`, with action/subject columns plus `payload_json` for action-specific fields. The additive production SQL in `db/production-sql-2026-06-18-review-decisions-and-snapshots.sql` has been run successfully in Supabase.
 - The structured draft-review cards now write decisions through `app/maker/trips/[tripId]/data/decisions/route.ts`. Confirm, Protect, Ignore, Mark answered, record-specific Edit forms, and item Combine persist to `trip_review_decisions`; the page reloads from structured records plus applied saved decisions so resolved items leave the queue.
 - The trip summary page now reads from applied structured records rather than raw `draft_json` arrays. `lib/generated-trip-summary.ts` produces the title, destination/date range, active record counts, and unresolved-review status after saved review decisions are applied.
-- Published traveler snapshots now have a first backend contract: `published_trip_snapshots` in `db/schema.sql`, `lib/published-snapshots.ts`, `app/maker/trips/[tripId]/publish/snapshot/route.ts`, and token rendering in `app/t/[token]/page.tsx`. Real token rendering requires `SUPABASE_SERVICE_ROLE_KEY` server-side; `/t/demo` remains the local fallback.
+- Published traveler snapshots now have a first backend contract: `published_trip_snapshots` in `db/schema.sql`, `lib/published-snapshots.ts`, `app/maker/trips/[tripId]/publish/snapshot/route.ts`, and token rendering in `app/t/[token]/page.tsx`. `SUPABASE_SERVICE_ROLE_KEY` is configured in Vercel for Production and Preview; `/t/demo` remains the local fallback.
+- Production QA validation passed on a disposable trip `82e1834c-efaf-4409-929e-542aa881c24e`: Confirm, Protect, Mark answered, summary update, publish snapshot creation, and real `/t/[token]` rendering all worked. The disposable trip was deleted afterward, and its generated token returned 404 after cleanup.
 
 Live Supabase dev setup is partially complete:
 
@@ -204,11 +205,10 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `components/traveler-app-shell.tsx`
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
-4. Run `db/production-sql-2026-06-18-review-decisions-and-snapshots.sql` in Supabase before asking the deployed app to write decisions or publish snapshots.
-5. Ensure `SUPABASE_SERVICE_ROLE_KEY` is configured in Vercel before testing real `/t/[token]` rendering.
-6. Browser-test the paid trip draft-review controls and publish snapshot flow after SQL/env are applied.
-7. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.
-8. Return to Design preview only after it can render the real shared traveler architecture.
+4. Decide whether to turn on OpenAI extraction now. The backend write/publish path is validated, so extraction is now worth enabling once the OpenAI key/model/cost guardrails are confirmed.
+5. Test extraction on the real paid Central Europe upload, then review the generated records and publish a real snapshot.
+6. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.
+7. Return to Design preview only after it can render the real shared traveler architecture.
 
 Latest checks run after the model-backed draft-review update:
 
