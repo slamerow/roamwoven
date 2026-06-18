@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
 import { StyleSettingsPanel } from "@/components/style-settings-panel";
 import { getTripStyleSettings } from "@/lib/style-settings";
@@ -27,8 +28,8 @@ export default async function StylePage({
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             Every design direction starts from a quiet luxury travel-app
-            foundation, then changes the atmosphere around the Wren-style
-            traveler architecture the generated app will use.
+            foundation, then changes the atmosphere around the traveler
+            architecture the generated app will use.
           </p>
         </header>
 
@@ -50,6 +51,13 @@ export default async function StylePage({
             Design choices could not be saved. Try again.
           </p>
         ) : null}
+
+        <Link
+          className="mt-6 inline-flex rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink"
+          href={`/maker/trips/${tripId}/review`}
+        >
+          Back to app setup
+        </Link>
 
         <StyleSettingsPanel settings={settings} tripId={tripId} />
       </div>

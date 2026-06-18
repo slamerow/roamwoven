@@ -27,6 +27,30 @@ const paletteFields = [
   { key: "soft", label: "Soft" },
 ] as const;
 
+const themePreviewCopy = {
+  modern_futuristic: {
+    material: "Glass itinerary OS",
+    cards: ["Transit window", "Hotel access", "Rooftop dinner"],
+    detail:
+      "Clean rails, crisp surfaces, and quick tools for moving through the day.",
+  },
+  rustic_adventure: {
+    material: "Field journal",
+    cards: ["Morning route", "Lodge check-in", "Trailside dinner"],
+    detail:
+      "Grounded cards, map-room warmth, and practical notes close to the plan.",
+  },
+  whimsical_fantasy: {
+    material: "Storybook journey",
+    cards: ["Morning chapter", "Hidden doorway", "Lantern dinner"],
+    detail:
+      "Soft storybook atmosphere with restrained contrast and readable cards.",
+  },
+} satisfies Record<
+  ThemeDirectionKey,
+  { cards: [string, string, string]; detail: string; material: string }
+>;
+
 function getReadableTextColor(backgroundColor: string) {
   const hex = backgroundColor.replace("#", "");
   const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
@@ -86,6 +110,7 @@ export function StyleSettingsPanel({
   const heroTextColor = isWhimsical
     ? theme.text
     : getReadableTextColor(palette.primary);
+  const themeCopy = themePreviewCopy[themeDirection];
 
   function updatePrimaryColor(value: string) {
     const nextPalette = derivePalette(value);
@@ -132,6 +157,50 @@ export function StyleSettingsPanel({
             trip name can be edited from the trip workspace.
           </span>
         </label>
+
+        <div className="mt-6">
+          <p className="text-sm font-semibold text-ink">Theme direction</p>
+          <p className="mt-1 text-xs leading-5 text-ink/55">
+            Every direction keeps the same quiet luxury baseline. Choose the
+            expression that best fits the trip.
+          </p>
+          <div className="mt-3 space-y-3">
+            {THEME_DIRECTIONS.map((option) => (
+              <button
+                key={option.key}
+                className={
+                  option.key === themeDirection
+                    ? "flex w-full items-center justify-between rounded-md border border-moss/35 bg-moss/10 p-3 text-left"
+                    : "flex w-full items-center justify-between rounded-md border border-ink/10 bg-paper p-3 text-left"
+                }
+                type="button"
+                onClick={() => setThemeDirection(option.key)}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink">{option.name}</p>
+                  <p className="mt-1 text-xs text-ink/55">
+                    {option.description}
+                  </p>
+                  <span className="mt-3 flex gap-1.5">
+                    {[option.surface, option.text, palette.primary].map(
+                      (color) => (
+                        <span
+                          aria-hidden="true"
+                          className="h-3 w-8 rounded-full ring-1 ring-ink/10"
+                          key={color}
+                          style={{ backgroundColor: color }}
+                        />
+                      )
+                    )}
+                  </span>
+                </div>
+                {option.key === themeDirection ? (
+                  <Check className="text-moss" size={20} />
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="mt-6">
           <p className="text-sm font-semibold text-ink">Primary color</p>
@@ -195,43 +264,11 @@ export function StyleSettingsPanel({
           </div>
         </div>
 
-        <div className="mt-6">
-          <p className="text-sm font-semibold text-ink">Theme direction</p>
-          <p className="mt-1 text-xs leading-5 text-ink/55">
-            Every direction keeps the same quiet luxury baseline. Choose the
-            expression that best fits the trip.
-          </p>
-          <div className="mt-3 space-y-3">
-            {THEME_DIRECTIONS.map((option) => (
-              <button
-                key={option.key}
-                className={
-                  option.key === themeDirection
-                    ? "flex w-full items-center justify-between rounded-md border border-moss/35 bg-moss/10 p-3 text-left"
-                    : "flex w-full items-center justify-between rounded-md border border-ink/10 bg-paper p-3 text-left"
-                }
-                type="button"
-                onClick={() => setThemeDirection(option.key)}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-ink">{option.name}</p>
-                  <p className="mt-1 text-xs text-ink/55">
-                    {option.description}
-                  </p>
-                </div>
-                {option.key === themeDirection ? (
-                  <Check className="text-moss" size={20} />
-                ) : null}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <button
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
           type="submit"
         >
-          Build draft for review
+          Continue to process draft
           <ArrowRight size={16} />
         </button>
       </form>
@@ -249,7 +286,7 @@ export function StyleSettingsPanel({
               Traveler app preview
             </p>
             <h2 className="mt-1 text-xl font-semibold">
-              Wren-style shell
+              Traveler app structure
             </h2>
           </div>
           <div
@@ -279,7 +316,7 @@ export function StyleSettingsPanel({
                 Traveler mode
               </p>
               <p className="mt-1 truncate text-sm font-bold">
-                Private details
+                {themeCopy.material}
               </p>
             </div>
             <div className="flex gap-1">
@@ -315,13 +352,12 @@ export function StyleSettingsPanel({
               {appName || "Untitled Trip"}
             </h2>
             <p className="mt-3 text-sm leading-6 opacity-80">
-              A calm traveler app foundation with today cards, trip tools, and
-              private details close at hand.
+              {themeCopy.detail}
             </p>
           </div>
 
           <div className="mt-5 -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2">
-            {["Morning plan", "Check-in details", "Dinner reservation"].map((label, index) => (
+            {themeCopy.cards.map((label, index) => (
               <div
                 key={label}
                 className="min-h-40 w-[76%] shrink-0 rounded-[22px] border p-4"
@@ -351,7 +387,7 @@ export function StyleSettingsPanel({
                 </p>
                 <p className={`mt-8 text-xl ${theme.headingClass}`}>{label}</p>
                 <p className="mt-2 text-xs leading-5 opacity-70">
-                  Designed like the generated Wren-style traveler card.
+                  Previewing the same card rhythm used in the traveler app.
                 </p>
               </div>
             ))}

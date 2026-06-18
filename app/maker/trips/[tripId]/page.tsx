@@ -176,7 +176,7 @@ export default async function TripWorkspacePage({
           />
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             {trip.isDemo
-              ? "Demo trip is seeded from Wren's Adventure so the traveler-app flow stays testable before live extraction exists."
+              ? "Demo trip is seeded so the traveler-app flow stays testable before live extraction exists."
               : "Your app workspace is ready. Follow the steps below to move from trip idea to live traveler app."}
           </p>
         </header>

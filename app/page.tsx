@@ -90,10 +90,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-paper">
       <header className="absolute left-0 right-0 top-0 z-10">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5 md:px-10">
-          <Link className="text-sm font-semibold text-ink" href="/">
-            Roamwoven
-          </Link>
+        <div className="mx-auto flex max-w-6xl items-center justify-end px-6 py-5 md:px-10">
           <Link
             href="/login?next=%2Fmaker"
             className="rounded-md border border-ink/20 bg-paper/80 px-4 py-2 text-sm font-semibold text-ink backdrop-blur"
@@ -108,8 +105,8 @@ export default function HomePage() {
             The superapp for your next adventure
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink/75">
-            All the information you need, right at your fingertips. Don&apos;t
-            spend vacation time digging through emails and PDFs.
+            All the information you need, right at your fingertips. It&apos;s
+            vacation. Don&apos;t waste time digging through emails and PDFs.
           </p>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
             Roamwoven is a custom one-stop shop for your travels: flight and
@@ -212,26 +209,34 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="mt-10 grid gap-5 lg:grid-cols-5">
-            {demoPanels.map((panel) => (
+          <div className="mt-10 grid gap-5 lg:grid-cols-2">
+            {demoPanels.map((panel, index) => (
               <article
-                className="rounded-md border border-ink/10 bg-paper p-4"
+                className={
+                  index === 0
+                    ? "grid gap-6 rounded-md border border-ink/10 bg-paper p-5 md:grid-cols-[0.7fr_1fr] lg:col-span-2"
+                    : "grid gap-5 rounded-md border border-ink/10 bg-paper p-5 md:grid-cols-[0.62fr_1fr]"
+                }
                 key={panel.title}
               >
-                {panel.image ? (
-                  <DemoClip alt={`${panel.title} demo`} image={panel.image} />
-                ) : (
-                  <PhotoPlaceholder />
-                )}
-                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-clay">
-                  {panel.eyebrow}
-                </p>
-                <h3 className="mt-2 text-lg font-semibold text-ink">
-                  {panel.title}
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-ink/65">
-                  {panel.description}
-                </p>
+                <div className="md:row-span-2">
+                  {panel.image ? (
+                    <DemoClip alt={`${panel.title} demo`} image={panel.image} />
+                  ) : (
+                    <PhotoPlaceholder />
+                  )}
+                </div>
+                <div className="self-center">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-clay">
+                    {panel.eyebrow}
+                  </p>
+                  <h3 className="mt-2 text-2xl font-semibold text-ink">
+                    {panel.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-6 text-ink/65">
+                    {panel.description}
+                  </p>
+                </div>
               </article>
             ))}
           </div>

@@ -34,7 +34,7 @@ type TripRow = {
 
 const demoTrip: MakerTrip = {
   id: "demo-trip",
-  name: "Wren's Adventure",
+  name: "Reference Adventure",
   destinationSummary: "Asia workbook reference trip",
   status: "preview_ready",
   paymentStatus: "demo",

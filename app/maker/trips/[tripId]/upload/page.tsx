@@ -1,16 +1,9 @@
-import { FileImage, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
 import { UploadIntakePanel } from "@/components/upload-intake-panel";
 import { canEditTripMaterials, getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
-
-const uploadTypes = [
-  { label: "PDF confirmations", icon: FileText },
-  { label: "Screenshots", icon: FileImage },
-  { label: "Word docs and notes", icon: FileText },
-  { label: "Spreadsheets", icon: FileSpreadsheet }
-];
 
 const intakePreview = [
   { label: "Travel bookings", count: 6 },
@@ -185,7 +178,7 @@ export default async function UploadPage({
                     href={`/maker/trips/${tripId}/review`}
                     className="inline-flex justify-center rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
                   >
-                    Continue to intake review
+                    Continue to app setup
                   </Link>
                 ) : null}
               </div>
@@ -235,32 +228,14 @@ export default async function UploadPage({
               )}
             </section>
 
-            <section className="mt-6 grid gap-3 md:grid-cols-4">
-              {uploadTypes.map((type) => {
-                const Icon = type.icon;
-                return (
-                  <div
-                    key={type.label}
-                    className="rounded-md border border-ink/10 bg-white p-4"
-                  >
-                    <Icon className="text-tide" size={22} />
-                    <p className="mt-3 text-sm font-semibold text-ink">
-                      {type.label}
-                    </p>
-                  </div>
-                );
-              })}
-            </section>
-
             <section className="mt-6 rounded-md border border-tide/20 bg-tide/10 p-5">
               <h2 className="text-xl font-semibold text-ink">
-                Later document updates
+                Add what you have now. Update the app later.
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
-                Before the first build, keep adding materials here. After the
-                app is generated, V1 should support a small update lane for
-                simple late docs like a plane ticket, hotel change, or tour
-                voucher, capped separately from a full rebuild.
+                Before the first build, you can add or remove source materials
+                here. Once the app has a core trip shape, new simple documents
+                should update that app instead of starting over.
               </p>
             </section>
           </>
