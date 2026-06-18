@@ -2,7 +2,8 @@ export const THEME_DIRECTIONS = [
   {
     key: "modern_futuristic",
     name: "Modern / Futuristic",
-    description: "Glass, precision, slim type, and a sharper digital edge.",
+    description:
+      "Quiet luxury with glass, precision, slim type, and a sharper digital edge.",
     surface: "#f6f8fb",
     text: "#10161d",
     fontFamily:
@@ -14,7 +15,8 @@ export const THEME_DIRECTIONS = [
   {
     key: "rustic_adventure",
     name: "Rustic / Adventure",
-    description: "Map-room warmth, sturdy cards, field notes, and worn-in texture.",
+    description:
+      "Quiet luxury with map-room warmth, field notes, and worn-in texture.",
     surface: "#faf8f2",
     text: "#20211f",
     fontFamily: "Georgia, 'Times New Roman', serif",
@@ -25,7 +27,8 @@ export const THEME_DIRECTIONS = [
   {
     key: "whimsical_fantasy",
     name: "Whimsical / Fantasy",
-    description: "Storybook, ornate, softer edges, and a little enchanted.",
+    description:
+      "Quiet luxury with storybook atmosphere, softer edges, and a little wonder.",
     surface: "#fcf4e6",
     text: "#292432",
     fontFamily: "Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif",

@@ -127,6 +127,10 @@ export function StyleSettingsPanel({
             value={appName}
             onChange={(event) => setAppName(event.target.value)}
           />
+          <span className="mt-2 block text-xs leading-5 text-ink/55">
+            This is the title travelers see in the finished app. The dashboard
+            trip name can be edited from the trip workspace.
+          </span>
         </label>
 
         <div className="mt-6">
@@ -193,6 +197,10 @@ export function StyleSettingsPanel({
 
         <div className="mt-6">
           <p className="text-sm font-semibold text-ink">Theme direction</p>
+          <p className="mt-1 text-xs leading-5 text-ink/55">
+            Every direction keeps the same quiet luxury baseline. Choose the
+            expression that best fits the trip.
+          </p>
           <div className="mt-3 space-y-3">
             {THEME_DIRECTIONS.map((option) => (
               <button
@@ -307,7 +315,8 @@ export function StyleSettingsPanel({
               {appName || "Untitled Trip"}
             </h2>
             <p className="mt-3 text-sm leading-6 opacity-80">
-              Today cards, trip tools, and private details in one traveler app.
+              A calm traveler app foundation with today cards, trip tools, and
+              private details close at hand.
             </p>
           </div>
 

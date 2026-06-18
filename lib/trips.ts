@@ -192,6 +192,44 @@ export async function createMakerTrip(input: {
   return String(data.id);
 }
 
+export async function updateMakerTripName({
+  name,
+  tripId,
+}: {
+  name: string;
+  tripId: string;
+}) {
+  if (!hasSupabaseServerConfig()) {
+    return;
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to rename this trip.");
+  }
+
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    throw new Error("Trip name is required.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("trips")
+    .update({
+      name: trimmedName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId)
+    .eq("owner_user_id", user.id);
+
+  if (error) {
+    throw new Error(`Unable to rename trip: ${error.message}`);
+  }
+}
+
 export async function markTripPaid(tripId: string) {
   if (!hasSupabaseServerConfig()) {
     return;

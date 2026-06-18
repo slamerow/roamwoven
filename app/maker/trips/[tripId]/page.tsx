@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
+import { TripNameEditor } from "@/components/trip-name-editor";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getPaidCheckoutTripId,
@@ -100,12 +101,15 @@ export default async function TripWorkspacePage({
   params: Promise<{ tripId: string }>;
   searchParams: Promise<{
     checkout?: string;
+    error?: string;
     making?: string;
+    renamed?: string;
     session_id?: string;
   }>;
 }) {
   const { tripId } = await params;
-  const { checkout, making, session_id: sessionId } = await searchParams;
+  const { checkout, error, making, renamed, session_id: sessionId } =
+    await searchParams;
   let checkoutStatus: "verified" | "pending" | "cancelled" | null = null;
 
   if (checkout === "success" && sessionId) {
@@ -165,15 +169,28 @@ export default async function TripWorkspacePage({
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
       <div className="mx-auto max-w-5xl">
         <header className="border-b border-ink/10 pb-6">
-          <h1 className="text-4xl font-semibold text-ink">
-            {trip.name}
-          </h1>
+          <TripNameEditor
+            canRename={!trip.isDemo}
+            name={trip.name}
+            tripId={tripId}
+          />
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
             {trip.isDemo
               ? "Demo trip is seeded from Wren's Adventure so the traveler-app flow stays testable before live extraction exists."
               : "Your app workspace is ready. Follow the steps below to move from trip idea to live traveler app."}
           </p>
         </header>
+
+        {renamed ? (
+          <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+            Trip name updated.
+          </p>
+        ) : null}
+        {error === "rename-failed" ? (
+          <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+            Trip name could not be updated. Try again.
+          </p>
+        ) : null}
 
         {making ? (
           <section className="mt-8 rounded-md border border-moss/20 bg-white p-5">

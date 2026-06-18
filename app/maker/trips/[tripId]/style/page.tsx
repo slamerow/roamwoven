@@ -26,8 +26,9 @@ export default async function StylePage({
             Make it feel like your trip
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Keep customization simple for V1, but preview it inside the same
-            Wren-style traveler app architecture the generated app will use.
+            Every design direction starts from a quiet luxury travel-app
+            foundation, then changes the atmosphere around the Wren-style
+            traveler architecture the generated app will use.
           </p>
         </header>
 
