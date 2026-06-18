@@ -204,7 +204,7 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `components/traveler-app-shell.tsx`
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
-4. Run the additive production SQL for `trip_review_decisions`, `published_trip_snapshots`, and `trips.published_snapshot_id` before asking the deployed app to write decisions or publish snapshots.
+4. Run `db/production-sql-2026-06-18-review-decisions-and-snapshots.sql` in Supabase before asking the deployed app to write decisions or publish snapshots.
 5. Ensure `SUPABASE_SERVICE_ROLE_KEY` is configured in Vercel before testing real `/t/[token]` rendering.
 6. Browser-test the paid trip draft-review controls and publish snapshot flow after SQL/env are applied.
 7. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.

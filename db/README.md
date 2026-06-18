@@ -23,3 +23,7 @@ The next database step is to turn this into real Supabase migrations and wire:
 6. Production-safe extraction migrations before enabling `ROAMWOVEN_ENABLE_AI_EXTRACTION`.
 
 The prototype must keep building without Supabase env vars. In that mode, maker routes use the Wren's Adventure demo trip while the production code paths remain Supabase-ready.
+
+## Production Patches
+
+- `production-sql-2026-06-18-review-decisions-and-snapshots.sql`: additive patch for `trip_review_decisions`, `published_trip_snapshots`, and `trips.published_snapshot_id`. Run this before testing deployed review decisions or published traveler snapshots.
