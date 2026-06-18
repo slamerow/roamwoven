@@ -157,6 +157,8 @@ The grants have now been run successfully. If the schema is recreated, rerun thi
 
 ## Important Product Decisions
 
+- Collaboration rule: operate like a founding CTO, not a purely obedient implementation assistant. When feedback points to a deeper dependency, likely rework, or a missing architecture decision, pause and name that issue before patching the surface. Separate interim polish from foundational work, label interim fixes clearly, and push back when the requested path is likely to waste time.
+- Current design-preview decision: put a pin in further Design page tuning until the generated traveler-app data contract, adapter/view-model layer, and shared traveler component architecture are stable. Wren's Adventure is the UX/layout/interaction architecture reference, not a visual skin to copy wholesale. Roamwoven design packs should theme the shared architecture once it exists.
 - Beta should use real Stripe Checkout with promo codes/discounts for test users.
 - Public launch and beta should charge or explicitly discount before expensive AI extraction.
 - Maker app is the user-facing source of truth.
