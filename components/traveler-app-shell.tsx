@@ -44,6 +44,7 @@ const samplePhotos = [
 
 type TravelerAppShellProps = {
   displayName?: string;
+  initialUnlocked?: boolean;
   mode?: "standalone" | "preview";
   style?: CSSProperties;
   trip: AsiaDemoTrip;
@@ -84,6 +85,32 @@ function getItemSensitivity(item: TravelerItem) {
 
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function categoryEmoji(category: string | null | undefined) {
+  const normalized = category?.toLowerCase() ?? "";
+
+  if (normalized.includes("arrival") || normalized.includes("departure")) {
+    return "✈️";
+  }
+
+  if (normalized.includes("food") || normalized.includes("dinner")) {
+    return "🍽️";
+  }
+
+  if (normalized.includes("stay") || normalized.includes("hotel")) {
+    return "🏨";
+  }
+
+  if (normalized.includes("transport")) {
+    return "🚆";
+  }
+
+  if (normalized.includes("activity")) {
+    return "✨";
+  }
+
+  return "•";
 }
 
 function categoriesForTrip(trip: AsiaDemoTrip) {
@@ -156,6 +183,29 @@ function IconButton({
   );
 }
 
+function MiniWeatherSummary({ isPreview = false }: { isPreview?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label="Weather details"
+      className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-white/65 bg-[var(--color-sky)] px-2 py-2 text-left shadow-sm transition hover:-translate-y-0.5 min-[400px]:gap-2 min-[400px]:px-2.5"
+    >
+      <CloudSun className="shrink-0 text-[var(--color-blue)]" size={22} />
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase leading-none text-[var(--color-muted)]">
+          Weather
+        </p>
+        <p className="mt-1 whitespace-nowrap text-sm font-bold leading-none">
+          {isPreview ? "71° / 52°" : "-- / --"}
+        </p>
+        <p className="mt-1 max-w-28 truncate text-[11px] font-semibold leading-none text-[var(--color-blue)]">
+          {isPreview ? "Cloudy" : "Forecast soon"}
+        </p>
+      </div>
+    </button>
+  );
+}
+
 function Overlay({
   children,
   closeLabel,
@@ -219,11 +269,9 @@ function UnlockForm({
 
 function ActivityCard({
   item,
-  locked,
   onSelect,
 }: {
   item: TravelerItem;
-  locked: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -241,12 +289,7 @@ function ActivityCard({
       <h2 className={item.time ? "mt-5 line-clamp-4 text-3xl font-semibold leading-tight" : "line-clamp-4 text-3xl font-semibold leading-tight"}>
         {item.title}
       </h2>
-      <p className="mt-5 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-muted)]">
-        {locked ? "Locked detail" : item.category}
-      </p>
-      <span className="mt-5 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-app)] text-[var(--color-muted)]">
-        {locked ? <LockKeyhole size={18} /> : <Sparkles size={18} />}
-      </span>
+      <p className="mt-6 text-3xl leading-none">{categoryEmoji(item.category)}</p>
     </button>
   );
 }
@@ -318,15 +361,23 @@ function PhotoPanel({
 
 function TodayPanel({
   day,
+  isPreview,
   onSelect,
   unlocked,
 }: {
   day: TravelerDay;
+  isPreview?: boolean;
   onSelect: (item: TravelerItem) => void;
   unlocked: boolean;
 }) {
   return (
-    <div className="flex min-h-[calc(100dvh-15rem)] flex-col">
+    <div
+      className={
+        isPreview
+          ? "flex min-h-[410px] flex-col"
+          : "flex min-h-[calc(100dvh-15rem)] flex-col"
+      }
+    >
       <div className="pb-2 pt-1">
         <div className="flex items-center justify-between gap-3 px-1">
           <button
@@ -362,7 +413,6 @@ function TodayPanel({
             <ActivityCard
               item={item}
               key={item.id}
-              locked={Boolean(getItemSensitivity(item)) && !unlocked}
               onSelect={() => onSelect(item)}
             />
           ))}
@@ -631,12 +681,13 @@ function ActivityDetail({
 
 export function TravelerAppShell({
   displayName,
+  initialUnlocked = false,
   mode = "standalone",
   style,
   trip,
 }: TravelerAppShellProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("today");
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(initialUnlocked);
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
   const [overlay, setOverlay] = useState<OverlayKind | null>(null);
@@ -672,7 +723,7 @@ export function TravelerAppShell({
     <main
       className={
         isPreview
-          ? "journal-page h-[720px] overflow-hidden rounded-[28px] text-[var(--color-ink)]"
+          ? "journal-page h-[720px] overflow-hidden rounded-[34px] border-[8px] border-[#17140f] text-[var(--color-ink)] shadow-2xl shadow-stone-950/25"
           : "journal-page min-h-screen text-[var(--color-ink)]"
       }
       style={style}
@@ -686,28 +737,32 @@ export function TravelerAppShell({
       >
         <header className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-app)]/95 px-4 pb-4 pt-5 backdrop-blur min-[400px]:px-5">
           <div className="flex items-start justify-between gap-2 min-[400px]:gap-3">
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/65 bg-[var(--color-sky)] px-2.5 py-2 text-left shadow-sm"
-              onClick={() => (unlocked ? setActiveTab("today") : setOverlay("unlock"))}
-            >
-              {unlocked ? (
-                <CloudSun className="shrink-0 text-[var(--color-blue)]" size={22} />
-              ) : (
-                <LockKeyhole className="shrink-0 text-[var(--color-blue)]" size={22} />
-              )}
-              <span className="min-w-0">
-                <span className="block text-[10px] font-bold uppercase leading-none text-[var(--color-muted)]">
-                  {unlocked ? "Traveler mode" : "Follow along"}
+            {activeTab === "today" ? (
+              <MiniWeatherSummary isPreview={isPreview} />
+            ) : (
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/65 bg-[var(--color-sky)] px-2.5 py-2 text-left shadow-sm"
+                onClick={() => (unlocked ? setActiveTab("today") : setOverlay("unlock"))}
+              >
+                {unlocked ? (
+                  <CloudSun className="shrink-0 text-[var(--color-blue)]" size={22} />
+                ) : (
+                  <LockKeyhole className="shrink-0 text-[var(--color-blue)]" size={22} />
+                )}
+                <span className="min-w-0">
+                  <span className="block text-[10px] font-bold uppercase leading-none text-[var(--color-muted)]">
+                    {unlocked ? "Traveler mode" : "Follow along"}
+                  </span>
+                  <span className="mt-1 block whitespace-nowrap text-sm font-bold leading-none">
+                    {unlocked ? "Private details" : "Photos first"}
+                  </span>
+                  <span className="mt-1 block max-w-32 truncate text-[11px] font-semibold leading-none text-[var(--color-blue)]">
+                    {unlocked ? "Unlocked" : "Tap to unlock"}
+                  </span>
                 </span>
-                <span className="mt-1 block whitespace-nowrap text-sm font-bold leading-none">
-                  {unlocked ? "Private details" : "Photos first"}
-                </span>
-                <span className="mt-1 block max-w-32 truncate text-[11px] font-semibold leading-none text-[var(--color-blue)]">
-                  {unlocked ? "Unlocked" : "Tap to unlock"}
-                </span>
-              </span>
-            </button>
+              </button>
+            )}
             <div className="flex shrink-0 gap-1 min-[400px]:gap-1.5">
               {TRAVELER_TOOLS.map((tool) => {
                 const Icon = travelerToolIcons[tool.id];
@@ -726,18 +781,16 @@ export function TravelerAppShell({
           </div>
         </header>
 
+        {displayName && !isPreview ? (
+          <section className="border-b border-[var(--color-border)]/35 px-5 py-3">
+            <p className="truncate text-sm font-bold text-[var(--color-muted)]">
+              {displayName}
+            </p>
+          </section>
+        ) : null}
+
         <section className="flex-1 px-5 pb-28 pt-5">
-          {displayName ? (
-            <section className="mb-5 rounded-xl border border-white/70 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--color-leather)]">
-                Trip app
-              </p>
-              <h1 className="mt-2 text-3xl font-semibold leading-tight">
-                {displayName}
-              </h1>
-            </section>
-          ) : null}
-          {!unlocked ? (
+          {isPreview ? null : !unlocked ? (
             <button
               type="button"
               className="mb-5 w-full rounded-xl border border-white/70 bg-[var(--color-surface)] p-4 text-left shadow-[var(--shadow-card)]"
@@ -758,6 +811,7 @@ export function TravelerAppShell({
           {activeTab === "today" ? (
             <TodayPanel
               day={todayDay}
+              isPreview={isPreview}
               onSelect={setSelectedItem}
               unlocked={unlocked}
             />

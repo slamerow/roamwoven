@@ -292,6 +292,7 @@ export function StyleSettingsPanel({
 
         <TravelerAppShell
           displayName={appName || "Untitled Trip"}
+          initialUnlocked
           mode="preview"
           style={previewVars}
           trip={previewTrip}
