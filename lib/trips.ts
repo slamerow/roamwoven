@@ -15,6 +15,8 @@ export type MakerTrip = {
   travelerPasswordEnabled: boolean;
   photoCount: number;
   photoStorageBytes: number;
+  publishedAppToken: string | null;
+  publishedAt: string | null;
   createdAt: string | null;
   isDemo?: boolean;
 };
@@ -30,6 +32,8 @@ type TripRow = {
   traveler_password_enabled: boolean | null;
   photo_count: number | null;
   photo_storage_bytes: number | null;
+  published_app_token: string | null;
+  published_at: string | null;
   created_at: string | null;
 };
 
@@ -44,6 +48,8 @@ const demoTrip: MakerTrip = {
   travelerPasswordEnabled: true,
   photoCount: 0,
   photoStorageBytes: 0,
+  publishedAppToken: "demo",
+  publishedAt: null,
   createdAt: null,
   isDemo: true,
 };
@@ -65,6 +71,8 @@ function normalizeTrip(row: TripRow): MakerTrip {
     travelerPasswordEnabled: Boolean(row.traveler_password_enabled),
     photoCount: row.photo_count ?? 0,
     photoStorageBytes: row.photo_storage_bytes ?? 0,
+    publishedAppToken: row.published_app_token,
+    publishedAt: row.published_at,
     createdAt: row.created_at,
   };
 }
@@ -95,6 +103,8 @@ export async function listMakerTrips(): Promise<MakerTrip[]> {
         "traveler_password_enabled",
         "photo_count",
         "photo_storage_bytes",
+        "published_app_token",
+        "published_at",
         "created_at",
       ].join(",")
     )
@@ -134,6 +144,8 @@ export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
         "traveler_password_enabled",
         "photo_count",
         "photo_storage_bytes",
+        "published_app_token",
+        "published_at",
         "created_at",
       ].join(",")
     )

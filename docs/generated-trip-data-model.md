@@ -588,6 +588,13 @@ Use:
 - Fast traveler-app rendering.
 - Stable published app even while maker edits a future update.
 
+Current code:
+
+- `lib/published-snapshots.ts` compiles applied structured records into a versioned traveler-app snapshot payload.
+- `published_trip_snapshots` in `db/schema.sql` stores the snapshot JSON, version, and share token.
+- `app/maker/trips/[tripId]/publish/snapshot/route.ts` creates a new snapshot only after checkout, parsing, and review decisions are complete.
+- `app/t/[token]/page.tsx` can render real snapshot payloads by token when `SUPABASE_SERVICE_ROLE_KEY` is configured server-side; `/t/demo` remains the local reference fallback.
+
 ## Immediate Implementation Order
 
 1. Define TypeScript types for structured trip records and `TravelerAppViewModel`. Done in `lib/generated-trip-model.ts` and `lib/traveler-view-model.ts`.
@@ -599,8 +606,9 @@ Use:
 7. Define review decisions before wiring persistent forms. Done in `lib/generated-trip-decisions.ts`: confirm, edit, protect, delete/ignore, combine, and answer-question apply to structured records in a testable way.
 8. Add the persistence table/action layer for review decisions. The additive schema and data-access helper now exist in `db/schema.sql` and `lib/review-decisions.ts`.
 9. Wire card controls to write decisions and re-render the applied structured records. Done for confirm, protect, delete/ignore, mark-question-answered, record-specific edit forms, and item combine.
-10. Next: browser-test the paid trip after production SQL is applied, then decide whether structured records themselves should be persisted before summary/publish.
-11. Return to Design preview only after it can render the real traveler view model.
+10. Move summary/publish onto applied structured records and published traveler snapshots. Done for summary, publish snapshot creation, and token-based traveler rendering.
+11. Next: browser-test the paid trip after production SQL is applied, then decide whether structured records themselves should be persisted as tables before relying on decision replay long term.
+12. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions
 

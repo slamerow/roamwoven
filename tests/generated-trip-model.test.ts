@@ -9,10 +9,12 @@ import {
   getStructuredReviewCount,
   getStructuredReviewSections,
 } from "@/lib/generated-trip-review";
+import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
 import {
   normalizeTripReviewDecisionRow,
   serializeTripReviewDecision,
 } from "@/lib/review-decisions";
+import { createPublishedTripSnapshotPayload } from "@/lib/published-snapshots";
 import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
@@ -461,4 +463,100 @@ test("review decisions serialize through the persistence payload contract", () =
     targetId: "item-1",
     tripId: "trip-4",
   });
+});
+
+test("generated trip summary uses applied structured records", () => {
+  const draft = {
+    activities: [
+      {
+        date: "2026-09-02",
+        title: "Museum visit",
+      },
+      {
+        date: null,
+        title: "Loose duplicate note",
+      },
+    ],
+    missingDetails: [
+      {
+        prompt: "Where does the loose note belong?",
+        reason: "The traveler app needs placement.",
+        relatedTitle: "Loose duplicate note",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Paris",
+        country: "France",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Paris summary",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-5",
+  });
+  const duplicate = records.items.find(
+    (item) => item.title === "Loose duplicate note"
+  );
+  const keeper = records.items.find((item) => item.title === "Museum visit");
+  const question = records.reviewQuestions[0];
+
+  assert.ok(duplicate);
+  assert.ok(keeper);
+  assert.ok(question);
+
+  const updated = applyReviewDecisions(records, [
+    {
+      action: "combine",
+      createdAt: "2026-06-18T14:00:00.000Z",
+      id: "decision-combine-summary",
+      sourceIds: [duplicate.id],
+      subjectId: keeper.id,
+      subjectType: "item",
+      targetId: keeper.id,
+      tripId: "trip-5",
+    },
+    {
+      action: "answer_question",
+      answerValue: "Combined into Museum visit.",
+      createdAt: "2026-06-18T14:01:00.000Z",
+      id: "decision-answer-summary",
+      resolvedAction: "combine",
+      subjectId: question.id,
+      subjectType: "review_question",
+      tripId: "trip-5",
+    },
+  ]);
+  const summary = createGeneratedTripSummaryView(updated);
+
+  assert.equal(summary.title, "Paris summary");
+  assert.equal(summary.counts.activities, 1);
+  assert.equal(summary.counts.review, 0);
+  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.dateRange, "2026-09-01 to 2026-09-02");
+});
+
+test("published snapshot payload compiles traveler app view model", () => {
+  const records = getAsiaDemoStructuredTripRecords();
+  const payload = createPublishedTripSnapshotPayload(records);
+
+  assert.equal(payload.schemaVersion, 1);
+  assert.equal(payload.createdFrom, "structured_trip_records");
+  assert.equal(payload.travelerApp.trip.id, records.trip.id);
+  assert.equal(payload.recordsSummary.cardCount, payload.travelerApp.cards.length);
+  assert.equal(payload.recordsSummary.dayCount, payload.travelerApp.days.length);
+  assert.equal(payload.recordsSummary.legCount, payload.travelerApp.legs.length);
+  assert.equal(
+    payload.recordsSummary.privateDetailCount,
+    payload.travelerApp.privacy.privateDetailCount
+  );
+  assert.ok(payload.travelerApp.days.length > 80);
 });

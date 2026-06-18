@@ -1,50 +1,9 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
-import { getAsiaDemoTrip } from "@/lib/asia-trip";
-import { getLatestTripDraftSnapshot } from "@/lib/extraction/processing-runs";
+import { getAppliedTripRecords } from "@/lib/applied-trip-records";
+import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
 import { getMakerTrip } from "@/lib/trips";
-
-function getDraftArray(value: unknown, key: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return [];
-  }
-
-  const record = value as Record<string, unknown>;
-  return Array.isArray(record[key]) ? record[key] : [];
-}
-
-function getDraftObject(value: unknown, key: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const child = (value as Record<string, unknown>)[key];
-  return child && typeof child === "object" && !Array.isArray(child)
-    ? (child as Record<string, unknown>)
-    : null;
-}
-
-function getString(value: Record<string, unknown> | null, key: string) {
-  const child = value?.[key];
-  return typeof child === "string" && child.trim() ? child.trim() : null;
-}
-
-function pluralize(count: number, singular: string, plural = `${singular}s`) {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function getDraftCounts(draft: unknown) {
-  return {
-    activities: getDraftArray(draft, "activities").length,
-    places: getDraftArray(draft, "places").length,
-    review:
-      getDraftArray(draft, "missingDetails").length +
-      getDraftArray(draft, "sensitiveDetails").length,
-    stays: getDraftArray(draft, "stays").length,
-    transport: getDraftArray(draft, "transport").length,
-  };
-}
 
 export default async function TripSummaryPage({
   params,
@@ -53,33 +12,12 @@ export default async function TripSummaryPage({
 }) {
   const { tripId } = await params;
   const trip = await getMakerTrip(tripId);
-  const latestDraft = trip.isDemo
-    ? null
-    : await getLatestTripDraftSnapshot(tripId);
-  const demoTrip = trip.isDemo ? getAsiaDemoTrip() : null;
-  const draft = latestDraft?.draftJson ?? null;
-  const overview = getDraftObject(draft, "tripOverview");
-  const counts = demoTrip
-    ? {
-        activities: demoTrip.itemCount,
-        places: demoTrip.legs.length,
-        review: 9,
-        stays: demoTrip.legs.filter((leg) => leg.stayName).length,
-        transport: demoTrip.items.filter((item) =>
-          ["flight", "transport", "transfer", "train", "rental"].some((token) =>
-            `${item.category ?? ""} ${item.title}`.toLowerCase().includes(token)
-          )
-        ).length,
-      }
-    : getDraftCounts(draft);
-  const title =
-    getString(overview, "title") ?? demoTrip?.name ?? trip.name;
-  const dateRange =
-    getString(overview, "dateRange") ?? demoTrip?.dateRange ?? "Dates to confirm";
-  const destination =
-    getString(overview, "destinationSummary") ??
-    demoTrip?.countries.slice(0, 5).join(", ") ??
-    "Destinations to confirm";
+  const { latestDraft, records } = await getAppliedTripRecords({
+    fallbackTripName: trip.name,
+    isDemo: trip.isDemo,
+    tripId,
+  });
+  const summary = records ? createGeneratedTripSummaryView(records) : null;
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -105,24 +43,36 @@ export default async function TripSummaryPage({
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-sm font-semibold text-moss">{dateRange}</p>
-              <h2 className="mt-2 text-2xl font-semibold text-ink">{title}</h2>
+              <p className="text-sm font-semibold text-moss">
+                {summary?.dateRange ?? "Dates to confirm"}
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-ink">
+                {summary?.title ?? trip.name}
+              </h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
-                {destination}
+                {summary?.destination ?? "Destinations to confirm"}
               </p>
             </div>
-            <div className="rounded-md bg-moss/10 px-4 py-3 text-sm font-semibold text-moss">
-              Ready for final review
+            <div
+              className={
+                summary?.isReadyForPublishReview
+                  ? "rounded-md bg-moss/10 px-4 py-3 text-sm font-semibold text-moss"
+                  : "rounded-md bg-clay/10 px-4 py-3 text-sm font-semibold text-clay"
+              }
+            >
+              {summary?.isReadyForPublishReview
+                ? "Ready for final review"
+                : "Needs review decisions"}
             </div>
           </div>
 
           <div className="mt-6 grid gap-3 md:grid-cols-5">
             {[
-              ["Places", counts.places],
-              ["Transport", counts.transport],
-              ["Stays", counts.stays],
-              ["Activities", counts.activities],
-              ["Review items", counts.review],
+              ["Places", summary?.counts.places ?? 0],
+              ["Transport", summary?.counts.transport ?? 0],
+              ["Stays", summary?.counts.stays ?? 0],
+              ["Activities", summary?.counts.activities ?? 0],
+              ["Review items", summary?.counts.review ?? 0],
             ].map(([label, count]) => (
               <div key={label} className="rounded-md bg-paper p-4">
                 <p className="text-2xl font-semibold text-ink">{count}</p>

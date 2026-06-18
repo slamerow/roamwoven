@@ -2,15 +2,21 @@ import Link from "next/link";
 import { ExternalLink, RotateCcw, ShieldCheck, Smartphone } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
 import { CopyLinkButton, RefreshAppButton } from "@/components/publish-actions";
-
-const shareUrl = "https://roamwoven.com/t/demo";
+import { getAppUrl } from "@/lib/env";
+import { getMakerTrip } from "@/lib/trips";
 
 export default async function PublishPage({
-  params
+  params,
+  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ error?: string; published?: string }>;
 }) {
   const { tripId } = await params;
+  const { error, published } = await searchParams;
+  const trip = await getMakerTrip(tripId);
+  const token = trip.publishedAppToken ?? (trip.isDemo ? "demo" : null);
+  const shareUrl = token ? `${getAppUrl()}/t/${token}` : null;
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -20,8 +26,8 @@ export default async function PublishPage({
             Share the traveler app
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Trip `{tripId}` has a beta publish screen. In production this will
-            create a private snapshot and share token.
+            Create a traveler snapshot from the confirmed trip records, then
+            share the private link when it is ready.
           </p>
         </header>
 
@@ -33,6 +39,23 @@ export default async function PublishPage({
           tripId={tripId}
         />
 
+        {error ? (
+          <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+            {error === "checkout-required"
+              ? "Checkout must be complete before publishing."
+              : error === "publish-failed"
+                ? "Publishing failed. Check that the snapshot database table exists before trying again."
+                : "The trip still needs review decisions before publishing."}
+          </p>
+        ) : null}
+        {published ? (
+          <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+            {published === "demo"
+              ? "Demo preview is available."
+              : "Published snapshot saved."}
+          </p>
+        ) : null}
+
         <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
           <div className="rounded-md border border-ink/10 bg-white p-5">
             <div className="flex items-center gap-3">
@@ -42,7 +65,9 @@ export default async function PublishPage({
                   Private app is ready
                 </h2>
                 <p className="mt-1 text-sm text-ink/60">
-                  Anyone with the link can view this beta preview.
+                  {shareUrl
+                    ? "Anyone with the link can view this beta preview."
+                    : "Create the first snapshot to get a private share link."}
                 </p>
               </div>
             </div>
@@ -52,19 +77,29 @@ export default async function PublishPage({
                 Share URL
               </p>
               <p className="mt-2 break-all text-sm font-semibold text-ink">
-                {shareUrl}
+                {shareUrl ?? "Not published yet"}
               </p>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
-              <CopyLinkButton shareUrl={shareUrl} />
-              <Link
-                href="/t/demo"
-                className="inline-flex items-center gap-2 rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink"
-              >
-                <ExternalLink size={16} />
-                Open preview
-              </Link>
+              {shareUrl ? <CopyLinkButton shareUrl={shareUrl} /> : null}
+              {shareUrl ? (
+                <Link
+                  href={`/t/${token}`}
+                  className="inline-flex items-center gap-2 rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink"
+                >
+                  <ExternalLink size={16} />
+                  Open preview
+                </Link>
+              ) : null}
+              <form action={`/maker/trips/${tripId}/publish/snapshot`} method="post">
+                <button
+                  className="inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+                  type="submit"
+                >
+                  {shareUrl ? "Refresh snapshot" : "Create snapshot"}
+                </button>
+              </form>
             </div>
           </div>
 
