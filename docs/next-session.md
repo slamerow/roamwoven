@@ -195,9 +195,10 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `lib/extraction/draft-to-structured-trip.ts`
    - `components/traveler-app-shell.tsx`
    - `app/t/[token]/page.tsx`
-3. Build review/edit forms around structured records and review questions.
-4. Add persistence tables only after the adapter contract is stable enough to justify the DB surface.
-5. Return to Design preview only after it can render the real shared traveler architecture.
+3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
+4. Build review/edit forms around structured records and review questions.
+5. Add persistence tables only after the adapter contract is stable enough to justify the DB surface.
+6. Return to Design preview only after it can render the real shared traveler architecture.
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 

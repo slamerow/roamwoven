@@ -561,8 +561,9 @@ Use:
 2. Build a Wren workbook/seed adapter into those types. First seed adapter exists in `getAsiaDemoStructuredTripRecords()`.
 3. Change `/t/demo` to render `TravelerAppViewModel` instead of Asia-demo-specific rows. Done; `TravelerAppShell` now consumes `TravelerAppViewModel`.
 4. Build a draft parser adapter from current `trip_draft_snapshots.draft_json` into those records. First adapter exists in `lib/extraction/draft-to-structured-trip.ts`, and the draft review page now derives scan/review summaries through it.
-5. Build review/edit forms around records and review questions.
-6. Return to Design preview only after it can render the real traveler view model.
+5. Add adapter fixture tests. Done in `tests/generated-trip-model.test.ts`; run with `npm test`.
+6. Build review/edit forms around records and review questions.
+7. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions
 
