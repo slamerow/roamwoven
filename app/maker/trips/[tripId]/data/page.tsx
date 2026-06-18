@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,6 +11,7 @@ import {
   MapPinned,
   Route,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
 import { hasOpenAIExtractionConfig } from "@/lib/env";
@@ -25,9 +27,15 @@ import {
   formatStructuredDiscoverySummary,
   getStructuredReviewCount,
   getStructuredReviewSections,
+  type StructuredReviewEditField,
   type StructuredReviewItem,
   type StructuredReviewSection,
 } from "@/lib/generated-trip-review";
+import {
+  applyReviewDecisions,
+  type TripReviewDecision,
+} from "@/lib/generated-trip-decisions";
+import { listTripReviewDecisions } from "@/lib/review-decisions";
 import { type TripStyleSettings } from "@/lib/style-settings-config";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -244,10 +252,212 @@ function toneIcon(tone: StructuredReviewItem["tone"]) {
   return FileText;
 }
 
+function canProtectReviewItem(item: StructuredReviewItem) {
+  return (
+    item.tone === "sensitive" ||
+    item.subjectType === "private_detail" ||
+    item.subjectType === "stay" ||
+    item.subjectType === "transport"
+  );
+}
+
+function ReviewDecisionButton({
+  action,
+  children,
+  icon,
+  item,
+  tone = "neutral",
+  tripId,
+}: {
+  action: "answer_question" | "confirm" | "delete" | "protect";
+  children: ReactNode;
+  icon: ReactNode;
+  item: StructuredReviewItem;
+  tone?: "neutral" | "positive" | "sensitive" | "destructive";
+  tripId: string;
+}) {
+  const colorClasses =
+    tone === "positive"
+      ? "hover:border-moss/30 hover:text-moss"
+      : tone === "sensitive"
+        ? "hover:border-tide/30 hover:text-tide"
+        : tone === "destructive"
+          ? "hover:border-clay/30 hover:text-clay"
+          : "hover:border-ink/25 hover:text-ink";
+
+  return (
+    <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
+      <input name="action" type="hidden" value={action} />
+      <input name="subjectId" type="hidden" value={item.subjectId} />
+      <input name="subjectType" type="hidden" value={item.subjectType} />
+      {action === "answer_question" ? (
+        <input
+          name="answerValue"
+          type="hidden"
+          value="Marked answered in review."
+        />
+      ) : null}
+      <button
+        className={`inline-flex h-9 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 text-xs font-semibold text-ink/55 transition ${colorClasses}`}
+        type="submit"
+      >
+        {icon}
+        {children}
+      </button>
+    </form>
+  );
+}
+
+function EditFieldInput({ field }: { field: StructuredReviewEditField }) {
+  const baseClass =
+    "mt-1 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss/40";
+
+  if (field.type === "textarea") {
+    return (
+      <textarea
+        className={`${baseClass} min-h-24 leading-6`}
+        defaultValue={field.value}
+        name={`field:${field.name}`}
+      />
+    );
+  }
+
+  if (field.type === "select") {
+    return (
+      <select
+        className={baseClass}
+        defaultValue={field.value}
+        name={`field:${field.name}`}
+      >
+        {field.options?.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      className={baseClass}
+      defaultValue={field.value}
+      name={`field:${field.name}`}
+      type={field.type}
+    />
+  );
+}
+
+function ReviewEditForm({
+  item,
+  tripId,
+}: {
+  item: StructuredReviewItem;
+  tripId: string;
+}) {
+  if (item.editFields.length === 0) {
+    return null;
+  }
+
+  return (
+    <details className="mt-4 rounded-md border border-ink/10 bg-white p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+        Edit details
+      </summary>
+      <form
+        action={`/maker/trips/${tripId}/data/decisions`}
+        className="mt-3 grid gap-3 md:grid-cols-2"
+        method="post"
+      >
+        <input name="action" type="hidden" value="edit" />
+        <input name="subjectId" type="hidden" value={item.subjectId} />
+        <input name="subjectType" type="hidden" value={item.subjectType} />
+        {item.editFields.map((field) => (
+          <label
+            className={field.type === "textarea" ? "md:col-span-2" : ""}
+            key={field.name}
+          >
+            <span className="text-xs font-semibold text-ink/55">
+              {field.label}
+            </span>
+            <EditFieldInput field={field} />
+            {field.helpText ? (
+              <span className="mt-1 block text-xs leading-5 text-ink/45">
+                {field.helpText}
+              </span>
+            ) : null}
+          </label>
+        ))}
+        <div className="md:col-span-2">
+          <button
+            className="inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
+            type="submit"
+          >
+            Save edit
+          </button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
+function ReviewCombineForm({
+  item,
+  tripId,
+}: {
+  item: StructuredReviewItem;
+  tripId: string;
+}) {
+  if (item.subjectType !== "item" || item.combineOptions.length === 0) {
+    return null;
+  }
+
+  return (
+    <details className="mt-3 rounded-md border border-ink/10 bg-white p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+        Combine cards
+      </summary>
+      <form
+        action={`/maker/trips/${tripId}/data/decisions`}
+        className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end"
+        method="post"
+      >
+        <input name="action" type="hidden" value="combine" />
+        <input name="subjectId" type="hidden" value={item.subjectId} />
+        <input name="subjectType" type="hidden" value={item.subjectType} />
+        <input name="targetId" type="hidden" value={item.subjectId} />
+        <label className="min-w-0 flex-1">
+          <span className="text-xs font-semibold text-ink/55">
+            Fold another card into this one
+          </span>
+          <select
+            className="mt-1 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss/40"
+            name="sourceId"
+          >
+            {item.combineOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
+          type="submit"
+        >
+          Combine
+        </button>
+      </form>
+    </details>
+  );
+}
+
 function StructuredRecordReview({
   sections,
+  tripId,
 }: {
   sections: StructuredReviewSection[];
+  tripId: string;
 }) {
   const reviewCount = sections.reduce(
     (count, section) => count + section.items.length,
@@ -346,6 +556,51 @@ function StructuredRecordReview({
                         <p className="mt-2 text-sm leading-6 text-ink/60">
                           {item.detail}
                         </p>
+                        <ReviewEditForm item={item} tripId={tripId} />
+                        <ReviewCombineForm item={item} tripId={tripId} />
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {item.subjectType === "review_question" ? (
+                            <ReviewDecisionButton
+                              action="answer_question"
+                              icon={<CheckCircle2 size={14} />}
+                              item={item}
+                              tone="positive"
+                              tripId={tripId}
+                            >
+                              Mark answered
+                            </ReviewDecisionButton>
+                          ) : (
+                            <ReviewDecisionButton
+                              action="confirm"
+                              icon={<CheckCircle2 size={14} />}
+                              item={item}
+                              tone="positive"
+                              tripId={tripId}
+                            >
+                              Confirm
+                            </ReviewDecisionButton>
+                          )}
+                          {canProtectReviewItem(item) ? (
+                            <ReviewDecisionButton
+                              action="protect"
+                              icon={<LockKeyhole size={14} />}
+                              item={item}
+                              tone="sensitive"
+                              tripId={tripId}
+                            >
+                              Protect
+                            </ReviewDecisionButton>
+                          ) : null}
+                          <ReviewDecisionButton
+                            action="delete"
+                            icon={<Trash2 size={14} />}
+                            item={item}
+                            tone="destructive"
+                            tripId={tripId}
+                          >
+                            Ignore
+                          </ReviewDecisionButton>
+                        </div>
                       </div>
                     </div>
                   );
@@ -392,6 +647,7 @@ function RealTripFirstPass({
   extractionStatus,
   latestDraft,
   latestRun,
+  reviewDecisions,
   tripId,
   tripName,
   uploads,
@@ -402,6 +658,7 @@ function RealTripFirstPass({
   extractionStatus?: string;
   latestDraft: TripDraftSnapshot | null;
   latestRun: TripProcessingRun | null;
+  reviewDecisions: TripReviewDecision[];
   tripId: string;
   tripName: string;
   uploads: TripUpload[];
@@ -427,32 +684,35 @@ function RealTripFirstPass({
         tripId,
       })
     : null;
+  const reviewedStructuredDraft = structuredDraft
+    ? applyReviewDecisions(structuredDraft, reviewDecisions)
+    : null;
   const overview = getDraftObject(draft, "tripOverview");
-  const reviewItems = structuredDraft
-    ? getStructuredReviewItems(structuredDraft)
+  const reviewItems = reviewedStructuredDraft
+    ? getStructuredReviewItems(reviewedStructuredDraft)
     : getReviewItems(draft);
-  const structuredSections = structuredDraft
-    ? getStructuredReviewSections(structuredDraft)
+  const structuredSections = reviewedStructuredDraft
+    ? getStructuredReviewSections(reviewedStructuredDraft)
     : [];
-  const structuredReviewCount = getStructuredReviewCount(structuredDraft);
+  const structuredReviewCount = getStructuredReviewCount(reviewedStructuredDraft);
   const structuredDiscoverySummary = formatStructuredDiscoverySummary(
-    structuredDraft,
+    reviewedStructuredDraft,
     structuredReviewCount
   );
-  const scannedParts = structuredDraft
-    ? formatStructuredScannedSummary(structuredDraft)
+  const scannedParts = reviewedStructuredDraft
+    ? formatStructuredScannedSummary(reviewedStructuredDraft)
     : formatScannedSummary(draft);
-  const scannedCount = structuredDraft
-    ? structuredDraft.legs.length +
-      structuredDraft.transport.length +
-      structuredDraft.stays.length +
-      structuredDraft.items.length
+  const scannedCount = reviewedStructuredDraft
+    ? reviewedStructuredDraft.legs.length +
+      reviewedStructuredDraft.transport.length +
+      reviewedStructuredDraft.stays.length +
+      reviewedStructuredDraft.items.length
     : getDraftCount(draft, "places") +
       getDraftCount(draft, "transport") +
       getDraftCount(draft, "stays") +
       getDraftCount(draft, "activities");
   const overviewTitle =
-    structuredDraft?.trip.travelerAppTitle ??
+    reviewedStructuredDraft?.trip.travelerAppTitle ??
     getDraftString(overview, "title") ??
     style.appName ??
     tripName;
@@ -569,8 +829,8 @@ function RealTripFirstPass({
         )}
       </section>
 
-      {latestDraft && structuredDraft ? (
-        <StructuredRecordReview sections={structuredSections} />
+      {latestDraft && reviewedStructuredDraft ? (
+        <StructuredRecordReview sections={structuredSections} tripId={tripId} />
       ) : latestDraft ? (
         <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -871,6 +1131,9 @@ export default async function StructuredDataPage({
     makerTrip.isDemo ? Promise.resolve(null) : getLatestTripProcessingRun(tripId),
     makerTrip.isDemo ? Promise.resolve(null) : getLatestTripDraftSnapshot(tripId),
   ]);
+  const reviewDecisions = makerTrip.isDemo
+    ? []
+    : await listTripReviewDecisions(tripId);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -909,6 +1172,7 @@ export default async function StructuredDataPage({
             extractionStatus={extraction}
             latestDraft={latestDraft}
             latestRun={latestRun}
+            reviewDecisions={reviewDecisions}
             tripId={tripId}
             tripName={makerTrip.name}
             uploads={uploads}

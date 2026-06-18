@@ -91,6 +91,7 @@ Backend-ready pieces now exist:
 - Draft day generation in `lib/extraction/draft-to-structured-trip.ts` now follows Wren's leave-date-exclusive rule. A Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
 - The generated-trip review decision contract now exists in `lib/generated-trip-decisions.ts`. Decisions are confirm, edit, protect, delete/ignore, combine, and answer-question. Delete/ignore marks records as `ignored`; protect changes visibility; answer-question records the answer and should resolve into one of the other structured operations.
 - Review-decision persistence now exists in `db/schema.sql` and `lib/review-decisions.ts`. The table is `trip_review_decisions`, with action/subject columns plus `payload_json` for action-specific fields. Run the additive production SQL before deploying UI that writes review decisions.
+- The structured draft-review cards now write decisions through `app/maker/trips/[tripId]/data/decisions/route.ts`. Confirm, Protect, Ignore, Mark answered, record-specific Edit forms, and item Combine persist to `trip_review_decisions`; the page reloads from structured records plus applied saved decisions so resolved items leave the queue.
 
 Live Supabase dev setup is partially complete:
 
@@ -201,9 +202,9 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `components/traveler-app-shell.tsx`
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
-4. Wire confirm/edit/protect/delete/combine/answer controls to write `trip_review_decisions`.
-5. Re-render draft review from structured records plus applied decisions.
-6. Add structured-record persistence tables only after the decision contract is stable enough to justify the DB surface.
+4. Run the additive `trip_review_decisions` production SQL before asking the deployed app to write review decisions.
+5. Browser-test the paid trip draft-review controls after SQL is applied.
+6. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.
 7. Return to Design preview only after it can render the real shared traveler architecture.
 
 Latest checks run after the model-backed draft-review update:
@@ -213,6 +214,18 @@ Latest checks run after the model-backed draft-review update:
 - `npm run build`
 
 Latest checks after the review-decision persistence layer:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after wiring simple review-card decisions:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after wiring edit forms and item combine:
 
 - `npm test`
 - `npm run typecheck`

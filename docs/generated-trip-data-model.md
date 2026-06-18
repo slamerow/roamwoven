@@ -390,6 +390,7 @@ Current code:
 - `lib/generated-trip-decisions.ts` defines the decision union and pure apply helpers.
 - `lib/review-decisions.ts` serializes decisions into `payload_json`, loads saved decisions, and applies them to structured records.
 - `db/schema.sql` includes the owner-scoped `trip_review_decisions` table, grants, indexes, and RLS policy.
+- `app/maker/trips/[tripId]/data/decisions/route.ts` persists review controls: confirm, edit, protect, delete/ignore, combine, and mark-question-answered.
 - The first test coverage applies edit, protect, combine, answer-question, and delete decisions to parser-generated records.
 
 ### `trip_photos`
@@ -597,8 +598,9 @@ Use:
 6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions.
 7. Define review decisions before wiring persistent forms. Done in `lib/generated-trip-decisions.ts`: confirm, edit, protect, delete/ignore, combine, and answer-question apply to structured records in a testable way.
 8. Add the persistence table/action layer for review decisions. The additive schema and data-access helper now exist in `db/schema.sql` and `lib/review-decisions.ts`.
-9. Next: wire card controls to write decisions and re-render the applied structured records.
-10. Return to Design preview only after it can render the real traveler view model.
+9. Wire card controls to write decisions and re-render the applied structured records. Done for confirm, protect, delete/ignore, mark-question-answered, record-specific edit forms, and item combine.
+10. Next: browser-test the paid trip after production SQL is applied, then decide whether structured records themselves should be persisted before summary/publish.
+11. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions
 
