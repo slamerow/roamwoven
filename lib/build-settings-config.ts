@@ -52,7 +52,7 @@ export const APP_MODULES = [
 export const BUILD_CONFIRMATIONS = [
   {
     key: "materials",
-    title: "Uploaded materials look complete enough for a first pass",
+    title: "Materials are ready for a first draft",
     copy: "You can add more later, but this starts the review cleanly.",
   },
   {
@@ -62,7 +62,7 @@ export const BUILD_CONFIRMATIONS = [
   },
   {
     key: "sensitive",
-    title: "Sensitive card details should be reviewed before sharing",
+    title: "Private details need a sharing pass",
     copy: "Cards with exact private addresses, codes, confirmations, or personal notes can keep those details behind a password.",
   },
 ] as const;

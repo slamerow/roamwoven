@@ -3,6 +3,34 @@ import { ArrowRight, ClipboardCheck, FileUp, Smartphone } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { listMakerTrips } from "@/lib/trips";
 
+function getTripStatusLabel({
+  isDemo,
+  paymentStatus,
+  processingStatus,
+}: {
+  isDemo?: boolean;
+  paymentStatus: string;
+  processingStatus: string;
+}) {
+  if (isDemo) {
+    return "Demo trip";
+  }
+
+  if (processingStatus === "parsed") {
+    return "Draft ready";
+  }
+
+  if (processingStatus === "processing") {
+    return "Building draft";
+  }
+
+  if (paymentStatus === "paid") {
+    return "Ready to build";
+  }
+
+  return "New trip";
+}
+
 export default async function MakerDashboardPage() {
   const user = await getCurrentUser();
   const trips = await listMakerTrips();
@@ -12,10 +40,7 @@ export default async function MakerDashboardPage() {
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-              Maker foundry
-            </p>
-            <h1 className="mt-2 text-4xl font-semibold text-ink">
+            <h1 className="text-4xl font-semibold text-ink">
               Trip dashboard
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
@@ -69,8 +94,12 @@ export default async function MakerDashboardPage() {
             >
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-clay">
-                    {trip.isDemo ? "Beta demo trip" : trip.paymentStatus}
+                  <p className="text-sm font-semibold text-clay">
+                    {getTripStatusLabel({
+                      isDemo: trip.isDemo,
+                      paymentStatus: trip.paymentStatus,
+                      processingStatus: trip.processingStatus,
+                    })}
                   </p>
                   <h2 className="mt-2 text-2xl font-semibold text-ink">
                     {trip.name}

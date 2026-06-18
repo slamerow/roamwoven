@@ -85,6 +85,7 @@ export function ReviewFlowPanel({
   const canContinue =
     uploads.length > 0 && checkedCount === BUILD_CONFIRMATIONS.length;
   const settingsPayload = JSON.stringify({ enabledModules, confirmations: checked });
+  const remainingChecks = BUILD_CONFIRMATIONS.length - checkedCount;
 
   return (
     <>
@@ -101,11 +102,11 @@ export function ReviewFlowPanel({
         ) : null}
         <div>
           <h2 className="text-xl font-semibold text-ink">
-            Confirm what belongs in the app
+            Shape the traveler app
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            This sets the app scope before design. The actual structured draft
-            comes after the design choices are saved.
+            Choose the sections this trip actually needs. Roamwoven will use
+            this setup when it builds the first draft.
           </p>
           <Link
             className="mt-4 inline-flex text-sm font-semibold text-moss"
@@ -116,7 +117,7 @@ export function ReviewFlowPanel({
         </div>
       </section>
 
-      <section className="mt-6 grid gap-6 lg:grid-cols-[0.68fr_0.32fr]">
+      <section className="mt-6 grid gap-6 lg:grid-cols-[0.62fr_0.38fr]">
         <div className="space-y-6">
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -187,47 +188,9 @@ export function ReviewFlowPanel({
               })}
             </div>
           </section>
-
-          <section className="rounded-md border border-ink/10 bg-white p-5">
-            <h2 className="text-xl font-semibold text-ink">
-              Confirm before build
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-ink/60">
-              These checks help keep the app focused before Roamwoven turns
-              source materials into the first structured draft.
-            </p>
-            <div className="mt-5 space-y-3">
-              {BUILD_CONFIRMATIONS.map((item) => (
-                <label
-                  key={item.key}
-                  className="flex cursor-pointer gap-3 rounded-md bg-paper p-4"
-                >
-                  <input
-                    checked={Boolean(checked[item.key])}
-                    className="mt-1 h-4 w-4 accent-moss"
-                    type="checkbox"
-                    onChange={(event) =>
-                      setChecked((current) => ({
-                        ...current,
-                        [item.key]: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-ink">
-                      {item.title}
-                    </span>
-                    <span className="mt-1 block text-sm leading-5 text-ink/60">
-                      {item.copy}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </section>
         </div>
 
-        <aside>
+        <aside className="space-y-6">
           <section className="rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-lg font-semibold text-ink">{trip.name}</h2>
             {trip.destinationSummary ? (
@@ -265,6 +228,44 @@ export function ReviewFlowPanel({
               )}
             </div>
           </section>
+
+          <section className="rounded-md border border-ink/10 bg-white p-5">
+            <h2 className="text-lg font-semibold text-ink">
+              Before design
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-ink/60">
+              A quick check keeps the first draft focused and avoids empty
+              sections in the traveler app.
+            </p>
+            <div className="mt-5 space-y-3">
+              {BUILD_CONFIRMATIONS.map((item) => (
+                <label
+                  key={item.key}
+                  className="flex cursor-pointer gap-3 rounded-md bg-paper p-4"
+                >
+                  <input
+                    checked={Boolean(checked[item.key])}
+                    className="mt-1 h-4 w-4 accent-moss"
+                    type="checkbox"
+                    onChange={(event) =>
+                      setChecked((current) => ({
+                        ...current,
+                        [item.key]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-ink">
+                      {item.title}
+                    </span>
+                    <span className="mt-1 block text-sm leading-5 text-ink/60">
+                      {item.copy}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
         </aside>
       </section>
 
@@ -293,7 +294,9 @@ export function ReviewFlowPanel({
             disabled
             type="button"
           >
-            Confirm {BUILD_CONFIRMATIONS.length - checkedCount} more
+            {remainingChecks === 1
+              ? "Finish 1 check"
+              : `Finish ${remainingChecks} checks`}
           </button>
         )}
       </section>

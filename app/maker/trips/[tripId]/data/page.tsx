@@ -633,10 +633,7 @@ export default async function StructuredDataPage({
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-              Process & Review
-            </p>
-            <h1 className="mt-2 text-4xl font-semibold text-ink">
+            <h1 className="text-4xl font-semibold text-ink">
               Review what needs attention
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">

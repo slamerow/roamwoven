@@ -10,10 +10,7 @@ export default async function NewTripPage({
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
       <div className="mx-auto max-w-2xl">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-          New Trip
-        </p>
-        <h1 className="mt-2 text-4xl font-semibold text-ink">
+        <h1 className="text-4xl font-semibold text-ink">
           Create a trip app
         </h1>
         <p className="mt-3 text-sm leading-6 text-ink/65">

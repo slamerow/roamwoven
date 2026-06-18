@@ -82,11 +82,8 @@ export default async function UploadPage({
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
       <div className="mx-auto max-w-4xl">
         <header className="border-b border-ink/10 pb-6">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">
-            Upload Materials
-          </p>
-          <h1 className="mt-2 text-4xl font-semibold text-ink">
-            Dump everything in
+          <h1 className="text-4xl font-semibold text-ink">
+            Drop everything in
           </h1>
           <p className="mt-3 text-sm leading-6 text-ink/65">
             {canUpload
