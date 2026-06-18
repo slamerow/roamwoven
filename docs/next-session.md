@@ -89,6 +89,7 @@ Backend-ready pieces now exist:
 - The draft-review screen now derives its first review surface from the generated trip model instead of a flat parser queue. The review contract lives in `lib/generated-trip-review.ts`. When a parsed draft exists, it says what Roamwoven found in human terms, such as legs across days plus flights/stays/activities/restaurants, and shows the number of things the maker needs to confirm before the traveler app is assembled.
 - The model-backed draft-review sections are Places, Stays, Transport, Cards, Private details, and Questions. Confident records stay summarized; only records/questions marked for review expand into confirmation cards.
 - Draft day generation in `lib/extraction/draft-to-structured-trip.ts` now follows Wren's leave-date-exclusive rule. A Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
+- The generated-trip review decision contract now exists in `lib/generated-trip-decisions.ts`. Decisions are confirm, edit, protect, delete/ignore, combine, and answer-question. Delete/ignore marks records as `ignored`; protect changes visibility; answer-question records the answer and should resolve into one of the other structured operations.
 
 Live Supabase dev setup is partially complete:
 
@@ -199,9 +200,10 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `components/traveler-app-shell.tsx`
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
-4. Build review/edit forms around structured records and review questions.
-5. Add persistence tables only after the adapter contract is stable enough to justify the DB surface.
-6. Return to Design preview only after it can render the real shared traveler architecture.
+4. Add persistence for review decisions, then wire confirm/edit/protect/delete/combine/answer controls to write those decisions.
+5. Re-render draft review from structured records plus applied decisions.
+6. Add structured-record persistence tables only after the decision contract is stable enough to justify the DB surface.
+7. Return to Design preview only after it can render the real shared traveler architecture.
 
 Latest checks run after the model-backed draft-review update:
 

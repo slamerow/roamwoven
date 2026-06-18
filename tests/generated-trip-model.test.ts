@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
+  applyReviewDecision,
+  applyReviewDecisions,
+} from "@/lib/generated-trip-decisions";
+import {
   formatStructuredDiscoverySummary,
   getStructuredReviewCount,
   getStructuredReviewSections,
@@ -229,5 +233,166 @@ test("structured review summary uses maker-facing counts", () => {
   assert.deepEqual(
     sections.map((section) => section.id),
     ["places", "stays", "transport", "cards", "private-details", "questions"]
+  );
+});
+
+test("review decisions update structured records", () => {
+  const draft = {
+    activities: [
+      {
+        date: null,
+        description: "Duplicate dinner note.",
+        title: "Dinner TBD",
+      },
+      {
+        date: "2026-09-02",
+        description: "Dinner reservation.",
+        title: "Dinner reservation",
+      },
+    ],
+    missingDetails: [
+      {
+        prompt: "Which day is Dinner TBD?",
+        reason: "The traveler app needs a date to place the card.",
+        relatedTitle: "Dinner TBD",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Paris",
+        country: "France",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    sensitiveDetails: [
+      {
+        detailType: "door_code",
+        reason: "Door codes should stay behind traveler mode.",
+        title: "Apartment access",
+      },
+    ],
+    stays: [
+      {
+        address: "Private apartment address",
+        checkIn: null,
+        checkOut: "2026-09-03",
+        name: "Paris apartment",
+      },
+    ],
+    transport: [],
+    tripOverview: {
+      title: "Paris review",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-3",
+  });
+  const stay = records.stays[0];
+  const detail = records.privateDetails.find(
+    (item) => item.detailType === "door_code"
+  );
+  const sourceItem = records.items.find((item) => item.title === "Dinner TBD");
+  const targetItem = records.items.find(
+    (item) => item.title === "Dinner reservation"
+  );
+  const question = records.reviewQuestions[0];
+
+  assert.ok(stay);
+  assert.ok(detail);
+  assert.ok(sourceItem);
+  assert.ok(targetItem);
+  assert.ok(question);
+
+  const updated = applyReviewDecisions(records, [
+    {
+      action: "edit",
+      changes: {
+        checkInDate: "2026-09-01",
+        reviewRequired: false,
+        status: "confirmed",
+      },
+      createdAt: "2026-06-18T12:00:00.000Z",
+      id: "decision-edit-stay",
+      subjectId: stay.id,
+      subjectType: "stay",
+      tripId: "trip-3",
+    },
+    {
+      action: "protect",
+      createdAt: "2026-06-18T12:01:00.000Z",
+      id: "decision-protect-detail",
+      subjectId: detail.id,
+      subjectType: "private_detail",
+      tripId: "trip-3",
+    },
+    {
+      action: "combine",
+      createdAt: "2026-06-18T12:02:00.000Z",
+      id: "decision-combine-dinner",
+      mergedChanges: {
+        description: "Dinner reservation with the duplicate note folded in.",
+      },
+      sourceIds: [sourceItem.id],
+      subjectId: targetItem.id,
+      subjectType: "item",
+      targetId: targetItem.id,
+      tripId: "trip-3",
+    },
+    {
+      action: "answer_question",
+      answerValue: "Use the dinner reservation on Sep 2.",
+      createdAt: "2026-06-18T12:03:00.000Z",
+      id: "decision-answer-question",
+      resolvedAction: "combine",
+      subjectId: question.id,
+      subjectType: "review_question",
+      tripId: "trip-3",
+    },
+  ]);
+
+  const updatedStay = updated.stays.find((item) => item.id === stay.id);
+  const updatedDetail = updated.privateDetails.find(
+    (item) => item.id === detail.id
+  );
+  const updatedSourceItem = updated.items.find(
+    (item) => item.id === sourceItem.id
+  );
+  const updatedTargetItem = updated.items.find(
+    (item) => item.id === targetItem.id
+  );
+  const updatedQuestion = updated.reviewQuestions.find(
+    (item) => item.id === question.id
+  );
+
+  assert.equal(updatedStay?.checkInDate, "2026-09-01");
+  assert.equal(updatedStay?.reviewRequired, false);
+  assert.equal(updatedStay?.status, "confirmed");
+  assert.equal(updatedDetail?.visibility, "traveler_password");
+  assert.equal(updatedDetail?.reviewRequired, false);
+  assert.equal(updatedSourceItem?.status, "ignored");
+  assert.equal(updatedSourceItem?.parentItemId, targetItem.id);
+  assert.equal(updatedTargetItem?.status, "confirmed");
+  assert.equal(
+    updatedTargetItem?.description,
+    "Dinner reservation with the duplicate note folded in."
+  );
+  assert.equal(updatedQuestion?.answerValue, "Use the dinner reservation on Sep 2.");
+  assert.equal(updatedQuestion?.status, "answered");
+
+  const deleted = applyReviewDecision(updated, {
+    action: "delete",
+    createdAt: "2026-06-18T12:04:00.000Z",
+    id: "decision-delete-dinner",
+    subjectId: targetItem.id,
+    subjectType: "item",
+    tripId: "trip-3",
+  });
+
+  assert.equal(
+    deleted.items.find((item) => item.id === targetItem.id)?.status,
+    "ignored"
   );
 });

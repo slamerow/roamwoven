@@ -360,6 +360,36 @@ Default sensitive `detail_type` values:
 - `personal_safety_note`
 - `wifi_password`
 
+### `trip_review_decisions`
+
+Review decisions are the maker's edits to structured records after parsing. They should be persisted as an audit/update layer, then applied to structured records before building the traveler snapshot.
+
+Core fields:
+
+- `id`
+- `trip_id`
+- `action`
+- `subject_type`
+- `subject_id`
+- `payload_json`
+- `note`
+- `created_at`
+- `created_by_user_id`
+
+Allowed `action` values:
+
+- `confirm`: marks the record as correct enough to build from and removes it from the review queue.
+- `edit`: changes record fields such as title, date, leg, category/type, description, stay details, or transport fields.
+- `protect`: changes field/detail visibility, usually to `traveler_password`.
+- `delete`: removes the record from the traveler app by marking it `ignored`; the UI can call this Delete or Ignore without making it a separate workflow.
+- `combine`: folds duplicate or related cards into a target record, preserving the target and marking source cards ignored/linked.
+- `answer_question`: records an answer to a generated question, usually resolving into edit, confirm, protect, delete, or combine behavior.
+
+Current code:
+
+- `lib/generated-trip-decisions.ts` defines the decision union and pure apply helpers.
+- The first test coverage applies edit, protect, combine, answer-question, and delete decisions to parser-generated records.
+
 ### `trip_photos`
 
 Photos are a separate media system, not sheet-only data.
@@ -562,8 +592,10 @@ Use:
 3. Change `/t/demo` to render `TravelerAppViewModel` instead of Asia-demo-specific rows. Done; `TravelerAppShell` now consumes `TravelerAppViewModel`.
 4. Build a draft parser adapter from current `trip_draft_snapshots.draft_json` into those records. First adapter exists in `lib/extraction/draft-to-structured-trip.ts`. Draft day generation now follows Wren's leave-date-exclusive rule, so a Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
 5. Add adapter fixture tests. Done in `tests/generated-trip-model.test.ts`; run with `npm test`.
-6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions. The next step is editable confirm/fix actions that persist.
-7. Return to Design preview only after it can render the real traveler view model.
+6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions.
+7. Define review decisions before wiring persistent forms. Done in `lib/generated-trip-decisions.ts`: confirm, edit, protect, delete/ignore, combine, and answer-question apply to structured records in a testable way.
+8. Next: add the persistence table/action layer for review decisions, then wire card controls to write decisions and re-render the applied structured records.
+9. Return to Design preview only after it can render the real traveler view model.
 
 ## Open Product Decisions
 

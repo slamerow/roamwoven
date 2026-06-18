@@ -2,6 +2,7 @@ export type TripRecordStatus =
   | "draft"
   | "confirmed"
   | "needs_review"
+  | "ignored"
   | "placeholder";
 
 export type TripSourceConfidence = "low" | "medium" | "high";
@@ -246,4 +247,3 @@ export type StructuredTripRecords = {
   trip: TripSummaryRecord;
   weatherHooks: TripWeatherHookRecord[];
 };
-
