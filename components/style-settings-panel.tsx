@@ -111,6 +111,8 @@ export function StyleSettingsPanel({
     ? theme.text
     : getReadableTextColor(palette.primary);
   const themeCopy = themePreviewCopy[themeDirection];
+  const isModern = themeDirection === "modern_futuristic";
+  const isRustic = themeDirection === "rustic_adventure";
 
   function updatePrimaryColor(value: string) {
     const nextPalette = derivePalette(value);
@@ -298,9 +300,21 @@ export function StyleSettingsPanel({
         </div>
 
         <div
-          className="rounded-[28px] border p-4"
+          className={
+            isModern
+              ? "rounded-[26px] border p-4"
+              : isRustic
+                ? "rounded-[18px] border p-4"
+                : "rounded-[34px] border p-4"
+          }
           style={{
             backgroundColor: theme.surface,
+            backgroundImage: isModern
+              ? `linear-gradient(90deg, ${palette.soft} 1px, transparent 1px), linear-gradient(180deg, ${palette.soft} 1px, transparent 1px)`
+              : isRustic
+                ? `linear-gradient(180deg, ${palette.soft}, ${theme.surface})`
+                : `radial-gradient(circle at 18% 10%, ${palette.soft}, transparent 34%), linear-gradient(180deg, #fffaf0, ${theme.surface})`,
+            backgroundSize: isModern ? "26px 26px" : undefined,
             borderColor: palette.secondary,
             boxShadow: theme.cardShadow,
             color: theme.text,
@@ -335,63 +349,170 @@ export function StyleSettingsPanel({
             </div>
           </div>
 
-          <div
-            className="mt-5 rounded-[24px] p-5"
-            style={{
-              background: heroBackground,
-              color: heroTextColor,
-            }}
-          >
-            <p
-              className="text-xs font-semibold uppercase tracking-[0.14em]"
-              style={{ color: isWhimsical ? palette.secondary : palette.accent }}
-            >
-              {theme.name}
-            </p>
-            <h2 className={`mt-3 text-4xl leading-tight ${theme.headingClass}`}>
-              {appName || "Untitled Trip"}
-            </h2>
-            <p className="mt-3 text-sm leading-6 opacity-80">
-              {themeCopy.detail}
-            </p>
-          </div>
-
-          <div className="mt-5 -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2">
-            {themeCopy.cards.map((label, index) => (
+          {isModern ? (
+            <div className="mt-5">
               <div
-                key={label}
-                className="min-h-40 w-[76%] shrink-0 rounded-[22px] border p-4"
+                className="rounded-[22px] border p-5"
                 style={{
-                  backgroundColor:
-                    index === 0
-                      ? palette.soft
-                      : index === 1
-                        ? theme.surface
-                        : palette.primary,
-                  borderColor: index === 2 ? palette.accent : palette.secondary,
-                  color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
+                  background: heroBackground,
+                  borderColor: palette.accent,
+                  color: heroTextColor,
+                }}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em]">
+                    {theme.name}
+                  </p>
+                  <span className="h-px flex-1 opacity-40" style={{ backgroundColor: heroTextColor }} />
+                  <p className="text-xs font-semibold">09:20</p>
+                </div>
+                <h2 className={`mt-5 text-4xl leading-tight ${theme.headingClass}`}>
+                  {appName || "Untitled Trip"}
+                </h2>
+                <p className="mt-3 max-w-sm text-sm leading-6 opacity-80">
+                  {themeCopy.detail}
+                </p>
+              </div>
+              <div className="mt-5 space-y-3">
+                {themeCopy.cards.map((label, index) => (
+                  <div
+                    className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-[18px] border bg-white/80 p-3 backdrop-blur"
+                    key={label}
+                    style={{ borderColor: index === 0 ? palette.primary : palette.soft }}
+                  >
+                    <span
+                      className="h-10 w-1.5 rounded-full"
+                      style={{ backgroundColor: index === 0 ? palette.primary : palette.accent }}
+                    />
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-55">
+                        {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">{label}</p>
+                    </div>
+                    <span
+                      className="rounded-full px-2 py-1 text-[10px] font-semibold"
+                      style={{
+                        backgroundColor: palette.soft,
+                        color: theme.text,
+                      }}
+                    >
+                      Open
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : isRustic ? (
+            <div className="mt-5">
+              <div
+                className="rounded-[14px] border-l-4 p-5"
+                style={{
+                  background: heroBackground,
+                  borderColor: palette.accent,
+                  color: heroTextColor,
+                }}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.14em]">
+                  {theme.name}
+                </p>
+                <h2 className={`mt-4 text-4xl leading-tight ${theme.headingClass}`}>
+                  {appName || "Untitled Trip"}
+                </h2>
+                <p className="mt-3 text-sm leading-6 opacity-80">
+                  {themeCopy.detail}
+                </p>
+              </div>
+              <div className="mt-5 space-y-3 border-l-2 pl-4" style={{ borderColor: palette.secondary }}>
+                {themeCopy.cards.map((label, index) => (
+                  <div
+                    className="relative rounded-[12px] border p-4"
+                    key={label}
+                    style={{
+                      backgroundColor: index === 2 ? palette.primary : "#fffaf0",
+                      borderColor: palette.secondary,
+                      color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
+                    }}
+                  >
+                    <span
+                      className="absolute -left-[23px] top-5 h-3 w-3 rounded-full ring-4"
+                      style={{
+                        backgroundColor: palette.accent,
+                        boxShadow: `0 0 0 4px ${theme.surface}`,
+                      }}
+                    />
+                    <p className="text-xs font-semibold uppercase">
+                      {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
+                    </p>
+                    <p className={`mt-5 text-xl ${theme.headingClass}`}>{label}</p>
+                    <p className="mt-2 text-xs leading-5 opacity-70">
+                      Notes, timing, and private details stay tucked into the card.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5">
+              <div
+                className="rounded-t-[54px] rounded-b-[26px] border p-6"
+                style={{
+                  background: heroBackground,
+                  borderColor: palette.accent,
+                  color: heroTextColor,
                 }}
               >
                 <p
-                  className="text-xs font-semibold uppercase"
-                  style={{
-                    color:
-                      index === 2
-                        ? getReadableTextColor(palette.primary)
-                        : index === 1
-                          ? palette.secondary
-                          : palette.primary,
-                  }}
+                  className="text-xs font-semibold uppercase tracking-[0.16em]"
+                  style={{ color: palette.secondary }}
                 >
-                  {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
+                  {theme.name}
                 </p>
-                <p className={`mt-8 text-xl ${theme.headingClass}`}>{label}</p>
-                <p className="mt-2 text-xs leading-5 opacity-70">
-                  Previewing the same card rhythm used in the traveler app.
+                <h2 className={`mt-5 text-4xl leading-tight ${theme.headingClass}`}>
+                  {appName || "Untitled Trip"}
+                </h2>
+                <p className="mt-3 text-sm leading-6 opacity-80">
+                  {themeCopy.detail}
                 </p>
               </div>
-            ))}
-          </div>
+              <div className="mt-5 grid gap-3">
+                {themeCopy.cards.map((label, index) => (
+                  <div
+                    className="rounded-[26px] border p-4"
+                    key={label}
+                    style={{
+                      backgroundColor:
+                        index === 0
+                          ? "#fffaf0"
+                          : index === 1
+                            ? palette.soft
+                            : palette.primary,
+                      borderColor: palette.accent,
+                      color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold"
+                        style={{
+                          backgroundColor: index === 2 ? palette.accent : palette.primary,
+                          color: getReadableTextColor(index === 2 ? palette.accent : palette.primary),
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] opacity-65">
+                          {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
+                        </p>
+                        <p className={`mt-1 text-lg ${theme.headingClass}`}>{label}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mt-5 grid grid-cols-4 gap-2">
             {[
