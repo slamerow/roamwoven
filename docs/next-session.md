@@ -100,7 +100,8 @@ Backend-ready pieces now exist:
   - The server POST route rejects non-allowlisted trips even if someone bypasses the disabled button.
   - The draft-review page checks trip-specific extraction eligibility before enabling `Build parsed draft`.
   - Use the paid Central Europe trip `e50f7e93-b2e9-4b8c-9097-92fce402d885` as the first allowlisted trip.
-  - Vercel did not show OpenAI env vars during the latest check, so add `OPENAI_API_KEY`, `OPENAI_EXTRACTION_MODEL`, caps, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885` before testing.
+  - Vercel now has `OPENAI_EXTRACTION_MODEL`, `OPENAI_EXTRACTION_MAX_INPUT_CHARS`, `OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS`, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885`.
+  - Vercel still does not have `OPENAI_API_KEY`. Do not add the key until the allowlist code is pushed and deployed.
 
 Live Supabase dev setup is partially complete:
 
@@ -212,7 +213,7 @@ Continue the generated-trip foundation before returning to Design page iteration
    - `app/t/[token]/page.tsx`
 3. Keep adapter fixture tests passing with `npm test`; coverage starts in `tests/generated-trip-model.test.ts`.
 4. Decide whether to turn on OpenAI extraction now. The backend write/publish path is validated, so extraction is now worth enabling once the OpenAI key/model/cost guardrails are confirmed.
-5. Add the OpenAI env vars in Vercel with `ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885`, redeploy, and test extraction on the real paid Central Europe upload.
+5. Push/deploy the allowlist code, add `OPENAI_API_KEY` in Vercel, redeploy if Vercel requires it, and test extraction on the real paid Central Europe upload.
 6. Decide whether to persist applied structured records before summary/publish, or keep decisions as the first durable edit layer a little longer.
 7. Return to Design preview only after it can render the real shared traveler architecture.
 
