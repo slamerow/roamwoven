@@ -8,6 +8,7 @@ import {
   TableProperties,
   WandSparkles
 } from "lucide-react";
+import { MakerProgress } from "@/components/maker-progress";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getPaidCheckoutTripId,
@@ -20,57 +21,6 @@ import {
 } from "@/lib/build-settings";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { listTripUploads } from "@/lib/uploads";
-
-function getStages(isPaid: boolean) {
-  return [
-    {
-      title: "Create trip",
-      description: "Name the app and add the first trip details.",
-      state: "complete",
-      icon: CheckCircle2
-    },
-    {
-      title: "Unlock the build",
-      description: "A one-time checkout starts the full app build.",
-      state: isPaid ? "complete" : "current",
-      icon: CreditCard
-    },
-    {
-      title: "Upload info",
-      description: "Drop in confirmations, notes, docs, and screenshots.",
-      state: isPaid ? "current" : "locked",
-      icon: FileUp
-    },
-    {
-      title: "Confirm details",
-      description: "Answer quick prompts in a guided review.",
-      state: isPaid ? "available" : "locked",
-      icon: TableProperties
-    },
-  {
-    title: "Review summary",
-    description: "Confirm the app shape before generating the traveler app.",
-    state: isPaid ? "available" : "locked",
-    icon: WandSparkles
-  },
-  {
-    title: "Publish app",
-    description: "Share the traveler app when the summary looks right.",
-    state: isPaid ? "available" : "locked",
-    icon: Share2
-  }
-  ];
-}
-
-function getCompletedStepCount(stages: ReturnType<typeof getStages>) {
-  const currentIndex = stages.findIndex((stage) => stage.state === "current");
-
-  if (currentIndex === -1) {
-    return stages.length;
-  }
-
-  return Math.max(0, currentIndex);
-}
 
 function getNextBuildStep({
   hasBuildSettings,
@@ -120,6 +70,36 @@ function getNextBuildStep({
     label: "Continue building",
     message: "Design choices are saved. Review the first structured draft.",
   };
+}
+
+function getProgressState({
+  hasBuildSettings,
+  hasStyleSettings,
+  isPaid,
+  uploadCount,
+}: {
+  hasBuildSettings: boolean;
+  hasStyleSettings: boolean;
+  isPaid: boolean;
+  uploadCount: number;
+}) {
+  if (!isPaid) {
+    return { completedSteps: 1, currentStep: 2 };
+  }
+
+  if (uploadCount === 0) {
+    return { completedSteps: 2, currentStep: 3 };
+  }
+
+  if (!hasBuildSettings) {
+    return { completedSteps: 3, currentStep: 4 };
+  }
+
+  if (!hasStyleSettings) {
+    return { completedSteps: 4, currentStep: 5 };
+  }
+
+  return { completedSteps: 5, currentStep: 6 };
 }
 
 const betaLinks = [
@@ -192,9 +172,12 @@ export default async function TripWorkspacePage({
     isPaid,
     uploadCount: uploads.length,
   });
-  const stages = getStages(isPaid);
-  const completedSteps = getCompletedStepCount(stages);
-  const progressPercent = Math.round((completedSteps / stages.length) * 100);
+  const progress = getProgressState({
+    hasBuildSettings,
+    hasStyleSettings,
+    isPaid,
+    uploadCount: uploads.length,
+  });
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -263,63 +246,13 @@ export default async function TripWorkspacePage({
           </section>
         ) : null}
 
-        <section className="mt-8">
-          <div className="mb-5">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
-                  Five steps until your app is live
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-ink">
-                  Build path
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-                  Each step turns the materials you already have into a polished
-                  traveler app you can share.
-                </p>
-              </div>
-              <p className="rounded-md border border-moss/20 bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
-                Step {completedSteps} of {stages.length} complete
-              </p>
-            </div>
-            <div className="mt-5 h-2 overflow-hidden rounded-full bg-ink/10">
-              <div
-                className="h-full rounded-full bg-moss"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-            {stages.map((stage) => {
-              const Icon = stage.icon;
-              return (
-                <div
-                  key={stage.title}
-                  className="rounded-md border border-ink/10 bg-white p-4"
-                >
-                  <Icon
-                    className={
-                      stage.state === "complete"
-                        ? "text-moss"
-                        : stage.state === "current"
-                          ? "text-clay"
-                          : stage.state === "available"
-                            ? "text-tide"
-                            : "text-ink/30"
-                    }
-                    size={22}
-                  />
-                  <p className="mt-4 text-sm font-semibold text-ink">
-                    {stage.title}
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-ink/60">
-                    {stage.description}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+        <MakerProgress
+          completedSteps={progress.completedSteps}
+          currentStep={progress.currentStep}
+          detail="Each step turns the materials you already have into a polished traveler app you can share."
+          isPaid={isPaid}
+          tripId={tripId}
+        />
 
         {isPaid ? (
           <section className="mt-8 rounded-md border border-moss/20 bg-moss/10 p-4">

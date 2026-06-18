@@ -1,3 +1,4 @@
+import { MakerProgress } from "@/components/maker-progress";
 import { StyleSettingsPanel } from "@/components/style-settings-panel";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -28,10 +29,18 @@ export default async function StylePage({
             Make it feel like your trip
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Keep customization simple for V1: app name, primary color, and a
-            theme direction.
+            Keep customization simple for V1, but preview it inside the same
+            Wren-style traveler app architecture the generated app will use.
           </p>
         </header>
+
+        <MakerProgress
+          completedSteps={settings.updatedAt ? 5 : 4}
+          currentStep={5}
+          detail="Color choices should show up immediately in previews and carry into draft review before the final traveler app is published."
+          isPaid={trip.isDemo || trip.paymentStatus === "paid"}
+          tripId={tripId}
+        />
 
         {scope === "saved" ? (
           <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">

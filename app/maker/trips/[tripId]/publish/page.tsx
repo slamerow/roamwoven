@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ExternalLink, RotateCcw, ShieldCheck, Smartphone } from "lucide-react";
+import { MakerProgress } from "@/components/maker-progress";
 import { CopyLinkButton, RefreshAppButton } from "@/components/publish-actions";
 
 const shareUrl = "https://roamwoven.com/t/demo";
@@ -26,6 +27,14 @@ export default async function PublishPage({
             create a private snapshot and share token.
           </p>
         </header>
+
+        <MakerProgress
+          completedSteps={6}
+          currentStep={6}
+          detail="The app is ready to share. Future late documents should be handled as small updates to the existing trip spine."
+          isPaid
+          tripId={tripId}
+        />
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
           <div className="rounded-md border border-ink/10 bg-white p-5">

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import { MakerProgress } from "@/components/maker-progress";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import { getLatestTripDraftSnapshot } from "@/lib/extraction/processing-runs";
 import { getMakerTrip } from "@/lib/trips";
@@ -95,6 +96,14 @@ export default async function TripSummaryPage({
             published. You should not need to inspect every activity one by one.
           </p>
         </header>
+
+        <MakerProgress
+          completedSteps={5}
+          currentStep={6}
+          detail="Confirm the trip spine and final app shape before publishing. Later documents should update this spine, not restart it."
+          isPaid={trip.isDemo || trip.paymentStatus === "paid"}
+          tripId={tripId}
+        />
 
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

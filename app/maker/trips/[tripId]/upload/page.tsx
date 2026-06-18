@@ -1,5 +1,6 @@
 import { FileImage, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { MakerProgress } from "@/components/maker-progress";
 import { UploadIntakePanel } from "@/components/upload-intake-panel";
 import { canEditTripMaterials, getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
@@ -32,6 +33,8 @@ const errorMessages: Record<string, string> = {
     "This trip has reached the beta upload storage limit.",
   "unsupported-file": "One file is not a supported beta file type.",
   "delete-failed": "That material could not be deleted. Try again.",
+  "duplicate-material":
+    "That material already appears to be attached to this trip.",
   "materials-locked":
     "Materials are locked after processing starts. Create a revision instead.",
   "upload-failed":
@@ -91,6 +94,18 @@ export default async function UploadPage({
               : "Upload unlocks after secure checkout so expensive processing stays gated."}
           </p>
         </header>
+
+        <MakerProgress
+          completedSteps={canUpload ? 2 : 1}
+          currentStep={3}
+          detail={
+            canEditMaterials
+              ? "Add and remove source materials freely before the first app build starts."
+              : "Materials from the first build are locked. Small later additions should go through a limited update lane."
+          }
+          isPaid={canUpload}
+          tripId={tripId}
+        />
 
         {!canUpload ? (
           <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
@@ -165,7 +180,7 @@ export default async function UploadPage({
                     Files and notes saved for this trip will stay here after refresh.
                     {canEditMaterials
                       ? " You can remove anything before generation starts."
-                      : " Materials lock once generation starts."}
+                      : " Materials from the first build lock once generation starts."}
                   </p>
                 </div>
                 {uploads.length > 0 ? (
@@ -238,6 +253,18 @@ export default async function UploadPage({
                   </div>
                 );
               })}
+            </section>
+
+            <section className="mt-6 rounded-md border border-tide/20 bg-tide/10 p-5">
+              <h2 className="text-xl font-semibold text-ink">
+                Later document updates
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
+                Before the first build, keep adding materials here. After the
+                app is generated, V1 should support a small update lane for
+                simple late docs like a plane ticket, hotel change, or tour
+                voucher, capped separately from a full rebuild.
+              </p>
             </section>
           </>
         )}

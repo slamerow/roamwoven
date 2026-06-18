@@ -84,66 +84,9 @@ export function ReviewFlowPanel({
   const canContinue =
     uploads.length > 0 && checkedCount === BUILD_CONFIRMATIONS.length;
   const settingsPayload = JSON.stringify({ enabledModules, confirmations: checked });
-  const percent = Math.round((3 / 8) * 100);
-  const steps = [
-    "Create trip",
-    "Pay",
-    "Upload",
-    "Confirm data",
-    "Design",
-    "Check data",
-    "Summary",
-    "Publish",
-  ];
 
   return (
     <>
-      <section className="sticky top-0 z-10 -mx-6 border-b border-ink/10 bg-paper/95 px-6 py-3 backdrop-blur md:-mx-10 md:px-10">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
-                Build path
-              </p>
-              <h2 className="text-base font-semibold text-ink">
-                Confirm data
-              </h2>
-            </div>
-            <p className="hidden text-sm text-ink/60 md:block">
-              {uploads.length} material{uploads.length === 1 ? "" : "s"} saved ·{" "}
-              {enabledCount} section{enabledCount === 1 ? "" : "s"} selected
-            </p>
-          </div>
-          <div className="mt-3 h-2 rounded-full bg-ink/10">
-            <div
-              className="h-2 rounded-full bg-moss"
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-4 gap-2 text-[11px] font-semibold text-ink/45 md:grid-cols-8">
-            {steps.map((step, index) => {
-              const complete = index < 3;
-              const current = index === 3;
-
-              return (
-                <span
-                  key={step}
-                  className={
-                    complete
-                      ? "text-moss"
-                      : current
-                        ? "text-clay"
-                        : "text-ink/35"
-                  }
-                >
-                  {step}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
       <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
         {saved ? (
           <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
@@ -163,6 +106,12 @@ export function ReviewFlowPanel({
             This sets the app scope before design. The actual structured draft
             comes after the design choices are saved.
           </p>
+          <Link
+            className="mt-4 inline-flex text-sm font-semibold text-moss"
+            href={`/maker/trips/${trip.id}/upload`}
+          >
+            Add more source material before build
+          </Link>
         </div>
       </section>
 

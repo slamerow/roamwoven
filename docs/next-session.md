@@ -32,6 +32,7 @@ Backend-ready pieces now exist:
 - The upload page now posts real multipart uploads, shows saved materials after refresh, and keeps upload processing gated behind payment.
 - Saved materials can be deleted before generation/processing starts, so bad test inputs can be removed and replaced. Material edits should lock once parsing/generation begins; future revisions should use a revision flow instead of mutating source inputs in place.
 - Source-material abuse caps are enforced in the app: 25 MB per file, 20 files per upload request, 100 saved materials per trip, 500 MB total source-material bytes per trip, and 250 KB pasted notes per upload.
+- Duplicate source-material uploads are now blocked before save using filename/size matching for files and exact pasted-note matching for notes. This is a lightweight V1 guardrail; a future production-grade version should add content hashes.
 - Without Supabase env vars, the maker flow falls back to the Wren's Adventure demo trip.
 - Real trip upload is gated behind payment status.
 - Stripe Checkout scaffolding exists with promotion-code support and env placeholders.
@@ -74,6 +75,12 @@ Backend-ready pieces now exist:
   - design settings saved -> draft review
   - parsed draft reviewed -> trip summary before publish
 - The Step 4 content-scope progress bar should stay fixed while the maker checks confirmations. Checkboxes can unlock the "Continue to design" action, but should not mark the top step track complete before the settings save succeeds.
+- Maker progress is now a shared six-step component shown across the workspace, upload, app setup, design, draft review, summary, and publish pages: Start trip -> Unlock build -> Add materials -> App setup -> Design -> Review & publish.
+- Later maker pages now provide direct navigation back to app setup and design, so Draft Review is not a one-way funnel.
+- The design page must preview the actual Wren-style traveler app architecture, not generic sample cards. The Wren-style shell is the source of truth for generated app structure.
+- The whimsical/fantasy preview had a contrast bug where light text could sit on a light hero background. Keep theme previews accessible regardless of primary/accent color choices.
+- Document-update rule: before the first build, the maker can add/delete source materials freely. After the trip spine exists, late documents should be treated as limited app updates that append/modify structured trip records, not a full rebuild. V1 can frame this as a small update lane, such as up to 3 simple late docs.
+- Do not rebuild a trip from scratch after the core/spine is built. Updates should patch the existing structured trip data and refresh the app snapshot. If source materials are not enough to build the V1 trip spine, do not produce a thin app; stop and ask for the missing basics such as dates, destinations, stays, transport, or anchor plans.
 
 Live Supabase dev setup is partially complete:
 

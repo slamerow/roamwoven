@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Check } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarDays,
+  Check,
+  Images,
+  Languages,
+  MapPin,
+  Search,
+  Sparkles,
+  Tags,
+} from "lucide-react";
 import {
   THEME_DIRECTIONS,
   derivePalette,
@@ -16,6 +26,17 @@ const paletteFields = [
   { key: "accent", label: "Accent" },
   { key: "soft", label: "Soft" },
 ] as const;
+
+function getReadableTextColor(backgroundColor: string) {
+  const hex = backgroundColor.replace("#", "");
+  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
+  const luminance =
+    0.2126 * red ** 2.2 + 0.7152 * green ** 2.2 + 0.0722 * blue ** 2.2;
+
+  return luminance > 0.52 ? "#201c16" : "#fffaf0";
+}
 
 export function StyleSettingsPanel({
   settings,
@@ -44,6 +65,7 @@ export function StyleSettingsPanel({
     settings.softColor ?? derivedPalette.soft
   );
   const theme = getThemeDirection(themeDirection);
+  const isWhimsical = themeDirection === "whimsical_fantasy";
   const palette = {
     primary: primaryColor,
     secondary: paletteOptions.secondary.includes(secondaryColor)
@@ -56,6 +78,14 @@ export function StyleSettingsPanel({
       ? softColor
       : derivedPalette.soft,
   };
+  const heroBackground = isWhimsical
+    ? `linear-gradient(135deg, ${palette.soft} 0%, #fffaf0 48%, ${palette.accent} 180%)`
+    : themeDirection === "modern_futuristic"
+      ? `linear-gradient(145deg, ${palette.primary}, ${theme.text} 62%, ${palette.accent})`
+      : `linear-gradient(135deg, ${palette.secondary}, ${theme.text})`;
+  const heroTextColor = isWhimsical
+    ? theme.text
+    : getReadableTextColor(palette.primary);
 
   function updatePrimaryColor(value: string) {
     const nextPalette = derivePalette(value);
@@ -202,76 +232,164 @@ export function StyleSettingsPanel({
         className="overflow-hidden rounded-md border border-ink/10 p-5"
         style={{ backgroundColor: theme.text, color: theme.surface }}
       >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.14em]"
+              style={{ color: palette.accent }}
+            >
+              Traveler app preview
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              Wren-style shell
+            </h2>
+          </div>
+          <div
+            className="rounded-full px-3 py-1 text-xs font-semibold"
+            style={{ backgroundColor: palette.soft, color: theme.text }}
+          >
+            Today
+          </div>
+        </div>
+
         <div
-          className="p-5"
+          className="rounded-[28px] border p-4"
           style={{
-            background:
-              themeDirection === "modern_futuristic"
-                ? `linear-gradient(145deg, ${palette.primary}, ${theme.text} 62%, ${palette.accent})`
-                : themeDirection === "whimsical_fantasy"
-                  ? `radial-gradient(circle at top left, ${palette.accent} 0, ${palette.soft} 32%, ${theme.surface} 70%)`
-                  : `linear-gradient(135deg, ${palette.secondary}, ${theme.text})`,
-            borderRadius: theme.cardRadius,
+            backgroundColor: theme.surface,
+            borderColor: palette.secondary,
             boxShadow: theme.cardShadow,
-            color: theme.surface,
+            color: theme.text,
             fontFamily: theme.fontFamily,
           }}
         >
-          <p
-            className="text-xs font-semibold uppercase tracking-[0.14em]"
-            style={{ color: palette.accent }}
-          >
-            {theme.name}
-          </p>
-          <h2 className={`mt-3 text-4xl leading-tight ${theme.headingClass}`}>
-            {appName || "Untitled Trip"}
-          </h2>
-          <p className="mt-3 text-sm leading-6 opacity-80">
-            A private trip app built from your confirmed materials.
-          </p>
-        </div>
-
-        <div className="mt-6 space-y-3" style={{ fontFamily: theme.fontFamily }}>
-          {["Today", "Stay", "Dinner"].map((label, index) => (
+          <div className="flex items-center justify-between gap-2">
             <div
-              key={label}
-              className="border p-4"
-              style={{
-                backgroundColor:
-                  index === 0
-                    ? palette.soft
-                    : index === 1
-                      ? theme.surface
-                      : palette.primary,
-                borderColor: index === 2 ? palette.accent : palette.secondary,
-                borderRadius: theme.cardRadius,
-                boxShadow: index === 0 ? theme.cardShadow : "none",
-                color: index === 2 ? theme.surface : theme.text,
-              }}
+              className="min-w-0 rounded-lg px-3 py-2"
+              style={{ backgroundColor: palette.soft }}
             >
-              <p
-                className="text-xs font-semibold uppercase"
+              <p className="text-[10px] font-bold uppercase leading-none opacity-65">
+                Traveler mode
+              </p>
+              <p className="mt-1 truncate text-sm font-bold">
+                Private details
+              </p>
+            </div>
+            <div className="flex gap-1">
+              {[Images, MapPin, Search, Languages].map((Icon, index) => (
+                <span
+                  className="flex h-9 w-9 items-center justify-center rounded-lg"
+                  key={index}
+                  style={{
+                    backgroundColor: index === 0 ? palette.primary : palette.soft,
+                    color: index === 0 ? getReadableTextColor(palette.primary) : theme.text,
+                  }}
+                >
+                  <Icon size={17} />
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="mt-5 rounded-[24px] p-5"
+            style={{
+              background: heroBackground,
+              color: heroTextColor,
+            }}
+          >
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.14em]"
+              style={{ color: isWhimsical ? palette.secondary : palette.accent }}
+            >
+              {theme.name}
+            </p>
+            <h2 className={`mt-3 text-4xl leading-tight ${theme.headingClass}`}>
+              {appName || "Untitled Trip"}
+            </h2>
+            <p className="mt-3 text-sm leading-6 opacity-80">
+              Today cards, trip tools, and private details in one traveler app.
+            </p>
+          </div>
+
+          <div className="mt-5 -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2">
+            {["Morning plan", "Check-in details", "Dinner reservation"].map((label, index) => (
+              <div
+                key={label}
+                className="min-h-40 w-[76%] shrink-0 rounded-[22px] border p-4"
                 style={{
-                  color:
-                    index === 2
-                      ? theme.surface
+                  backgroundColor:
+                    index === 0
+                      ? palette.soft
                       : index === 1
-                        ? palette.secondary
+                        ? theme.surface
                         : palette.primary,
+                  borderColor: index === 2 ? palette.accent : palette.secondary,
+                  color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
                 }}
               >
-                {label}
-              </p>
-              <p className={`mt-2 text-sm ${theme.headingClass}`}>
-                {index === 0
-                  ? "Morning plan"
-                  : index === 1
-                    ? "Check-in details"
-                    : "Reservation card"}
-              </p>
-              <p className="mt-1 text-xs leading-5 opacity-70">
-                The preview should feel like the app, not just a tinted form.
-              </p>
+                <p
+                  className="text-xs font-semibold uppercase"
+                  style={{
+                    color:
+                      index === 2
+                        ? getReadableTextColor(palette.primary)
+                        : index === 1
+                          ? palette.secondary
+                          : palette.primary,
+                  }}
+                >
+                  {index === 0 ? "Today" : index === 1 ? "Stay" : "Dinner"}
+                </p>
+                <p className={`mt-8 text-xl ${theme.headingClass}`}>{label}</p>
+                <p className="mt-2 text-xs leading-5 opacity-70">
+                  Designed like the generated Wren-style traveler card.
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 grid grid-cols-4 gap-2">
+            {[
+              ["Legs", MapPin],
+              ["Categories", Tags],
+              ["Today", Sparkles],
+              ["Calendar", CalendarDays],
+            ].map(([label, Icon], index) => {
+              const ActiveIcon = Icon as typeof Sparkles;
+
+              return (
+                <div
+                  className="flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-xs font-semibold"
+                  key={label as string}
+                  style={{
+                    backgroundColor: index === 2 ? palette.primary : palette.soft,
+                    color: index === 2 ? getReadableTextColor(palette.primary) : theme.text,
+                  }}
+                >
+                  <ActiveIcon size={18} />
+                  <span>{label as string}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3" style={{ fontFamily: theme.fontFamily }}>
+          {[
+            ["Palette", palette.primary],
+            ["Accent", palette.accent],
+            ["Soft", palette.soft],
+          ].map(([label, color]) => (
+            <div
+              key={label}
+              className="rounded-md border border-white/10 p-3"
+              style={{
+                backgroundColor: color,
+                color: getReadableTextColor(color),
+              }}
+            >
+              <p className="text-xs font-semibold uppercase">{label}</p>
+              <p className="mt-1 text-sm font-bold">{color}</p>
             </div>
           ))}
         </div>

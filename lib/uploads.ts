@@ -165,17 +165,21 @@ function getByteCount(value: string) {
 
 async function validateTripUploadCapacity({
   tripId,
+  files,
   incomingCount,
   incomingBytes,
+  notes,
 }: {
+  files: File[];
   tripId: string;
   incomingCount: number;
   incomingBytes: number;
+  notes: string;
 }) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("trip_uploads")
-    .select("file_size_bytes")
+    .select("original_filename,file_size_bytes,user_note")
     .eq("trip_id", tripId);
 
   if (error) {
@@ -187,6 +191,42 @@ async function validateTripUploadCapacity({
     (sum, upload) => sum + Number(upload.file_size_bytes ?? 0),
     0
   );
+  const existingFileKeys = new Set(
+    existingUploads
+      .filter((upload) => upload.user_note === null)
+      .map(
+        (upload) =>
+          `${String(upload.original_filename).trim().toLowerCase()}:${Number(
+            upload.file_size_bytes ?? 0
+          )}`
+      )
+  );
+  const incomingFileKeys = new Set<string>();
+
+  for (const file of files) {
+    const key = `${file.name.trim().toLowerCase()}:${file.size}`;
+
+    if (incomingFileKeys.has(key) || existingFileKeys.has(key)) {
+      throw new UploadValidationError(
+        "duplicate-material",
+        `${file.name} already appears to be attached to this trip.`
+      );
+    }
+
+    incomingFileKeys.add(key);
+  }
+
+  if (
+    notes &&
+    existingUploads.some(
+      (upload) => upload.user_note?.trim().toLowerCase() === notes.toLowerCase()
+    )
+  ) {
+    throw new UploadValidationError(
+      "duplicate-material",
+      "These pasted notes already appear to be attached to this trip."
+    );
+  }
 
   if (existingUploads.length + incomingCount > MAX_UPLOADS_PER_TRIP) {
     throw new UploadValidationError(
@@ -271,10 +311,12 @@ export async function uploadTripMaterials({
   }
 
   await validateTripUploadCapacity({
+    files,
     tripId,
     incomingCount: files.length + (trimmedNotes ? 1 : 0),
     incomingBytes:
       files.reduce((sum, file) => sum + file.size, 0) + noteBytes,
+    notes: trimmedNotes,
   });
 
   const supabase = await createSupabaseServerClient();

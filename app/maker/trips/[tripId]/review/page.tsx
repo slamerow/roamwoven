@@ -1,3 +1,4 @@
+import { MakerProgress } from "@/components/maker-progress";
 import { ReviewFlowPanel } from "@/components/review-flow-panel";
 import { getTripBuildSettings } from "@/lib/build-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -32,6 +33,14 @@ export default async function ReviewPage({
             traveler app before clean trip data is generated.
           </p>
         </header>
+
+        <MakerProgress
+          completedSteps={uploads.length > 0 ? 3 : 2}
+          currentStep={4}
+          detail="Choose the traveler-app sections before design. You can return here later from draft review if the app structure needs to change."
+          isPaid={canReview}
+          tripId={tripId}
+        />
 
         <ReviewFlowPanel
           trip={trip}
