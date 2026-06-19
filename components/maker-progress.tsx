@@ -57,12 +57,14 @@ const MAKER_STEPS = [
 export const MAKER_STEP_COUNT = MAKER_STEPS.length;
 
 export function MakerProgress({
+  canAccessMaterials = false,
   completedSteps,
   currentStep,
   detail,
   isPaid,
   tripId,
 }: {
+  canAccessMaterials?: boolean;
   completedSteps: number;
   currentStep: number;
   detail?: string;
@@ -123,7 +125,8 @@ export function MakerProgress({
           const stepNumber = index + 1;
           const complete = stepNumber <= boundedCompletedSteps;
           const current = stepNumber === currentStep;
-          const available = isPaid || stepNumber === 1;
+          const available =
+            isPaid || stepNumber === 1 || (canAccessMaterials && stepNumber === 2);
           const Icon = step.icon;
           const content = (
             <>

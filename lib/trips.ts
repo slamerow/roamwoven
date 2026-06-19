@@ -348,7 +348,6 @@ export function canEditTripMaterials(trip: Pick<MakerTrip, "isDemo" | "paymentSt
 
   return (
     !trip.isDemo &&
-    trip.paymentStatus === "paid" &&
     !lockedProcessingStates.has(trip.processingStatus)
   );
 }

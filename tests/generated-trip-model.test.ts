@@ -28,6 +28,11 @@ import {
   getAsiaDemoStructuredTripRecords,
   getAsiaDemoTravelerAppViewModel,
 } from "@/lib/traveler-view-model";
+import { canEditTripMaterials } from "@/lib/trips";
+import {
+  getUnpaidStarterMaterialCleanupCutoff,
+  UNPAID_STARTER_MATERIAL_RETENTION_DAYS,
+} from "@/lib/uploads";
 
 function test(name: string, fn: () => void) {
   try {
@@ -68,6 +73,43 @@ test("Asia seed compiles into structured records and traveler view model", () =>
   assert.equal(
     viewModel.privacy.privateDetailCount,
     records.privateDetails.length
+  );
+});
+
+test("starter materials can be edited before checkout until processing starts", () => {
+  assert.equal(
+    canEditTripMaterials({
+      isDemo: false,
+      paymentStatus: "unpaid",
+      processingStatus: "draft",
+    }),
+    true
+  );
+  assert.equal(
+    canEditTripMaterials({
+      isDemo: false,
+      paymentStatus: "paid",
+      processingStatus: "parsed",
+    }),
+    false
+  );
+  assert.equal(
+    canEditTripMaterials({
+      isDemo: true,
+      paymentStatus: "demo",
+      processingStatus: "demo",
+    }),
+    false
+  );
+});
+
+test("unpaid starter material cleanup uses the beta retention window", () => {
+  assert.equal(UNPAID_STARTER_MATERIAL_RETENTION_DAYS, 14);
+  assert.equal(
+    getUnpaidStarterMaterialCleanupCutoff({
+      now: new Date("2026-06-19T12:00:00.000Z"),
+    }),
+    "2026-06-05T12:00:00.000Z"
   );
 });
 

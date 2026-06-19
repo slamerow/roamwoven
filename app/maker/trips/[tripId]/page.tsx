@@ -106,11 +106,12 @@ export default async function TripWorkspacePage({
     error?: string;
     making?: string;
     renamed?: string;
+    saved?: string;
     session_id?: string;
   }>;
 }) {
   const { tripId } = await params;
-  const { checkout, error, making, renamed, session_id: sessionId } =
+  const { checkout, error, making, renamed, saved, session_id: sessionId } =
     await searchParams;
   let checkoutStatus: "verified" | "pending" | "cancelled" | null = null;
 
@@ -160,13 +161,13 @@ export default async function TripWorkspacePage({
   const trip = await getMakerTrip(tripId);
   const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
-  const [uploads, buildSettings, styleSettings] = isPaid
+  const uploads = trip.isDemo ? [] : await listTripUploads(tripId);
+  const [buildSettings, styleSettings] = isPaid
     ? await Promise.all([
-        listTripUploads(tripId),
         getTripBuildSettings(tripId),
         getTripStyleSettings({ fallbackAppName: trip.name, tripId }),
       ])
-    : [[], null, null];
+    : [null, null];
   const hasBuildSettings =
     Boolean(buildSettings?.updatedAt) &&
     BUILD_CONFIRMATIONS.every(
@@ -205,6 +206,11 @@ export default async function TripWorkspacePage({
         {renamed ? (
           <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
             Trip name updated.
+          </p>
+        ) : null}
+        {saved ? (
+          <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+            Saved {saved} starter material{saved === "1" ? "" : "s"}.
           </p>
         ) : null}
         {error === "rename-failed" ? (
@@ -263,6 +269,7 @@ export default async function TripWorkspacePage({
         ) : null}
 
         <MakerProgress
+          canAccessMaterials={uploads.length > 0}
           completedSteps={progress.completedSteps}
           currentStep={progress.currentStep}
           detail="Each step turns the materials you already have into a polished traveler app you can share."
@@ -297,8 +304,18 @@ export default async function TripWorkspacePage({
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
               {trip.isDemo
                 ? "This seeded trip can continue straight to upload while the product is still using mocked beta state."
-                : "Complete checkout once, then add the trip materials Roamwoven will turn into a private traveler app."}
+                : uploads.length > 0
+                  ? `${uploads.length} starter material${uploads.length === 1 ? " is" : "s are"} saved. Complete checkout once, then Roamwoven can process the first draft.`
+                  : "Complete checkout once, then add the trip materials Roamwoven will turn into a private traveler app."}
             </p>
+            {uploads.length > 0 ? (
+              <Link
+                href={`/maker/trips/${tripId}/upload`}
+                className="mt-4 inline-flex text-sm font-semibold text-moss"
+              >
+                Review saved materials
+              </Link>
+            ) : null}
             {checkout === "setup-required" ? (
               <p className="mt-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
                 Stripe Checkout is not configured yet. Add Stripe test keys and

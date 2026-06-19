@@ -1,9 +1,11 @@
 import { createHash } from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getSupabaseConfig } from "@/lib/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const TRIP_MATERIALS_BUCKET = "trip-materials";
+export const UNPAID_STARTER_MATERIAL_RETENTION_DAYS = 14;
 const MAX_FILES_PER_UPLOAD = 20;
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOADS_PER_TRIP = 100;
@@ -78,6 +80,12 @@ type TripUploadRow = {
   user_note: string | null;
   processing_status: string | null;
   created_at: string | null;
+};
+
+type AbandonedUploadCleanupRow = {
+  id: string;
+  storage_path: string | null;
+  trip_id: string;
 };
 
 export type UploadTripMaterialsInput = {
@@ -555,4 +563,101 @@ export async function deleteTripUpload({
       throw new Error(`Unable to delete stored file: ${storageError.message}`);
     }
   }
+}
+
+export function getUnpaidStarterMaterialCleanupCutoff({
+  now = new Date(),
+  retentionDays = UNPAID_STARTER_MATERIAL_RETENTION_DAYS,
+}: {
+  now?: Date;
+  retentionDays?: number;
+} = {}) {
+  const boundedRetentionDays = Math.max(1, Math.floor(retentionDays));
+  return new Date(
+    now.getTime() - boundedRetentionDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+}
+
+export async function cleanupAbandonedUnpaidStarterMaterials({
+  dryRun = true,
+  limit = 200,
+  retentionDays = UNPAID_STARTER_MATERIAL_RETENTION_DAYS,
+}: {
+  dryRun?: boolean;
+  limit?: number;
+  retentionDays?: number;
+} = {}) {
+  const supabase = createSupabaseAdminClient();
+  const cutoff = getUnpaidStarterMaterialCleanupCutoff({ retentionDays });
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 1000));
+  const { data, error } = await supabase
+    .from("trip_uploads")
+    .select(
+      [
+        "id",
+        "trip_id",
+        "storage_path",
+        "trips!inner(id,payment_status,processing_status,status,created_at)",
+      ].join(",")
+    )
+    .eq("trips.payment_status", "unpaid")
+    .eq("trips.processing_status", "not_started")
+    .neq("trips.status", "deleted")
+    .lt("created_at", cutoff)
+    .limit(boundedLimit);
+
+  if (error) {
+    throw new Error(
+      `Unable to find abandoned unpaid starter materials: ${error.message}`
+    );
+  }
+
+  const rows = (data ?? []) as unknown as AbandonedUploadCleanupRow[];
+  const storagePaths = rows
+    .map((row) => row.storage_path)
+    .filter((path): path is string => Boolean(path));
+  const uploadIds = rows.map((row) => row.id);
+
+  if (dryRun || rows.length === 0) {
+    return {
+      cutoff,
+      deletedFileCount: 0,
+      deletedUploadCount: 0,
+      dryRun,
+      foundFileCount: storagePaths.length,
+      foundUploadCount: rows.length,
+    };
+  }
+
+  if (storagePaths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from(TRIP_MATERIALS_BUCKET)
+      .remove(storagePaths);
+
+    if (storageError) {
+      throw new Error(
+        `Unable to delete abandoned material files: ${storageError.message}`
+      );
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("trip_uploads")
+    .delete()
+    .in("id", uploadIds);
+
+  if (deleteError) {
+    throw new Error(
+      `Unable to delete abandoned material rows: ${deleteError.message}`
+    );
+  }
+
+  return {
+    cutoff,
+    deletedFileCount: storagePaths.length,
+    deletedUploadCount: uploadIds.length,
+    dryRun,
+    foundFileCount: storagePaths.length,
+    foundUploadCount: rows.length,
+  };
 }

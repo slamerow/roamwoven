@@ -86,6 +86,7 @@ export default async function UploadPage({
         </header>
 
         <MakerProgress
+          canAccessMaterials={uploads.length > 0}
           completedSteps={uploads.length > 0 ? 2 : 1}
           currentStep={2}
           detail={
