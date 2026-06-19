@@ -3,10 +3,7 @@ import { DeleteTripButton } from "@/components/delete-trip-button";
 import { MakerProgress } from "@/components/maker-progress";
 import { TripNameEditor } from "@/components/trip-name-editor";
 import { getCurrentUser } from "@/lib/auth";
-import {
-  getPaidCheckoutTripId,
-  getStripeSetupState,
-} from "@/lib/billing/stripe";
+import { getPaidCheckoutTripId } from "@/lib/billing/stripe";
 import { recordCheckoutPaymentAndMarkPaid } from "@/lib/billing/payment-events";
 import { getMakerTrip } from "@/lib/trips";
 import {
@@ -159,7 +156,6 @@ export default async function TripWorkspacePage({
   }
 
   const trip = await getMakerTrip(tripId);
-  const stripeSetup = getStripeSetupState();
   const isPaid = trip.paymentStatus === "paid" || Boolean(trip.isDemo);
   const uploads = trip.isDemo ? [] : await listTripUploads(tripId);
   const [buildSettings, styleSettings] = isPaid
@@ -332,22 +328,6 @@ export default async function TripWorkspacePage({
                 </button>
               </form>
             </div>
-            {!trip.isDemo ? (
-              <div className="mt-5 grid gap-2 text-xs text-ink/50 md:grid-cols-3">
-                <p>
-                  Stripe key: {stripeSetup.hasSecretKey ? "set" : "missing"}
-                </p>
-                <p>
-                  Price ID: {stripeSetup.hasTripPriceId ? "set" : "missing"}
-                </p>
-                <p>
-                  Webhook secret:{" "}
-                  {stripeSetup.hasWebhookSecret
-                    ? "set"
-                    : "needed before launch"}
-                </p>
-              </div>
-            ) : null}
           </section>
         )}
 

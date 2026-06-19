@@ -232,6 +232,171 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(viewModel.cards.length, 2);
 });
 
+test("explicit stay nights infer checkout without review", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: null,
+          checkIn: null,
+          checkOut: null,
+          firstNightDate: "2019-01-18",
+          name: "Wombats City Hostel Vienna - The Lounge",
+          nights: 3,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        confidence: "medium",
+        dateRange: "Jan 18-21, 2019",
+        destinationSummary: "Vienna",
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-stay-nights",
+  });
+  const stay = records.stays[0];
+
+  assert.equal(stay?.checkInDate, "2019-01-18");
+  assert.equal(stay?.checkOutDate, "2019-01-21");
+  assert.equal(stay?.reviewRequired, false);
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
+test("explicit stay nights infer check-in from checkout", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "Wombats City Hostel Vienna - The Lounge ... 3 nights",
+          guessedValue: "3 nights",
+          prompt: "Is the Vienna hostel stay definitely 3 nights, ending on January 21?",
+          reason: "The source explicitly says 3 nights.",
+          relatedTitle: "Wombats City Hostel Vienna - The Lounge",
+          subjectType: "stay",
+          targetField: "item/date",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: null,
+          checkIn: null,
+          checkInTime: null,
+          checkOut: "2019-01-21",
+          checkOutTime: null,
+          firstNightDate: null,
+          name: "Wombats City Hostel Vienna - The Lounge",
+          nights: 3,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        confidence: "medium",
+        dateRange: "Jan 18-21, 2019",
+        destinationSummary: "Vienna",
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-stay-checkin",
+  });
+  const stay = records.stays[0];
+  const notes = getStructuredReviewSections(records).find(
+    (section) => section.id === "notes"
+  );
+
+  assert.equal(stay?.checkInDate, "2019-01-18");
+  assert.equal(stay?.checkOutDate, "2019-01-21");
+  assert.equal(stay?.reviewRequired, false);
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(notes?.count, 1);
+});
+
+test("strong lodging title guesses become stay names instead of questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "The Yellow: Check in: 2:30 PM #743-410652363",
+          guessedValue: "The Yellow Hostel",
+          prompt: "Is this the correct lodging title for the Rome stay on January 13?",
+          reason: "The source has check-in instructions and address.",
+          relatedTitle: "Rome stay",
+          subjectType: "stay",
+          targetField: "item/title",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: null,
+          checkIn: "2019-01-13",
+          checkInTime: "14:30",
+          checkOut: "2019-01-14",
+          checkOutTime: null,
+          firstNightDate: "2019-01-13",
+          name: "Rome stay",
+          nights: 1,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        confidence: "medium",
+        dateRange: "Jan 13-14, 2019",
+        destinationSummary: "Rome",
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-yellow",
+  });
+  const stay = records.stays[0];
+
+  assert.equal(stay?.name, "The Yellow Hostel");
+  assert.equal(stay?.checkInTime, "14:30");
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+});
+
 test("structured review summary uses maker-facing counts", () => {
   const draft = {
     activities: [

@@ -110,7 +110,8 @@ export function ExtractionSubmitButton({
           </p>
           <p className="mt-1 text-xs leading-5 text-ink/50">
             This can take up to 5 minutes. Keep this tab open; take a quick
-            hydration break and Roamwoven should be ready when you're back.
+            hydration break, do some stretches, tell someone you love them, and
+            Roamwoven should be ready when you're back.
           </p>
         </div>
       ) : null}

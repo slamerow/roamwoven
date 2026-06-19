@@ -939,12 +939,12 @@ export function TravelerAppShell({
 
           <section className="mt-5 rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
             <p className="text-sm font-semibold">
-              {formatCount(sensitiveCount, "private detail")} protected
+              Trip details tucked away
             </p>
             <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
               {unlocked
-                ? "Traveler mode reveals exact lodging, access notes, booking controls, and private contact details."
-                : "Follower mode keeps exact lodging, access notes, booking controls, and private contact details locked behind the trip password."}
+                ? "Traveler mode shows lodging details, access notes, and booking references when you need them."
+                : `${formatCount(sensitiveCount, "detail")} can stay behind the trip password until traveler mode is unlocked.`}
             </p>
           </section>
         </section>

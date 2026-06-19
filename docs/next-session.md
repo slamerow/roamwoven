@@ -350,6 +350,8 @@ Extraction inference note:
 
 - Avoid dumb questions, but do not hallucinate. The parser may infer stay checkout dates only from explicit source evidence such as a visible first night/check-in date plus a stated nights count. Do not infer lodging dates from nearby itinerary context alone; leave uncertain fields null and ask only when the ambiguity materially affects the traveler app.
 - Review questions should be rare. High-confidence confirmations, trip-level start/end calls, and privacy-default calls should move into a non-action `Calls we made` section instead of the decision queue. Clearly sensitive details should default to privacy handling instead of asking yes/no privacy questions.
+- Stay-date extraction must understand explicit first-night plus nights-count language. Example: if source text says Friday sleep at Wombats and 3 nights, this should produce check-in Friday and checkout Monday, not a missing-date review item. The OpenAI stay schema now captures `firstNightDate` and `nights`; the structured adapter computes checkout from those fields when `checkOut` is absent.
+- Central Europe PDF QA found two more lodging calibration rules: if a stay has `checkOut` plus explicit `nights`, compute check-in by subtracting nights; if a lodging-title question has a strong guessed value such as `The Yellow Hostel`, apply it as the stay name and move the question to `Calls we made` instead of `Needs review`. The stay schema now includes check-in/check-out times so `Check in: 2:30 PM` has a real field.
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 

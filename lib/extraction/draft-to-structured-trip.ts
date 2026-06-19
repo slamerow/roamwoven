@@ -78,6 +78,21 @@ function getString(value: DraftObject | null, key: string) {
   return typeof child === "string" && child.trim() ? child.trim() : null;
 }
 
+function getNumber(value: DraftObject | null, key: string) {
+  const child = value?.[key];
+
+  if (typeof child === "number" && Number.isFinite(child)) {
+    return child;
+  }
+
+  if (typeof child === "string" && child.trim()) {
+    const parsed = Number(child);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
 function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
 }
@@ -237,6 +252,78 @@ function addDays(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function subtractDays(value: string, days: number) {
+  return addDays(value, -days);
+}
+
+function normalizeText(value: string | null) {
+  return value
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim() ?? "";
+}
+
+function isGenericStayName(value: string) {
+  const normalized = normalizeText(value);
+  return (
+    /^stay \d+$/.test(normalized) ||
+    normalized.includes("rome stay") ||
+    normalized.includes("vienna stay") ||
+    normalized.includes("budapest stay") ||
+    normalized.includes("hostel stay") ||
+    normalized.includes("lodging")
+  );
+}
+
+function getStayNameGuess({
+  draft,
+  fallbackName,
+}: {
+  draft: unknown;
+  fallbackName: string;
+}) {
+  const normalizedFallback = normalizeText(fallbackName);
+  const candidates = getArray(draft, "missingDetails")
+    .map((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as DraftObject)
+        : null
+    )
+    .filter((item): item is DraftObject => Boolean(item))
+    .filter((item) => {
+      const subjectType = getString(item, "subjectType");
+      const targetField = normalizeText(getString(item, "targetField"));
+      const guessedValue = getString(item, "guessedValue");
+
+      return (
+        subjectType === "stay" &&
+        Boolean(guessedValue) &&
+        (targetField.includes("title") || targetField.includes("name"))
+      );
+    });
+
+  const matchingCandidate = candidates.find((item) => {
+    const relatedTitle = normalizeText(getString(item, "relatedTitle"));
+    const prompt = normalizeText(getString(item, "prompt"));
+    const reason = normalizeText(getString(item, "reason"));
+
+    return (
+      Boolean(normalizedFallback) &&
+      (relatedTitle.includes(normalizedFallback) ||
+        normalizedFallback.includes(relatedTitle) ||
+        prompt.includes(normalizedFallback) ||
+        reason.includes(normalizedFallback))
+    );
+  });
+
+  return (
+    getString(matchingCandidate ?? null, "guessedValue") ??
+    (isGenericStayName(fallbackName) && candidates.length === 1
+      ? getString(candidates[0], "guessedValue")
+      : null)
+  );
+}
+
 function datesBetweenExclusiveEnd(startDate: string | null, endDate: string | null) {
   if (!isIsoDate(startDate)) {
     return [];
@@ -352,8 +439,18 @@ function createStayRecords({
     const stay = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const name = getString(stay, "name") ?? `Stay ${index + 1}`;
-    const checkIn = getString(stay, "checkIn");
+    const fallbackName = getString(stay, "name") ?? `Stay ${index + 1}`;
+    const name =
+      getStayNameGuess({ draft, fallbackName }) ?? fallbackName;
+    const nights = getNumber(stay, "nights");
+    const rawCheckOut = getString(stay, "checkOut");
+    const checkIn =
+      getString(stay, "checkIn") ??
+      getString(stay, "firstNightDate") ??
+      (rawCheckOut && nights && nights > 0 ? subtractDays(rawCheckOut, nights) : null);
+    const checkOut =
+      rawCheckOut ??
+      (checkIn && nights && nights > 0 ? addDays(checkIn, nights) : null);
     const leg = findLegForDate(legs, checkIn);
 
     return {
@@ -364,9 +461,9 @@ function createStayRecords({
         : "public",
       bookingUrl: null,
       checkInDate: checkIn,
-      checkInTime: null,
-      checkOutDate: getString(stay, "checkOut"),
-      checkOutTime: null,
+      checkInTime: getString(stay, "checkInTime"),
+      checkOutDate: checkOut,
+      checkOutTime: getString(stay, "checkOutTime"),
       confirmationLabel: null,
       confirmationVisibility: "traveler_password",
       id: `${tripId}-stay-${slugify(name)}-${index + 1}`,
@@ -700,6 +797,16 @@ function createReviewQuestions({
     }
 
     if (subjectType === "trip" && guessedValue) {
+      return true;
+    }
+
+    if (
+      subjectType === "stay" &&
+      guessedValue &&
+      (normalizedTarget.includes("title") ||
+        normalizedTarget.includes("name") ||
+        normalizedTarget.includes("date"))
+    ) {
       return true;
     }
 
