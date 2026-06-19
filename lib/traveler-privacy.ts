@@ -86,10 +86,10 @@ const privateResidencePatterns = [
   /\bhome\b/i,
   /\bairbnb\b/i,
   /\brental\b/i,
+  /\bapartment\b/i,
+  /\bflat\b/i,
+  /\bresidence\b/i,
 ];
-
-const streetAddressPattern =
-  /\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|way|ct|court|pl|place)\b/i;
 
 export function classifySensitiveText(
   value: string | null | undefined
@@ -132,12 +132,12 @@ export function classifyAddressSensitivity({
     pattern.test(combined)
   );
 
-  if (isPrivateResidence || streetAddressPattern.test(addressText)) {
+  if (isPrivateResidence) {
     return {
       kind: "private_residence",
-      label: isPrivateResidence ? "Private lodging detail" : "Exact address",
+      label: "Private lodging detail",
       reason:
-        "Exact lodging and private-residence addresses should stay behind the trip password.",
+        "Exact private lodging and residence addresses should stay behind the trip password.",
     };
   }
 

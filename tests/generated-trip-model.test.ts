@@ -23,6 +23,7 @@ import {
   hashTravelerPassword,
   verifyTravelerPassword,
 } from "@/lib/traveler-access";
+import { classifyAddressSensitivity } from "@/lib/traveler-privacy";
 import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
@@ -395,6 +396,92 @@ test("strong lodging title guesses become stay names instead of questions", () =
   assert.equal(stay?.checkInTime, "14:30");
   assert.equal(getStructuredReviewCount(records), 0);
   assert.equal(records.reviewQuestions[0]?.status, "noted");
+});
+
+test("medium-confidence core date guesses stay questions without explicit evidence", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          date: "2019-01-13",
+          itemType: "activity",
+          title: "Rome walk after bag drop",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "Surrounding itinerary suggests this framing.",
+          guessedValue: "2019-01-13",
+          prompt: "Is the Rome walk really on January 13?",
+          reason: "The source context implies the date but does not state it directly.",
+          relatedTitle: "Rome walk after bag drop",
+          subjectType: "item",
+          targetField: "date",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Rome",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-contextual-date",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
+test("commercial activity addresses do not become private details", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          address: "10 Via Roma",
+          date: "2019-01-13",
+          itemType: "activity",
+          title: "Watches in Rome",
+        },
+      ],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [
+        {
+          detailType: "address",
+          reason: "The source includes a watch shop address.",
+          title: "Watches in Rome address",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Rome",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-commercial-address",
+  });
+
+  assert.equal(records.privateDetails.length, 0);
+  assert.equal(
+    classifyAddressSensitivity({
+      address: "10 Via Roma",
+      context: "Watches in Rome shop",
+    }),
+    null
+  );
+  assert.equal(
+    classifyAddressSensitivity({
+      address: "10 Via Roma",
+      context: "Airbnb apartment",
+    })?.kind,
+    "private_residence"
+  );
 });
 
 test("structured review summary uses maker-facing counts", () => {

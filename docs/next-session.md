@@ -123,6 +123,12 @@ Backend-ready pieces now exist:
   - Extraction progress should steadily advance and rotate through meaningful checks instead of resetting through 1-5 repeatedly; copy should underpromise that the build can take up to 2-3 minutes.
   - Review dates should use friendlier compact display such as `Jan. 10-14` instead of raw ISO dates in summary/dropdown contexts.
   - Traveler shell still needs Wren-parity polish later: category emojis, leg grouping/color by country/region, blocked calendar areas, homepage lower-half spacing, and copy.
+- Central Europe extraction QA improved enough that lodging dates were correct on the first encouraging pass. Current review calibration:
+  - `Calls we made` should be non-blocking and lightweight, with evidence hidden behind a dropdown and an edit escape hatch when the call maps to a structured record.
+  - A roughly week-long trip should ideally produce 5-7 meaningful questions; fewer than 10 is the normal target, and 10-15 is acceptable for messier inputs. Accuracy is still more important than minimizing questions.
+  - Reasonable calls like "no hotel night 1 because you're on an overnight flight" belong in `Calls we made`, not Questions.
+  - Medium-confidence contextual guesses that would move stays, transport, or dated cards should remain Questions unless the source evidence is explicit.
+  - Commercial/public venue addresses such as shops, restaurants, museums, or activity locations should not be treated as private details just because they are exact street addresses. Private homes, rentals/Airbnb, apartments, access codes, booking controls, and personal notes remain protected.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
 - CTO durability pass started before new product work:
   - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.

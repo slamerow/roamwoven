@@ -97,6 +97,85 @@ function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
 }
 
+function hasExplicitSourceEvidence(...values: Array<string | null>) {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+
+  return (
+    /\b(source|document|confirmation|reservation|itinerary|pdf)\s+(says|states|shows|lists|includes|explicitly)\b/.test(text) ||
+    /\b(says|states|shows|lists|includes|explicitly)\b/.test(text) ||
+    /\b\d+\s+night(s)?\b/.test(text) ||
+    /\bcheck[-\s]?in\b/.test(text) ||
+    /\bcheck[-\s]?out\b/.test(text)
+  );
+}
+
+function isCorePlanningTarget({
+  subjectType,
+  targetField,
+}: {
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  const normalizedTarget = targetField?.toLowerCase() ?? "";
+
+  if (subjectType === "stay") {
+    return (
+      normalizedTarget.includes("date") ||
+      normalizedTarget.includes("checkin") ||
+      normalizedTarget.includes("check-in") ||
+      normalizedTarget.includes("checkout") ||
+      normalizedTarget.includes("check-out")
+    );
+  }
+
+  if (subjectType === "transport") {
+    return (
+      normalizedTarget.includes("date") ||
+      normalizedTarget.includes("time") ||
+      normalizedTarget.includes("departure") ||
+      normalizedTarget.includes("arrival")
+    );
+  }
+
+  if (subjectType === "item") {
+    return normalizedTarget.includes("date") || normalizedTarget.includes("time");
+  }
+
+  if (subjectType === "leg") {
+    return normalizedTarget.includes("date") || normalizedTarget.includes("city");
+  }
+
+  return false;
+}
+
+function isPublicVenueAddressDetail({
+  detailType,
+  title,
+}: {
+  detailType: string;
+  title: string;
+}) {
+  const normalizedType = detailType.toLowerCase();
+
+  if (
+    !normalizedType.includes("address") &&
+    !normalizedType.includes("location")
+  ) {
+    return false;
+  }
+
+  const normalizedTitle = title.toLowerCase();
+  const publicVenuePattern =
+    /\b(bar|bistro|cafe|café|church|gallery|landmark|market|museum|restaurant|shop|shopping|station|store|venue|watch|watches)\b/;
+  const privatePlacePattern =
+    /\b(access|airbnb|apartment|door|flat|gate|home|host|hotel|hostel|lodging|lock|rental|residence|room|stay)\b/;
+
+  return (
+    publicVenuePattern.test(normalizedTitle) &&
+    !privatePlacePattern.test(normalizedTitle)
+  );
+}
+
 function getAnswerType(
   value: string | null
 ): TripReviewQuestionRecord["answerType"] {
@@ -648,14 +727,19 @@ function createPrivateDetailRecords({
       visibility: "traveler_password" as const,
     }));
 
-  const sensitive = getArray(draft, "sensitiveDetails").map((item, index) => {
+  const sensitive = getArray(draft, "sensitiveDetails").flatMap((item, index) => {
     const detail = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
     const title = getString(detail, "title") ?? `Sensitive detail ${index + 1}`;
+    const detailType = getString(detail, "detailType") ?? "sensitive_detail";
 
-    return {
-      detailType: getString(detail, "detailType") ?? "sensitive_detail",
+    if (isPublicVenueAddressDetail({ detailType, title })) {
+      return [];
+    }
+
+    return [{
+      detailType,
       id: `${tripId}-sensitive-${index + 1}`,
       label: title,
       reason: getString(detail, "reason"),
@@ -666,7 +750,7 @@ function createPrivateDetailRecords({
       tripId,
       value: title,
       visibility: "traveler_password" as const,
-    };
+    }];
   });
 
   return [...stayDetails, ...transportDetails, ...sensitive];
@@ -775,14 +859,20 @@ function createReviewQuestions({
   function shouldTreatAsNote({
     answerType,
     confidence,
+    evidence,
     guessedValue,
+    prompt,
+    reason,
     subjectId,
     subjectType,
     targetField,
   }: {
     answerType: TripReviewQuestionRecord["answerType"];
     confidence: TripSourceConfidence;
+    evidence: string | null;
     guessedValue: string | null;
+    prompt: string | null;
+    reason: string | null;
     subjectId: string | null;
     subjectType: TripReviewQuestionRecord["subjectType"];
     targetField: string | null;
@@ -818,6 +908,14 @@ function createReviewQuestions({
       guessedValue &&
       getTargetValue({ subjectId, subjectType, targetField })
     ) {
+      if (
+        isCorePlanningTarget({ subjectType, targetField }) &&
+        confidence !== "high" &&
+        !hasExplicitSourceEvidence(prompt, reason, evidence)
+      ) {
+        return false;
+      }
+
       return true;
     }
 
@@ -878,13 +976,19 @@ function createReviewQuestions({
     const subjectId = findSubjectId(subjectType, relatedTitle);
     const answerType = getAnswerType(getString(detail, "answerType"));
     const confidence = getConfidence(getString(detail, "confidence"));
+    const evidence = getString(detail, "evidence");
     const guessedValue = getString(detail, "guessedValue");
+    const prompt = getString(detail, "prompt");
+    const reason = getString(detail, "reason");
     const targetField = getString(detail, "targetField");
 
     const status = shouldTreatAsNote({
         answerType,
         confidence,
+        evidence,
         guessedValue,
+        prompt,
+        reason,
         subjectId,
         subjectType,
         targetField,
@@ -896,12 +1000,12 @@ function createReviewQuestions({
       answerType,
       answerValue: null,
       createdAt: null,
-      evidence: getString(detail, "evidence"),
+      evidence,
       guessedValue,
       id: `${tripId}-question-${index + 1}`,
-      prompt: getString(detail, "prompt") ?? "Confirm a missing detail",
+      prompt: prompt ?? "Confirm a missing detail",
       reason:
-        getString(detail, "reason") ??
+        reason ??
         "This detail affects the generated traveler app.",
       resolvedAt: null,
       sourceConfidence: confidence,

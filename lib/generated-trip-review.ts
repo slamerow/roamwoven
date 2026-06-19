@@ -127,6 +127,33 @@ function hasMeaningfulTokenOverlap(first: string, second: string) {
   return secondTokens.some((token) => firstTokens.has(token));
 }
 
+function normalizeQuestionTargetField(
+  subjectType: StructuredTripRecords["reviewQuestions"][number]["subjectType"],
+  targetField: string | null
+) {
+  const rawField = targetField?.split("/").pop() ?? targetField;
+
+  if (!rawField) {
+    return null;
+  }
+
+  if (subjectType === "stay") {
+    if (rawField === "title") {
+      return "name";
+    }
+
+    if (rawField === "checkIn") {
+      return "checkInDate";
+    }
+
+    if (rawField === "checkOut") {
+      return "checkOutDate";
+    }
+  }
+
+  return rawField;
+}
+
 function field({
   helpText,
   label,
@@ -150,6 +177,134 @@ function field({
     type,
     value: value ?? "",
   };
+}
+
+function getFieldValue(record: Record<string, unknown>, name: string) {
+  const value = record[name];
+  return typeof value === "string" ? value : "";
+}
+
+function editFieldForRecord({
+  name,
+  record,
+}: {
+  name: string;
+  record: Record<string, unknown>;
+}) {
+  const dateFields = new Set(["arriveDate", "checkInDate", "checkOutDate", "date", "leaveDate"]);
+  const timeFields = new Set(["arrivalTime", "departureTime", "endTime", "startTime"]);
+  const textareaFields = new Set(["description", "summary"]);
+  const label = name
+    .replace(/([A-Z])/g, " $1")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+  if (name === "addressVisibility") {
+    return field({
+      label,
+      name,
+      options: visibilityOptions,
+      type: "select",
+      value: getFieldValue(record, name),
+    });
+  }
+
+  return field({
+    label,
+    name,
+    type: dateFields.has(name)
+      ? "date"
+      : timeFields.has(name)
+        ? "time"
+        : textareaFields.has(name)
+          ? "textarea"
+          : "text",
+    value: getFieldValue(record, name),
+  });
+}
+
+function noteEditFieldsForQuestion({
+  question,
+  records,
+}: {
+  question: StructuredTripRecords["reviewQuestions"][number];
+  records: StructuredTripRecords;
+}) {
+  if (!question.subjectId) {
+    return [];
+  }
+
+  const targetField = normalizeQuestionTargetField(
+    question.subjectType,
+    question.targetField
+  );
+
+  if (question.subjectType === "stay") {
+    const stay = records.stays.find((item) => item.id === question.subjectId);
+
+    if (!stay) {
+      return [];
+    }
+
+    const fields = targetField
+      ? [targetField]
+      : ["name", "checkInDate", "checkOutDate", "publicLocationLabel"];
+
+    return fields
+      .filter((name) => name in stay)
+      .map((name) => editFieldForRecord({ name, record: stay as unknown as Record<string, unknown> }));
+  }
+
+  if (question.subjectType === "transport") {
+    const transport = records.transport.find(
+      (item) => item.id === question.subjectId
+    );
+
+    if (!transport) {
+      return [];
+    }
+
+    const fields = targetField
+      ? [targetField]
+      : ["routeLabel", "date", "departureTime", "arrivalTime"];
+
+    return fields
+      .filter((name) => name in transport)
+      .map((name) => editFieldForRecord({ name, record: transport as unknown as Record<string, unknown> }));
+  }
+
+  if (question.subjectType === "item") {
+    const item = records.items.find((record) => record.id === question.subjectId);
+
+    if (!item) {
+      return [];
+    }
+
+    const fields = targetField
+      ? [targetField]
+      : ["title", "date", "startTime", "locationName"];
+
+    return fields
+      .filter((name) => name in item)
+      .map((name) => editFieldForRecord({ name, record: item as unknown as Record<string, unknown> }));
+  }
+
+  if (question.subjectType === "leg") {
+    const leg = records.legs.find((item) => item.id === question.subjectId);
+
+    if (!leg) {
+      return [];
+    }
+
+    const fields = targetField
+      ? [targetField]
+      : ["city", "arriveDate", "leaveDate"];
+
+    return fields
+      .filter((name) => name in leg)
+      .map((name) => editFieldForRecord({ name, record: leg as unknown as Record<string, unknown> }));
+  }
+
+  return [];
 }
 
 function parseReviewDate(value: string | null) {
@@ -720,7 +875,39 @@ export function getStructuredReviewSections(
       description: "Reasonable itinerary calls Roamwoven made without needing a decision.",
       emptyDetail: "No extra calls to note.",
       id: "notes",
-      items: [],
+      items: records.reviewQuestions
+        .filter(isNotedQuestion)
+        .map((question) => {
+          const editFields = noteEditFieldsForQuestion({ question, records });
+
+          return {
+            combineOptions: [],
+            detail: [
+              question.guessedValue
+                ? `Used: ${question.guessedValue}`
+                : null,
+              question.reason,
+              question.evidence ? `Evidence: ${question.evidence}` : null,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            editFields,
+            id: question.id,
+            meta: question.targetField
+              ? `${question.subjectType} · ${question.targetField}`
+              : "Itinerary call",
+            subjectId:
+              editFields.length > 0 && question.subjectId
+                ? question.subjectId
+                : question.id,
+            subjectType:
+              editFields.length > 0 && question.subjectId
+                ? (question.subjectType as ReviewDecisionSubjectType)
+                : ("review_question" as const),
+            title: question.prompt,
+            tone: "warning" as const,
+          };
+        }),
       summaryItems: records.reviewQuestions
         .filter(isNotedQuestion)
         .map((question) =>

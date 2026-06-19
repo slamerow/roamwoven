@@ -516,9 +516,11 @@ function EditFieldInput({ field }: { field: StructuredReviewEditField }) {
 
 function ReviewEditForm({
   item,
+  summaryLabel = "Edit details",
   tripId,
 }: {
   item: StructuredReviewItem;
+  summaryLabel?: string;
   tripId: string;
 }) {
   if (item.editFields.length === 0) {
@@ -528,7 +530,7 @@ function ReviewEditForm({
   return (
     <details className="mt-4 rounded-md border border-ink/10 bg-white p-3">
       <summary className="cursor-pointer text-xs font-semibold text-ink/60">
-        Edit details
+        {summaryLabel}
       </summary>
       <form
         action={`/maker/trips/${tripId}/data/decisions`}
@@ -640,7 +642,9 @@ function StructuredRecordReview({
       section.id !== "notes" &&
       (section.count > 0 || section.summaryItems.length > 0)
   );
-  const decisionSections = sections.filter((section) => section.items.length > 0);
+  const decisionSections = sections.filter(
+    (section) => section.id !== "notes" && section.items.length > 0
+  );
   const reviewCount = decisionSections.reduce(
     (count, section) => count + section.items.length,
     0
@@ -709,29 +713,47 @@ function StructuredRecordReview({
               </p>
               <div className="mt-3 grid gap-2">
                 {noteSections.flatMap((section) =>
-                  section.summaryItems.slice(0, 6).map((summaryItem) => (
+                  section.items.slice(0, 6).map((item) => (
                     <div
                       className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
-                      key={`${section.id}-${summaryItem}`}
+                      key={item.id}
                     >
-                      <p className="whitespace-pre-line">
-                        {summaryItem.split("\n")[0]}
-                      </p>
-                      {summaryItem.includes("\n") ? (
-                        <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
-                          {summaryItem
-                            .split("\n")
-                            .slice(1)
-                            .map((line) => (
+                      <p>{item.title}</p>
+                      {item.detail ? (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-ink/45">
+                            Evidence and details
+                          </summary>
+                          <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
+                            {item.detail.split("\n").map((line) => (
                               <p className="font-medium text-ink/55" key={line}>
                                 {line.trim()}
                               </p>
                             ))}
-                        </div>
+                          </div>
+                        </details>
                       ) : null}
+                      <ReviewEditForm
+                        item={item}
+                        summaryLabel="Edit call"
+                        tripId={tripId}
+                      />
                     </div>
                   ))
                 )}
+                {noteSections.reduce(
+                  (count, section) => count + section.items.length,
+                  0
+                ) > 6 ? (
+                  <p className="px-3 text-xs font-semibold text-ink/40">
+                    +
+                    {noteSections.reduce(
+                      (count, section) => count + section.items.length,
+                      0
+                    ) - 6}{" "}
+                    more
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>
