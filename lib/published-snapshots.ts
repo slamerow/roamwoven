@@ -7,6 +7,7 @@ import {
 } from "@/lib/traveler-privacy";
 import type {
   StructuredTripRecords,
+  TripPrivateDetailRecord,
   TripItemRecord,
   TripLegRecord,
   TripSourceConfidence,
@@ -38,6 +39,16 @@ export type PublishedTripSnapshot = {
   version: number;
 };
 
+export type PublishedTripPrivateDetail = {
+  detailId: string;
+  label: string;
+  reason: string | null;
+  subjectId: string;
+  subjectType: string;
+  value: string;
+  visibility: string;
+};
+
 type PublishedTripSnapshotRow = {
   created_at: string | null;
   id: string;
@@ -47,8 +58,20 @@ type PublishedTripSnapshotRow = {
   version: number | null;
 };
 
+type PublishedTripPrivateDetailRow = {
+  detail_id: string;
+  label: string;
+  reason: string | null;
+  subject_id: string;
+  subject_type: string;
+  value: string;
+  visibility: string;
+};
+
 type TripPublicationStateRow = {
   published_snapshot_id: string | null;
+  traveler_password_enabled: boolean | null;
+  traveler_password_hash: string | null;
   status: string | null;
 };
 
@@ -160,6 +183,16 @@ function redactSensitiveLeg(
   return leg;
 }
 
+export function createPublishedPrivateDetails(
+  records: StructuredTripRecords
+): TripPrivateDetailRecord[] {
+  return records.privateDetails.filter(
+    (detail) =>
+      detail.visibility === "traveler_password" ||
+      detail.visibility === "maker_only"
+  );
+}
+
 export function createPublicSnapshotRecords(
   records: StructuredTripRecords
 ): StructuredTripRecords {
@@ -260,6 +293,32 @@ export async function publishTripSnapshot({
   }
 
   const snapshot = normalizeSnapshot(data as unknown as PublishedTripSnapshotRow);
+  const privateDetails = createPublishedPrivateDetails(records);
+
+  if (privateDetails.length > 0) {
+    const { error: privateDetailError } = await supabase
+      .from("published_trip_private_details")
+      .insert(
+        privateDetails.map((detail) => ({
+          detail_id: detail.id,
+          label: detail.label,
+          reason: detail.reason,
+          snapshot_id: snapshot.id,
+          subject_id: detail.subjectId,
+          subject_type: detail.subjectType,
+          trip_id: tripId,
+          value: detail.value,
+          visibility: detail.visibility,
+        }))
+      );
+
+    if (privateDetailError) {
+      throw new Error(
+        `Unable to save published private details: ${privateDetailError.message}`
+      );
+    }
+  }
+
   const { error: tripError } = await supabase
     .from("trips")
     .update({
@@ -321,4 +380,79 @@ export async function getPublishedTripSnapshotByToken(token: string) {
   }
 
   return snapshot;
+}
+
+export async function getPublishedTripPrivateDetailsByToken(token: string) {
+  if (!hasSupabaseAdminConfig()) {
+    return null;
+  }
+
+  const snapshot = await getPublishedTripSnapshotByToken(token);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("published_trip_private_details")
+    .select("detail_id,label,reason,subject_id,subject_type,value,visibility")
+    .eq("snapshot_id", snapshot.id)
+    .eq("visibility", "traveler_password")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Unable to load private traveler details: ${error.message}`);
+  }
+
+  return ((data ?? []) as unknown as PublishedTripPrivateDetailRow[]).map(
+    (detail) => ({
+      detailId: detail.detail_id,
+      label: detail.label,
+      reason: detail.reason,
+      subjectId: detail.subject_id,
+      subjectType: detail.subject_type,
+      value: detail.value,
+      visibility: detail.visibility,
+    })
+  );
+}
+
+export async function getPublishedTripAccessStateByToken(token: string) {
+  if (!hasSupabaseAdminConfig()) {
+    return null;
+  }
+
+  const snapshot = await getPublishedTripSnapshotByToken(token);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("trips")
+    .select("status,published_snapshot_id,traveler_password_enabled,traveler_password_hash")
+    .eq("id", snapshot.tripId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Unable to load trip access state: ${error.message}`);
+  }
+
+  const publicationState = data as unknown as TripPublicationStateRow | null;
+
+  if (
+    !publicationState ||
+    publicationState.status === "deleted" ||
+    publicationState.published_snapshot_id !== snapshot.id
+  ) {
+    return null;
+  }
+
+  return {
+    passwordEnabled: Boolean(publicationState.traveler_password_enabled),
+    passwordHash: publicationState.traveler_password_hash,
+    snapshot,
+  };
 }

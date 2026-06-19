@@ -15,7 +15,14 @@ import {
   normalizeTripReviewDecisionRow,
   serializeTripReviewDecision,
 } from "@/lib/review-decisions";
-import { createPublishedTripSnapshotPayload } from "@/lib/published-snapshots";
+import {
+  createPublishedPrivateDetails,
+  createPublishedTripSnapshotPayload,
+} from "@/lib/published-snapshots";
+import {
+  hashTravelerPassword,
+  verifyTravelerPassword,
+} from "@/lib/traveler-access";
 import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
@@ -665,6 +672,49 @@ test("published snapshot payload redacts protected traveler details", () => {
   assert.equal(
     JSON.stringify(payload).includes(privateStay.address ?? ""),
     false
+  );
+
+  const privateDetails = createPublishedPrivateDetails(records);
+  assert.ok(
+    privateDetails.some((detail) => detail.value === privateStay.address),
+    "expected server-only published private details to retain protected value"
+  );
+});
+
+test("traveler password verification is explicit about missing configuration", () => {
+  const passwordHash = hashTravelerPassword("traveler");
+
+  assert.equal(
+    verifyTravelerPassword({
+      password: "traveler",
+      passwordEnabled: true,
+      passwordHash,
+    }),
+    "valid"
+  );
+  assert.equal(
+    verifyTravelerPassword({
+      password: "wrong",
+      passwordEnabled: true,
+      passwordHash,
+    }),
+    "invalid"
+  );
+  assert.equal(
+    verifyTravelerPassword({
+      password: "traveler",
+      passwordEnabled: true,
+      passwordHash: null,
+    }),
+    "missing_hash"
+  );
+  assert.equal(
+    verifyTravelerPassword({
+      password: "",
+      passwordEnabled: false,
+      passwordHash: null,
+    }),
+    "disabled"
   );
 });
 

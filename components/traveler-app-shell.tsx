@@ -46,8 +46,19 @@ type TravelerAppShellProps = {
   displayName?: string;
   initialUnlocked?: boolean;
   mode?: "standalone" | "preview";
+  shareToken?: string;
   style?: CSSProperties;
   trip: TravelerAppViewModel;
+};
+
+type ProtectedTravelerDetail = {
+  detailId: string;
+  label: string;
+  reason: string | null;
+  subjectId: string;
+  subjectType: string;
+  value?: string;
+  visibility: string;
 };
 
 type TravelerItem = TravelerAppViewModel["cards"][number];
@@ -151,6 +162,61 @@ function LockedDetail({
           <div className="mt-3 h-6 max-w-64 rounded-md bg-[var(--color-muted)]/20 blur-[3px]" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProtectedDetailBlock({
+  details,
+  unlocked,
+}: {
+  details: ProtectedTravelerDetail[];
+  unlocked: boolean;
+}) {
+  if (details.length === 0) {
+    return null;
+  }
+
+  if (unlocked) {
+    return (
+      <div className="mt-4 space-y-3">
+        {details.map((detail) => (
+          <div
+            className="rounded-xl bg-[var(--color-sky)]/55 px-4 py-3 text-sm leading-6 text-[var(--color-ink)]"
+            key={detail.detailId}
+          >
+            <p className="font-bold">{detail.label}</p>
+            <p className="mt-1 whitespace-pre-line">
+              {detail.value ?? "Private detail unlocked."}
+            </p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      {details.map((detail) => (
+        <div
+          className="rounded-xl border border-[var(--color-border)]/35 bg-[var(--color-app)] p-4"
+          key={detail.detailId}
+        >
+          <div className="flex items-start gap-2">
+            <LockKeyhole className="mt-0.5 shrink-0 text-[var(--color-leather)]" size={17} />
+            <div>
+              <p className="text-sm font-bold text-[var(--color-ink)]">
+                {detail.label} locked
+              </p>
+              <p className="mt-1 text-xs leading-5 text-[var(--color-muted)]">
+                {detail.reason ??
+                  "This private trip detail is available in traveler mode."}
+              </p>
+              <div className="mt-3 h-6 max-w-64 rounded-md bg-[var(--color-muted)]/20 blur-[3px]" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -625,10 +691,12 @@ function PhraseTool() {
 }
 
 function ActivityDetail({
+  protectedDetails,
   item,
   onClose,
   unlocked,
 }: {
+  protectedDetails: ProtectedTravelerDetail[];
   item: TravelerItem;
   onClose: () => void;
   unlocked: boolean;
@@ -645,6 +713,7 @@ function ActivityDetail({
         {[item.time, item.categoryLabel].filter(Boolean).join(" · ")}
       </p>
       <h2 className="mt-2 text-4xl font-semibold leading-tight">{item.title}</h2>
+      <ProtectedDetailBlock details={protectedDetails} unlocked={unlocked} />
       {detailSensitivity ? (
         <LockedDetail classification={detailSensitivity} unlocked={unlocked}>
           {item.description}
@@ -677,6 +746,7 @@ export function TravelerAppShell({
   displayName,
   initialUnlocked = false,
   mode = "standalone",
+  shareToken,
   style,
   trip,
 }: TravelerAppShellProps) {
@@ -685,17 +755,42 @@ export function TravelerAppShell({
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
   const [overlay, setOverlay] = useState<OverlayKind | null>(null);
+  const [protectedDetailsById, setProtectedDetailsById] = useState<
+    Record<string, ProtectedTravelerDetail>
+  >({});
   const [selectedItem, setSelectedItem] = useState<TravelerItem | null>(null);
   const todayDay = trip.days[0];
   const categories = useMemo(() => categoriesForTrip(trip), [trip]);
+  const publicProtectedDetailsById = useMemo(
+    () =>
+      Object.fromEntries(
+        trip.privacy.privateDetails.map((detail) => [
+          detail.id,
+          {
+            detailId: detail.id,
+            label: detail.label,
+            reason: null,
+            subjectId: detail.subjectId,
+            subjectType: detail.subjectType,
+            visibility: "traveler_password",
+          } satisfies ProtectedTravelerDetail,
+        ])
+      ),
+    [trip.privacy.privateDetails]
+  );
   const sensitiveCount = useMemo(
     () => trip.privacy.privateDetailCount,
     [trip.privacy.privateDetailCount]
   );
-  function unlock(event: FormEvent<HTMLFormElement>) {
+  async function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (password.trim().toLowerCase() === DEMO_TRAVELER_PASSWORD) {
+    if (!shareToken || shareToken === "demo") {
+      if (password.trim().toLowerCase() !== DEMO_TRAVELER_PASSWORD) {
+        setError(true);
+        return;
+      }
+
       setUnlocked(true);
       setActiveTab("today");
       setOverlay(null);
@@ -703,7 +798,36 @@ export function TravelerAppShell({
       return;
     }
 
-    setError(true);
+    const response = await fetch(`/t/${shareToken}/unlock`, {
+      body: JSON.stringify({ password }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      setError(true);
+      return;
+    }
+
+    const body = (await response.json()) as {
+      details?: ProtectedTravelerDetail[];
+      unlocked?: boolean;
+    };
+
+    if (!body.unlocked) {
+      setError(true);
+      return;
+    }
+
+    setProtectedDetailsById(
+      Object.fromEntries(
+        (body.details ?? []).map((detail) => [detail.detailId, detail])
+      )
+    );
+    setUnlocked(true);
+    setActiveTab("today");
+    setOverlay(null);
+    setError(false);
   }
 
   const isPreview = mode === "preview";
@@ -860,6 +984,15 @@ export function TravelerAppShell({
           <ActivityDetail
             item={selectedItem}
             onClose={() => setSelectedItem(null)}
+            protectedDetails={selectedItem.privateDetailIds
+              .map(
+                (detailId) =>
+                  protectedDetailsById[detailId] ??
+                  publicProtectedDetailsById[detailId]
+              )
+              .filter(
+                (detail): detail is ProtectedTravelerDetail => Boolean(detail)
+              )}
             unlocked={unlocked}
           />
         ) : null}

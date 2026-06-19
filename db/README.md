@@ -13,6 +13,7 @@ Ownership is part of the schema, not just app code:
 - `trip_payment_events` records checkout/session/payment-intent metadata idempotently before a trip is marked paid.
 - `trip_processing_runs` logs explicit parsing attempts, model/usage metadata, and failure states.
 - `trip_draft_snapshots` stores raw parser JSON drafts before those drafts are converted into editable trip records.
+- `published_trip_private_details` stores server-only protected values for active traveler snapshots; public snapshot JSON should stay redacted.
 
 The next database step is to turn this into real Supabase migrations and wire:
 

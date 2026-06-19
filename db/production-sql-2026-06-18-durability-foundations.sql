@@ -36,12 +36,30 @@ create table if not exists trip_payment_events (
   received_at timestamptz not null default now()
 );
 
+create table if not exists published_trip_private_details (
+  id uuid primary key default gen_random_uuid(),
+  snapshot_id uuid not null references published_trip_snapshots(id) on delete cascade,
+  trip_id uuid not null references trips(id) on delete cascade,
+  detail_id text not null,
+  subject_type text not null,
+  subject_id text not null,
+  label text not null,
+  reason text,
+  value text not null,
+  visibility text not null default 'traveler_password',
+  created_at timestamptz not null default now()
+);
+
 alter table trip_payment_events enable row level security;
+alter table published_trip_private_details enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant select on trip_payment_events to anon;
 grant select on trip_payment_events to authenticated;
 grant select, insert, update, delete on trip_payment_events to service_role;
+grant select, insert, update, delete on published_trip_private_details to anon;
+grant select, insert, update, delete on published_trip_private_details to authenticated;
+grant select, insert, update, delete on published_trip_private_details to service_role;
 
 create index if not exists trip_payment_events_trip_id_idx
   on trip_payment_events(trip_id, received_at desc);
@@ -53,7 +71,14 @@ create unique index if not exists trip_payment_events_event_id_idx
 create unique index if not exists trip_payment_events_checkout_session_idx
   on trip_payment_events(checkout_session_id);
 
+create index if not exists published_trip_private_details_snapshot_idx
+  on published_trip_private_details(snapshot_id, subject_type, subject_id);
+
+create unique index if not exists published_trip_private_details_snapshot_detail_idx
+  on published_trip_private_details(snapshot_id, detail_id);
+
 drop policy if exists "Trip owners can read payment events" on trip_payment_events;
+drop policy if exists "Trip owners can manage published private details" on published_trip_private_details;
 
 create policy "Trip owners can read payment events"
   on trip_payment_events
@@ -62,6 +87,24 @@ create policy "Trip owners can read payment events"
     exists (
       select 1 from trips
       where trips.id = trip_payment_events.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can manage published private details"
+  on published_trip_private_details
+  for all
+  using (
+    exists (
+      select 1 from trips
+      where trips.id = published_trip_private_details.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from trips
+      where trips.id = published_trip_private_details.trip_id
         and trips.owner_user_id = auth.uid()
     )
   );

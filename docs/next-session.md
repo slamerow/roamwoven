@@ -118,6 +118,8 @@ Backend-ready pieces now exist:
   - Stripe checkout now writes durable `trip_payment_events`, verifies the checkout owner, expected Stripe price, expected amount, expected currency, payment status, and deleted-trip state before marking a trip paid.
   - Soft delete now writes `deleted_at`, `deleted_by_user_id`, and `deletion_reason`; late payment webhooks cannot resurrect deleted trips.
   - Review decisions now use a stable `decision_key` and `upsert`, so repeated Confirm/Edit/Protect/etc. clicks update the current decision instead of appending duplicate conflicting rows.
+  - Traveler privacy now has a server-side unlock foundation: protected detail values publish into `published_trip_private_details`, and `/t/[token]/unlock` verifies the active token and traveler password before returning those values.
+  - CTO risk register added at `docs/cto-risk-register.md`.
   - New additive SQL: `db/production-sql-2026-06-18-durability-foundations.sql`. Run this before deploying the matching app code.
 - Checkout sessions now pass `receipt_email` to Stripe using the signed-in user's email. This is the quick checkout-email path; a branded Roamwoven post-purchase email still needs a real email provider later.
 - Stripe sandbox promo code `QA100` is active for Roamwoven test builds. It is 100% off once, valid, capped at 10 total redemptions, and currently showed 1 out of 10 redemptions used in the Stripe dashboard, so there are 9 remaining test uses before another code is needed.

@@ -11,7 +11,7 @@ export default async function TravelerAppPage({
   const { token } = await params;
 
   if (token === "demo") {
-    return <TravelerAppShell trip={getAsiaDemoTravelerAppViewModel()} />;
+    return <TravelerAppShell shareToken="demo" trip={getAsiaDemoTravelerAppViewModel()} />;
   }
 
   const snapshot = await getPublishedTripSnapshotByToken(token);
@@ -20,5 +20,10 @@ export default async function TravelerAppPage({
     notFound();
   }
 
-  return <TravelerAppShell trip={snapshot.snapshotJson.travelerApp} />;
+  return (
+    <TravelerAppShell
+      shareToken={token}
+      trip={snapshot.snapshotJson.travelerApp}
+    />
+  );
 }
