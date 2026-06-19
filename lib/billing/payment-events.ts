@@ -20,27 +20,62 @@ function getPaymentIntentId(value: string | Stripe.PaymentIntent | null) {
   return typeof value === "string" ? value : value?.id ?? null;
 }
 
+export function validateCheckoutSessionPaymentContract({
+  amountSubtotal,
+  amountTotal,
+  currency,
+  expectedAmountTotal,
+  expectedCurrency,
+  expectedPriceId,
+  configuredPriceId,
+}: {
+  amountSubtotal: number | null;
+  amountTotal: number | null;
+  configuredPriceId: string | null;
+  currency: string | null;
+  expectedAmountTotal: number;
+  expectedCurrency: string | null;
+  expectedPriceId: string | null;
+}) {
+  if (configuredPriceId && expectedPriceId !== configuredPriceId) {
+    return false;
+  }
+
+  if (!Number.isInteger(expectedAmountTotal)) {
+    return false;
+  }
+
+  if (amountSubtotal !== expectedAmountTotal) {
+    return false;
+  }
+
+  if (typeof amountTotal === "number" && amountTotal > expectedAmountTotal) {
+    return false;
+  }
+
+  if (expectedCurrency && currency !== expectedCurrency) {
+    return false;
+  }
+
+  return true;
+}
+
 function assertCheckoutSessionMatchesRoamwovenPrice(
   session: Stripe.Checkout.Session
 ) {
   const { tripPriceId } = getStripeConfig();
-  const expectedAmountTotal = Number(session.metadata?.expected_amount_total);
-  const expectedCurrency = session.metadata?.expected_currency ?? null;
-  const expectedPriceId = session.metadata?.price_id ?? null;
+  const valid = validateCheckoutSessionPaymentContract({
+    amountSubtotal: session.amount_subtotal ?? null,
+    amountTotal: session.amount_total ?? null,
+    configuredPriceId: tripPriceId,
+    currency: session.currency ?? null,
+    expectedAmountTotal: Number(session.metadata?.expected_amount_total),
+    expectedCurrency: session.metadata?.expected_currency ?? null,
+    expectedPriceId: session.metadata?.price_id ?? null,
+  });
 
-  if (tripPriceId && expectedPriceId !== tripPriceId) {
-    throw new Error("Checkout session price does not match Roamwoven trip price.");
-  }
-
-  if (
-    Number.isInteger(expectedAmountTotal) &&
-    session.amount_total !== expectedAmountTotal
-  ) {
-    throw new Error("Checkout session amount does not match expected trip price.");
-  }
-
-  if (expectedCurrency && session.currency !== expectedCurrency) {
-    throw new Error("Checkout session currency does not match expected trip currency.");
+  if (!valid) {
+    throw new Error("Checkout session does not match the expected Roamwoven payment contract.");
   }
 }
 

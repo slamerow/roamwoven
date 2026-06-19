@@ -142,7 +142,15 @@ export default async function TripWorkspacePage({
       } else {
         checkoutStatus = "pending";
       }
-    } catch {
+    } catch (checkoutError) {
+      console.warn("checkout_return_verification_failed", {
+        message:
+          checkoutError instanceof Error
+            ? checkoutError.message
+            : "Unknown checkout return error.",
+        sessionId,
+        tripId,
+      });
       checkoutStatus = "pending";
     }
   } else if (checkout === "cancelled") {

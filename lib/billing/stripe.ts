@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { getStripeConfig, hasStripeCheckoutConfig } from "@/lib/env";
+import { validateCheckoutSessionPaymentContract } from "@/lib/billing/payment-events";
 import type { AuthUser } from "@/lib/auth";
 import type { MakerTrip } from "@/lib/trips";
 
@@ -83,25 +84,17 @@ export async function getPaidCheckoutTripId(sessionId: string) {
     return null;
   }
 
-  const expectedAmountTotal = Number(session.metadata?.expected_amount_total);
-  const expectedCurrency = session.metadata?.expected_currency ?? null;
-  const expectedPriceId = session.metadata?.price_id ?? null;
-
   if (
-    config.tripPriceId &&
-    (!expectedPriceId || expectedPriceId !== config.tripPriceId)
+    !validateCheckoutSessionPaymentContract({
+      amountSubtotal: session.amount_subtotal ?? null,
+      amountTotal: session.amount_total ?? null,
+      configuredPriceId: config.tripPriceId,
+      currency: session.currency ?? null,
+      expectedAmountTotal: Number(session.metadata?.expected_amount_total),
+      expectedCurrency: session.metadata?.expected_currency ?? null,
+      expectedPriceId: session.metadata?.price_id ?? null,
+    })
   ) {
-    return null;
-  }
-
-  if (
-    !Number.isInteger(expectedAmountTotal) ||
-    session.amount_total !== expectedAmountTotal
-  ) {
-    return null;
-  }
-
-  if (!expectedCurrency || session.currency !== expectedCurrency) {
     return null;
   }
 

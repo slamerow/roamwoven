@@ -135,6 +135,7 @@ Backend-ready pieces now exist:
   - New additive SQL: `db/production-sql-2026-06-18-durability-foundations.sql`. Run this before deploying the matching app code.
 - Checkout sessions now pass `receipt_email` to Stripe using the signed-in user's email. This is the quick checkout-email path; a branded Roamwoven post-purchase email still needs a real email provider later.
 - Stripe sandbox promo code `QA100` is active for Roamwoven test builds. It is 100% off once, valid, capped at 10 total redemptions, and currently showed 1 out of 10 redemptions used in the Stripe dashboard, so there are 9 remaining test uses before another code is needed.
+- Promo-code checkout verification fix: Stripe discounts can make `checkout.session.amount_total` lower than the configured trip price, including `0` for `QA100`. Payment verification now compares `amount_subtotal` to the expected trip price while recording the actual discounted `amount_total`, so valid promo-code checkouts can mark trips paid without weakening price/currency/owner checks.
 
 Live Supabase dev setup is partially complete:
 
