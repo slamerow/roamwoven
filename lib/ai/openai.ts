@@ -363,6 +363,7 @@ export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAI
               text: [
                 "Extract all readable travel-planning text from this uploaded material.",
                 "Preserve confirmation codes, dates, times, airport/station names, hotel names, addresses, passenger/traveler names, reservation numbers, and cancellation/check-in instructions when visible.",
+                "Pay special attention to transport timeline cards and screenshot blocks: preserve route direction, departure and arrival stations or airports, train/flight numbers, operators, dates, durations, and departure/arrival times.",
                 "Return plain text only. If a section is illegible, write [illegible] briefly rather than guessing.",
               ].join(" "),
               type: "input_text",

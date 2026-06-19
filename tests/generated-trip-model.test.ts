@@ -525,6 +525,105 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
+test("optional rental car provider questions become calls", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "The source has pickup time and location, but no provider.",
+          guessedValue: null,
+          prompt: "We created the rental car pickup without a company name.",
+          reason:
+            "The pickup details are enough for the traveler app; the company name can be added later if needed.",
+          relatedTitle: "Rental car pickup",
+          subjectType: "transport",
+          targetField: "provider",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          date: "2019-01-17",
+          departure: "Revolucni 1044/23",
+          title: "Rental car pickup",
+          type: "rental_car",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-rental-car-provider",
+  });
+  const notes = getStructuredReviewSections(records).find(
+    (section) => section.id === "notes"
+  );
+
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(notes?.count, 1);
+});
+
+test("duplicate open questions for the same record and field collapse", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          date: "2019-01-14",
+          itemType: "activity",
+          title: "Prague walking plan",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "The source context suggests this but does not lock it.",
+          guessedValue: "2019-01-14",
+          prompt: "Is Prague walking plan on January 14?",
+          reason: "The date is not explicit.",
+          relatedTitle: "Prague walking plan",
+          subjectType: "item",
+          targetField: "date",
+        },
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "The same source context suggests this date.",
+          guessedValue: "2019-01-14",
+          prompt: "Should Prague walking plan also be on January 14?",
+          reason: "This is the same underlying date uncertainty.",
+          relatedTitle: "Prague walking plan",
+          subjectType: "item",
+          targetField: "date",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-duplicate-question",
+  });
+
+  assert.equal(
+    records.reviewQuestions.filter((question) => question.status === "open")
+      .length,
+    1
+  );
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
 test("structured review summary uses maker-facing counts", () => {
   const draft = {
     activities: [

@@ -159,6 +159,45 @@ function isCorePlanningTarget({
   return false;
 }
 
+function isOptionalMissingDetail({
+  prompt,
+  reason,
+  subjectId,
+  subjectType,
+  targetField,
+}: {
+  prompt: string | null;
+  reason: string | null;
+  subjectId: string | null;
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  if (!subjectId) {
+    return false;
+  }
+
+  const target = targetField?.toLowerCase().split("/").pop() ?? "";
+  const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
+
+  if (
+    subjectType === "transport" &&
+    (target.includes("provider") ||
+      target.includes("company") ||
+      /\b(company|provider|operator|rental car company)\b/.test(text))
+  ) {
+    return true;
+  }
+
+  if (
+    subjectType === "item" &&
+    (target.includes("url") || target.includes("website"))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function isPublicVenueAddressDetail({
   detailType,
   title,
@@ -184,6 +223,44 @@ function isPublicVenueAddressDetail({
   return (
     publicVenuePattern.test(normalizedTitle) &&
     !privatePlacePattern.test(normalizedTitle)
+  );
+}
+
+function getQuestionClusterKey(question: TripReviewQuestionRecord) {
+  const target = question.targetField?.toLowerCase() ?? "";
+
+  if (
+    target.includes("date") ||
+    target.includes("checkin") ||
+    target.includes("check-in") ||
+    target.includes("checkout") ||
+    target.includes("check-out")
+  ) {
+    return "date";
+  }
+
+  if (
+    target.includes("provider") ||
+    target.includes("company") ||
+    /\b(company|provider|operator)\b/i.test(question.prompt)
+  ) {
+    return "provider";
+  }
+
+  if (target.includes("name") || target.includes("title")) {
+    return "title";
+  }
+
+  return (
+    target ||
+    question.prompt
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter((token) => token.length > 3)
+      .slice(0, 4)
+      .join("-") ||
+    "general"
   );
 }
 
@@ -993,7 +1070,15 @@ function createReviewQuestions({
     const reason = getString(detail, "reason");
     const targetField = getString(detail, "targetField");
 
-    const status = shouldTreatAsNote({
+    const status: TripReviewQuestionRecord["status"] =
+      isOptionalMissingDetail({
+        prompt,
+        reason,
+        subjectId,
+        subjectType,
+        targetField,
+      }) ||
+      shouldTreatAsNote({
         answerType,
         confidence,
         evidence,
@@ -1026,6 +1111,20 @@ function createReviewQuestions({
       targetField,
       tripId,
     }];
+  }).filter((question, index, questions) => {
+    if (question.status !== "open") {
+      return true;
+    }
+
+    return (
+      questions.findIndex(
+        (candidate) =>
+          candidate.status === "open" &&
+          candidate.subjectId === question.subjectId &&
+          candidate.subjectType === question.subjectType &&
+          getQuestionClusterKey(candidate) === getQuestionClusterKey(question)
+      ) === index
+    );
   });
 }
 

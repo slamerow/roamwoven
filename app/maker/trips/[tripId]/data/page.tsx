@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { ExtractionSubmitButton } from "@/components/extraction-submit-button";
 import { MakerProgress } from "@/components/maker-progress";
+import { ReviewDecisionInlineForm } from "@/components/review-decision-inline-form";
 import { hasOpenAIExtractionConfigForTrip } from "@/lib/env";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
 import {
@@ -383,28 +384,20 @@ function ReviewDecisionButton({
           : "hover:border-ink/25 hover:text-ink";
 
   return (
-    <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
-      <input name="action" type="hidden" value={action} />
-      <input name="subjectId" type="hidden" value={item.subjectId} />
-      <input name="subjectType" type="hidden" value={item.subjectType} />
-      {item.subjectIds && item.subjectIds.length > 0 ? (
-        <input name="subjectIds" type="hidden" value={item.subjectIds.join(",")} />
-      ) : null}
-      {action === "answer_question" ? (
-        <input
-          name="answerValue"
-          type="hidden"
-          value="Marked answered in review."
-        />
-      ) : null}
-      <button
-        className={`inline-flex h-9 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 text-xs font-semibold text-ink/55 transition ${colorClasses}`}
-        type="submit"
-      >
+    <ReviewDecisionInlineForm
+      action={action}
+      actionUrl={`/maker/trips/${tripId}/data/decisions`}
+      answerValue={
+        action === "answer_question" ? "Marked answered in review." : undefined
+      }
+      buttonClassName={`inline-flex h-9 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 text-xs font-semibold text-ink/55 transition disabled:cursor-wait disabled:opacity-60 ${colorClasses}`}
+      subjectId={item.subjectId}
+      subjectIds={item.subjectIds}
+      subjectType={item.subjectType}
+    >
         {icon}
         {children}
-      </button>
-    </form>
+    </ReviewDecisionInlineForm>
   );
 }
 
@@ -867,6 +860,7 @@ function StructuredRecordReview({
                   return (
                     <div
                       className="flex gap-3 rounded-md bg-paper p-4"
+                      data-review-item
                       key={item.id}
                     >
                       <ItemIcon
