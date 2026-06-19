@@ -23,6 +23,7 @@ import {
   optimizeTripExtractionMaterials,
   type MaterialBudgetSummary,
 } from "@/lib/extraction/material-budget";
+import { listMaterialExtractionCheckpoints } from "@/lib/extraction/material-extractions";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
@@ -91,6 +92,32 @@ function withRunInputEstimate(
   };
 }
 
+function summarizeMaterialCheckpoints(
+  checkpoints: Awaited<ReturnType<typeof listMaterialExtractionCheckpoints>>
+) {
+  return checkpoints.reduce(
+    (summary, checkpoint) => {
+      summary.byStatus[checkpoint.status] =
+        (summary.byStatus[checkpoint.status] ?? 0) + 1;
+      summary.extractedCharCount += checkpoint.extractedCharCount;
+      summary.materialCount += 1;
+
+      if (checkpoint.failureClass) {
+        summary.failureClasses[checkpoint.failureClass] =
+          (summary.failureClasses[checkpoint.failureClass] ?? 0) + 1;
+      }
+
+      return summary;
+    },
+    {
+      byStatus: {} as Record<string, number>,
+      extractedCharCount: 0,
+      failureClasses: {} as Record<string, number>,
+      materialCount: 0,
+    }
+  );
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ tripId: string }> }
@@ -129,6 +156,9 @@ export async function POST(
   }
 
   const materials = await getTripExtractionMaterials(uploads);
+  const materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
+  const materialCheckpointSummary =
+    summarizeMaterialCheckpoints(materialCheckpoints);
 
   if (materials.length === 0) {
     return redirectToData(request, tripId, { error: "no-text-materials" });
@@ -149,6 +179,7 @@ export async function POST(
     materialCount: optimizedMaterials.summary.materialCount,
     materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
     rawCharCount: optimizedMaterials.summary.rawCharCount,
+    statusCounts: materialCheckpointSummary.byStatus,
     submittedCharCount: optimizedMaterials.summary.submittedCharCount,
     truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
     tripId,
@@ -184,6 +215,7 @@ export async function POST(
           optimizedMaterials.summary,
           result.usage
         ),
+        materialCheckpoints: materialCheckpointSummary,
         openai: result.usage,
       },
     });
@@ -226,6 +258,7 @@ export async function POST(
                   optimizedMaterials.summary,
                   extractionUsage
                 ),
+                materialCheckpoints: materialCheckpointSummary,
                 openaiError: (error as { details?: unknown }).details,
               }
             : {
@@ -233,6 +266,7 @@ export async function POST(
                   optimizedMaterials.summary,
                   extractionUsage
                 ),
+                materialCheckpoints: materialCheckpointSummary,
               },
         runId: run.id,
         tripId,

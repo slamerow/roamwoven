@@ -12,6 +12,7 @@ Ownership is part of the schema, not just app code:
 - Service-role access is reserved for trusted backend jobs, such as Stripe webhook payment updates.
 - `trip_payment_events` records checkout/session/payment-intent metadata idempotently before a trip is marked paid.
 - `trip_processing_runs` logs explicit parsing attempts, model/usage metadata, and failure states.
+- `trip_material_extractions` checkpoints each uploaded material before the model call, including text-ready/OCR-needed/unsupported/failed status and extracted text when available.
 - `trip_draft_snapshots` stores raw parser JSON drafts before those drafts are converted into editable trip records.
 - `published_trip_private_details` stores server-only protected values for active traveler snapshots; public snapshot JSON should stay redacted.
 
@@ -30,3 +31,4 @@ The prototype must keep building without Supabase env vars. In that mode, maker 
 
 - `production-sql-2026-06-18-review-decisions-and-snapshots.sql`: additive patch for `trip_review_decisions`, `published_trip_snapshots`, and `trips.published_snapshot_id`. Run this before testing deployed review decisions or published traveler snapshots.
 - `production-sql-2026-06-18-durability-foundations.sql`: additive patch for payment event audit rows, review-decision idempotency keys, and soft-delete recovery metadata. Run this before deploying the durability foundation code.
+- `production-sql-2026-06-19-material-extraction-checkpoints.sql`: additive patch for `trip_material_extractions`. Run this before deploying code that checkpoints uploaded materials during extraction.

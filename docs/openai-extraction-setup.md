@@ -50,8 +50,9 @@ Also keep it `false` until the production database has the additive extraction t
 - Require an explicit maker action such as `Build parsed draft`.
 - During early production testing, allowlist only the intended paid test trip.
 - Log model, token usage, trip ID, upload count, run number, and success/failure.
+- Checkpoint each uploaded material before the model call as text-ready, OCR-needed, unsupported, or failed. The maker still sees one build action; this is internal durability. Material triage uses bounded concurrency so multi-file trips do not process purely serially or spike all uploads at once.
 - Normalize materials before the AI call by removing repeated document boilerplate and trimming each material plus the total bundle to `OPENAI_EXTRACTION_MAX_INPUT_CHARS`.
-- Store internal material-budget telemetry on `trip_processing_runs.openai_usage.materialBudget`, including raw characters, submitted characters, estimated per-pass input tokens, estimated staged-run input tokens, and trimmed material count. This belongs in future admin/support tooling, not customer-facing maker or traveler UI.
+- Store internal material-budget and material-checkpoint telemetry on `trip_processing_runs.openai_usage`, including raw characters, submitted characters, estimated per-pass input tokens, estimated staged-run input tokens, trimmed material count, and checkpoint status counts. This belongs in future admin/support tooling, not customer-facing maker or traveler UI.
 - Cap input characters/pages/files for the first beta.
 - Treat reprocessing as explicit and limited.
 - Prefer cheap first-pass extraction; allow higher-cost reruns only when needed for quality.
@@ -68,7 +69,9 @@ Also keep it `false` until the production database has the additive extraction t
   - Accepts extracted text materials, not raw uploaded files.
 - `lib/extraction/trip-materials.ts`
   - Collects pasted notes, small `.txt` uploads, and readable text-based PDFs for the first beta parser.
-  - Does not OCR scanned/image-only PDFs yet.
+  - Records scanned/image-heavy PDFs and images as OCR-needed instead of silently dropping them.
+- `lib/extraction/material-extractions.ts`
+  - Persists per-upload extraction checkpoints in `trip_material_extractions`.
 - `lib/extraction/material-budget.ts`
   - Removes repeated boilerplate and caps the submitted material bundle before the AI call.
   - Produces per-run internal telemetry for cost/support review.
@@ -80,12 +83,12 @@ Also keep it `false` until the production database has the additive extraction t
 
 ## Still Needed Before Turning It On
 
-1. Run the additive production SQL for `trip_processing_runs` and `trip_draft_snapshots`.
+1. Run the additive production SQL for `trip_processing_runs`, `trip_draft_snapshots`, and `trip_material_extractions`.
 2. Add the OpenAI API key to Vercel.
 3. Keep the flag disabled until ready for an intentional paid test.
 4. Test with pasted notes, a `.txt` file, or a readable text-based PDF first.
 5. Convert the raw draft JSON into editable review cards.
-6. Extract text from Word docs, spreadsheets, images, and scanned PDFs.
+6. Add the OCR lane for `trip_material_extractions.status = 'ocr_needed'`.
 7. Add better per-run estimated or actual OpenAI cost display.
 
 ## First Beta Target

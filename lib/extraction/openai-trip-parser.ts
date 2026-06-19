@@ -2,6 +2,7 @@ import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 
 export type TripExtractionMaterial = {
   filename: string;
+  sourceUploadId?: string;
   text: string;
   type: "file_text" | "note" | "pdf_text";
 };
