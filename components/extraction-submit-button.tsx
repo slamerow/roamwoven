@@ -20,7 +20,7 @@ export function ExtractionSubmitButton({
       disabled={disabled}
       type="submit"
     >
-      {pending ? "Building draft..." : "Build draft once"}
+      {pending ? "Building trip app..." : "Build my trip app"}
     </button>
   );
 }
