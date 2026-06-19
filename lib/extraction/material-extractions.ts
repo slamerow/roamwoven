@@ -6,12 +6,14 @@ const MAX_STORED_TEXT_CONTENT_CHARS = 80000;
 export type MaterialExtractionStatus =
   | "failed"
   | "ocr_needed"
+  | "ocr_processing"
   | "pending"
   | "text_ready"
   | "unsupported";
 
 export type MaterialExtractionMethod =
   | "manual_note"
+  | "ocr"
   | "pdf_text"
   | "text_file"
   | "triage";
@@ -80,6 +82,7 @@ function normalizeStatus(value: string | null): MaterialExtractionStatus {
   if (
     value === "failed" ||
     value === "ocr_needed" ||
+    value === "ocr_processing" ||
     value === "pending" ||
     value === "text_ready" ||
     value === "unsupported"
@@ -216,6 +219,126 @@ export async function listMaterialExtractionCheckpoints(tripId: string) {
   return ((data ?? []) as unknown as MaterialExtractionRow[]).map(
     normalizeMaterialExtraction
   );
+}
+
+export async function listOcrNeededMaterialExtractions({
+  limit = 20,
+  tripId,
+}: {
+  limit?: number;
+  tripId?: string;
+} = {}) {
+  const supabase = await createSupabaseServerClient();
+  let query = supabase
+    .from("trip_material_extractions")
+    .select(materialExtractionColumns)
+    .eq("status", "ocr_needed")
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (tripId) {
+    query = query.eq("trip_id", tripId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return [];
+    }
+
+    throw new Error(`Unable to load OCR-needed materials: ${error.message}`);
+  }
+
+  return ((data ?? []) as unknown as MaterialExtractionRow[]).map(
+    normalizeMaterialExtraction
+  );
+}
+
+export async function markMaterialExtractionOcrProcessing({
+  id,
+  metadata = {},
+}: {
+  id: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("trip_material_extractions")
+    .update({
+      completed_at: null,
+      error_message: null,
+      extraction_method: "ocr",
+      failure_class: null,
+      metadata,
+      status: "ocr_processing",
+      updated_at: now,
+    })
+    .eq("id", id)
+    .eq("status", "ocr_needed")
+    .select(materialExtractionColumns)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Unable to mark material OCR processing: ${error.message}`);
+  }
+
+  return data ? normalizeMaterialExtraction(data as unknown as MaterialExtractionRow) : null;
+}
+
+export async function completeMaterialExtractionOcr({
+  metadata = {},
+  provider,
+  record,
+  text,
+}: {
+  metadata?: Record<string, unknown>;
+  provider: string;
+  record: MaterialExtractionRecord;
+  text: string;
+}) {
+  return upsertMaterialExtractionCheckpoint({
+    extractedCharCount: text.trim().length,
+    extractionMethod: "ocr",
+    metadata: {
+      ...record.metadata,
+      ...metadata,
+      ocrProvider: provider,
+    },
+    status: "text_ready",
+    textContent: text,
+    tripId: record.tripId,
+    uploadId: record.uploadId,
+  });
+}
+
+export async function failMaterialExtractionOcr({
+  errorMessage,
+  failureClass = "ocr_failed",
+  metadata = {},
+  provider,
+  record,
+}: {
+  errorMessage: string;
+  failureClass?: string;
+  metadata?: Record<string, unknown>;
+  provider: string;
+  record: MaterialExtractionRecord;
+}) {
+  return upsertMaterialExtractionCheckpoint({
+    errorMessage,
+    extractionMethod: "ocr",
+    failureClass,
+    metadata: {
+      ...record.metadata,
+      ...metadata,
+      ocrProvider: provider,
+    },
+    status: "failed",
+    tripId: record.tripId,
+    uploadId: record.uploadId,
+  });
 }
 
 export function materialFromCheckpoint({

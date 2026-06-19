@@ -886,6 +886,10 @@ function getExtractionErrorMessage(error?: string) {
     return "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass.";
   }
 
+  if (error === "ocr-needed") {
+    return "These saved materials look like scans or images, so Roamwoven needs the image-reading step before it can build the draft.";
+  }
+
   if (error === "checkout-required") {
     return "Checkout must be complete before parsing.";
   }

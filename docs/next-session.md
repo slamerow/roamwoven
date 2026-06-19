@@ -67,6 +67,7 @@ Backend-ready pieces now exist:
   - It requires a paid trip, OpenAI config, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and at least one parseable material.
   - It extracts normal PDF text locally before the OpenAI call. It does not OCR scanned/image-only PDFs yet.
   - It checkpoints each uploaded material in `trip_material_extractions` before the model call as text-ready, OCR-needed, unsupported, or failed. This is internal only; the maker still sees one build action.
+  - The OCR lane contract now exists in `lib/extraction/material-extractions.ts`: list OCR-needed materials, mark OCR processing, complete OCR into a text-ready checkpoint, or fail OCR with provider/failure metadata. No provider is wired yet.
   - It now normalizes and caps extracted materials before the OpenAI call so ugly documents cannot make model input scale linearly with document mess. Raw-vs-submitted character counts, estimated input tokens, and trimmed material count are stored internally in `trip_processing_runs.openai_usage.materialBudget`.
   - Material-budget telemetry is for future admin/support observability only; do not surface it to maker or traveler UI.
   - It logs `trip_processing_runs`, stores raw JSON in `trip_draft_snapshots`, and updates `trips.processing_status`.

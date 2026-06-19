@@ -72,6 +72,7 @@ Also keep it `false` until the production database has the additive extraction t
   - Records scanned/image-heavy PDFs and images as OCR-needed instead of silently dropping them.
 - `lib/extraction/material-extractions.ts`
   - Persists per-upload extraction checkpoints in `trip_material_extractions`.
+  - Defines the OCR lane contract: list OCR-needed materials, mark OCR processing, complete OCR into `text_ready`, or fail OCR with a class/message.
 - `lib/extraction/material-budget.ts`
   - Removes repeated boilerplate and caps the submitted material bundle before the AI call.
   - Produces per-run internal telemetry for cost/support review.

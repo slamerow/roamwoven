@@ -118,6 +118,14 @@ function summarizeMaterialCheckpoints(
   );
 }
 
+function getNoMaterialErrorCode(
+  summary: ReturnType<typeof summarizeMaterialCheckpoints>
+) {
+  return (summary.byStatus.ocr_needed ?? 0) > 0
+    ? "ocr-needed"
+    : "no-text-materials";
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ tripId: string }> }
@@ -161,7 +169,9 @@ export async function POST(
     summarizeMaterialCheckpoints(materialCheckpoints);
 
   if (materials.length === 0) {
-    return redirectToData(request, tripId, { error: "no-text-materials" });
+    return redirectToData(request, tripId, {
+      error: getNoMaterialErrorCode(materialCheckpointSummary),
+    });
   }
 
   const optimizedMaterials = optimizeTripExtractionMaterials({
@@ -171,7 +181,9 @@ export async function POST(
   const inputCharCount = optimizedMaterials.summary.submittedCharCount;
 
   if (optimizedMaterials.materials.length === 0 || inputCharCount === 0) {
-    return redirectToData(request, tripId, { error: "no-text-materials" });
+    return redirectToData(request, tripId, {
+      error: getNoMaterialErrorCode(materialCheckpointSummary),
+    });
   }
 
   console.info("trip_extraction_materials_ready", {

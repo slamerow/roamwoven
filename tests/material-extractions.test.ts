@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  completeMaterialExtractionOcr,
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
   type MaterialExtractionRecord,
@@ -120,6 +121,65 @@ export default async function run() {
         (savedPayload as Record<string, unknown> | null)?.extracted_char_count,
         longText.length
       );
+    } finally {
+      require("@/lib/supabase/server").createSupabaseServerClient =
+        originalCreateSupabaseServerClient;
+    }
+  });
+
+  await test("completed OCR writes text-ready checkpoint with provider metadata", async () => {
+    const originalCreateSupabaseServerClient =
+      require("@/lib/supabase/server").createSupabaseServerClient;
+    let savedPayload: Record<string, unknown> | null = null;
+
+    require("@/lib/supabase/server").createSupabaseServerClient = async () => ({
+      from: () => ({
+        upsert: (payload: Record<string, unknown>) => {
+          savedPayload = payload;
+
+          return {
+            select: () => ({
+              single: async () => ({
+                data: {
+                  id: "checkpoint-1",
+                  completed_at: "2026-06-19T12:00:00.000Z",
+                  created_at: "2026-06-19T12:00:00.000Z",
+                  error_message: null,
+                  extracted_char_count: payload.extracted_char_count,
+                  extraction_method: payload.extraction_method,
+                  failure_class: payload.failure_class,
+                  metadata: payload.metadata,
+                  status: payload.status,
+                  text_content: payload.text_content,
+                  trip_id: payload.trip_id,
+                  updated_at: payload.updated_at,
+                  upload_id: payload.upload_id,
+                },
+                error: null,
+              }),
+            }),
+          };
+        },
+      }),
+    });
+
+    try {
+      const record = await completeMaterialExtractionOcr({
+        provider: "test-ocr",
+        record: checkpoint({
+          metadata: { source: "unit-test" },
+          status: "ocr_processing",
+          textContent: null,
+        }),
+        text: "OCR flight text",
+      });
+
+      assert.equal(record.status, "text_ready");
+      assert.equal(record.extractionMethod, "ocr");
+      assert.equal(record.textContent, "OCR flight text");
+      assert.equal(record.metadata.ocrProvider, "test-ocr");
+      assert.equal(record.metadata.source, "unit-test");
+      assert.equal((savedPayload as Record<string, unknown> | null)?.status, "text_ready");
     } finally {
       require("@/lib/supabase/server").createSupabaseServerClient =
         originalCreateSupabaseServerClient;
