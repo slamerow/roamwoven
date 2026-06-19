@@ -68,7 +68,8 @@ function listTestFiles(dir) {
         return listTestFiles(fullPath);
       }
 
-      return entry.isFile() && entry.name.endsWith(".test.ts")
+      return entry.isFile() &&
+        (entry.name.endsWith(".test.ts") || entry.name.endsWith(".test.mjs"))
         ? [fullPath]
         : [];
     })
@@ -84,7 +85,21 @@ if (testFiles.length === 0) {
 }
 
 for (const file of testFiles) {
-  require(file);
+  if (file.endsWith(".mjs")) {
+    const module = await import(file);
+    const run = module.default ?? module.run;
+
+    if (typeof run === "function") {
+      await run();
+    }
+  } else {
+    const module = require(file);
+    const run = module.default ?? module.run;
+
+    if (typeof run === "function") {
+      await run();
+    }
+  }
 }
 
 console.log(`Passed ${testFiles.length} test file${testFiles.length === 1 ? "" : "s"}.`);

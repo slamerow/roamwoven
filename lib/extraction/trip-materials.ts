@@ -190,6 +190,11 @@ export async function getPdfExtractionMaterials(
       const text = await extractPdfText(data);
 
       if (text.length >= MIN_READABLE_PDF_TEXT_LENGTH) {
+        console.info("trip_material_pdf_text_extracted", {
+          charCount: text.length,
+          fileName: upload.originalFilename,
+          tripId: upload.tripId,
+        });
         materials.push({
           filename: upload.originalFilename,
           text,

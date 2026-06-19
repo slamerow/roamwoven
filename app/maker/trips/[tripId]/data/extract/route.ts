@@ -93,6 +93,12 @@ export async function POST(
     (sum, material) => sum + material.text.length,
     0
   );
+  console.info("trip_extraction_materials_ready", {
+    inputCharCount,
+    materialCount: materials.length,
+    materialTypes: Array.from(new Set(materials.map((material) => material.type))),
+    tripId,
+  });
   let run: Awaited<ReturnType<typeof createTripProcessingRun>> | null = null;
 
   try {
