@@ -106,7 +106,7 @@ function field({
   };
 }
 
-function formatShortDate(value: string | null) {
+function parseReviewDate(value: string | null) {
   if (!value) {
     return null;
   }
@@ -114,35 +114,55 @@ function formatShortDate(value: string | null) {
   const date = new Date(`${value}T00:00:00.000Z`);
 
   if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatReviewDate(value: string | null, includeYear = true) {
+  const date = parseReviewDate(value);
+
+  if (!date) {
     return value;
   }
 
   return new Intl.DateTimeFormat("en", {
     day: "numeric",
-    month: "short",
+    month: "long",
     timeZone: "UTC",
-  })
-    .format(date)
-    .replace(/^([A-Za-z]{3}) /, "$1. ");
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(date);
 }
 
-function formatShortDateRange(start: string | null, end: string | null) {
-  const formattedStart = formatShortDate(start);
-  const formattedEnd = formatShortDate(end);
+function formatReviewDateRange(start: string | null, end: string | null) {
+  const startDate = parseReviewDate(start);
+  const endDate = parseReviewDate(end);
+  const formattedStart = formatReviewDate(start, true);
+  const formattedEnd = formatReviewDate(end, true);
 
-  if (!formattedStart && !formattedEnd) {
+  if (!start && !end) {
     return "";
   }
 
-  if (!formattedStart || !formattedEnd || formattedStart === formattedEnd) {
+  if (!startDate || !endDate || start === end) {
     return formattedStart ?? formattedEnd ?? "";
   }
 
-  const [startMonth, startDay] = formattedStart.split(" ");
-  const [endMonth, endDay] = formattedEnd.split(" ");
+  const sameYear = startDate.getUTCFullYear() === endDate.getUTCFullYear();
+  const sameMonth = sameYear && startDate.getUTCMonth() === endDate.getUTCMonth();
 
-  if (startMonth === endMonth) {
-    return `${startMonth} ${startDay}-${endDay}`;
+  if (sameMonth) {
+    const month = new Intl.DateTimeFormat("en", {
+      month: "long",
+      timeZone: "UTC",
+    }).format(startDate);
+
+    return `${month} ${startDate.getUTCDate()}-${endDate.getUTCDate()}, ${startDate.getUTCFullYear()}`;
+  }
+
+  if (sameYear) {
+    return `${formatReviewDate(start, false)}-${formatReviewDate(end, true)}`;
   }
 
   return `${formattedStart}-${formattedEnd}`;
@@ -390,7 +410,7 @@ export function getStructuredReviewSections(
             }),
           ],
           id: leg.id,
-          meta: formatShortDateRange(leg.arriveDate, leg.leaveDate),
+          meta: formatReviewDateRange(leg.arriveDate, leg.leaveDate),
           subjectId: leg.id,
           subjectType: "leg" as const,
           title: leg.displayName,
@@ -399,7 +419,7 @@ export function getStructuredReviewSections(
       summaryItems: records.legs
         .filter((leg) => isActiveStatus(leg.status))
         .map((leg) =>
-          [leg.displayName, [leg.arriveDate, leg.leaveDate].filter(Boolean).join(" to ")]
+          [leg.displayName, formatReviewDateRange(leg.arriveDate, leg.leaveDate)]
             .filter(Boolean)
             .join(" · ")
         ),
@@ -450,7 +470,7 @@ export function getStructuredReviewSections(
             }),
           ],
           id: stay.id,
-          meta: formatShortDateRange(stay.checkInDate, stay.checkOutDate),
+          meta: formatReviewDateRange(stay.checkInDate, stay.checkOutDate),
           subjectId: stay.id,
           subjectType: "stay" as const,
           title: stay.name,
@@ -459,7 +479,7 @@ export function getStructuredReviewSections(
       summaryItems: records.stays
         .filter((stay) => isActiveStatus(stay.status))
         .map((stay) =>
-          [stay.name, [stay.checkInDate, stay.checkOutDate].filter(Boolean).join(" to ")]
+          [stay.name, formatReviewDateRange(stay.checkInDate, stay.checkOutDate)]
             .filter(Boolean)
             .join(" · ")
         ),

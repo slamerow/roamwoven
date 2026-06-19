@@ -8,7 +8,7 @@ export const APP_MODULES = [
   {
     key: "stays",
     title: "Stays",
-    copy: "Hotels, rentals, addresses, check-in details, and host notes.",
+    copy: "Hotels, rentals, check-in details, and stay notes. Exact private addresses and access details can stay password-protected.",
     defaultEnabled: true,
   },
   {
@@ -20,7 +20,7 @@ export const APP_MODULES = [
   {
     key: "search",
     title: "Trip search",
-    copy: "Fast lookup across dates, places, confirmations, and notes.",
+    copy: "Fast lookup across dates, places, confirmations, and notes, with sensitive details handled by privacy settings.",
     defaultEnabled: true,
   },
   {
@@ -53,17 +53,7 @@ export const BUILD_CONFIRMATIONS = [
   {
     key: "materials",
     title: "All core materials are included",
-    copy: "Add the files Roamwoven should use before the first build. Later uploads should be small corrections or late additions, not a fresh rebuild.",
-  },
-  {
-    key: "optional",
-    title: "Skipped modules should stay hidden",
-    copy: "If there are no flights, photos, or phrases, the traveler app should not show filler.",
-  },
-  {
-    key: "sensitive",
-    title: "Private details need a sharing pass",
-    copy: "Cards with exact private addresses, codes, confirmations, or personal notes can keep those details behind a password.",
+    copy: "Roamwoven will build from the files and notes saved here. Add anything essential now; later uploads should be small corrections or late additions.",
   },
 ] as const;
 

@@ -609,7 +609,11 @@ function StructuredRecordReview({
   sections: StructuredReviewSection[];
   tripId: string;
 }) {
-  const reviewCount = sections.reduce(
+  const foundSections = sections.filter(
+    (section) => section.count > 0 || section.summaryItems.length > 0
+  );
+  const decisionSections = sections.filter((section) => section.items.length > 0);
+  const reviewCount = decisionSections.reduce(
     (count, section) => count + section.items.length,
     0
   );
@@ -624,11 +628,11 @@ function StructuredRecordReview({
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-ink">
-            Review these items
+            What we found
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            Confirm the few details Roamwoven needs before the traveler app is
-            assembled.
+            These are the structured trip pieces Roamwoven pulled from your
+            materials. Expand a group to spot-check the titles and dates.
           </p>
         </div>
         <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
@@ -653,7 +657,7 @@ function StructuredRecordReview({
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
-        {sections.map((section) => {
+        {foundSections.map((section) => {
           const Icon = sectionIcons[section.id] ?? Sparkles;
 
           return (
@@ -681,11 +685,11 @@ function StructuredRecordReview({
               <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
                 Found
               </p>
-              <p className="mt-3 text-xs font-semibold text-ink/55">
-                {section.items.length > 0
-                  ? `${section.items.length} need confirmation`
-                  : section.emptyDetail}
-              </p>
+              {section.items.length > 0 ? (
+                <p className="mt-3 text-xs font-semibold text-clay">
+                  {section.items.length} need review
+                </p>
+              ) : null}
               {section.summaryItems.length > 0 ? (
                 <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
                   {section.summaryItems.slice(0, 8).map((summaryItem) => (
@@ -722,8 +726,16 @@ function StructuredRecordReview({
         })}
       </div>
 
-      <div className="mt-6 space-y-3">
-        {sections.map((section) =>
+      <div className="mt-6 border-t border-ink/10 pt-5">
+        <h3 className="text-lg font-semibold text-ink">Needs review</h3>
+        <p className="mt-2 text-sm leading-6 text-ink/60">
+          Only items that need a decision show up here. Everything else can keep
+          moving toward the traveler app.
+        </p>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {decisionSections.map((section) =>
           section.items.length > 0 ? (
             <details
               open
@@ -1070,6 +1082,7 @@ function RealTripFirstPass({
                 </div>
               </div>
             </div>
+            {!reviewedStructuredDraft ? (
             <details className="mt-5 rounded-md bg-paper px-4 py-3">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-ink">
                 <span className="inline-flex items-center gap-2">
@@ -1109,6 +1122,7 @@ function RealTripFirstPass({
                 </div>
               ) : null}
             </details>
+            ) : null}
           </>
         ) : (
           <>

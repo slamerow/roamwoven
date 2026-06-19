@@ -235,8 +235,9 @@ export function ReviewFlowPanel({
               Before design
             </h2>
             <p className="mt-2 text-sm leading-6 text-ink/60">
-              A quick check keeps the first draft focused and avoids empty
-              sections in the traveler app.
+              One quick check keeps the first draft focused. Roamwoven will
+              hide empty sections and recommend privacy protections during
+              review.
             </p>
             <div className="mt-5 space-y-3">
               {BUILD_CONFIRMATIONS.map((item) => (

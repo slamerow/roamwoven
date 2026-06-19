@@ -323,6 +323,23 @@ Latest checks after Andalucía review UX/product-contract pass:
 - `npm run typecheck`
 - `npm run build`
 
+Latest checks after Eastern Europe review-friction and bounded-inference pass:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Maker UX note:
+
+- App setup now has one required pre-build confirmation: core materials are included. Empty-section handling and recommended privacy language moved into the section/module copy and review behavior instead of separate friction checks.
+- Draft processing copy now sets the expectation at up to 5 minutes and cycles through concrete work labels such as flights/trains, hotels, dinner reservations, museums/tours, and other activities.
+- Structured draft review now separates `What we found` from `Needs review`. Found groups summarize extracted legs, stays, transport, activities, and privacy groups; the decision queue should only contain records/questions that actually need maker action.
+- Leg and stay review summaries should use human date ranges such as `January 1-3, 2019`, not raw ISO dates.
+
+Extraction inference note:
+
+- Avoid dumb questions, but do not hallucinate. The parser may infer stay checkout dates only from explicit source evidence such as a visible first night/check-in date plus a stated nights count. Do not infer lodging dates from nearby itinerary context alone; leave uncertain fields null and ask only when the ambiguity materially affects the traveler app.
+
 After that foundation is moving, continue hardening the post-payment maker flow:
 
 1. Test the newly scaffolded draft-review screen on the paid trip and the demo trip.

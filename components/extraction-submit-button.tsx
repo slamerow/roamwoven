@@ -7,8 +7,9 @@ const processingSteps = [
   "Checking trip dates and places",
   "Checking flights and trains",
   "Checking hotels and lodging",
-  "Checking dinners and reservations",
-  "Checking activities and notes",
+  "Checking dinner reservations",
+  "Checking museums and tours",
+  "Checking other activities and notes",
 ];
 
 export function ExtractionSubmitButton({
@@ -108,8 +109,8 @@ export function ExtractionSubmitButton({
             {processingSteps[stepIndex]}
           </p>
           <p className="mt-1 text-xs leading-5 text-ink/50">
-            This can take up to 2-3 minutes. Keep this tab open while Roamwoven
-            builds the first draft.
+            This can take up to 5 minutes. Keep this tab open; go grab water and
+            Roamwoven should be ready when you're back.
           </p>
         </div>
       ) : null}
