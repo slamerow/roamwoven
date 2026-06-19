@@ -495,7 +495,7 @@ test("commercial activity addresses do not become private details", () => {
         {
           detailType: "address",
           reason: "The source includes a watch shop address.",
-          title: "Watches in Rome address",
+          title: "Watch shop in Rome address",
         },
       ],
       stays: [],
@@ -525,7 +525,7 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
-test("optional rental car provider questions become calls", () => {
+test("optional transport provider questions become calls", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -568,6 +568,48 @@ test("optional rental car provider questions become calls", () => {
   assert.equal(records.reviewQuestions[0]?.status, "noted");
   assert.equal(getStructuredReviewCount(records), 0);
   assert.equal(notes?.count, 1);
+});
+
+test("optional train operator questions become calls", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "The source has train route and times, but no operator.",
+          guessedValue: null,
+          prompt: "We created the train without an operator.",
+          reason:
+            "The route and times are enough for the traveler app; the operator can be added later if needed.",
+          relatedTitle: "Vienna to Budapest train",
+          subjectType: "transport",
+          targetField: "provider",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Budapest Keleti",
+          date: "2019-01-21",
+          departure: "Wien Hbf",
+          title: "Vienna to Budapest train",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-train-provider",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("duplicate open questions for the same record and field collapse", () => {

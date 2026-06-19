@@ -82,7 +82,7 @@ const privateResidencePatterns = [
   /\bstay with\b/i,
   /\bfamily\b/i,
   /\bfriend'?s\b/i,
-  /\banna'?s house\b/i,
+  /\b[a-z]+['’]s\s+(apartment|flat|home|house)\b/i,
   /\bhome\b/i,
   /\bairbnb\b/i,
   /\brental\b/i,

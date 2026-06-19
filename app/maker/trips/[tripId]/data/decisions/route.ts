@@ -113,15 +113,37 @@ export async function POST(
   const { tripId } = await params;
   const trip = await getMakerTrip(tripId);
   const dataUrl = new URL(`/maker/trips/${tripId}/data`, request.url);
+  const wantsJson = request.headers.get("accept")?.includes("application/json");
 
-  if (trip.isDemo) {
-    dataUrl.searchParams.set("decision", "demo");
+  function respond(
+    params: { decision?: string; error?: string },
+    status = params.error ? 400 : 200
+  ) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) {
+        dataUrl.searchParams.set(key, value);
+      }
+    }
+
+    if (wantsJson) {
+      return NextResponse.json(
+        {
+          ok: !params.error,
+          ...params,
+        },
+        { status }
+      );
+    }
+
     return NextResponse.redirect(dataUrl, 303);
   }
 
+  if (trip.isDemo) {
+    return respond({ decision: "demo" });
+  }
+
   if (trip.paymentStatus !== "paid") {
-    dataUrl.searchParams.set("error", "checkout-required");
-    return NextResponse.redirect(dataUrl, 303);
+    return respond({ error: "checkout-required" }, 403);
   }
 
   try {
@@ -132,8 +154,7 @@ export async function POST(
     const note = String(formData.get("note") ?? "").trim() || null;
 
     if (!isWritableAction(action) || !isSubjectType(subjectType) || !subjectId) {
-      dataUrl.searchParams.set("error", "decision-invalid");
-      return NextResponse.redirect(dataUrl, 303);
+      return respond({ error: "decision-invalid" });
     }
 
     const subjectIds = String(formData.get("subjectIds") ?? "")
@@ -156,14 +177,12 @@ export async function POST(
           })
         )
       );
-      dataUrl.searchParams.set("decision", "saved");
-      return NextResponse.redirect(dataUrl, 303);
+      return respond({ decision: "saved" });
     }
 
     if (action === "answer_question") {
       if (subjectType !== "review_question") {
-        dataUrl.searchParams.set("error", "decision-invalid");
-        return NextResponse.redirect(dataUrl, 303);
+        return respond({ error: "decision-invalid" });
       }
 
       await saveTripReviewDecision({
@@ -181,8 +200,7 @@ export async function POST(
       const changes = parseEditChanges(formData, subjectType);
 
       if (Object.keys(changes).length === 0) {
-        dataUrl.searchParams.set("error", "decision-invalid");
-        return NextResponse.redirect(dataUrl, 303);
+        return respond({ error: "decision-invalid" });
       }
 
       await saveTripReviewDecision({
@@ -198,8 +216,7 @@ export async function POST(
       const targetId = String(formData.get("targetId") ?? subjectId);
 
       if (subjectType !== "item" || !sourceId || !targetId) {
-        dataUrl.searchParams.set("error", "decision-invalid");
-        return NextResponse.redirect(dataUrl, 303);
+        return respond({ error: "decision-invalid" });
       }
 
       await saveTripReviewDecision({
@@ -221,10 +238,8 @@ export async function POST(
       });
     }
 
-    dataUrl.searchParams.set("decision", "saved");
-    return NextResponse.redirect(dataUrl, 303);
+    return respond({ decision: "saved" });
   } catch {
-    dataUrl.searchParams.set("error", "decision-save-failed");
-    return NextResponse.redirect(dataUrl, 303);
+    return respond({ error: "decision-save-failed" });
   }
 }

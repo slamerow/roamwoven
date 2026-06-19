@@ -183,7 +183,7 @@ function isOptionalMissingDetail({
     subjectType === "transport" &&
     (target.includes("provider") ||
       target.includes("company") ||
-      /\b(company|provider|operator|rental car company)\b/.test(text))
+      /\b(company|provider|operator)\b/.test(text))
   ) {
     return true;
   }
@@ -216,7 +216,7 @@ function isPublicVenueAddressDetail({
 
   const normalizedTitle = title.toLowerCase();
   const publicVenuePattern =
-    /\b(bar|bistro|cafe|café|church|gallery|landmark|market|museum|restaurant|shop|shopping|station|store|venue|watch|watches)\b/;
+    /\b(bar|bistro|boutique|cafe|café|church|gallery|jewelry|jewellery|landmark|market|museum|restaurant|retail|shop|shopping|showroom|station|store|venue)\b/;
   const privatePlacePattern =
     /\b(access|airbnb|apartment|door|flat|gate|home|host|hotel|hostel|lodging|lock|rental|residence|room|stay)\b/;
 

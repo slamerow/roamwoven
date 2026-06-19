@@ -43,10 +43,16 @@ export function ReviewDecisionInlineForm({
 
           const response = await fetch(actionUrl, {
             body: new FormData(form),
+            headers: {
+              accept: "application/json",
+            },
             method: "POST",
           });
+          const result = (await response.json().catch(() => null)) as {
+            ok?: boolean;
+          } | null;
 
-          if (!response.ok) {
+          if (!response.ok || result?.ok !== true) {
             throw new Error("Decision save failed.");
           }
 
