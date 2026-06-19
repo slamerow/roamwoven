@@ -109,6 +109,7 @@ export async function listMakerTrips(): Promise<MakerTrip[]> {
       ].join(",")
     )
     .eq("owner_user_id", user.id)
+    .neq("status", "deleted")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -151,6 +152,7 @@ export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
     )
     .eq("id", tripId)
     .eq("owner_user_id", user.id)
+    .neq("status", "deleted")
     .single();
 
   if (error || !data) {
@@ -249,6 +251,48 @@ export async function updateMakerTripName({
     oldTripName: previousName,
     tripId,
   });
+}
+
+export async function softDeleteMakerTrip({
+  paidWarningAccepted = false,
+  tripId,
+}: {
+  paidWarningAccepted?: boolean;
+  tripId: string;
+}) {
+  if (!hasSupabaseServerConfig()) {
+    return;
+  }
+
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new Error("You must be signed in to delete this trip.");
+  }
+
+  const trip = await getMakerTrip(tripId);
+
+  if (trip.isDemo) {
+    throw new Error("Demo trips cannot be deleted.");
+  }
+
+  if (trip.paymentStatus === "paid" && !paidWarningAccepted) {
+    throw new Error("Paid trip deletion requires explicit confirmation.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("trips")
+    .update({
+      status: "deleted",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId)
+    .eq("owner_user_id", user.id);
+
+  if (error) {
+    throw new Error(`Unable to delete trip: ${error.message}`);
+  }
 }
 
 export async function markTripPaid(tripId: string) {

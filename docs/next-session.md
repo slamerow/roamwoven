@@ -110,6 +110,8 @@ Backend-ready pieces now exist:
 - First real-draft review feedback from the Andalucía extraction exposed a real data-contract issue, not a copy bug: dining reservations were flowing through the generic `activities` draft bucket without Wren-style category organization. The extraction schema now requires every activity to have a Wren-style `category`, dining language backfills to `categoryId = food_dining`, and the review cards label section totals as `Found` separately from records that need confirmation. Do not introduce `itemType = restaurant`; dining reservations are activities with a food/dining category.
 - First draft-review UX feedback also shifted the page away from internal parser language: headline is now `Check the draft`, technical model/input-character metadata and the `Parsed draft saved` banner are hidden, dates are spelled out in long form, style direction/colors are shown in the review header, `What we found` is collapsible and includes app categories, sections collapse, empty states say `No ... decisions needed`, and review progress is visible. Generated questions now have answer fields, but this is still only a persisted answer decision; the proper next contract is hypothesis-style questions with guessed value, field target, evidence, confidence, and a resolver that applies the answer to structured records.
 - The hypothesis-question contract now exists for new extractions: `missingDetails` can include `subjectType`, `targetField`, `guessedValue`, `evidence`, `answerType`, and `confidence`. The adapter links questions back to matching records by `relatedTitle`; the review UI shows the guess/evidence and offers `Yes, use this`; answering a targeted question applies the answer to a whitelisted structured record field and marks the record confirmed. Next improvement is richer matching/resolution for duplicate records and non-text/vision-derived evidence.
+- Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app but leaves backend records recoverable by the superadmin. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete.
+- Stripe sandbox promo code `QA100` is active for Roamwoven test builds. It is 100% off once, valid, capped at 10 total redemptions, and currently showed 1 out of 10 redemptions used in the Stripe dashboard, so there are 9 remaining test uses before another code is needed.
 
 Live Supabase dev setup is partially complete:
 
@@ -274,6 +276,12 @@ Latest checks after the Andalucía dining-card/count-contract fix:
 - `npm run build`
 
 Latest checks after the draft-review UX and final-travel-day fix:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after the maker trip soft-delete and published-token guard:
 
 - `npm test`
 - `npm run typecheck`

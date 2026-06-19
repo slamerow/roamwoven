@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DeleteTripButton } from "@/components/delete-trip-button";
 import { MakerProgress } from "@/components/maker-progress";
 import { TripNameEditor } from "@/components/trip-name-editor";
 import { getCurrentUser } from "@/lib/auth";
@@ -312,6 +313,26 @@ export default async function TripWorkspacePage({
             ) : null}
           </section>
         )}
+
+        {!trip.isDemo ? (
+          <section className="mt-8 rounded-md border border-clay/20 bg-white p-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-clay">
+                  Danger zone
+                </p>
+                <h2 className="mt-2 text-lg font-semibold text-ink">
+                  Remove this trip
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
+                  This hides the trip from your dashboard. Paid trips keep their
+                  backend records so a superadmin can recover them later.
+                </p>
+              </div>
+              <DeleteTripButton trip={trip} />
+            </div>
+          </section>
+        ) : null}
 
       </div>
     </main>

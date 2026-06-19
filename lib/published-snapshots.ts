@@ -40,6 +40,10 @@ type PublishedTripSnapshotRow = {
   version: number | null;
 };
 
+type TripPublicationStateRow = {
+  status: string | null;
+};
+
 function hasSupabaseServerConfig() {
   const { url, anonKey } = getSupabaseConfig();
   return Boolean(url && anonKey);
@@ -204,5 +208,24 @@ export async function getPublishedTripSnapshotByToken(token: string) {
     throw new Error(`Unable to load published snapshot: ${error.message}`);
   }
 
-  return data ? normalizeSnapshot(data as unknown as PublishedTripSnapshotRow) : null;
+  if (!data) {
+    return null;
+  }
+
+  const snapshot = normalizeSnapshot(data as unknown as PublishedTripSnapshotRow);
+  const { data: trip, error: tripError } = await supabase
+    .from("trips")
+    .select("status")
+    .eq("id", snapshot.tripId)
+    .maybeSingle();
+
+  if (tripError) {
+    throw new Error(`Unable to load trip publication state: ${tripError.message}`);
+  }
+
+  if ((trip as unknown as TripPublicationStateRow | null)?.status === "deleted") {
+    return null;
+  }
+
+  return snapshot;
 }
