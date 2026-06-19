@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useFormStatus } from "react-dom";
+import type { FormEvent } from "react";
 
 const processingSteps = [
   "Reading your materials",
@@ -12,11 +12,15 @@ const processingSteps = [
 ];
 
 export function ExtractionSubmitButton({
+  action,
   canExtract,
+  isRetry = false,
 }: {
+  action: string;
   canExtract: boolean;
+  isRetry?: boolean;
 }) {
-  const { pending } = useFormStatus();
+  const [pending, setPending] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const disabled = !canExtract || pending;
 
@@ -33,8 +37,30 @@ export function ExtractionSubmitButton({
     return () => window.clearInterval(interval);
   }, [pending]);
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (disabled) {
+      return;
+    }
+
+    setPending(true);
+
+    try {
+      const response = await fetch(action, {
+        method: "POST",
+      });
+
+      window.location.assign(response.url || action.replace(/\/extract$/, ""));
+    } catch {
+      const fallbackUrl = new URL(window.location.href);
+      fallbackUrl.searchParams.set("error", "extraction-failed");
+      window.location.assign(fallbackUrl.toString());
+    }
+  }
+
   return (
-    <div>
+    <form action={action} className="mt-5" method="post" onSubmit={handleSubmit}>
       <button
         className={
           disabled
@@ -44,7 +70,11 @@ export function ExtractionSubmitButton({
         disabled={disabled}
         type="submit"
       >
-        {pending ? "Building your draft..." : "Build my trip app"}
+        {pending
+          ? "Building your draft..."
+          : isRetry
+            ? "Retry build"
+            : "Build my trip app"}
       </button>
       {pending ? (
         <div className="mt-4 max-w-md rounded-md border border-ink/10 bg-paper p-4">
@@ -63,8 +93,12 @@ export function ExtractionSubmitButton({
           <p className="mt-3 text-sm font-semibold text-ink">
             {processingSteps[stepIndex]}
           </p>
+          <p className="mt-1 text-xs leading-5 text-ink/50">
+            This can take a minute. Keep this tab open while Roamwoven builds
+            the first draft.
+          </p>
         </div>
       ) : null}
-    </div>
+    </form>
   );
 }

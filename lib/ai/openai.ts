@@ -152,8 +152,20 @@ export async function createOpenAIStructuredResponse({
     );
   }
 
+  let json: unknown;
+
+  try {
+    json = JSON.parse(rawText) as unknown;
+  } catch (error) {
+    throw new OpenAIExtractionRequestError(
+      `OpenAI returned structured output that could not be parsed as JSON: ${
+        error instanceof Error ? error.message : "Unknown JSON parse error."
+      }`
+    );
+  }
+
   return {
-    json: JSON.parse(rawText) as unknown,
+    json,
     model: config.extractionModel,
     rawText,
     usage: body.usage ?? null,

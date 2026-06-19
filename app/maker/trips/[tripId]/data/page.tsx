@@ -799,6 +799,46 @@ function formatRunDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function getExtractionErrorMessage(error?: string) {
+  if (!error) {
+    return null;
+  }
+
+  if (error === "extraction-disabled") {
+    return "AI extraction is disabled. Add the OpenAI key and enable the extraction flag before parsing.";
+  }
+
+  if (error === "extraction-not-allowed") {
+    return "AI extraction is enabled only for selected test trips in this environment.";
+  }
+
+  if (error === "no-text-materials") {
+    return "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass.";
+  }
+
+  if (error === "checkout-required") {
+    return "Checkout must be complete before parsing.";
+  }
+
+  if (error === "processing-active") {
+    return "This trip is already processing. Wait for the current run to finish before starting another update.";
+  }
+
+  if (error === "duplicate-build-blocked") {
+    return "Roamwoven already attempted a build for this exact set of saved materials. The latest failed run can be retried below, but each retry may start another AI call.";
+  }
+
+  if (error === "spine-exists") {
+    return "The first trip spine already exists. Late documents should update the existing trip, not rebuild it from scratch.";
+  }
+
+  if (error === "missing-spine-basics") {
+    return "Roamwoven could not find enough basics to build a V1 trip spine. Add the missing dates, destinations, stays, transport, or anchor plans before trying again.";
+  }
+
+  return "Parsing failed. Review the failure detail below before retrying.";
+}
+
 function RealTripFirstPass({
   error,
   extractionEnabled,
@@ -834,6 +874,8 @@ function RealTripFirstPass({
             Number(upload.fileSizeBytes ?? 0) <= 10 * 1024 * 1024)))
   ).length;
   const canExtract = extractionEnabled && textMaterialCount > 0;
+  const latestRunFailed = latestRun?.status === "failed";
+  const extractionErrorMessage = getExtractionErrorMessage(error);
   const draft = latestDraft?.draftJson ?? null;
   const structuredDraft = draft
     ? createStructuredTripRecordsFromDraft({
@@ -892,25 +934,9 @@ function RealTripFirstPass({
 
   return (
     <>
-      {error ? (
+      {extractionErrorMessage ? (
         <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-          {error === "extraction-disabled"
-            ? "AI extraction is disabled. Add the OpenAI key and enable the extraction flag before parsing."
-            : error === "extraction-not-allowed"
-              ? "AI extraction is enabled only for selected test trips in this environment."
-            : error === "no-text-materials"
-              ? "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass."
-              : error === "checkout-required"
-                ? "Checkout must be complete before parsing."
-                : error === "processing-active"
-                  ? "This trip is already processing. Wait for the current run to finish before starting another update."
-                  : error === "duplicate-build-blocked"
-                    ? "Roamwoven already attempted a build for this exact set of saved materials, so it blocked another AI call. Add or replace source material before trying again."
-                  : error === "spine-exists"
-                    ? "The first trip spine already exists. Late documents should update the existing trip, not rebuild it from scratch."
-                    : error === "missing-spine-basics"
-                      ? "Roamwoven could not find enough basics to build a V1 trip spine. Add the missing dates, destinations, stays, transport, or anchor plans before trying again."
-                      : "Parsing failed. Check the processing run details and try again with a smaller text input."}
+          {extractionErrorMessage}
         </p>
       ) : null}
       <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
@@ -1014,13 +1040,27 @@ function RealTripFirstPass({
                 {latestRun?.status ?? "Not processed"}
               </span>
             </div>
-            <form
+            {latestRunFailed ? (
+              <section className="mt-5 rounded-md border border-clay/20 bg-clay/10 p-4">
+                <p className="text-sm font-semibold text-clay">
+                  Last build failed
+                </p>
+                <p className="mt-2 text-sm leading-6 text-ink/65">
+                  {latestRun.errorMessage ??
+                    "Roamwoven saved a failed processing run but did not receive a detailed error message."}
+                </p>
+                {latestRun.createdAt ? (
+                  <p className="mt-2 text-xs font-semibold text-ink/45">
+                    Tried {formatRunDate(latestRun.createdAt)}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+            <ExtractionSubmitButton
               action={`/maker/trips/${tripId}/data/extract`}
-              className="mt-5"
-              method="post"
-            >
-              <ExtractionSubmitButton canExtract={canExtract} />
-            </form>
+              canExtract={canExtract}
+              isRetry={latestRunFailed}
+            />
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
                 ? "This one-time build reads pasted notes, plain text files, and readable text-based PDFs. Roamwoven blocks repeated builds for the same saved materials before another AI call can start."

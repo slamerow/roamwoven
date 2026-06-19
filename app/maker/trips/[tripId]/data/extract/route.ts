@@ -11,6 +11,7 @@ import {
   DuplicateProcessingRunError,
   failTripProcessingRun,
   getLatestTripDraftSnapshot,
+  getLatestTripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import {
   assertTripSpineBasics,
@@ -22,7 +23,13 @@ import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
 export const runtime = "nodejs";
 
-function getInitialParseIdempotencyKey(uploads: TripUpload[]) {
+function getInitialParseIdempotencyKey({
+  failedRunId,
+  uploads,
+}: {
+  failedRunId?: string;
+  uploads: TripUpload[];
+}) {
   const identity = uploads
     .map((upload) => ({
       hash: upload.contentSha256,
@@ -32,7 +39,9 @@ function getInitialParseIdempotencyKey(uploads: TripUpload[]) {
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
 
-  return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify({ failedRunId: failedRunId ?? null, identity }))
+    .digest("hex");
 }
 
 function redirectToData(
@@ -77,7 +86,10 @@ export async function POST(
   }
 
   const uploads = await listTripUploads(tripId);
-  const latestDraft = await getLatestTripDraftSnapshot(tripId);
+  const [latestDraft, latestRun] = await Promise.all([
+    getLatestTripDraftSnapshot(tripId),
+    getLatestTripProcessingRun(tripId),
+  ]);
 
   if (latestDraft || ["parsed", "generated", "publishing", "published"].includes(trip.processingStatus)) {
     return redirectToData(request, tripId, { error: "spine-exists" });
@@ -103,7 +115,10 @@ export async function POST(
 
   try {
     run = await createTripProcessingRun({
-      idempotencyKey: getInitialParseIdempotencyKey(uploads),
+      idempotencyKey: getInitialParseIdempotencyKey({
+        failedRunId: latestRun?.status === "failed" ? latestRun.id : undefined,
+        uploads,
+      }),
       inputCharCount,
       sourceUploadIds: uploads.map((upload) => upload.id),
       tripId,
@@ -140,6 +155,12 @@ export async function POST(
 
     const message =
       error instanceof Error ? error.message : "Trip extraction failed.";
+    console.error("trip_extraction_failed", {
+      message,
+      name: error instanceof Error ? error.name : "UnknownError",
+      runId: run?.id ?? null,
+      tripId,
+    });
     const errorCode =
       error instanceof MissingTripSpineBasicsError
         ? "missing-spine-basics"
