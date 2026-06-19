@@ -29,6 +29,7 @@ import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function getInitialParseIdempotencyKey({
   failedRunId,
