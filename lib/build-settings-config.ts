@@ -52,8 +52,8 @@ export const APP_MODULES = [
 export const BUILD_CONFIRMATIONS = [
   {
     key: "materials",
-    title: "Materials are ready for a first draft",
-    copy: "You can add more later, but this starts the review cleanly.",
+    title: "All core materials are included",
+    copy: "Add every source doc you can reasonably find before the first build. Later uploads should be small corrections or late additions, not a second full rebuild.",
   },
   {
     key: "optional",

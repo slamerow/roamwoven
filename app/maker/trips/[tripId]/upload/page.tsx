@@ -1,15 +1,15 @@
-import { Trash2 } from "lucide-react";
+import { CheckCircle2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
 import { UploadIntakePanel } from "@/components/upload-intake-panel";
 import { canEditTripMaterials, getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
 
-const intakePreview = [
-  { label: "Travel bookings", count: 6 },
-  { label: "Stays", count: 4 },
-  { label: "Activities and notes", count: 42 },
-  { label: "Need review", count: 10 }
+const firstBuildChecklist = [
+  "Flight, train, ferry, and transfer confirmations",
+  "Hotels, rentals, addresses, and check-in instructions",
+  "Tour, restaurant, ticket, and reservation details",
+  "Planning notes, screenshots, and must-save private details",
 ];
 
 const errorMessages: Record<string, string> = {
@@ -137,23 +137,24 @@ export default async function UploadPage({
 
               <aside className="rounded-md border border-ink/10 bg-white p-5">
                 <h2 className="text-xl font-semibold text-ink">
-                  Intake preview
+                  Before the first build
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-ink/60">
-                  This is the kind of summary beta users should see after processing.
+                  Add every source doc you can reasonably find now. Later
+                  uploads should be small corrections or late additions, not a
+                  second full rebuild.
                 </p>
                 <div className="mt-5 space-y-3">
-                  {intakePreview.map((item) => (
+                  {firstBuildChecklist.map((item) => (
                     <div
-                      key={item.label}
-                      className="flex items-center justify-between rounded-md bg-paper px-4 py-3"
+                      key={item}
+                      className="flex gap-3 rounded-md bg-paper px-4 py-3"
                     >
-                      <span className="text-sm font-semibold text-ink">
-                        {item.label}
-                      </span>
-                      <span className="text-sm font-semibold text-clay">
-                        {item.count}
-                      </span>
+                      <CheckCircle2
+                        className="mt-0.5 shrink-0 text-moss"
+                        size={16}
+                      />
+                      <span className="text-sm leading-5 text-ink/70">{item}</span>
                     </div>
                   ))}
                 </div>
