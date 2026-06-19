@@ -839,6 +839,25 @@ function getExtractionErrorMessage(error?: string) {
   return "Parsing failed. Review the failure detail below before retrying.";
 }
 
+function getFriendlyRunFailureMessage(errorMessage: string | null) {
+  if (!errorMessage) {
+    return "Roamwoven could not finish this draft. Try again, and contact support if it happens twice.";
+  }
+
+  if (
+    errorMessage.includes("Unterminated string in JSON") ||
+    errorMessage.includes("could not be parsed as JSON")
+  ) {
+    return "Roamwoven started building the draft, but the response was cut off before it could be saved. Try again; if it fails twice, contact support and we can recover the run details.";
+  }
+
+  if (errorMessage.includes("missing dates") || errorMessage.includes("missing destinations")) {
+    return "Roamwoven could not find enough trip basics to build the first draft. Add dates, destinations, stays, transport, or anchor plans, then try again.";
+  }
+
+  return "Roamwoven could not finish this draft. Try again, and contact support if it happens twice.";
+}
+
 function RealTripFirstPass({
   error,
   extractionEnabled,
@@ -1043,15 +1062,16 @@ function RealTripFirstPass({
             {latestRunFailed ? (
               <section className="mt-5 rounded-md border border-clay/20 bg-clay/10 p-4">
                 <p className="text-sm font-semibold text-clay">
-                  Last build failed
+                  We couldn't finish this build
                 </p>
                 <p className="mt-2 text-sm leading-6 text-ink/65">
-                  {latestRun.errorMessage ??
-                    "Roamwoven saved a failed processing run but did not receive a detailed error message."}
+                  {getFriendlyRunFailureMessage(latestRun.errorMessage)}
                 </p>
                 {latestRun.createdAt ? (
                   <p className="mt-2 text-xs font-semibold text-ink/45">
                     Tried {formatRunDate(latestRun.createdAt)}
+                    {" · "}
+                    Reference {latestRun.id.slice(0, 8)}
                   </p>
                 ) : null}
               </section>

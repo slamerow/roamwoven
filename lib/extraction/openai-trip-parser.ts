@@ -198,6 +198,38 @@ const tripDraftSchema = {
   type: "object",
 };
 
+const tripSpineSchema = {
+  additionalProperties: false,
+  properties: {
+    missingDetails: tripDraftSchema.properties.missingDetails,
+    places: tripDraftSchema.properties.places,
+    sensitiveDetails: tripDraftSchema.properties.sensitiveDetails,
+    stays: tripDraftSchema.properties.stays,
+    transport: tripDraftSchema.properties.transport,
+    tripOverview: tripDraftSchema.properties.tripOverview,
+  },
+  required: [
+    "missingDetails",
+    "places",
+    "sensitiveDetails",
+    "stays",
+    "transport",
+    "tripOverview",
+  ],
+  type: "object",
+};
+
+const tripActivitiesSchema = {
+  additionalProperties: false,
+  properties: {
+    activities: tripDraftSchema.properties.activities,
+    missingDetails: tripDraftSchema.properties.missingDetails,
+    sensitiveDetails: tripDraftSchema.properties.sensitiveDetails,
+  },
+  required: ["activities", "missingDetails", "sensitiveDetails"],
+  type: "object",
+};
+
 const systemPrompt = [
   "You structure existing travel materials into a draft trip app data model.",
   "Do not invent details. Use null when a date, time, address, provider, or confirmation is missing.",
@@ -210,6 +242,18 @@ const systemPrompt = [
   "Create missingDetails only for questions that materially affect the generated traveler app.",
   "When you can make a reasonable uncertain guess, fill guessedValue and evidence instead of asking a blank question. Prefer confirmable prompts like 'This looks like dinner on June 14. Is that right?'",
   "For missingDetails, set subjectType and targetField to the exact structured record field when possible, such as item/date, item/startTime, stay/checkIn, stay/addressVisibility, transport/date, or transport/departureTime.",
+].join(" ");
+
+const spineSystemPrompt = [
+  systemPrompt,
+  "This stage extracts only the trip spine: tripOverview, places, stays, transport, sensitiveDetails, and missingDetails. Do not output activities in this stage.",
+  "Prioritize dates, destinations, stays, flights, trains, transfers, rental cars, and privacy-sensitive booking details.",
+].join(" ");
+
+const activitiesSystemPrompt = [
+  systemPrompt,
+  "This stage extracts only traveler cards and related review details: activities, missingDetails, and sensitiveDetails. Do not repeat places, stays, transport, or tripOverview.",
+  "Include restaurants and dining reservations as activities with category food_dining. Keep broad day arcs as anchor activities when they match the traveler's mental model.",
 ].join(" ");
 
 function formatMaterials(materials: TripExtractionMaterial[]) {
@@ -227,6 +271,71 @@ function formatMaterials(materials: TripExtractionMaterial[]) {
     .join("\n\n---\n\n");
 }
 
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function createActivityExtractionFailureQuestion(error: unknown) {
+  return {
+    answerType: "text",
+    confidence: "low",
+    evidence: null,
+    guessedValue: null,
+    prompt:
+      "Roamwoven built the trip spine, but could not finish extracting activities. Add any important activities manually or contact support to recover this section.",
+    reason:
+      error instanceof Error
+        ? `Activity extraction failed after the trip spine was captured: ${error.message}`
+        : "Activity extraction failed after the trip spine was captured.",
+    relatedTitle: null,
+    subjectType: "trip",
+    targetField: null,
+  };
+}
+
+function combineDraftStages({
+  activitiesStage,
+  activityFailure,
+  spineStage,
+}: {
+  activitiesStage?: unknown;
+  activityFailure?: unknown;
+  spineStage: unknown;
+}) {
+  const spine = asRecord(spineStage);
+  const activities = asRecord(activitiesStage);
+  const activityMissingDetails = activityFailure
+    ? [createActivityExtractionFailureQuestion(activityFailure)]
+    : asArray(activities.missingDetails);
+
+  return {
+    activities: asArray(activities.activities),
+    missingDetails: [
+      ...asArray(spine.missingDetails),
+      ...activityMissingDetails,
+    ],
+    places: asArray(spine.places),
+    sensitiveDetails: [
+      ...asArray(spine.sensitiveDetails),
+      ...asArray(activities.sensitiveDetails),
+    ],
+    stays: asArray(spine.stays),
+    transport: asArray(spine.transport),
+    tripOverview: spine.tripOverview ?? {
+      confidence: "low",
+      dateRange: null,
+      destinationSummary: null,
+      title: null,
+    },
+  };
+}
+
 export async function extractTripDraftWithOpenAI({
   materials,
   tripName,
@@ -240,18 +349,55 @@ export async function extractTripDraftWithOpenAI({
     throw new Error("No extracted text is available for AI trip parsing.");
   }
 
-  const result = await createOpenAIStructuredResponse({
-    input: [`Trip name: ${tripName}`, formatMaterials(usableMaterials)].join(
-      "\n\n"
-    ),
-    schema: tripDraftSchema,
-    schemaName: "roamwoven_trip_draft",
-    system: systemPrompt,
+  const formattedMaterials = formatMaterials(usableMaterials);
+  const input = [`Trip name: ${tripName}`, formattedMaterials].join("\n\n");
+  const spineResult = await createOpenAIStructuredResponse({
+    input,
+    schema: tripSpineSchema,
+    schemaName: "roamwoven_trip_spine",
+    system: spineSystemPrompt,
+  });
+  let activitiesResult: Awaited<
+    ReturnType<typeof createOpenAIStructuredResponse>
+  > | null = null;
+  let activityFailure: unknown = null;
+
+  try {
+    activitiesResult = await createOpenAIStructuredResponse({
+      input,
+      schema: tripActivitiesSchema,
+      schemaName: "roamwoven_trip_activities",
+      system: activitiesSystemPrompt,
+    });
+  } catch (error) {
+    activityFailure = error;
+    console.error("trip_activity_extraction_failed_after_spine", {
+      message: error instanceof Error ? error.message : "Unknown error.",
+      name: error instanceof Error ? error.name : "UnknownError",
+      tripName,
+    });
+  }
+
+  const draft = combineDraftStages({
+    activitiesStage: activitiesResult?.json,
+    activityFailure,
+    spineStage: spineResult.json,
   });
 
   return {
-    draft: result.json,
-    model: result.model,
-    usage: result.usage,
+    draft,
+    model: activitiesResult?.model ?? spineResult.model,
+    usage: {
+      activities: activitiesResult?.usage ?? null,
+      activityFailure:
+        activityFailure instanceof Error
+          ? {
+              message: activityFailure.message,
+              name: activityFailure.name,
+            }
+          : null,
+      spine: spineResult.usage,
+      staged: true,
+    },
   };
 }

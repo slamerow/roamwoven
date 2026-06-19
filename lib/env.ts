@@ -52,7 +52,7 @@ export function getOpenAIConfig() {
     ),
     maxOutputTokens: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS",
-      4000
+      12000
     ),
   };
 }

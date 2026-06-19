@@ -169,6 +169,10 @@ export async function POST(
     if (run) {
       await failTripProcessingRun({
         errorMessage: message,
+        failureDetails:
+          error && typeof error === "object" && "details" in error
+            ? (error as { details?: unknown }).details
+            : null,
         runId: run.id,
         tripId,
       });

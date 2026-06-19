@@ -248,10 +248,12 @@ export async function completeTripProcessingRun({
 
 export async function failTripProcessingRun({
   errorMessage,
+  failureDetails,
   runId,
   tripId,
 }: {
   errorMessage: string;
+  failureDetails?: unknown;
   runId: string;
   tripId: string;
 }) {
@@ -263,6 +265,7 @@ export async function failTripProcessingRun({
     .update({
       completed_at: completedAt,
       error_message: errorMessage.slice(0, 1000),
+      openai_usage: failureDetails ?? null,
       status: "failed",
     })
     .eq("id", runId);
