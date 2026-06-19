@@ -632,8 +632,13 @@ function StructuredRecordReview({
   sections: StructuredReviewSection[];
   tripId: string;
 }) {
+  const noteSections = sections.filter(
+    (section) => section.id === "notes" && section.summaryItems.length > 0
+  );
   const foundSections = sections.filter(
-    (section) => section.count > 0 || section.summaryItems.length > 0
+    (section) =>
+      section.id !== "notes" &&
+      (section.count > 0 || section.summaryItems.length > 0)
   );
   const decisionSections = sections.filter((section) => section.items.length > 0);
   const reviewCount = decisionSections.reduce(
@@ -678,6 +683,60 @@ function StructuredRecordReview({
           />
         </div>
       </div>
+
+      {noteSections.length > 0 ? (
+        <section className="mt-5 rounded-md border border-moss/20 bg-moss/10 p-4">
+          <div className="flex items-start gap-3">
+            <ListChecks className="mt-0.5 shrink-0 text-moss" size={18} />
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-ink">
+                  Calls we made
+                </h3>
+                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-moss">
+                  {pluralize(
+                    noteSections.reduce(
+                      (count, section) => count + section.summaryItems.length,
+                      0
+                    ),
+                    "call"
+                  )}
+                </span>
+              </div>
+              <p className="mt-1 text-sm leading-6 text-ink/60">
+                These are reasonable itinerary calls Roamwoven used to keep the
+                draft moving. No action needed unless something looks wrong.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {noteSections.flatMap((section) =>
+                  section.summaryItems.slice(0, 6).map((summaryItem) => (
+                    <div
+                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
+                      key={`${section.id}-${summaryItem}`}
+                    >
+                      <p className="whitespace-pre-line">
+                        {summaryItem.split("\n")[0]}
+                      </p>
+                      {summaryItem.includes("\n") ? (
+                        <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
+                          {summaryItem
+                            .split("\n")
+                            .slice(1)
+                            .map((line) => (
+                              <p className="font-medium text-ink/55" key={line}>
+                                {line.trim()}
+                              </p>
+                            ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {foundSections.map((section) => {
