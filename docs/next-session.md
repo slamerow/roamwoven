@@ -66,6 +66,8 @@ Backend-ready pieces now exist:
   - Route: `app/maker/trips/[tripId]/data/extract/route.ts`.
   - It requires a paid trip, OpenAI config, `ROAMWOVEN_ENABLE_AI_EXTRACTION=true`, and at least one parseable material.
   - It extracts normal PDF text locally before the OpenAI call. It does not OCR scanned/image-only PDFs yet.
+  - It now normalizes and caps extracted materials before the OpenAI call so ugly documents cannot make model input scale linearly with document mess. Raw-vs-submitted character counts, estimated input tokens, and trimmed material count are stored internally in `trip_processing_runs.openai_usage.materialBudget`.
+  - Material-budget telemetry is for future admin/support observability only; do not surface it to maker or traveler UI.
   - It logs `trip_processing_runs`, stores raw JSON in `trip_draft_snapshots`, and updates `trips.processing_status`.
   - Do not enable extraction in production until the additive DB SQL for those tables has run.
 - Important deployment sequencing rule: when code starts reading or writing a new Supabase table, run the matching production SQL/grants/RLS before asking the user to push/test the deployed app. Otherwise the UI can ship before the database contract exists and fail for non-technical testers.

@@ -50,6 +50,8 @@ Also keep it `false` until the production database has the additive extraction t
 - Require an explicit maker action such as `Build parsed draft`.
 - During early production testing, allowlist only the intended paid test trip.
 - Log model, token usage, trip ID, upload count, run number, and success/failure.
+- Normalize materials before the AI call by removing repeated document boilerplate and trimming each material plus the total bundle to `OPENAI_EXTRACTION_MAX_INPUT_CHARS`.
+- Store internal material-budget telemetry on `trip_processing_runs.openai_usage.materialBudget`, including raw characters, submitted characters, estimated per-pass input tokens, estimated staged-run input tokens, and trimmed material count. This belongs in future admin/support tooling, not customer-facing maker or traveler UI.
 - Cap input characters/pages/files for the first beta.
 - Treat reprocessing as explicit and limited.
 - Prefer cheap first-pass extraction; allow higher-cost reruns only when needed for quality.
@@ -67,6 +69,9 @@ Also keep it `false` until the production database has the additive extraction t
 - `lib/extraction/trip-materials.ts`
   - Collects pasted notes, small `.txt` uploads, and readable text-based PDFs for the first beta parser.
   - Does not OCR scanned/image-only PDFs yet.
+- `lib/extraction/material-budget.ts`
+  - Removes repeated boilerplate and caps the submitted material bundle before the AI call.
+  - Produces per-run internal telemetry for cost/support review.
 - `lib/extraction/processing-runs.ts`
   - Creates processing run logs and stores raw draft snapshots.
 - `app/maker/trips/[tripId]/data/extract/route.ts`

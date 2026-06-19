@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getOpenAIConfig,
   hasOpenAIExtractionConfig,
   isTripAllowedForOpenAIExtraction,
 } from "@/lib/env";
@@ -18,6 +19,10 @@ import {
   MissingTripSpineBasicsError,
 } from "@/lib/extraction/trip-spine-validation";
 import { getTripExtractionMaterials } from "@/lib/extraction/trip-materials";
+import {
+  optimizeTripExtractionMaterials,
+  type MaterialBudgetSummary,
+} from "@/lib/extraction/material-budget";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
@@ -56,6 +61,34 @@ function redirectToData(
   }
 
   return NextResponse.redirect(url, 303);
+}
+
+function getEstimatedInputPassCount(usage: unknown) {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+    return 1;
+  }
+
+  const record = usage as Record<string, unknown>;
+
+  if (record.staged !== true) {
+    return 1;
+  }
+
+  return record.activities || record.activityFailure ? 2 : 1;
+}
+
+function withRunInputEstimate(
+  summary: MaterialBudgetSummary,
+  usage?: unknown
+) {
+  const estimatedInputPassCount = getEstimatedInputPassCount(usage);
+
+  return {
+    ...summary,
+    estimatedInputPassCount,
+    estimatedRunInputTokens:
+      summary.estimatedInputTokens * estimatedInputPassCount,
+  };
 }
 
 export async function POST(
@@ -101,17 +134,27 @@ export async function POST(
     return redirectToData(request, tripId, { error: "no-text-materials" });
   }
 
-  const inputCharCount = materials.reduce(
-    (sum, material) => sum + material.text.length,
-    0
-  );
+  const optimizedMaterials = optimizeTripExtractionMaterials({
+    materials,
+    totalCharBudget: getOpenAIConfig().maxInputChars,
+  });
+  const inputCharCount = optimizedMaterials.summary.submittedCharCount;
+
+  if (optimizedMaterials.materials.length === 0 || inputCharCount === 0) {
+    return redirectToData(request, tripId, { error: "no-text-materials" });
+  }
+
   console.info("trip_extraction_materials_ready", {
-    inputCharCount,
-    materialCount: materials.length,
-    materialTypes: Array.from(new Set(materials.map((material) => material.type))),
+    estimatedInputTokens: optimizedMaterials.summary.estimatedInputTokens,
+    materialCount: optimizedMaterials.summary.materialCount,
+    materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
+    rawCharCount: optimizedMaterials.summary.rawCharCount,
+    submittedCharCount: optimizedMaterials.summary.submittedCharCount,
+    truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
     tripId,
   });
   let run: Awaited<ReturnType<typeof createTripProcessingRun>> | null = null;
+  let extractionUsage: unknown = null;
 
   try {
     run = await createTripProcessingRun({
@@ -124,9 +167,10 @@ export async function POST(
       tripId,
     });
     const result = await extractTripDraftWithOpenAI({
-      materials,
+      materials: optimizedMaterials.materials,
       tripName: trip.name,
     });
+    extractionUsage = result.usage;
 
     assertTripSpineBasics(result.draft);
 
@@ -135,7 +179,13 @@ export async function POST(
       model: result.model,
       runId: run.id,
       tripId,
-      usage: result.usage,
+      usage: {
+        materialBudget: withRunInputEstimate(
+          optimizedMaterials.summary,
+          result.usage
+        ),
+        openai: result.usage,
+      },
     });
 
     return redirectToData(request, tripId, { extraction: "completed" });
@@ -171,8 +221,19 @@ export async function POST(
         errorMessage: message,
         failureDetails:
           error && typeof error === "object" && "details" in error
-            ? (error as { details?: unknown }).details
-            : null,
+            ? {
+                materialBudget: withRunInputEstimate(
+                  optimizedMaterials.summary,
+                  extractionUsage
+                ),
+                openaiError: (error as { details?: unknown }).details,
+              }
+            : {
+                materialBudget: withRunInputEstimate(
+                  optimizedMaterials.summary,
+                  extractionUsage
+                ),
+              },
         runId: run.id,
         tripId,
       });

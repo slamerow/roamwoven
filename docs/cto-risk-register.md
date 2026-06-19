@@ -80,13 +80,14 @@ Done:
 
 - `trip_processing_runs` and `trip_draft_snapshots` exist.
 - Initial parse has idempotency for exact material sets and failed-run retry.
+- Extraction materials are normalized and capped before the AI call, with raw-vs-submitted material-budget telemetry stored on each processing run for internal cost review.
 
 Still needed:
 
 - Per-material extraction/checkpoint rows.
 - Failure taxonomy: no-text, OCR-needed, model-error, schema-invalid, missing-spine-basics, timeout.
 - Background worker or queued job runner before broad paid usage.
-- Cost/usage rollups per trip and per account.
+- Admin-only cost/usage rollups per trip and per account.
 
 ### Structured Record Persistence
 
