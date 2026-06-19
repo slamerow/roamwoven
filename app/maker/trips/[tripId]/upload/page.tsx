@@ -76,11 +76,11 @@ export default async function UploadPage({
       <div className="mx-auto max-w-4xl">
         <header className="border-b border-ink/10 pb-6">
           <h1 className="text-4xl font-semibold text-ink">
-            Drop everything in
+            Add trip materials
           </h1>
           <p className="mt-3 text-sm leading-6 text-ink/65">
             {canUpload
-              ? "Upload flight and hotel confirmations, screenshots, documents, spreadsheets, and notes."
+              ? "Upload the confirmations, screenshots, documents, spreadsheets, and notes Roamwoven should use."
               : "Complete checkout to start adding trip materials."}
           </p>
         </header>
@@ -90,8 +90,8 @@ export default async function UploadPage({
           currentStep={2}
           detail={
             canEditMaterials
-              ? "Add and remove source materials freely before the first app build starts."
-              : "Materials from the first build are locked. Small later additions should go through a limited update lane."
+              ? "Add everything important before the first build. After that, new materials should be small app updates."
+              : "The first build materials are locked. Later uploads should be small corrections or additions."
           }
           isPaid={canUpload}
           tripId={tripId}
@@ -140,9 +140,9 @@ export default async function UploadPage({
                   Before the first build
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-ink/60">
-                  Add every source doc you can reasonably find now. Later
-                  uploads should be small corrections or late additions, not a
-                  second full rebuild.
+                  Add the files you want Roamwoven to use now. After the first
+                  build, new uploads should be small corrections or late
+                  additions, not a fresh rebuild.
                 </p>
                 <div className="mt-5 space-y-3">
                   {firstBuildChecklist.map((item) => (

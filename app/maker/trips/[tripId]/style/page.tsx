@@ -25,12 +25,11 @@ export default async function StylePage({
       <div className="mx-auto max-w-5xl">
         <header className="border-b border-ink/10 pb-6">
           <h1 className="text-4xl font-semibold text-ink">
-            Make it feel like your trip
+            Choose the app style
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Every design direction starts from a quiet luxury travel-app
-            foundation, then changes the atmosphere around the traveler
-            architecture the generated app will use.
+            Pick the visual direction, app name, and colors that should carry
+            into draft review and the final traveler app.
           </p>
         </header>
 
@@ -44,7 +43,7 @@ export default async function StylePage({
 
         {scope === "saved" ? (
           <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
-            Content choices saved.
+            App sections saved.
           </p>
         ) : null}
         {error ? (
@@ -57,7 +56,7 @@ export default async function StylePage({
           className="mt-6 inline-flex rounded-md border border-ink/15 px-4 py-3 text-sm font-semibold text-ink"
           href={`/maker/trips/${tripId}/review`}
         >
-          Back to app setup
+          Back to app sections
         </Link>
 
         <StyleSettingsPanel

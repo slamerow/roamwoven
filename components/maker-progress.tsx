@@ -23,7 +23,7 @@ const MAKER_STEPS = [
     icon: FileUp,
   },
   {
-    title: "App setup",
+    title: "App sections",
     description: "Choose the sections that belong in this traveler app.",
     href: "review",
     icon: TableProperties,

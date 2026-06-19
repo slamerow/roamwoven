@@ -45,7 +45,7 @@ export const APP_MODULES = [
     key: "photos",
     title: "Photo album",
     copy: "A private follow-along album with dates and locations.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
 ] as const;
 
@@ -53,7 +53,7 @@ export const BUILD_CONFIRMATIONS = [
   {
     key: "materials",
     title: "All core materials are included",
-    copy: "Add every source doc you can reasonably find before the first build. Later uploads should be small corrections or late additions, not a second full rebuild.",
+    copy: "Add the files Roamwoven should use before the first build. Later uploads should be small corrections or late additions, not a fresh rebuild.",
   },
   {
     key: "optional",

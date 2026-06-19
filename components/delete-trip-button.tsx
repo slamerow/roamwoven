@@ -18,7 +18,7 @@ export function DeleteTripButton({
       onSubmit={(event) => {
         const message =
           trip.paymentStatus === "paid"
-            ? `Delete paid trip "${trip.name}"? This removes it from your dashboard and cannot be restored from the app. A superadmin can recover it later.`
+            ? `Delete paid trip "${trip.name}"? This removes it from your dashboard and traveler links. You will need to contact support to restore a deleted trip.`
             : `Delete trip "${trip.name}"? This removes it from your dashboard.`;
 
         if (!window.confirm(message)) {

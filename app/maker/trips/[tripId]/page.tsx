@@ -45,7 +45,7 @@ function getNextBuildStep({
   if (!hasBuildSettings) {
     return {
       href: "review",
-      label: "Continue building: App setup",
+      label: "Continue building: App sections",
       message: "Next: choose what belongs in the traveler app.",
     };
   }
@@ -325,8 +325,8 @@ export default async function TripWorkspacePage({
                   Remove this trip
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-                  This hides the trip from your dashboard. Paid trips keep their
-                  backend records so a superadmin can recover them later.
+                  This removes the trip from your dashboard and traveler links.
+                  You will need to contact support to restore a deleted trip.
                 </p>
               </div>
               <DeleteTripButton trip={trip} />

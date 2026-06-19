@@ -92,21 +92,21 @@ export function ReviewFlowPanel({
       <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
         {saved ? (
           <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
-            Content choices saved.
+            App sections saved.
           </p>
         ) : null}
         {error ? (
           <p className="mb-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-            Content choices could not be saved. Try again in a moment.
+            App sections could not be saved. Try again in a moment.
           </p>
         ) : null}
         <div>
           <h2 className="text-xl font-semibold text-ink">
-            Shape the traveler app
+            Set the app structure
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            Choose the sections this trip actually needs. Roamwoven will use
-            this setup when it builds the first draft.
+            Roamwoven starts with the sections most trips need. Turn off only
+            the pieces that should stay out of this app.
           </p>
           <Link
             className="mt-4 inline-flex text-sm font-semibold text-moss"
@@ -126,7 +126,8 @@ export function ReviewFlowPanel({
                   Choose what the app includes
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-ink/60">
-                  Roamwoven will only generate sections that belong in this trip.
+                  These switches control the visible traveler-app sections, not
+                  the parser's internal categories.
                 </p>
               </div>
               <p className="text-sm font-semibold text-moss">

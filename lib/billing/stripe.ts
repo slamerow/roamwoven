@@ -56,6 +56,7 @@ export async function createTripCheckoutSession(trip: MakerTrip, user: AuthUser)
       user_id: user.id,
     },
     payment_intent_data: {
+      receipt_email: user.email ?? undefined,
       metadata: {
         trip_id: trip.id,
         user_id: user.id,

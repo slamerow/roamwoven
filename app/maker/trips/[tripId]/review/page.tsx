@@ -23,18 +23,18 @@ export default async function ReviewPage({
       <div className="mx-auto max-w-6xl">
         <header className="border-b border-ink/10 pb-6">
           <h1 className="text-4xl font-semibold text-ink">
-            App setup
+            App sections
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Choose what belongs in {trip.name} before Roamwoven builds the
-            first draft.
+            Choose the sections {trip.name} should include before Roamwoven
+            builds the first draft.
           </p>
         </header>
 
         <MakerProgress
           completedSteps={uploads.length > 0 ? 2 : 1}
           currentStep={3}
-          detail="Choose the traveler-app sections before design. You can return here later from draft review if the app structure needs to change."
+          detail="Recommended sections start on. Turn off anything that does not belong in this traveler app."
           isPaid={canReview}
           tripId={tripId}
         />
