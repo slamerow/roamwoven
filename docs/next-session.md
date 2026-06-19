@@ -341,7 +341,7 @@ Maker UX note:
 - Draft processing copy now sets the expectation at up to 5 minutes and cycles through concrete work labels such as flights/trains, hotels, dinner reservations, museums/tours, and other activities.
 - Structured draft review now separates `What we found` from `Needs review`. Found groups summarize extracted legs, stays, transport, activities, and privacy groups; the decision queue should only contain records/questions that actually need maker action.
 - Leg and stay review summaries should use human date ranges such as `January 1-3, 2019`, not raw ISO dates.
-- The create-trip screen previously showed a local-only file/notes dropzone, but `app/maker/trips/create/route.ts` only persisted trip name/description. This made testers think materials vanished. The creation screen now stays honest and sends the maker to checkout/upload before materials are actually saved.
+- The create-trip screen previously showed a local-only file/notes dropzone, but `app/maker/trips/create/route.ts` only persisted trip name/description. This made testers think materials vanished. Updated product decision: keep the creation dropzone because it is a useful mini-commitment moment, but actually persist those starter materials to `trip_uploads` during trip creation. AI extraction/processing stays gated until checkout. The upload screen remains useful as the place to review saved materials, add/delete more after checkout, and continue to app setup.
 - Found-group cards should show counts while collapsed, such as `5 legs` or `3 stays`.
 - Activity combine controls should not appear on every activity. Only show them for plausible duplicates, and explain that the cards share date/category/title language.
 

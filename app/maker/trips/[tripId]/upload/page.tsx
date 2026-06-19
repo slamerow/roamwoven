@@ -14,7 +14,7 @@ const firstBuildChecklist = [
 
 const errorMessages: Record<string, string> = {
   "auth-required": "Sign in again before uploading materials.",
-  "checkout-required": "Complete checkout before uploading trip materials.",
+  "checkout-required": "Complete checkout before adding more trip materials.",
   "demo-upload": "The demo trip keeps uploads mocked for now.",
   "empty-upload": "Add at least one file or note before saving.",
   "file-too-large": "One file is over the 25 MB beta limit.",
@@ -62,14 +62,14 @@ export default async function UploadPage({
   searchParams
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ deleted?: string; error?: string; saved?: string }>;
+  searchParams: Promise<{ created?: string; deleted?: string; error?: string; saved?: string }>;
 }) {
   const { tripId } = await params;
-  const { deleted, error, saved } = await searchParams;
+  const { created, deleted, error, saved } = await searchParams;
   const trip = await getMakerTrip(tripId);
-  const canUpload = trip.isDemo || trip.paymentStatus === "paid";
+  const canAddMaterials = trip.isDemo || trip.paymentStatus === "paid";
   const canEditMaterials = canEditTripMaterials(trip);
-  const uploads = canUpload ? await listTripUploads(tripId) : [];
+  const uploads = trip.isDemo ? [] : await listTripUploads(tripId);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -79,9 +79,9 @@ export default async function UploadPage({
             Add trip materials
           </h1>
           <p className="mt-3 text-sm leading-6 text-ink/65">
-            {canUpload
+            {canAddMaterials
               ? "Upload the confirmations, screenshots, documents, spreadsheets, and notes Roamwoven should use."
-              : "Complete checkout to start adding trip materials."}
+              : "Your starter materials are saved here. Complete checkout before adding more or processing the first draft."}
           </p>
         </header>
 
@@ -89,22 +89,25 @@ export default async function UploadPage({
           completedSteps={uploads.length > 0 ? 2 : 1}
           currentStep={2}
           detail={
-            canEditMaterials
+            !canAddMaterials
+              ? "Starter materials are saved. Complete checkout before adding more or processing the first draft."
+              : canEditMaterials
               ? "Add everything important before the first build. After that, new materials should be small app updates."
               : "The first build materials are locked. Later uploads should be small corrections or additions."
           }
-          isPaid={canUpload}
+          isPaid={canAddMaterials}
           tripId={tripId}
         />
 
-        {!canUpload ? (
+        {!canAddMaterials ? (
           <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-xl font-semibold text-ink">
               Checkout required
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-              Complete checkout once, then upload the documents and notes for
-              this trip.
+              Complete checkout once, then add more materials or process the
+              first draft. Anything saved during trip creation stays attached
+              below.
             </p>
             <Link
               href={`/maker/trips/${tripId}`}
@@ -113,10 +116,16 @@ export default async function UploadPage({
               Return to checkout
             </Link>
           </section>
-        ) : (
-          <>
+        ) : null}
+
+        {canAddMaterials ? (
             <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
               <div>
+                {created ? (
+                  <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+                    Trip created. Your starter materials are saved below.
+                  </p>
+                ) : null}
                 {saved ? (
                   <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
                     Saved {saved} upload{saved === "1" ? "" : "s"}.
@@ -160,6 +169,20 @@ export default async function UploadPage({
                 </div>
               </aside>
             </section>
+        ) : created || error ? (
+          <section className="mt-6">
+            {created ? (
+              <p className="mb-4 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+                Trip created. Your starter materials are saved below.
+              </p>
+            ) : null}
+            {error ? (
+              <p className="mb-4 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+                {errorMessages[error] ?? errorMessages["upload-failed"]}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
 
             <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -169,12 +192,14 @@ export default async function UploadPage({
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-ink/60">
                     Files and notes saved for this trip will stay here after refresh.
-                    {canEditMaterials
+                    {!canAddMaterials
+                      ? " Complete checkout to add more, remove materials, or process the first draft."
+                      : canEditMaterials
                       ? " You can remove anything before generation starts."
                       : " Materials from the first build lock once generation starts."}
                   </p>
                 </div>
-                {uploads.length > 0 ? (
+                {uploads.length > 0 && canAddMaterials ? (
                   <Link
                     href={`/maker/trips/${tripId}/review`}
                     className="inline-flex justify-center rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
@@ -229,6 +254,7 @@ export default async function UploadPage({
               )}
             </section>
 
+        {canAddMaterials ? (
             <section className="mt-6 rounded-md border border-tide/20 bg-tide/10 p-5">
               <h2 className="text-xl font-semibold text-ink">
                 Add what you have now. Update the app later.
@@ -239,8 +265,7 @@ export default async function UploadPage({
                 should update that app instead of starting over.
               </p>
             </section>
-          </>
-        )}
+        ) : null}
       </div>
     </main>
   );

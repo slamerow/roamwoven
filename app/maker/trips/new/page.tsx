@@ -14,8 +14,9 @@ export default async function NewTripPage({
           Create a trip app
         </h1>
         <p className="mt-3 text-sm leading-6 text-ink/65">
-          Name the app and describe the trip. You will add PDFs,
-          confirmations, notes, and screenshots on the next step after checkout.
+          Name the app, describe the trip, and drop in the first materials you
+          have. Roamwoven saves them now and waits until checkout to process
+          them.
         </p>
         <CreateTripForm error={error} />
       </div>
