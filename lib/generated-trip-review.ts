@@ -66,6 +66,10 @@ function isOpenQuestion(question: StructuredTripRecords["reviewQuestions"][numbe
   return question.status === "open";
 }
 
+function isNotedQuestion(question: StructuredTripRecords["reviewQuestions"][number]) {
+  return question.status === "noted";
+}
+
 function itemCombineOptions({
   currentItemId,
   records,
@@ -73,12 +77,54 @@ function itemCombineOptions({
   currentItemId: string;
   records: StructuredTripRecords;
 }): StructuredReviewCombineOption[] {
+  const currentItem = records.items.find((item) => item.id === currentItemId);
+
+  if (!currentItem) {
+    return [];
+  }
+
+  const currentTitle = normalizeComparableText(currentItem.title);
+
   return records.items
-    .filter((item) => item.id !== currentItemId && isActiveStatus(item.status))
+    .filter((item) => {
+      if (item.id === currentItemId || !isActiveStatus(item.status)) {
+        return false;
+      }
+
+      if (item.categoryId !== currentItem.categoryId || item.date !== currentItem.date) {
+        return false;
+      }
+
+      const title = normalizeComparableText(item.title);
+      return (
+        currentTitle.includes(title) ||
+        title.includes(currentTitle) ||
+        hasMeaningfulTokenOverlap(currentTitle, title)
+      );
+    })
     .map((item) => ({
       label: item.date ? `${item.title} (${item.date})` : item.title,
       value: item.id,
     }));
+}
+
+function normalizeComparableText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function hasMeaningfulTokenOverlap(first: string, second: string) {
+  const stopWords = new Set(["and", "the", "a", "an", "to", "of", "in", "at"]);
+  const firstTokens = new Set(
+    first.split(" ").filter((token) => token.length > 3 && !stopWords.has(token))
+  );
+  const secondTokens = second
+    .split(" ")
+    .filter((token) => token.length > 3 && !stopWords.has(token));
+
+  return secondTokens.some((token) => firstTokens.has(token));
 }
 
 function field({
@@ -111,7 +157,8 @@ function parseReviewDate(value: string | null) {
     return null;
   }
 
-  const date = new Date(`${value}T00:00:00.000Z`);
+  const dateOnly = value.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? value;
+  const date = new Date(`${dateOnly}T00:00:00.000Z`);
 
   if (Number.isNaN(date.getTime())) {
     return null;
@@ -124,7 +171,7 @@ function formatReviewDate(value: string | null, includeYear = true) {
   const date = parseReviewDate(value);
 
   if (!date) {
-    return value;
+    return value?.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? value;
   }
 
   return new Intl.DateTimeFormat("en", {
@@ -166,6 +213,10 @@ function formatReviewDateRange(start: string | null, end: string | null) {
   }
 
   return `${formattedStart}-${formattedEnd}`;
+}
+
+function formatReviewDateValue(value: string | null) {
+  return formatReviewDate(value, true) ?? "";
 }
 
 function getPrivacyGroup(detailType: string) {
@@ -479,7 +530,20 @@ export function getStructuredReviewSections(
       summaryItems: records.stays
         .filter((stay) => isActiveStatus(stay.status))
         .map((stay) =>
-          [stay.name, formatReviewDateRange(stay.checkInDate, stay.checkOutDate)]
+          [
+            stay.name,
+            formatReviewDateRange(stay.checkInDate, stay.checkOutDate) ||
+              [
+                stay.checkInDate
+                  ? `Check-in ${formatReviewDateValue(stay.checkInDate)}`
+                  : null,
+                stay.checkOutDate
+                  ? `Check-out ${formatReviewDateValue(stay.checkOutDate)}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+          ]
             .filter(Boolean)
             .join(" · ")
         ),
@@ -650,6 +714,27 @@ export function getStructuredReviewSections(
         .filter((detail) => detail.visibility !== "hidden")
         .map((detail) => detail.label),
       title: "Privacy",
+    },
+    {
+      count: records.reviewQuestions.filter(isNotedQuestion).length,
+      description: "Reasonable itinerary calls Roamwoven made without needing a decision.",
+      emptyDetail: "No extra calls to note.",
+      id: "notes",
+      items: [],
+      summaryItems: records.reviewQuestions
+        .filter(isNotedQuestion)
+        .map((question) =>
+          [
+            question.prompt,
+            question.guessedValue
+              ? `Used: ${question.guessedValue}`
+              : null,
+            question.evidence ? `Evidence: ${question.evidence}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        ),
+      title: "Calls we made",
     },
     {
       count: records.reviewQuestions.filter(isOpenQuestion).length,

@@ -14,9 +14,8 @@ export default async function NewTripPage({
           Create a trip app
         </h1>
         <p className="mt-3 text-sm leading-6 text-ink/65">
-          Name the app, describe the trip, and drop in whatever materials you
-          have. The full upload pipeline comes next; this first screen gives the
-          flow its real shape.
+          Name the app and describe the trip. You will add PDFs,
+          confirmations, notes, and screenshots on the next step after checkout.
         </p>
         <CreateTripForm error={error} />
       </div>

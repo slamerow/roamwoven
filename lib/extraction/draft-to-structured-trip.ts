@@ -643,6 +643,80 @@ function createReviewQuestions({
   tripId: string;
   transport: TripTransportRecord[];
 }): TripReviewQuestionRecord[] {
+  function getTargetValue({
+    subjectId,
+    subjectType,
+    targetField,
+  }: {
+    subjectId: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+    targetField: string | null;
+  }) {
+    if (!subjectId || !targetField) {
+      return null;
+    }
+
+    const record =
+      subjectType === "item"
+        ? items.find((item) => item.id === subjectId)
+        : subjectType === "stay"
+          ? stays.find((stay) => stay.id === subjectId)
+          : subjectType === "transport"
+            ? transport.find((item) => item.id === subjectId)
+            : subjectType === "leg"
+              ? legs.find((leg) => leg.id === subjectId)
+              : null;
+
+    if (!record || !(targetField in record)) {
+      return null;
+    }
+
+    const value = record[targetField as keyof typeof record];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  }
+
+  function shouldTreatAsNote({
+    answerType,
+    confidence,
+    guessedValue,
+    subjectId,
+    subjectType,
+    targetField,
+  }: {
+    answerType: TripReviewQuestionRecord["answerType"];
+    confidence: TripSourceConfidence;
+    guessedValue: string | null;
+    subjectId: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+    targetField: string | null;
+  }) {
+    const normalizedTarget = targetField?.toLowerCase() ?? "";
+
+    if (
+      normalizedTarget.includes("visibility") ||
+      normalizedTarget.includes("confirmation")
+    ) {
+      return true;
+    }
+
+    if (subjectType === "trip" && guessedValue) {
+      return true;
+    }
+
+    if (answerType === "confirm" && guessedValue && confidence === "high") {
+      return true;
+    }
+
+    if (
+      guessedValue &&
+      getTargetValue({ subjectId, subjectType, targetField })
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
   const findSubjectId = (
     subjectType: TripReviewQuestionRecord["subjectType"],
     relatedTitle: string | null
@@ -688,33 +762,48 @@ function createReviewQuestions({
     return null;
   };
 
-  return getArray(draft, "missingDetails").map((item, index) => {
+  return getArray(draft, "missingDetails").flatMap((item, index) => {
     const detail = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
     const relatedTitle = getString(detail, "relatedTitle");
     const subjectType = getReviewSubjectType(getString(detail, "subjectType"));
     const subjectId = findSubjectId(subjectType, relatedTitle);
+    const answerType = getAnswerType(getString(detail, "answerType"));
+    const confidence = getConfidence(getString(detail, "confidence"));
+    const guessedValue = getString(detail, "guessedValue");
+    const targetField = getString(detail, "targetField");
 
-    return {
-      answerType: getAnswerType(getString(detail, "answerType")),
+    const status = shouldTreatAsNote({
+        answerType,
+        confidence,
+        guessedValue,
+        subjectId,
+        subjectType,
+        targetField,
+      })
+      ? "noted"
+      : "open";
+
+    return [{
+      answerType,
       answerValue: null,
       createdAt: null,
       evidence: getString(detail, "evidence"),
-      guessedValue: getString(detail, "guessedValue"),
+      guessedValue,
       id: `${tripId}-question-${index + 1}`,
       prompt: getString(detail, "prompt") ?? "Confirm a missing detail",
       reason:
         getString(detail, "reason") ??
         "This detail affects the generated traveler app.",
       resolvedAt: null,
-      sourceConfidence: getConfidence(getString(detail, "confidence")),
-      status: "open",
+      sourceConfidence: confidence,
+      status,
       subjectId,
       subjectType,
-      targetField: getString(detail, "targetField"),
+      targetField,
       tripId,
-    };
+    }];
   });
 }
 

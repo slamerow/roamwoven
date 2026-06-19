@@ -254,11 +254,76 @@ test("structured review summary uses maker-facing counts", () => {
     "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
-  assert.equal(sections.length, 6);
+  assert.equal(sections.length, 7);
   assert.deepEqual(
     sections.map((section) => section.id),
-    ["legs", "stays", "transport", "activities", "private-details", "questions"]
+    [
+      "legs",
+      "stays",
+      "transport",
+      "activities",
+      "private-details",
+      "notes",
+      "questions",
+    ]
   );
+  assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
+});
+
+test("high-confidence parser calls become notes instead of review questions", () => {
+  const draft = {
+    activities: [],
+    missingDetails: [
+      {
+        answerType: "confirm",
+        confidence: "high",
+        evidence: "Outbound flight departs on January 12.",
+        guessedValue: "Trip starts January 12",
+        prompt: "This looks like the trip starts with the outbound flight on January 12. Is that right?",
+        reason: "The outbound flight is the first dated trip event.",
+        relatedTitle: null,
+        subjectType: "trip",
+        targetField: "dateRange",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2019-01-12",
+        city: "Rome",
+        country: "Italy",
+        leaveDate: "2019-01-15",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [
+      {
+        date: "2019-01-12",
+        departure: "Washington, DC",
+        arrival: "Rome",
+        provider: "Delta",
+        title: "Fly to Rome",
+        type: "flight",
+      },
+    ],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-note",
+  });
+  const sections = getStructuredReviewSections(records);
+  const notes = sections.find((section) => section.id === "notes");
+  const questions = sections.find((section) => section.id === "questions");
+
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(notes?.count, 1);
+  assert.equal(questions?.count, 0);
+  assert.match(notes?.summaryItems[0] ?? "", /outbound flight/i);
 });
 
 test("review decisions update structured records", () => {

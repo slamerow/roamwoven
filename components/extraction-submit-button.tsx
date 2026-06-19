@@ -109,8 +109,8 @@ export function ExtractionSubmitButton({
             {processingSteps[stepIndex]}
           </p>
           <p className="mt-1 text-xs leading-5 text-ink/50">
-            This can take up to 5 minutes. Keep this tab open; go grab water and
-            Roamwoven should be ready when you're back.
+            This can take up to 5 minutes. Keep this tab open; take a quick
+            hydration break and Roamwoven should be ready when you're back.
           </p>
         </div>
       ) : null}

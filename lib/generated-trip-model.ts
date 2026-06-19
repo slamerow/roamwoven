@@ -228,7 +228,7 @@ export type TripReviewQuestionRecord = {
   reason: string;
   resolvedAt: string | null;
   sourceConfidence: TripSourceConfidence;
-  status: "open" | "answered" | "dismissed";
+  status: "open" | "answered" | "dismissed" | "noted";
   subjectId: string | null;
   subjectType: "trip" | "day" | "leg" | "stay" | "transport" | "item";
   targetField: string | null;

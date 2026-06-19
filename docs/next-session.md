@@ -329,16 +329,26 @@ Latest checks after Eastern Europe review-friction and bounded-inference pass:
 - `npm run typecheck`
 - `npm run build`
 
+Latest checks after Central Europe review-feedback pass:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
 Maker UX note:
 
 - App setup now has one required pre-build confirmation: core materials are included. Empty-section handling and recommended privacy language moved into the section/module copy and review behavior instead of separate friction checks.
 - Draft processing copy now sets the expectation at up to 5 minutes and cycles through concrete work labels such as flights/trains, hotels, dinner reservations, museums/tours, and other activities.
 - Structured draft review now separates `What we found` from `Needs review`. Found groups summarize extracted legs, stays, transport, activities, and privacy groups; the decision queue should only contain records/questions that actually need maker action.
 - Leg and stay review summaries should use human date ranges such as `January 1-3, 2019`, not raw ISO dates.
+- The create-trip screen previously showed a local-only file/notes dropzone, but `app/maker/trips/create/route.ts` only persisted trip name/description. This made testers think materials vanished. The creation screen now stays honest and sends the maker to checkout/upload before materials are actually saved.
+- Found-group cards should show counts while collapsed, such as `5 legs` or `3 stays`.
+- Activity combine controls should not appear on every activity. Only show them for plausible duplicates, and explain that the cards share date/category/title language.
 
 Extraction inference note:
 
 - Avoid dumb questions, but do not hallucinate. The parser may infer stay checkout dates only from explicit source evidence such as a visible first night/check-in date plus a stated nights count. Do not infer lodging dates from nearby itinerary context alone; leave uncertain fields null and ask only when the ambiguity materially affects the traveler app.
+- Review questions should be rare. High-confidence confirmations, trip-level start/end calls, and privacy-default calls should move into a non-action `Calls we made` section instead of the decision queue. Clearly sensitive details should default to privacy handling instead of asking yes/no privacy questions.
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 
