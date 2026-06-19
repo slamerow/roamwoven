@@ -137,7 +137,6 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
   const flights = records.transport.filter(
     (item) => item.transportType === "flight"
   ).length;
-  const otherTransport = records.transport.length - flights;
   const restaurants = records.items.filter(
     (item) => item.itemType === "restaurant"
   ).length;
@@ -146,8 +145,11 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
   ).length;
 
   return [
-    flights ? pluralize(flights, "flight") : null,
-    otherTransport ? pluralize(otherTransport, "transport item") : null,
+    records.transport.length
+      ? `${pluralize(records.transport.length, "transport item")}${
+          flights ? ` (${pluralize(flights, "flight")})` : ""
+        }`
+      : null,
     records.stays.length ? pluralize(records.stays.length, "stay") : null,
     restaurants ? pluralize(restaurants, "restaurant") : null,
     activities ? pluralize(activities, "activity", "activities") : null,
