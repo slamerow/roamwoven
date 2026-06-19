@@ -156,6 +156,31 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
   ].filter(Boolean);
 }
 
+export function getStructuredScannedParts(records: StructuredTripRecords | null) {
+  if (!records) {
+    return [];
+  }
+
+  const restaurants = records.items.filter(
+    (item) => item.itemType === "restaurant"
+  ).length;
+  const activities = records.items.filter(
+    (item) => item.itemType === "activity"
+  ).length;
+  const otherCards = records.items.length - restaurants - activities;
+
+  return [
+    records.transport.length
+      ? pluralize(records.transport.length, "transport item")
+      : null,
+    records.stays.length ? pluralize(records.stays.length, "stay") : null,
+    activities ? pluralize(activities, "activity", "activities") : null,
+    restaurants ? pluralize(restaurants, "restaurant") : null,
+    otherCards ? pluralize(otherCards, "other card") : null,
+    records.legs.length ? pluralize(records.legs.length, "place") : null,
+  ].filter(Boolean);
+}
+
 export function formatStructuredDiscoverySummary(
   records: StructuredTripRecords | null,
   reviewCount = getStructuredReviewCount(records)

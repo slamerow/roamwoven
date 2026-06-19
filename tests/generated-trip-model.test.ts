@@ -81,6 +81,7 @@ test("draft parser output compiles into structured records", () => {
         date: null,
         description: "A flexible cafe stop.",
         endTime: null,
+        itemType: "restaurant",
         sourceFilename: "central-europe.pdf",
         startTime: null,
         title: "Cafe TBD",
@@ -156,6 +157,11 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(records.transport[0]?.transportType, "flight");
   assert.equal(records.transport[0]?.confirmationVisibility, "traveler_password");
   assert.equal(records.items.length, 2);
+  assert.equal(records.items[1]?.itemType, "restaurant");
+  assert.ok(
+    records.categories.some((category) => category.categoryKey === "restaurant"),
+    "expected restaurant cards to get their own category"
+  );
   assert.equal(records.items[1]?.reviewRequired, true);
   assert.equal(records.reviewQuestions.length, 1);
   assert.ok(
@@ -180,10 +186,12 @@ test("structured review summary uses maker-facing counts", () => {
     activities: [
       {
         date: "2026-09-02",
+        itemType: "activity",
         title: "Museum visit",
       },
       {
         date: null,
+        itemType: "restaurant",
         title: "Dinner TBD",
       },
     ],
@@ -233,7 +241,7 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 2 days, including 1 transport item (1 flight), 1 stay, 2 activities. We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 2 days, including 1 transport item (1 flight), 1 stay, 1 restaurant, 1 activity. We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
   assert.equal(sections.length, 6);

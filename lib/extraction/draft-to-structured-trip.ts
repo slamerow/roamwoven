@@ -9,6 +9,7 @@ import type {
   TripSummaryRecord,
   TripTransportRecord,
   TripTransportType,
+  TripItemType,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
 
@@ -62,6 +63,36 @@ function normalizeTransportType(value: string | null): TripTransportType {
   }
 
   return "other";
+}
+
+function normalizeItemType(value: string | null, title: string, description: string | null): TripItemType {
+  if (
+    value === "activity" ||
+    value === "restaurant" ||
+    value === "note" ||
+    value === "admin" ||
+    value === "rest_day" ||
+    value === "social" ||
+    value === "placeholder"
+  ) {
+    return value;
+  }
+
+  const text = `${title} ${description ?? ""}`.toLowerCase();
+
+  if (
+    /\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery)\b/.test(
+      text
+    )
+  ) {
+    return "restaurant";
+  }
+
+  if (/\b(tbd|to confirm|placeholder)\b/.test(text)) {
+    return "placeholder";
+  }
+
+  return "activity";
 }
 
 function isIsoDate(value: string | null): value is string {
@@ -274,17 +305,23 @@ function createItemRecords({
       ? (item as DraftObject)
       : {};
     const title = getString(activity, "title") ?? `Activity ${index + 1}`;
+    const description = getString(activity, "description");
     const date = getString(activity, "date");
     const leg = findLegForDate(legs, date);
+    const itemType = normalizeItemType(
+      getString(activity, "itemType"),
+      title,
+      description
+    );
 
     return {
       address: getString(activity, "address"),
-      categoryId: "activity",
+      categoryId: itemType,
       date,
-      description: getString(activity, "description"),
+      description,
       endTime: getString(activity, "endTime"),
       id: `${tripId}-item-${slugify(title)}-${index + 1}`,
-      itemType: "activity",
+      itemType,
       latitude: null,
       legId: leg?.id ?? null,
       locationName: null,
@@ -314,12 +351,20 @@ function createCategoryRecords({
 
   return keys.map((key, index) => ({
     categoryKey: key,
-    description: null,
-    emoji: key === "activity" ? "✨" : "•",
+    description:
+      key === "restaurant"
+        ? "Food, drinks, reservations, and places to eat."
+        : null,
+    emoji: key === "activity" ? "✨" : key === "restaurant" ? "🍽️" : "•",
     enabled: true,
     icon: null,
     id: key,
-    label: key === "activity" ? "Activities" : key,
+    label:
+      key === "activity"
+        ? "Activities"
+        : key === "restaurant"
+          ? "Restaurants"
+          : key,
     sortOrder: index,
     tripId,
   }));

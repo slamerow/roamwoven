@@ -107,6 +107,7 @@ Backend-ready pieces now exist:
   - The next deployed attempt failed with `Cannot find module '/var/task/.next/server/chunks/pdf.worker.mjs'` while trying to read the uploaded PDF; this was a PDF worker/bundling problem, not a storage or OpenAI problem.
   - The extraction material reader now uses `pdfjs-dist/legacy/build/pdf.mjs` directly for text-only PDF extraction and removes the unused `pdf-parse` dependency. This should be deployed before asking the user to click `Build parsed draft` again.
 - Cost-control guardrail: the initial parse button is now framed as a one-time build for the saved material set. The client disables the submit button while the form is pending, and the server/database idempotency key blocks repeated AI calls for the same trip/material set before `extractTripDraftWithOpenAI` can run.
+- First real-draft review feedback from the Andalucía extraction exposed a real data-contract issue, not a copy bug: dining reservations were flowing through the generic `activities` draft bucket and could be counted as activities even though the generated traveler app needs typed cards. The extraction schema now requires `activities[].itemType`, the adapter backfills `restaurant` from older drafts with dining language, restaurant cards get their own category/count, and the draft-review cards now label section totals as `Found` separately from records that need confirmation.
 
 Live Supabase dev setup is partially complete:
 
@@ -263,6 +264,12 @@ Latest checks after the OpenAI extraction allowlist guardrail:
 - `npm test`
 - `npm run build`
 - `npm run typecheck` after build regenerated `.next/types`
+
+Latest checks after the Andalucía dining-card/count-contract fix:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
 
 After that foundation is moving, continue hardening the post-payment maker flow:
 

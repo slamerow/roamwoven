@@ -28,6 +28,7 @@ import {
   formatStructuredDiscoverySummary,
   getStructuredReviewCount,
   getStructuredReviewSections,
+  getStructuredScannedParts,
   type StructuredReviewEditField,
   type StructuredReviewItem,
   type StructuredReviewSection,
@@ -136,20 +137,7 @@ function formatScannedSummary(draft: unknown) {
 function formatStructuredScannedSummary(
   records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null
 ) {
-  if (!records) {
-    return [];
-  }
-
-  return [
-    records.transport.length
-      ? pluralize(records.transport.length, "transport item")
-      : null,
-    records.stays.length ? pluralize(records.stays.length, "stay") : null,
-    records.items.length
-      ? pluralize(records.items.length, "activity", "activities")
-      : null,
-    records.legs.length ? pluralize(records.legs.length, "place") : null,
-  ].filter(Boolean);
+  return getStructuredScannedParts(records);
 }
 
 function getReviewItems(draft: unknown) {
@@ -506,8 +494,11 @@ function StructuredRecordReview({
                 {section.count}
               </p>
               <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+                Found
+              </p>
+              <p className="mt-3 text-xs font-semibold text-ink/55">
                 {section.items.length > 0
-                  ? `${section.items.length} to confirm`
+                  ? `${section.items.length} need confirmation`
                   : section.emptyDetail}
               </p>
             </section>
