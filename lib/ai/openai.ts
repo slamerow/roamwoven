@@ -51,6 +51,18 @@ export type OpenAIStructuredResponseResult = {
   usage: unknown;
 };
 
+export type OpenAIOcrInput = {
+  base64: string;
+  filename: string;
+  mimeType: string;
+};
+
+export type OpenAIOcrResult = {
+  model: string;
+  text: string;
+  usage: unknown;
+};
+
 function getResponseText(body: OpenAIResponseBody) {
   if (typeof body.output_text === "string") {
     return body.output_text;
@@ -285,6 +297,115 @@ export async function createOpenAIStructuredResponse({
     json: parsed.json,
     model: config.extractionModel,
     rawText: parsed.rawText,
+    usage: body.usage ?? null,
+  };
+}
+
+function isSupportedOcrMimeType(mimeType: string) {
+  return (
+    mimeType === "application/pdf" ||
+    mimeType === "image/jpeg" ||
+    mimeType === "image/png" ||
+    mimeType === "image/webp"
+  );
+}
+
+function getOcrContent(input: OpenAIOcrInput) {
+  const dataUrl = `data:${input.mimeType};base64,${input.base64}`;
+
+  if (input.mimeType === "application/pdf") {
+    return {
+      file_data: dataUrl,
+      filename: input.filename,
+      type: "input_file",
+    };
+  }
+
+  return {
+    image_url: dataUrl,
+    type: "input_image",
+  };
+}
+
+export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAIOcrResult> {
+  const config = getOpenAIConfig();
+
+  if (!config.extractionEnabled) {
+    throw new OpenAIExtractionConfigError(
+      "AI extraction is disabled. Set ROAMWOVEN_ENABLE_AI_EXTRACTION=true to allow OCR calls."
+    );
+  }
+
+  if (!config.apiKey) {
+    throw new OpenAIExtractionConfigError(
+      "OPENAI_API_KEY is missing. Add a server-side OpenAI API key before running OCR."
+    );
+  }
+
+  if (!isSupportedOcrMimeType(input.mimeType)) {
+    throw new OpenAIExtractionRequestError(
+      `OCR does not support ${input.mimeType || "unknown file type"} yet.`
+    );
+  }
+
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      input: [
+        {
+          content: [
+            getOcrContent(input),
+            {
+              text: [
+                "Extract all readable travel-planning text from this uploaded material.",
+                "Preserve confirmation codes, dates, times, airport/station names, hotel names, addresses, passenger/traveler names, reservation numbers, and cancellation/check-in instructions when visible.",
+                "Return plain text only. If a section is illegible, write [illegible] briefly rather than guessing.",
+              ].join(" "),
+              type: "input_text",
+            },
+          ],
+          role: "user",
+        },
+      ],
+      max_output_tokens: Math.min(config.maxOutputTokens, 6000),
+      model: config.ocrModel,
+      service_tier: "default",
+      store: false,
+    }),
+  });
+  const body = (await response.json().catch(() => null)) as
+    | OpenAIResponseBody
+    | null;
+
+  if (!response.ok) {
+    throw new OpenAIExtractionRequestError(
+      body?.error?.message ?? `OpenAI OCR request failed with ${response.status}.`,
+      response.status,
+      body ?? null
+    );
+  }
+
+  if (!body) {
+    throw new OpenAIExtractionRequestError(
+      "OpenAI OCR returned an empty or unreadable response."
+    );
+  }
+
+  const text = getResponseText(body);
+
+  if (!text) {
+    throw new OpenAIExtractionRequestError(
+      "OpenAI OCR response did not include extracted text."
+    );
+  }
+
+  return {
+    model: config.ocrModel,
+    text,
     usage: body.usage ?? null,
   };
 }

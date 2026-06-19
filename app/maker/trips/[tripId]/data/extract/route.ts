@@ -24,6 +24,7 @@ import {
   type MaterialBudgetSummary,
 } from "@/lib/extraction/material-budget";
 import { listMaterialExtractionCheckpoints } from "@/lib/extraction/material-extractions";
+import { processTripOcrNeededMaterials } from "@/lib/extraction/ocr-processor";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
@@ -163,10 +164,19 @@ export async function POST(
     return redirectToData(request, tripId, { error: "spine-exists" });
   }
 
-  const materials = await getTripExtractionMaterials(uploads);
-  const materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
-  const materialCheckpointSummary =
+  let materials = await getTripExtractionMaterials(uploads);
+  let materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
+  let materialCheckpointSummary =
     summarizeMaterialCheckpoints(materialCheckpoints);
+  let ocrSummary: Awaited<ReturnType<typeof processTripOcrNeededMaterials>> | null = null;
+
+  if ((materialCheckpointSummary.byStatus.ocr_needed ?? 0) > 0) {
+    ocrSummary = await processTripOcrNeededMaterials({ tripId, uploads });
+    materials = await getTripExtractionMaterials(uploads);
+    materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
+    materialCheckpointSummary =
+      summarizeMaterialCheckpoints(materialCheckpoints);
+  }
 
   if (materials.length === 0) {
     return redirectToData(request, tripId, {
@@ -191,6 +201,7 @@ export async function POST(
     materialCount: optimizedMaterials.summary.materialCount,
     materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
     rawCharCount: optimizedMaterials.summary.rawCharCount,
+    ocrSummary,
     statusCounts: materialCheckpointSummary.byStatus,
     submittedCharCount: optimizedMaterials.summary.submittedCharCount,
     truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
@@ -228,6 +239,7 @@ export async function POST(
           result.usage
         ),
         materialCheckpoints: materialCheckpointSummary,
+        ocr: ocrSummary,
         openai: result.usage,
       },
     });
@@ -271,6 +283,7 @@ export async function POST(
                   extractionUsage
                 ),
                 materialCheckpoints: materialCheckpointSummary,
+                ocr: ocrSummary,
                 openaiError: (error as { details?: unknown }).details,
               }
             : {
@@ -279,6 +292,7 @@ export async function POST(
                   extractionUsage
                 ),
                 materialCheckpoints: materialCheckpointSummary,
+                ocr: ocrSummary,
               },
         runId: run.id,
         tripId,

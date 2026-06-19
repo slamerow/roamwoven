@@ -3,6 +3,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { TripUpload } from "@/lib/uploads";
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
 import {
+  listMaterialExtractionCheckpoints,
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
 } from "@/lib/extraction/material-extractions";
@@ -88,7 +89,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function downloadMaterialFile(upload: TripUpload) {
+export async function downloadMaterialFile(upload: TripUpload) {
   if (!upload.storagePath) {
     return null;
   }
@@ -257,6 +258,13 @@ export async function getPdfExtractionMaterials(
 }
 
 export async function getTripExtractionMaterials(uploads: TripUpload[]) {
+  const tripId = uploads.find((upload) => upload.tripId)?.tripId;
+  const existingCheckpoints = tripId
+    ? await listMaterialExtractionCheckpoints(tripId)
+    : [];
+  const checkpointsByUploadId = new Map(
+    existingCheckpoints.map((checkpoint) => [checkpoint.uploadId, checkpoint])
+  );
   const materialLists = await mapWithConcurrency(
     uploads,
     MATERIAL_EXTRACTION_CONCURRENCY,
@@ -264,7 +272,27 @@ export async function getTripExtractionMaterials(uploads: TripUpload[]) {
       const materials: TripExtractionMaterial[] = [];
 
       try {
-      if (upload.userNote?.trim()) {
+        const existingCheckpoint = checkpointsByUploadId.get(upload.id);
+
+        if (existingCheckpoint?.status === "text_ready") {
+          const material = materialFromCheckpoint({
+            filename: upload.originalFilename,
+            record: existingCheckpoint,
+            type: getMaterialTypeForRecord(upload),
+          });
+
+          return material ? [material] : materials;
+        }
+
+        if (
+          existingCheckpoint?.status === "ocr_needed" ||
+          existingCheckpoint?.status === "ocr_processing" ||
+          existingCheckpoint?.status === "unsupported"
+        ) {
+          return materials;
+        }
+
+        if (upload.userNote?.trim()) {
         const record = await upsertMaterialExtractionCheckpoint({
           extractedCharCount: upload.userNote.trim().length,
           extractionMethod: "manual_note",

@@ -46,6 +46,14 @@ export function getOpenAIConfig() {
     extractionAllowedTripIds: parseOptionalEnvList(
       getOptionalEnv("ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS")
     ),
+    ocrModel:
+      getOptionalEnv("OPENAI_OCR_MODEL") ??
+      getOptionalEnv("OPENAI_EXTRACTION_MODEL") ??
+      "gpt-5.4-mini",
+    ocrMaxFilesPerRun: getOptionalPositiveInteger(
+      "OPENAI_OCR_MAX_FILES_PER_RUN",
+      3
+    ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",
       60000

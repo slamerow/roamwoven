@@ -28,8 +28,10 @@ Use a dedicated OpenAI project for Roamwoven so usage, keys, and budgets stay is
 ```bash
 OPENAI_API_KEY=...
 OPENAI_EXTRACTION_MODEL=gpt-5.4-mini
+OPENAI_OCR_MODEL=gpt-5.4-mini
 OPENAI_EXTRACTION_MAX_INPUT_CHARS=60000
 OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS=4000
+OPENAI_OCR_MAX_FILES_PER_RUN=3
 ROAMWOVEN_ENABLE_AI_EXTRACTION=false
 ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885
 ```
@@ -53,6 +55,7 @@ Also keep it `false` until the production database has the additive extraction t
 - Checkpoint each uploaded material before the model call as text-ready, OCR-needed, unsupported, or failed. The maker still sees one build action; this is internal durability. Material triage uses bounded concurrency so multi-file trips do not process purely serially or spike all uploads at once.
 - Normalize materials before the AI call by removing repeated document boilerplate and trimming each material plus the total bundle to `OPENAI_EXTRACTION_MAX_INPUT_CHARS`.
 - Store internal material-budget and material-checkpoint telemetry on `trip_processing_runs.openai_usage`, including raw characters, submitted characters, estimated per-pass input tokens, estimated staged-run input tokens, trimmed material count, and checkpoint status counts. This belongs in future admin/support tooling, not customer-facing maker or traveler UI.
+- Run a capped OCR pass for OCR-needed materials before the trip draft model call. OCR output is written back to the material checkpoint as `text_ready`; the model still receives normalized extracted text, not raw files.
 - Cap input characters/pages/files for the first beta.
 - Treat reprocessing as explicit and limited.
 - Prefer cheap first-pass extraction; allow higher-cost reruns only when needed for quality.
@@ -73,6 +76,8 @@ Also keep it `false` until the production database has the additive extraction t
 - `lib/extraction/material-extractions.ts`
   - Persists per-upload extraction checkpoints in `trip_material_extractions`.
   - Defines the OCR lane contract: list OCR-needed materials, mark OCR processing, complete OCR into `text_ready`, or fail OCR with a class/message.
+- `lib/extraction/ocr-processor.ts`
+  - Downloads OCR-needed originals, sends images/PDFs to OpenAI Responses with bounded per-run file count, and writes OCR text back into checkpoints.
 - `lib/extraction/material-budget.ts`
   - Removes repeated boilerplate and caps the submitted material bundle before the AI call.
   - Produces per-run internal telemetry for cost/support review.
@@ -89,7 +94,7 @@ Also keep it `false` until the production database has the additive extraction t
 3. Keep the flag disabled until ready for an intentional paid test.
 4. Test with pasted notes, a `.txt` file, or a readable text-based PDF first.
 5. Convert the raw draft JSON into editable review cards.
-6. Add the OCR lane for `trip_material_extractions.status = 'ocr_needed'`.
+6. Move OCR/extraction into a real worker before broad paid usage.
 7. Add better per-run estimated or actual OpenAI cost display.
 
 ## First Beta Target
