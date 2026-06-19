@@ -241,6 +241,9 @@ const systemPrompt = [
   "Hotel names, public landmarks, restaurants, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
   "Create missingDetails only for questions that materially affect the generated traveler app.",
   "When you can make a reasonable uncertain guess, fill guessedValue and evidence instead of asking a blank question. Prefer confirmable prompts like 'This looks like dinner on June 14. Is that right?'",
+  "Avoid asking obvious itinerary questions that a competent travel assistant should infer. A night outbound flight is the start of the trip even if the first lodging check-in is the next day. If lodging is missing for that night because the traveler is on an overnight flight, ask a targeted confirmation about sleeping on the plane only if the materials are genuinely ambiguous.",
+  "Do not ask whether the trip start date should be the first hotel night when there is clear same-day outbound transport. Use the transport date as the trip start and, if helpful, create a low-friction confirmation such as 'We treated the overnight flight as the first trip night because there is no hotel that night. Is that right?'",
+  "If an activity choice is unresolved but non-blocking, make a placeholder traveler card with TBD language instead of blocking the app. MissingDetails may accept answers like 'not sure yet' and should not prevent a draft unless the missing detail affects the core route, dates, lodging, or critical transport.",
   "For missingDetails, set subjectType and targetField to the exact structured record field when possible, such as item/date, item/startTime, stay/checkIn, stay/addressVisibility, transport/date, or transport/departureTime.",
 ].join(" ");
 

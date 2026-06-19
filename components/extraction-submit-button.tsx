@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 const processingSteps = [
-  "Reading your materials",
-  "Finding dates and places",
-  "Reviewing flights and stays",
-  "Sorting dining reservations",
-  "Building the review list",
+  "Checking trip dates and places",
+  "Checking flights and trains",
+  "Checking hotels and lodging",
+  "Checking dinners and reservations",
+  "Checking activities and notes",
 ];
 
 export function ExtractionSubmitButton({
@@ -21,21 +21,35 @@ export function ExtractionSubmitButton({
   isRetry?: boolean;
 }) {
   const [pending, setPending] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const disabled = !canExtract || pending;
 
   useEffect(() => {
     if (!pending) {
+      setElapsedSeconds(0);
       setStepIndex(0);
       return;
     }
 
     const interval = window.setInterval(() => {
-      setStepIndex((current) => (current + 1) % processingSteps.length);
-    }, 900);
+      setElapsedSeconds((current) => current + 1);
+    }, 1000);
 
     return () => window.clearInterval(interval);
   }, [pending]);
+
+  useEffect(() => {
+    if (!pending) {
+      return;
+    }
+
+    const nextStep = Math.min(
+      processingSteps.length - 1,
+      Math.floor(elapsedSeconds / 22)
+    );
+    setStepIndex(nextStep);
+  }, [elapsedSeconds, pending]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,13 +94,13 @@ export function ExtractionSubmitButton({
         <div className="mt-4 max-w-md rounded-md border border-ink/10 bg-paper p-4">
           <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
             <span>Processing</span>
-            <span>{stepIndex + 1}/{processingSteps.length}</span>
+            <span>{Math.min(95, 12 + elapsedSeconds)}%</span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
             <div
-              className="h-full rounded-full bg-moss transition-all duration-500"
+              className="h-full rounded-full bg-moss transition-all duration-1000"
               style={{
-                width: `${((stepIndex + 1) / processingSteps.length) * 100}%`,
+                width: `${Math.min(95, 12 + elapsedSeconds)}%`,
               }}
             />
           </div>
@@ -94,8 +108,8 @@ export function ExtractionSubmitButton({
             {processingSteps[stepIndex]}
           </p>
           <p className="mt-1 text-xs leading-5 text-ink/50">
-            This can take a minute. Keep this tab open while Roamwoven builds
-            the first draft.
+            This can take up to 2-3 minutes. Keep this tab open while Roamwoven
+            builds the first draft.
           </p>
         </div>
       ) : null}

@@ -111,6 +111,14 @@ Backend-ready pieces now exist:
 - First real-draft review feedback from the Andalucía extraction exposed a real data-contract issue, not a copy bug: dining reservations were flowing through the generic `activities` draft bucket without Wren-style category organization. The extraction schema now requires every activity to have a Wren-style `category`, dining language backfills to `categoryId = food_dining`, and the review cards label section totals as `Found` separately from records that need confirmation. Do not introduce `itemType = restaurant`; dining reservations are activities with a food/dining category.
 - First draft-review UX feedback also shifted the page away from internal parser language: headline is now `Check the draft`, technical model/input-character metadata and the `Parsed draft saved` banner are hidden, dates are spelled out in long form, style direction/colors are shown in the review header, `What we found` is collapsible and includes app categories, sections collapse, empty states say `No ... decisions needed`, and review progress is visible. Generated questions now have answer fields, but this is still only a persisted answer decision; the proper next contract is hypothesis-style questions with guessed value, field target, evidence, confidence, and a resolver that applies the answer to structured records.
 - The hypothesis-question contract now exists for new extractions: `missingDetails` can include `subjectType`, `targetField`, `guessedValue`, `evidence`, `answerType`, and `confidence`. The adapter links questions back to matching records by `relatedTitle`; the review UI shows the guess/evidence and offers `Yes, use this`; answering a targeted question applies the answer to a whitelisted structured record field and marks the record confirmed. Next improvement is richer matching/resolution for duplicate records and non-text/vision-derived evidence.
+- Andalucía extraction QA/product feedback:
+  - Avoid dumb questions. If a night outbound flight clearly starts the trip, use that as the trip start; do not ask whether the first hotel date is the start. If needed, ask a targeted confirmation that the first night is on the plane.
+  - Non-blocking uncertainty should not block app creation. Users can answer “not sure yet,” and Roamwoven should still create a TBD card or placeholder when the missing detail is not core route/dates/lodging/transport.
+  - Privacy review should be dialed back in the happy path. Group recommended privacy into a few confirmations such as stay addresses, confirmation/booking codes, access codes, and personal/private notes, with optional drill-down into specifics.
+  - Activities by category are the right direction; categories should expand accordion-style to show titles, but not descriptions by default.
+  - Extraction progress should steadily advance and rotate through meaningful checks instead of resetting through 1-5 repeatedly; copy should underpromise that the build can take up to 2-3 minutes.
+  - Review dates should use friendlier compact display such as `Jan. 10-14` instead of raw ISO dates in summary/dropdown contexts.
+  - Traveler shell still needs Wren-parity polish later: category emojis, leg grouping/color by country/region, blocked calendar areas, homepage lower-half spacing, and copy.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
 - CTO durability pass started before new product work:
   - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.
@@ -299,6 +307,12 @@ Latest checks after the maker trip soft-delete and published-token guard:
 - `npm run build`
 
 Latest checks after the CTO durability foundation pass:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after Andalucía review UX/product-contract pass:
 
 - `npm test`
 - `npm run typecheck`

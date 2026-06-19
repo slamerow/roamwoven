@@ -151,6 +151,27 @@ function formatDisplayDate(value: string | null) {
   return `${month} ${day}${suffix}, ${year}`;
 }
 
+function formatCompactDisplayDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric",
+  })
+    .format(date)
+    .replace(/^([A-Za-z]{3}) /, "$1. ");
+}
+
 function formatDisplayDateRange(records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null) {
   if (!records) {
     return null;
@@ -173,12 +194,14 @@ function formatDisplayDateRange(records: ReturnType<typeof createStructuredTripR
     null;
   const formattedFirst = formatDisplayDate(firstDate);
   const formattedLast = formatDisplayDate(lastDate);
+  const compactFirst = formatCompactDisplayDate(firstDate);
+  const compactLast = formatCompactDisplayDate(lastDate);
 
-  if (formattedFirst && formattedLast && formattedFirst !== formattedLast) {
-    return `${formattedFirst} - ${formattedLast}`;
+  if (compactFirst && compactLast && compactFirst !== compactLast) {
+    return `${compactFirst} - ${compactLast}`;
   }
 
-  return formattedFirst ?? formattedLast;
+  return compactFirst ?? compactLast ?? formattedFirst ?? formattedLast;
 }
 
 function formatScannedSummary(draft: unknown) {
@@ -346,6 +369,9 @@ function ReviewDecisionButton({
       <input name="action" type="hidden" value={action} />
       <input name="subjectId" type="hidden" value={item.subjectId} />
       <input name="subjectType" type="hidden" value={item.subjectType} />
+      {item.subjectIds && item.subjectIds.length > 0 ? (
+        <input name="subjectIds" type="hidden" value={item.subjectIds.join(",")} />
+      ) : null}
       {action === "answer_question" ? (
         <input
           name="answerValue"
@@ -410,8 +436,13 @@ function ReviewQuestionAnswerForm({
               defaultValue={item.suggestedAnswer ?? ""}
               name="answerValue"
               placeholder="Tell Roamwoven what is correct."
+              aria-label="Answer"
               required
             />
+            <p className="mt-1 text-xs leading-5 text-ink/45">
+              It is okay to write “not sure yet.” Roamwoven can keep a TBD card
+              and you can fill it in later.
+            </p>
           </label>
           <button
             className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
@@ -658,12 +689,26 @@ function StructuredRecordReview({
               {section.summaryItems.length > 0 ? (
                 <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
                   {section.summaryItems.slice(0, 8).map((summaryItem) => (
-                    <p
+                    <details
                       className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/60"
                       key={summaryItem}
                     >
-                      {summaryItem}
-                    </p>
+                      <summary className="cursor-pointer list-none whitespace-pre-line">
+                        {summaryItem.split("\n")[0]}
+                      </summary>
+                      {summaryItem.includes("\n") ? (
+                        <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
+                          {summaryItem
+                            .split("\n")
+                            .slice(1)
+                            .map((line) => (
+                              <p className="font-medium text-ink/55" key={line}>
+                                {line.trim()}
+                              </p>
+                            ))}
+                        </div>
+                      ) : null}
+                    </details>
                   ))}
                   {section.summaryItems.length > 8 ? (
                     <p className="px-3 text-xs font-semibold text-ink/40">
@@ -724,8 +769,31 @@ function StructuredRecordReview({
                         <ReviewQuestionAnswerForm item={item} tripId={tripId} />
                         <ReviewEditForm item={item} tripId={tripId} />
                         <ReviewCombineForm item={item} tripId={tripId} />
+                        {item.childItems && item.childItems.length > 0 ? (
+                          <details className="mt-4 rounded-md border border-ink/10 bg-white p-3">
+                            <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+                              Review specifics
+                            </summary>
+                            <div className="mt-3 space-y-2">
+                              {item.childItems.map((child) => (
+                                <div
+                                  className="rounded-md bg-paper px-3 py-2"
+                                  key={child.id}
+                                >
+                                  <p className="text-xs font-semibold text-ink">
+                                    {child.title}
+                                  </p>
+                                  <p className="mt-1 text-xs text-ink/45">
+                                    {child.meta}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
                         <div className="mt-4 flex flex-wrap gap-2">
-                          {item.subjectType === "review_question" ? (
+                          {item.subjectType === "review_question" ||
+                          (item.subjectIds && item.subjectIds.length > 0) ? (
                             null
                           ) : (
                             <ReviewDecisionButton
@@ -746,7 +814,9 @@ function StructuredRecordReview({
                               tone="sensitive"
                               tripId={tripId}
                             >
-                              Protect
+                              {item.subjectIds && item.subjectIds.length > 0
+                                ? "Confirm recommended privacy"
+                                : "Protect"}
                             </ReviewDecisionButton>
                           ) : null}
                           <ReviewDecisionButton

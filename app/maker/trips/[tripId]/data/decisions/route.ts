@@ -136,6 +136,30 @@ export async function POST(
       return NextResponse.redirect(dataUrl, 303);
     }
 
+    const subjectIds = String(formData.get("subjectIds") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (
+      subjectIds.length > 0 &&
+      (action === "confirm" || action === "protect" || action === "delete")
+    ) {
+      await Promise.all(
+        subjectIds.map((currentSubjectId) =>
+          saveTripReviewDecision({
+            action,
+            note,
+            subjectId: currentSubjectId,
+            subjectType,
+            tripId,
+          })
+        )
+      );
+      dataUrl.searchParams.set("decision", "saved");
+      return NextResponse.redirect(dataUrl, 303);
+    }
+
     if (action === "answer_question") {
       if (subjectType !== "review_question") {
         dataUrl.searchParams.set("error", "decision-invalid");

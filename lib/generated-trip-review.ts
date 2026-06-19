@@ -21,12 +21,19 @@ export type StructuredReviewCombineOption = {
 };
 
 export type StructuredReviewItem = {
+  childItems?: Array<{
+    detail: string;
+    id: string;
+    meta: string;
+    title: string;
+  }>;
   combineOptions: StructuredReviewCombineOption[];
   detail: string;
   editFields: StructuredReviewEditField[];
   id: string;
   meta: string;
   subjectId: string;
+  subjectIds?: string[];
   subjectType: ReviewDecisionSubjectType;
   suggestedAnswer?: string | null;
   title: string;
@@ -96,6 +103,101 @@ function field({
     options,
     type,
     value: value ?? "",
+  };
+}
+
+function formatShortDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  })
+    .format(date)
+    .replace(/^([A-Za-z]{3}) /, "$1. ");
+}
+
+function formatShortDateRange(start: string | null, end: string | null) {
+  const formattedStart = formatShortDate(start);
+  const formattedEnd = formatShortDate(end);
+
+  if (!formattedStart && !formattedEnd) {
+    return "";
+  }
+
+  if (!formattedStart || !formattedEnd || formattedStart === formattedEnd) {
+    return formattedStart ?? formattedEnd ?? "";
+  }
+
+  const [startMonth, startDay] = formattedStart.split(" ");
+  const [endMonth, endDay] = formattedEnd.split(" ");
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${startDay}-${endDay}`;
+  }
+
+  return `${formattedStart}-${formattedEnd}`;
+}
+
+function getPrivacyGroup(detailType: string) {
+  const normalized = detailType.toLowerCase();
+
+  if (
+    normalized.includes("confirmation") ||
+    normalized.includes("booking") ||
+    normalized.includes("ticket") ||
+    normalized.includes("pnr")
+  ) {
+    return {
+      id: "confirmations",
+      title: "Confirmation and booking codes",
+      detail:
+        "Recommended: keep confirmation numbers, booking references, and ticket codes behind the trip password.",
+    };
+  }
+
+  if (
+    normalized.includes("access") ||
+    normalized.includes("door") ||
+    normalized.includes("gate") ||
+    normalized.includes("wifi") ||
+    normalized.includes("lock")
+  ) {
+    return {
+      id: "access",
+      title: "Access codes and arrival instructions",
+      detail:
+        "Recommended: keep door codes, Wi-Fi passwords, lockbox notes, and access instructions behind the trip password.",
+    };
+  }
+
+  if (
+    normalized.includes("address") ||
+    normalized.includes("residence") ||
+    normalized.includes("lodging")
+  ) {
+    return {
+      id: "addresses",
+      title: "Exact stay addresses",
+      detail:
+        "Recommended: show hotel or area labels publicly, but keep exact private addresses behind the trip password.",
+    };
+  }
+
+  return {
+    id: "private-notes",
+    title: "Personal and private notes",
+    detail:
+      "Recommended: keep personal contacts, family logistics, and safety-sensitive notes behind the trip password.",
   };
 }
 
@@ -215,6 +317,41 @@ export function formatStructuredDiscoverySummary(
 export function getStructuredReviewSections(
   records: StructuredTripRecords
 ): StructuredReviewSection[] {
+  const privacyGroups = new Map<
+    string,
+    {
+      detail: string;
+      items: StructuredReviewItem["childItems"];
+      subjectIds: string[];
+      title: string;
+    }
+  >();
+
+  records.privateDetails
+    .filter((detail) => detail.reviewRequired)
+    .forEach((detail) => {
+      const group = getPrivacyGroup(detail.detailType);
+      const existing =
+        privacyGroups.get(group.id) ??
+        {
+          detail: group.detail,
+          items: [],
+          subjectIds: [],
+          title: group.title,
+        };
+
+      existing.subjectIds.push(detail.id);
+      existing.items?.push({
+        detail:
+          detail.reason ??
+          "This private detail should be reviewed before the app is shared.",
+        id: detail.id,
+        meta: detail.detailType,
+        title: detail.label,
+      });
+      privacyGroups.set(group.id, existing);
+    });
+
   return [
     {
       count: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
@@ -253,7 +390,7 @@ export function getStructuredReviewSections(
             }),
           ],
           id: leg.id,
-          meta: [leg.arriveDate, leg.leaveDate].filter(Boolean).join(" to "),
+          meta: formatShortDateRange(leg.arriveDate, leg.leaveDate),
           subjectId: leg.id,
           subjectType: "leg" as const,
           title: leg.displayName,
@@ -313,7 +450,7 @@ export function getStructuredReviewSections(
             }),
           ],
           id: stay.id,
-          meta: [stay.checkInDate, stay.checkOutDate].filter(Boolean).join(" to "),
+          meta: formatShortDateRange(stay.checkInDate, stay.checkOutDate),
           subjectId: stay.id,
           subjectType: "stay" as const,
           title: stay.name,
@@ -449,49 +586,44 @@ export function getStructuredReviewSections(
           title: item.title,
           tone: "warning" as const,
         })),
-      summaryItems: records.categories.map((category) => {
-        const count = records.items.filter(
-          (item) => item.categoryId === category.id && isActiveStatus(item.status)
-        ).length;
+      summaryItems: records.categories
+        .map((category) => {
+          const items = records.items.filter(
+            (item) => item.categoryId === category.id && isActiveStatus(item.status)
+          );
 
-        return `${category.label} · ${pluralize(count, "activity", "activities")}`;
-      }),
+          if (items.length === 0) {
+            return null;
+          }
+
+          return [
+            `${category.emoji ?? "•"} ${category.label} · ${pluralize(
+              items.length,
+              "activity",
+              "activities"
+            )}`,
+            ...items.map((item) => `  ${item.title}`),
+          ].join("\n");
+        })
+        .filter((item): item is string => Boolean(item)),
       title: "Activities",
     },
     {
       count: records.privateDetails.length,
-      description: "Sensitive addresses, confirmations, access notes, and private details.",
-      emptyDetail: "Private details are protected by default.",
+      description: "Recommended privacy groups for addresses, confirmations, access notes, and personal details.",
+      emptyDetail: "Recommended privacy is already applied.",
       id: "private-details",
-      items: records.privateDetails
-        .filter((detail) => detail.reviewRequired)
-        .map((detail) => ({
+      items: Array.from(privacyGroups.entries()).map(([groupId, group]) => ({
           combineOptions: [],
-          detail:
-            detail.reason ??
-            "This private detail should be reviewed before the app is shared.",
-          editFields: [
-            field({ label: "Label", name: "label", value: detail.label }),
-            field({ label: "Detail type", name: "detailType", value: detail.detailType }),
-            field({
-              label: "Private value",
-              name: "value",
-              type: "textarea",
-              value: detail.value,
-            }),
-            field({
-              label: "Visibility",
-              name: "visibility",
-              options: visibilityOptions,
-              type: "select",
-              value: detail.visibility,
-            }),
-          ],
-          id: detail.id,
-          meta: detail.detailType,
-          subjectId: detail.id,
+          childItems: group.items,
+          detail: group.detail,
+          editFields: [],
+          id: `privacy-${groupId}`,
+          meta: pluralize(group.subjectIds.length, "detail"),
+          subjectId: group.subjectIds[0] ?? `privacy-${groupId}`,
+          subjectIds: group.subjectIds,
           subjectType: "private_detail" as const,
-          title: detail.label,
+          title: group.title,
           tone: "sensitive" as const,
         })),
       summaryItems: records.privateDetails
