@@ -28,6 +28,7 @@ export type StructuredReviewItem = {
   meta: string;
   subjectId: string;
   subjectType: ReviewDecisionSubjectType;
+  suggestedAnswer?: string | null;
   title: string;
   tone: StructuredReviewTone;
 };
@@ -478,12 +479,23 @@ export function getStructuredReviewSections(
       id: "questions",
       items: records.reviewQuestions.filter(isOpenQuestion).map((question) => ({
         combineOptions: [],
-        detail: question.reason,
+        detail: [
+          question.guessedValue
+            ? `Roamwoven thinks the answer is ${question.guessedValue}.`
+            : null,
+          question.evidence ? `Evidence: ${question.evidence}` : null,
+          question.reason,
+        ]
+          .filter(Boolean)
+          .join(" "),
         editFields: [],
         id: question.id,
-        meta: "Missing detail",
+        meta: question.targetField
+          ? `${question.subjectType} · ${question.targetField}`
+          : "Missing detail",
         subjectId: question.id,
         subjectType: "review_question" as const,
+        suggestedAnswer: question.guessedValue,
         title: question.prompt,
         tone: "question" as const,
       })),

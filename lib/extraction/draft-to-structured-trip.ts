@@ -10,6 +10,7 @@ import type {
   TripTransportRecord,
   TripTransportType,
   TripItemType,
+  TripSourceConfidence,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
 
@@ -38,6 +39,41 @@ function getArray(value: unknown, key: string) {
 function getString(value: DraftObject | null, key: string) {
   const child = value?.[key];
   return typeof child === "string" && child.trim() ? child.trim() : null;
+}
+
+function getConfidence(value: string | null): TripSourceConfidence {
+  return value === "low" || value === "high" ? value : "medium";
+}
+
+function getAnswerType(
+  value: string | null
+): TripReviewQuestionRecord["answerType"] {
+  if (
+    value === "date" ||
+    value === "time" ||
+    value === "visibility" ||
+    value === "confirm"
+  ) {
+    return value;
+  }
+
+  return "text";
+}
+
+function getReviewSubjectType(
+  value: string | null
+): TripReviewQuestionRecord["subjectType"] {
+  if (
+    value === "day" ||
+    value === "leg" ||
+    value === "stay" ||
+    value === "transport" ||
+    value === "item"
+  ) {
+    return value;
+  }
+
+  return "trip";
 }
 
 function slugify(value: string) {
@@ -500,30 +536,89 @@ function createDayRecords({
 
 function createReviewQuestions({
   draft,
+  items,
+  legs,
+  stays,
   tripId,
+  transport,
 }: {
   draft: unknown;
+  items: TripItemRecord[];
+  legs: TripLegRecord[];
+  stays: TripStayRecord[];
   tripId: string;
+  transport: TripTransportRecord[];
 }): TripReviewQuestionRecord[] {
+  const findSubjectId = (
+    subjectType: TripReviewQuestionRecord["subjectType"],
+    relatedTitle: string | null
+  ) => {
+    if (!relatedTitle) {
+      return null;
+    }
+
+    const normalized = relatedTitle.toLowerCase();
+
+    if (subjectType === "item") {
+      return (
+        items.find((item) => item.title.toLowerCase() === normalized)?.id ??
+        items.find((item) => item.title.toLowerCase().includes(normalized))?.id ??
+        null
+      );
+    }
+
+    if (subjectType === "stay") {
+      return (
+        stays.find((stay) => stay.name.toLowerCase() === normalized)?.id ??
+        stays.find((stay) => stay.name.toLowerCase().includes(normalized))?.id ??
+        null
+      );
+    }
+
+    if (subjectType === "transport") {
+      return (
+        transport.find((item) => item.routeLabel.toLowerCase() === normalized)?.id ??
+        transport.find((item) => item.routeLabel.toLowerCase().includes(normalized))?.id ??
+        null
+      );
+    }
+
+    if (subjectType === "leg") {
+      return (
+        legs.find((leg) => leg.displayName.toLowerCase() === normalized)?.id ??
+        legs.find((leg) => leg.displayName.toLowerCase().includes(normalized))?.id ??
+        null
+      );
+    }
+
+    return null;
+  };
+
   return getArray(draft, "missingDetails").map((item, index) => {
     const detail = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
+    const relatedTitle = getString(detail, "relatedTitle");
+    const subjectType = getReviewSubjectType(getString(detail, "subjectType"));
+    const subjectId = findSubjectId(subjectType, relatedTitle);
 
     return {
-      answerType: "text",
+      answerType: getAnswerType(getString(detail, "answerType")),
       answerValue: null,
       createdAt: null,
+      evidence: getString(detail, "evidence"),
+      guessedValue: getString(detail, "guessedValue"),
       id: `${tripId}-question-${index + 1}`,
       prompt: getString(detail, "prompt") ?? "Confirm a missing detail",
       reason:
         getString(detail, "reason") ??
         "This detail affects the generated traveler app.",
       resolvedAt: null,
-      sourceConfidence: "medium",
+      sourceConfidence: getConfidence(getString(detail, "confidence")),
       status: "open",
-      subjectId: null,
-      subjectType: "trip",
+      subjectId,
+      subjectType,
+      targetField: getString(detail, "targetField"),
       tripId,
     };
   });
@@ -588,7 +683,14 @@ export function createStructuredTripRecordsFromDraft({
     photos: [],
     phrases: [],
     privateDetails,
-    reviewQuestions: createReviewQuestions({ draft, tripId }),
+    reviewQuestions: createReviewQuestions({
+      draft,
+      items,
+      legs,
+      stays,
+      tripId,
+      transport,
+    }),
     stays,
     transport,
     trip,

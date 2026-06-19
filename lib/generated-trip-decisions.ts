@@ -311,11 +311,104 @@ function applyCombine(
   };
 }
 
+const answerTargetFields = {
+  item: [
+    "address",
+    "date",
+    "description",
+    "endTime",
+    "itemType",
+    "locationName",
+    "startTime",
+    "title",
+    "url",
+  ],
+  leg: [
+    "arriveDate",
+    "city",
+    "country",
+    "language",
+    "leaveDate",
+    "summary",
+    "timezone",
+  ],
+  stay: [
+    "address",
+    "addressVisibility",
+    "checkInDate",
+    "checkOutDate",
+    "name",
+    "publicLocationLabel",
+  ],
+  transport: [
+    "arrivalLocation",
+    "arrivalTime",
+    "date",
+    "departureLocation",
+    "departureTime",
+    "description",
+    "provider",
+    "routeLabel",
+    "transportType",
+  ],
+} as const;
+
+function canPatchTargetField(
+  subjectType: TripReviewQuestionRecord["subjectType"],
+  targetField: string | null
+): subjectType is "item" | "leg" | "stay" | "transport" {
+  if (!targetField || subjectType === "trip" || subjectType === "day") {
+    return false;
+  }
+
+  return (answerTargetFields[subjectType] as readonly string[]).includes(
+    targetField
+  );
+}
+
+function patchAnswerTarget({
+  decision,
+  question,
+  records,
+}: {
+  decision: AnswerQuestionReviewDecision;
+  question: TripReviewQuestionRecord;
+  records: StructuredTripRecords;
+}) {
+  const value =
+    decision.answerValue.trim() ||
+    (question.answerType === "confirm" ? question.guessedValue : null);
+
+  if (
+    !value ||
+    !question.subjectId ||
+    !canPatchTargetField(question.subjectType, question.targetField)
+  ) {
+    return records;
+  }
+
+  const changes = {
+    [question.targetField as string]: value,
+    reviewRequired: false,
+    status: "confirmed",
+  };
+
+  return applyToRecord(records, question.subjectType, question.subjectId, {
+    item: (record) => ({ ...record, ...changes }) as TripItemRecord,
+    leg: (record) => ({ ...record, ...changes }) as TripLegRecord,
+    stay: (record) => ({ ...record, ...changes }) as TripStayRecord,
+    transport: (record) => ({ ...record, ...changes }) as TripTransportRecord,
+  });
+}
+
 function applyAnswerQuestion(
   records: StructuredTripRecords,
   decision: AnswerQuestionReviewDecision
 ) {
-  return applyToRecord(records, "review_question", decision.subjectId, {
+  const question = records.reviewQuestions.find(
+    (item) => item.id === decision.subjectId
+  );
+  const updatedQuestions = applyToRecord(records, "review_question", decision.subjectId, {
     question: (question) => ({
       ...question,
       answerValue: decision.answerValue,
@@ -323,6 +416,14 @@ function applyAnswerQuestion(
       status: "answered",
     }),
   });
+
+  return question
+    ? patchAnswerTarget({
+        decision,
+        question,
+        records: updatedQuestions,
+      })
+    : updatedQuestions;
 }
 
 export function applyReviewDecision(

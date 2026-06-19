@@ -222,6 +222,8 @@ export type TripReviewQuestionRecord = {
   answerType: "text" | "choice" | "date" | "time" | "visibility" | "confirm";
   answerValue: string | null;
   createdAt: string | null;
+  evidence: string | null;
+  guessedValue: string | null;
   id: string;
   prompt: string;
   reason: string;
@@ -230,6 +232,7 @@ export type TripReviewQuestionRecord = {
   status: "open" | "answered" | "dismissed";
   subjectId: string | null;
   subjectType: "trip" | "day" | "leg" | "stay" | "transport" | "item";
+  targetField: string | null;
   tripId: string;
 };
 

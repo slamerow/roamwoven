@@ -56,11 +56,29 @@ const tripDraftSchema = {
       items: {
         additionalProperties: false,
         properties: {
+          answerType: { enum: ["text", "date", "time", "visibility", "confirm"] },
+          confidence: { enum: ["low", "medium", "high"] },
+          evidence: { type: ["string", "null"] },
+          guessedValue: { type: ["string", "null"] },
           prompt: { type: "string" },
           reason: { type: "string" },
           relatedTitle: { type: ["string", "null"] },
+          subjectType: {
+            enum: ["trip", "day", "leg", "stay", "transport", "item"],
+          },
+          targetField: { type: ["string", "null"] },
         },
-        required: ["prompt", "reason", "relatedTitle"],
+        required: [
+          "answerType",
+          "confidence",
+          "evidence",
+          "guessedValue",
+          "prompt",
+          "reason",
+          "relatedTitle",
+          "subjectType",
+          "targetField",
+        ],
         type: "object",
       },
       type: "array",
@@ -167,6 +185,8 @@ const systemPrompt = [
   "Default sensitiveDetails should include exact private home addresses, exact rental or Airbnb addresses, door/gate/lockbox codes, Wi-Fi passwords, host phone numbers or emails, confirmation numbers, booking references, ticket numbers, passport/ID/payment details, and child/medical/personal safety notes.",
   "Hotel names, public landmarks, restaurants, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
   "Create missingDetails only for questions that materially affect the generated traveler app.",
+  "When you can make a reasonable uncertain guess, fill guessedValue and evidence instead of asking a blank question. Prefer confirmable prompts like 'This looks like dinner on June 14. Is that right?'",
+  "For missingDetails, set subjectType and targetField to the exact structured record field when possible, such as item/date, item/startTime, stay/checkIn, stay/addressVisibility, transport/date, or transport/departureTime.",
 ].join(" ");
 
 function formatMaterials(materials: TripExtractionMaterial[]) {

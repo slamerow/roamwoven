@@ -412,6 +412,78 @@ test("review decisions update structured records", () => {
   );
 });
 
+test("answering a targeted question updates the structured record", () => {
+  const draft = {
+    activities: [
+      {
+        date: null,
+        description: "Dinner reservation listed under Sep 2 notes.",
+        itemType: "restaurant",
+        title: "Dinner at Septime",
+      },
+    ],
+    missingDetails: [
+      {
+        answerType: "date",
+        confidence: "medium",
+        evidence: "The reservation appears in the Sep 2 section.",
+        guessedValue: "2026-09-02",
+        prompt: "This looks like dinner on September 2nd. Is that right?",
+        reason: "The traveler app needs a date to place the dinner card.",
+        relatedTitle: "Dinner at Septime",
+        subjectType: "item",
+        targetField: "date",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Paris",
+        country: "France",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Paris question",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-targeted-question",
+  });
+  const dinner = records.items[0];
+  const question = records.reviewQuestions[0];
+
+  assert.ok(dinner);
+  assert.ok(question);
+  assert.equal(question.subjectId, dinner.id);
+  assert.equal(question.targetField, "date");
+  assert.equal(question.guessedValue, "2026-09-02");
+
+  const updated = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "2026-09-02",
+    createdAt: "2026-06-18T15:00:00.000Z",
+    id: "decision-targeted-answer",
+    resolvedAction: "edit",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "trip-targeted-question",
+  });
+  const updatedDinner = updated.items[0];
+  const updatedQuestion = updated.reviewQuestions[0];
+
+  assert.equal(updatedDinner?.date, "2026-09-02");
+  assert.equal(updatedDinner?.reviewRequired, false);
+  assert.equal(updatedDinner?.status, "confirmed");
+  assert.equal(updatedQuestion?.answerValue, "2026-09-02");
+  assert.equal(updatedQuestion?.status, "answered");
+  assert.equal(getStructuredReviewCount(updated), 0);
+});
+
 test("review decisions serialize through the persistence payload contract", () => {
   const serialized = serializeTripReviewDecision({
     action: "combine",

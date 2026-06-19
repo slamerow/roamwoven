@@ -376,30 +376,52 @@ function ReviewQuestionAnswerForm({
   }
 
   return (
-    <form
-      action={`/maker/trips/${tripId}/data/decisions`}
-      className="mt-4 rounded-md border border-ink/10 bg-white p-3"
-      method="post"
-    >
-      <input name="action" type="hidden" value="answer_question" />
-      <input name="subjectId" type="hidden" value={item.subjectId} />
-      <input name="subjectType" type="hidden" value={item.subjectType} />
-      <label>
-        <span className="text-xs font-semibold text-ink/55">Answer</span>
-        <textarea
-          className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
-          name="answerValue"
-          placeholder="Tell Roamwoven what is correct."
-          required
-        />
-      </label>
-      <button
-        className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
-        type="submit"
-      >
-        Save answer
-      </button>
-    </form>
+    <div className="mt-4 rounded-md border border-ink/10 bg-white p-3">
+      {item.suggestedAnswer ? (
+        <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
+          <input name="action" type="hidden" value="answer_question" />
+          <input name="subjectId" type="hidden" value={item.subjectId} />
+          <input name="subjectType" type="hidden" value={item.subjectType} />
+          <input name="answerValue" type="hidden" value={item.suggestedAnswer} />
+          <button
+            className="inline-flex rounded-md bg-moss px-3 py-2 text-xs font-semibold text-paper"
+            type="submit"
+          >
+            Yes, use this
+          </button>
+        </form>
+      ) : null}
+      <details className={item.suggestedAnswer ? "mt-3" : ""}>
+        <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+          {item.suggestedAnswer ? "Change answer" : "Answer question"}
+        </summary>
+        <form
+          action={`/maker/trips/${tripId}/data/decisions`}
+          className="mt-3"
+          method="post"
+        >
+          <input name="action" type="hidden" value="answer_question" />
+          <input name="subjectId" type="hidden" value={item.subjectId} />
+          <input name="subjectType" type="hidden" value={item.subjectType} />
+          <label>
+            <span className="text-xs font-semibold text-ink/55">Answer</span>
+            <textarea
+              className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
+              defaultValue={item.suggestedAnswer ?? ""}
+              name="answerValue"
+              placeholder="Tell Roamwoven what is correct."
+              required
+            />
+          </label>
+          <button
+            className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
+            type="submit"
+          >
+            Save answer
+          </button>
+        </form>
+      </details>
+    </div>
   );
 }
 
