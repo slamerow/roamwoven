@@ -9,7 +9,7 @@ export type GeneratedTripSummaryView = {
     activities: number;
     places: number;
     privateDetails: number;
-    restaurants: number;
+    foodAndDining: number;
     review: number;
     stays: number;
     transport: number;
@@ -75,7 +75,7 @@ export function createGeneratedTripSummaryView(
       privateDetails: records.privateDetails.filter(
         (detail) => detail.visibility !== "hidden"
       ).length,
-      restaurants: activeItems.filter((item) => item.itemType === "restaurant")
+      foodAndDining: activeItems.filter((item) => item.categoryId === "food_dining")
         .length,
       review,
       stays: records.stays.filter((stay) => isActiveStatus(stay.status)).length,

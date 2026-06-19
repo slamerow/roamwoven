@@ -78,10 +78,11 @@ test("draft parser output compiles into structured records", () => {
       },
       {
         address: null,
+        category: "food_dining",
         date: null,
         description: "A flexible cafe stop.",
         endTime: null,
-        itemType: "restaurant",
+        itemType: "activity",
         sourceFilename: "central-europe.pdf",
         startTime: null,
         title: "Cafe TBD",
@@ -157,10 +158,11 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(records.transport[0]?.transportType, "flight");
   assert.equal(records.transport[0]?.confirmationVisibility, "traveler_password");
   assert.equal(records.items.length, 2);
-  assert.equal(records.items[1]?.itemType, "restaurant");
+  assert.equal(records.items[1]?.itemType, "activity");
+  assert.equal(records.items[1]?.categoryId, "food_dining");
   assert.ok(
-    records.categories.some((category) => category.categoryKey === "restaurant"),
-    "expected restaurant cards to get their own category"
+    records.categories.some((category) => category.categoryKey === "food_dining"),
+    "expected dining activities to use the food and dining category"
   );
   assert.equal(records.items[1]?.reviewRequired, true);
   assert.equal(records.reviewQuestions.length, 1);
@@ -191,7 +193,8 @@ test("structured review summary uses maker-facing counts", () => {
       },
       {
         date: null,
-        itemType: "restaurant",
+        itemType: "activity",
+        category: "food_dining",
         title: "Dinner TBD",
       },
     ],
@@ -241,13 +244,13 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 1 restaurant, 1 activity. We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
   assert.equal(sections.length, 6);
   assert.deepEqual(
     sections.map((section) => section.id),
-    ["places", "stays", "transport", "cards", "private-details", "questions"]
+    ["legs", "stays", "transport", "activities", "private-details", "questions"]
   );
 });
 
@@ -416,9 +419,10 @@ test("answering a targeted question updates the structured record", () => {
   const draft = {
     activities: [
       {
+        category: "food_dining",
         date: null,
         description: "Dinner reservation listed under Sep 2 notes.",
-        itemType: "restaurant",
+        itemType: "activity",
         title: "Dinner at Septime",
       },
     ],

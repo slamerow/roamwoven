@@ -39,6 +39,7 @@ export type StructuredReviewSection = {
   emptyDetail: string;
   id: string;
   items: StructuredReviewItem[];
+  summaryItems: string[];
   title: string;
 };
 
@@ -100,7 +101,6 @@ function field({
 
 const itemTypeOptions = [
   { label: "Activity", value: "activity" },
-  { label: "Restaurant", value: "restaurant" },
   { label: "Note", value: "note" },
   { label: "Admin", value: "admin" },
   { label: "Rest day", value: "rest_day" },
@@ -138,12 +138,10 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
   const flights = records.transport.filter(
     (item) => item.transportType === "flight"
   ).length;
-  const restaurants = records.items.filter(
-    (item) => item.itemType === "restaurant"
+  const foodAndDining = records.items.filter(
+    (item) => item.categoryId === "food_dining"
   ).length;
-  const activities = records.items.filter(
-    (item) => item.itemType === "activity"
-  ).length;
+  const activities = records.items.length;
 
   return [
     records.transport.length
@@ -152,8 +150,11 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
         }`
       : null,
     records.stays.length ? pluralize(records.stays.length, "stay") : null,
-    restaurants ? pluralize(restaurants, "restaurant") : null,
-    activities ? pluralize(activities, "activity", "activities") : null,
+    activities
+      ? `${pluralize(activities, "activity", "activities")}${
+          foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
+        }`
+      : null,
   ].filter(Boolean);
 }
 
@@ -162,23 +163,22 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
     return [];
   }
 
-  const restaurants = records.items.filter(
-    (item) => item.itemType === "restaurant"
+  const foodAndDining = records.items.filter(
+    (item) => item.categoryId === "food_dining"
   ).length;
-  const activities = records.items.filter(
-    (item) => item.itemType === "activity"
-  ).length;
-  const otherCards = records.items.length - restaurants - activities;
+  const activities = records.items.length;
 
   return [
+    records.legs.length ? pluralize(records.legs.length, "leg") : null,
     records.transport.length
       ? pluralize(records.transport.length, "transport item")
       : null,
     records.stays.length ? pluralize(records.stays.length, "stay") : null,
-    activities ? pluralize(activities, "activity", "activities") : null,
-    restaurants ? pluralize(restaurants, "restaurant") : null,
-    otherCards ? pluralize(otherCards, "other card") : null,
-    records.legs.length ? pluralize(records.legs.length, "place") : null,
+    activities
+      ? `${pluralize(activities, "activity", "activities")}${
+          foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
+        }`
+      : null,
   ].filter(Boolean);
 }
 
@@ -220,7 +220,7 @@ export function getStructuredReviewSections(
       count: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
       description: "Route spine, dates, cities, languages, and map/weather anchors.",
       emptyDetail: "No place decisions needed.",
-      id: "places",
+      id: "legs",
       items: records.legs
         .filter(needsRecordReview)
         .map((leg) => ({
@@ -259,7 +259,14 @@ export function getStructuredReviewSections(
           title: leg.displayName,
           tone: "warning" as const,
         })),
-      title: "Places",
+      summaryItems: records.legs
+        .filter((leg) => isActiveStatus(leg.status))
+        .map((leg) =>
+          [leg.displayName, [leg.arriveDate, leg.leaveDate].filter(Boolean).join(" to ")]
+            .filter(Boolean)
+            .join(" · ")
+        ),
+      title: "Legs",
     },
     {
       count: records.stays.filter((stay) => isActiveStatus(stay.status)).length,
@@ -312,6 +319,13 @@ export function getStructuredReviewSections(
           title: stay.name,
           tone: "warning" as const,
         })),
+      summaryItems: records.stays
+        .filter((stay) => isActiveStatus(stay.status))
+        .map((stay) =>
+          [stay.name, [stay.checkInDate, stay.checkOutDate].filter(Boolean).join(" to ")]
+            .filter(Boolean)
+            .join(" · ")
+        ),
       title: "Stays",
     },
     {
@@ -372,13 +386,16 @@ export function getStructuredReviewSections(
           title: item.routeLabel,
           tone: "warning" as const,
         })),
+      summaryItems: records.transport
+        .filter((item) => isActiveStatus(item.status))
+        .map((item) => [item.routeLabel, item.date].filter(Boolean).join(" · ")),
       title: "Transport",
     },
     {
       count: records.items.filter((item) => isActiveStatus(item.status)).length,
-      description: "Activities, restaurants, notes, rest days, and other traveler cards.",
-      emptyDetail: "No card decisions needed.",
-      id: "cards",
+      description: "Activities table rows, each with a Wren-style category.",
+      emptyDetail: "No activity decisions needed.",
+      id: "activities",
       items: records.items
         .filter(needsRecordReview)
         .map((item) => ({
@@ -432,7 +449,14 @@ export function getStructuredReviewSections(
           title: item.title,
           tone: "warning" as const,
         })),
-      title: "Cards",
+      summaryItems: records.categories.map((category) => {
+        const count = records.items.filter(
+          (item) => item.categoryId === category.id && isActiveStatus(item.status)
+        ).length;
+
+        return `${category.label} · ${pluralize(count, "activity", "activities")}`;
+      }),
+      title: "Activities",
     },
     {
       count: records.privateDetails.length,
@@ -470,7 +494,10 @@ export function getStructuredReviewSections(
           title: detail.label,
           tone: "sensitive" as const,
         })),
-      title: "Private details",
+      summaryItems: records.privateDetails
+        .filter((detail) => detail.visibility !== "hidden")
+        .map((detail) => detail.label),
+      title: "Privacy",
     },
     {
       count: records.reviewQuestions.filter(isOpenQuestion).length,
@@ -499,6 +526,9 @@ export function getStructuredReviewSections(
         title: question.prompt,
         tone: "question" as const,
       })),
+      summaryItems: records.reviewQuestions
+        .filter(isOpenQuestion)
+        .map((question) => question.prompt),
       title: "Questions",
     },
   ];

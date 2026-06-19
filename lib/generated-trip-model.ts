@@ -120,7 +120,6 @@ export type TripTransportRecord = {
 
 export type TripItemType =
   | "activity"
-  | "restaurant"
   | "note"
   | "admin"
   | "rest_day"

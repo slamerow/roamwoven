@@ -68,7 +68,7 @@ export default async function TripSummaryPage({
 
           <div className="mt-6 grid gap-3 md:grid-cols-5">
             {[
-              ["Places", summary?.counts.places ?? 0],
+              ["Legs", summary?.counts.places ?? 0],
               ["Transport", summary?.counts.transport ?? 0],
               ["Stays", summary?.counts.stays ?? 0],
               ["Activities", summary?.counts.activities ?? 0],

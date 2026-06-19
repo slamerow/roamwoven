@@ -16,6 +16,43 @@ import type {
 
 type DraftObject = Record<string, unknown>;
 
+const defaultCategoryLabels: Record<string, { emoji: string; label: string }> = {
+  activity: { emoji: "✨", label: "Activities" },
+  admin_logistics: { emoji: "📋", label: "Admin and logistics" },
+  arrival_departure: { emoji: "✈️", label: "Arrival and departure" },
+  art_class: { emoji: "🖌️", label: "Art classes" },
+  art_culture: { emoji: "🎨", label: "Art and culture" },
+  beach_water: { emoji: "🏖️", label: "Beach and water" },
+  food_class: { emoji: "👨‍🍳", label: "Food classes" },
+  food_dining: { emoji: "🍜", label: "Food and dining" },
+  kid_activity: { emoji: "🧸", label: "Kid activities" },
+  nature_outdoors: { emoji: "🌿", label: "Nature and outdoors" },
+  note: { emoji: "•", label: "Notes" },
+  rest_day: { emoji: "😴", label: "Rest days" },
+  scenic_ride: { emoji: "🚗", label: "Scenic rides" },
+  shopping_tailor: { emoji: "🛍️", label: "Shopping and tailoring" },
+  social: { emoji: "👥", label: "Social" },
+  temple_shrine: { emoji: "⛩️", label: "Temples and shrines" },
+  transport: { emoji: "🚆", label: "Transport" },
+  wellness_and_relaxation: { emoji: "💆", label: "Wellness and relaxation" },
+};
+
+function getCategoryLabel(categoryId: string) {
+  const category = defaultCategoryLabels[categoryId];
+
+  if (category) {
+    return category.label;
+  }
+
+  return categoryId
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getCategoryEmoji(categoryId: string) {
+  return defaultCategoryLabels[categoryId]?.emoji ?? "•";
+}
+
 function getObject(value: unknown, key: string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -104,7 +141,6 @@ function normalizeTransportType(value: string | null): TripTransportType {
 function normalizeItemType(value: string | null, title: string, description: string | null): TripItemType {
   if (
     value === "activity" ||
-    value === "restaurant" ||
     value === "note" ||
     value === "admin" ||
     value === "rest_day" ||
@@ -121,11 +157,71 @@ function normalizeItemType(value: string | null, title: string, description: str
       text
     )
   ) {
-    return "restaurant";
+    return "activity";
   }
 
   if (/\b(tbd|to confirm|placeholder)\b/.test(text)) {
     return "placeholder";
+  }
+
+  return "activity";
+}
+
+function normalizeCategoryId({
+  category,
+  description,
+  itemType,
+  title,
+}: {
+  category: string | null;
+  description: string | null;
+  itemType: TripItemType;
+  title: string;
+}) {
+  const normalized = category?.trim().replaceAll("&", "and");
+
+  if (normalized) {
+    return normalized;
+  }
+
+  if (/\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery)\b/.test(
+    `${title} ${description ?? ""}`.toLowerCase()
+  )) {
+    return "food_dining";
+  }
+
+  if (itemType === "admin") {
+    return "admin_logistics";
+  }
+
+  if (itemType === "rest_day") {
+    return "rest_day";
+  }
+
+  if (itemType === "note" || itemType === "placeholder") {
+    return "note";
+  }
+
+  const text = `${title} ${description ?? ""}`.toLowerCase();
+
+  if (/\b(beach|swim|snorkel|pool|water)\b/.test(text)) {
+    return "beach_water";
+  }
+
+  if (/\b(hike|park|garden|trail|mountain|nature|outdoors)\b/.test(text)) {
+    return "nature_outdoors";
+  }
+
+  if (/\b(museum|gallery|festival|temple|church|mosque|palace|art|culture)\b/.test(text)) {
+    return "art_culture";
+  }
+
+  if (/\b(shop|market|tailor|souvenir)\b/.test(text)) {
+    return "shopping_tailor";
+  }
+
+  if (/\b(train|drive|ferry|transfer|bus|ride)\b/.test(text)) {
+    return "scenic_ride";
   }
 
   return "activity";
@@ -357,10 +453,16 @@ function createItemRecords({
       title,
       description
     );
+    const categoryId = normalizeCategoryId({
+      category: getString(activity, "category"),
+      description,
+      itemType,
+      title,
+    });
 
     return {
       address: getString(activity, "address"),
-      categoryId: itemType,
+      categoryId,
       date,
       description,
       endTime: getString(activity, "endTime"),
@@ -395,20 +497,12 @@ function createCategoryRecords({
 
   return keys.map((key, index) => ({
     categoryKey: key,
-    description:
-      key === "restaurant"
-        ? "Food, drinks, reservations, and places to eat."
-        : null,
-    emoji: key === "activity" ? "✨" : key === "restaurant" ? "🍽️" : "•",
+    description: getCategoryLabel(key),
+    emoji: getCategoryEmoji(key),
     enabled: true,
     icon: null,
     id: key,
-    label:
-      key === "activity"
-        ? "Activities"
-        : key === "restaurant"
-          ? "Restaurants"
-          : key,
+    label: getCategoryLabel(key),
     sortOrder: index,
     tripId,
   }));

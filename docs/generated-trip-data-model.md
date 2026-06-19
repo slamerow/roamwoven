@@ -260,7 +260,7 @@ Why not just an activity:
 
 ### `trip_items`
 
-The unified traveler card record for activities, restaurants, notes, admin tasks, rest days, and placeholders.
+The unified traveler card record for activities, dining reservations, notes, admin tasks, rest days, and placeholders.
 
 Core fields:
 
@@ -289,18 +289,17 @@ Core fields:
 Allowed `item_type` values:
 
 - `activity`
-- `restaurant`
 - `note`
 - `admin`
 - `rest_day`
 - `social`
 - `placeholder`
 
-Why restaurants are a type, not a totally separate table in V1:
+Dining reservation rule:
 
-- The traveler UI usually treats restaurants like dated cards in Today, Search, Calendar, Categories, and Map.
-- A restaurant can later get restaurant-specific fields without forking the whole traveler experience.
-- If restaurant booking/payment/vendor integrations become real, then a separate `trip_restaurants` table can be introduced behind the same view-model shape.
+- Restaurant reservations, cafes, bars, and meal plans are `trip_items` with `item_type = activity`.
+- They should usually use `category_id = food_dining`, because Categories are the Wren-style traveler organization layer.
+- Do not create a separate visible `restaurant` type unless restaurant-specific booking/payment/vendor integrations become real later.
 
 ### `trip_categories`
 
@@ -602,7 +601,7 @@ Current code:
 3. Change `/t/demo` to render `TravelerAppViewModel` instead of Asia-demo-specific rows. Done; `TravelerAppShell` now consumes `TravelerAppViewModel`.
 4. Build a draft parser adapter from current `trip_draft_snapshots.draft_json` into those records. First adapter exists in `lib/extraction/draft-to-structured-trip.ts`. Draft day generation now follows Wren's leave-date-exclusive rule, so a Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
 5. Add adapter fixture tests. Done in `tests/generated-trip-model.test.ts`; run with `npm test`.
-6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Places, Stays, Transport, Cards, Private details, and Questions.
+6. Build review/edit forms around records and review questions. The first grouped review contract now lives in `lib/generated-trip-review.ts`: it creates the maker-facing summary, review count, and sections for Legs, Stays, Transport, Activities, Privacy, and Questions.
 7. Define review decisions before wiring persistent forms. Done in `lib/generated-trip-decisions.ts`: confirm, edit, protect, delete/ignore, combine, and answer-question apply to structured records in a testable way.
 8. Add the persistence table/action layer for review decisions. The additive schema and data-access helper now exist in `db/schema.sql` and `lib/review-decisions.ts`.
 9. Wire card controls to write decisions and re-render the applied structured records. Done for confirm, protect, delete/ignore, mark-question-answered, record-specific edit forms, and item combine.
@@ -612,7 +611,7 @@ Current code:
 
 ## Open Product Decisions
 
-- Whether `restaurants` deserve their own table before V1, or remain `trip_items.item_type = restaurant`.
+- Whether dining later needs restaurant-specific fields behind the same activity/category view model.
 - Whether `days` are stored as canonical editable rows immediately, or generated at publish time and exposed in the view model first.
 - Whether `weather_hooks` need a database table immediately, or can be part of the published snapshot.
 - How much of `private_details.value` is searchable in unlocked traveler mode.

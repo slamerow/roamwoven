@@ -341,7 +341,7 @@ function inferItemType(item: SeedItem): TripItemRecord["itemType"] {
   const text = `${item.category ?? ""} ${item.title}`.toLowerCase();
 
   if (text.includes("food") || text.includes("dinner") || text.includes("lunch")) {
-    return "restaurant";
+    return "activity";
   }
 
   if (text.includes("arrival") || text.includes("departure")) {
@@ -688,4 +688,3 @@ export function createTravelerAppViewModel(
 export function getAsiaDemoTravelerAppViewModel() {
   return createTravelerAppViewModel(getAsiaDemoStructuredTripRecords());
 }
-

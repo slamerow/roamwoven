@@ -288,8 +288,8 @@ function getStructuredReviewItems(
 }
 
 const sectionIcons: Record<string, typeof Sparkles> = {
-  cards: Sparkles,
-  places: MapPinned,
+  activities: Sparkles,
+  legs: MapPinned,
   "private-details": LockKeyhole,
   questions: AlertCircle,
   stays: BedDouble,
@@ -570,9 +570,11 @@ function ReviewCombineForm({
 }
 
 function StructuredRecordReview({
+  completedDecisionCount,
   sections,
   tripId,
 }: {
+  completedDecisionCount: number;
   sections: StructuredReviewSection[];
   tripId: string;
 }) {
@@ -580,9 +582,11 @@ function StructuredRecordReview({
     (count, section) => count + section.items.length,
     0
   );
-  const foundCount = sections.reduce((count, section) => count + section.count, 0);
-  const completedCount = Math.max(foundCount - reviewCount, 0);
-  const progressPercent = foundCount > 0 ? (completedCount / foundCount) * 100 : 100;
+  const totalDecisionCount = completedDecisionCount + reviewCount;
+  const progressPercent =
+    totalDecisionCount > 0
+      ? (completedDecisionCount / totalDecisionCount) * 100
+      : 100;
 
   return (
     <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
@@ -592,8 +596,8 @@ function StructuredRecordReview({
             Review these items
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            Roamwoven found {pluralize(foundCount, "record")} and pulled the
-            uncertain or private ones into a shorter decision list.
+            Confirm the few details Roamwoven needs before the traveler app is
+            assembled.
           </p>
         </div>
         <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
@@ -606,7 +610,7 @@ function StructuredRecordReview({
         <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
           <span>Draft check</span>
           <span>
-            {completedCount}/{foundCount || completedCount} reviewed
+            {completedDecisionCount}/{totalDecisionCount || completedDecisionCount} reviewed
           </span>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
@@ -651,6 +655,23 @@ function StructuredRecordReview({
                   ? `${section.items.length} need confirmation`
                   : section.emptyDetail}
               </p>
+              {section.summaryItems.length > 0 ? (
+                <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
+                  {section.summaryItems.slice(0, 8).map((summaryItem) => (
+                    <p
+                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/60"
+                      key={summaryItem}
+                    >
+                      {summaryItem}
+                    </p>
+                  ))}
+                  {section.summaryItems.length > 8 ? (
+                    <p className="px-3 text-xs font-semibold text-ink/40">
+                      +{section.summaryItems.length - 8} more
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </details>
           );
         })}
@@ -859,7 +880,13 @@ function RealTripFirstPass({
   const theme = getThemeDirection(style.themeDirection);
   const categoryParts = reviewedStructuredDraft
     ? reviewedStructuredDraft.categories
-        .map((category) => `${category.label} (${category.enabled ? "on" : "off"})`)
+        .map((category) => {
+          const count = reviewedStructuredDraft.items.filter(
+            (item) => item.categoryId === category.id
+          ).length;
+
+          return `${category.label} · ${pluralize(count, "activity", "activities")}`;
+        })
         .slice(0, 8)
     : [];
 
@@ -900,18 +927,8 @@ function RealTripFirstPass({
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
                   {structuredDiscoverySummary
                     ? (
-                        <>
-                          <strong className="font-semibold text-ink">
-                            {structuredDiscoverySummary.split(" before ")[0]}
-                          </strong>
-                          {structuredDiscoverySummary.includes(" before ")
-                            ? ` before ${structuredDiscoverySummary
-                                .split(" before ")
-                                .slice(1)
-                                .join(" before ")}`
-                            : ""}
-                        </>
-                      )
+                        structuredDiscoverySummary
+                    )
                     : `We scanned ${pluralize(scannedCount, "item")} and found ${pluralize(reviewItems.length, "thing")} to review.`}
                 </p>
               </div>
@@ -1015,7 +1032,11 @@ function RealTripFirstPass({
       </section>
 
       {latestDraft && reviewedStructuredDraft ? (
-        <StructuredRecordReview sections={structuredSections} tripId={tripId} />
+        <StructuredRecordReview
+          completedDecisionCount={reviewDecisions.length}
+          sections={structuredSections}
+          tripId={tripId}
+        />
       ) : latestDraft ? (
         <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -1332,7 +1353,7 @@ export default async function StructuredDataPage({
               {makerTrip.isDemo
                 ? "Review the decisions for the demo trip before the traveler app is built."
                 : latestDraft
-                  ? `${makerTrip.name} is parsed. Confirm the few decisions left before the traveler app is assembled.`
+                  ? `We reviewed your document for ${makerTrip.name}. Confirm a few things and we're ready to build the app.`
                   : `Process ${makerTrip.name} into the first structured trip draft.`}
             </p>
           </div>

@@ -32,7 +32,6 @@ export const tripItemSchema = z.object({
     "rental_car",
     "lodging",
     "activity",
-    "restaurant",
     "admin",
     "rest_day",
     "social",
@@ -46,4 +45,3 @@ export const tripItemSchema = z.object({
 
 export type TripLeg = z.infer<typeof tripLegSchema>;
 export type TripItem = z.infer<typeof tripItemSchema>;
-
