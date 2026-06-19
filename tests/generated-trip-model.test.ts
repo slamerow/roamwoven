@@ -437,6 +437,47 @@ test("medium-confidence core date guesses stay questions without explicit eviden
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
+test("strong contextual date calls become notes instead of questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          date: "2019-01-13",
+          itemType: "activity",
+          title: "Rome walk after bag drop",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence:
+            "This follows the Rome arrival, bag drop, then check-in sequence on the same day.",
+          guessedValue: "2019-01-13",
+          prompt: "We placed the Rome walk on January 13 after arrival and bag drop.",
+          reason:
+            "A reasonable trip planner would place this on the Rome arrival day from the surrounding sequence.",
+          relatedTitle: "Rome walk after bag drop",
+          subjectType: "item",
+          targetField: "date",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Rome",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-strong-contextual-date",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("commercial activity addresses do not become private details", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

@@ -97,15 +97,26 @@ function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
 }
 
-function hasExplicitSourceEvidence(...values: Array<string | null>) {
+function hasHumanConfidentEvidence(...values: Array<string | null>) {
   const text = values.filter(Boolean).join(" ").toLowerCase();
+
+  if (
+    /\b(ambiguous|unclear|possible|probably|suggests|implies|might|maybe)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
 
   return (
     /\b(source|document|confirmation|reservation|itinerary|pdf)\s+(says|states|shows|lists|includes|explicitly)\b/.test(text) ||
     /\b(says|states|shows|lists|includes|explicitly)\b/.test(text) ||
     /\b\d+\s+night(s)?\b/.test(text) ||
     /\bcheck[-\s]?in\b/.test(text) ||
-    /\bcheck[-\s]?out\b/.test(text)
+    /\bcheck[-\s]?out\b/.test(text) ||
+    /\b(arrival|arrive|arrives|land|lands|departure|depart|departs|overnight flight|no hotel|bag drop|same day|sequence|follows|then|after|before|next)\b/.test(
+      text
+    )
   );
 }
 
@@ -911,7 +922,7 @@ function createReviewQuestions({
       if (
         isCorePlanningTarget({ subjectType, targetField }) &&
         confidence !== "high" &&
-        !hasExplicitSourceEvidence(prompt, reason, evidence)
+        !hasHumanConfidentEvidence(prompt, reason, evidence)
       ) {
         return false;
       }
