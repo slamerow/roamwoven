@@ -106,6 +106,7 @@ Backend-ready pieces now exist:
   - The first deployed attempt failed with `DOMMatrix is not defined`; this was fixed by adding a minimal server-side `DOMMatrix` shim before loading PDF tooling.
   - The next deployed attempt failed with `Cannot find module '/var/task/.next/server/chunks/pdf.worker.mjs'` while trying to read the uploaded PDF; this was a PDF worker/bundling problem, not a storage or OpenAI problem.
   - The extraction material reader now uses `pdfjs-dist/legacy/build/pdf.mjs` directly for text-only PDF extraction and removes the unused `pdf-parse` dependency. This should be deployed before asking the user to click `Build parsed draft` again.
+- Cost-control guardrail: the initial parse button is now framed as a one-time build for the saved material set. The client disables the submit button while the form is pending, and the server/database idempotency key blocks repeated AI calls for the same trip/material set before `extractTripDraftWithOpenAI` can run.
 
 Live Supabase dev setup is partially complete:
 

@@ -13,6 +13,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { ExtractionSubmitButton } from "@/components/extraction-submit-button";
 import { MakerProgress } from "@/components/maker-progress";
 import { hasOpenAIExtractionConfigForTrip } from "@/lib/env";
 import { getAsiaDemoTrip } from "@/lib/asia-trip";
@@ -732,6 +733,8 @@ function RealTripFirstPass({
                 ? "Checkout must be complete before parsing."
                 : error === "processing-active"
                   ? "This trip is already processing. Wait for the current run to finish before starting another update."
+                  : error === "duplicate-build-blocked"
+                    ? "Roamwoven already attempted a build for this exact set of saved materials, so it blocked another AI call. Add or replace source material before trying again."
                   : error === "spine-exists"
                     ? "The first trip spine already exists. Late documents should update the existing trip, not rebuild it from scratch."
                     : error === "missing-spine-basics"
@@ -809,21 +812,11 @@ function RealTripFirstPass({
               className="mt-5"
               method="post"
             >
-              <button
-                className={
-                  canExtract
-                    ? "inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-                    : "inline-flex rounded-md bg-ink/30 px-4 py-3 text-sm font-semibold text-paper"
-                }
-                disabled={!canExtract}
-                type="submit"
-              >
-                Build parsed draft
-              </button>
+              <ExtractionSubmitButton canExtract={canExtract} />
             </form>
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
-                ? "This first parser pass reads pasted notes, plain text files, and readable text-based PDFs."
+                ? "This one-time build reads pasted notes, plain text files, and readable text-based PDFs. Roamwoven blocks repeated builds for the same saved materials before another AI call can start."
                 : "AI extraction is not enabled for this trip in this environment."}
               {" "}Once a trip spine exists, later docs should update that spine instead of rebuilding from scratch.
             </p>

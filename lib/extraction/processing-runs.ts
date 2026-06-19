@@ -48,6 +48,16 @@ type TripDraftSnapshotRow = {
   trip_id: string;
 };
 
+export class DuplicateProcessingRunError extends Error {
+  existingRun: TripProcessingRun | null;
+
+  constructor(existingRun: TripProcessingRun | null) {
+    super("A processing run for these exact materials already exists.");
+    this.name = "DuplicateProcessingRunError";
+    this.existingRun = existingRun;
+  }
+}
+
 function normalizeRun(row: TripProcessingRunRow): TripProcessingRun {
   return {
     id: row.id,
@@ -78,6 +88,43 @@ function normalizeSnapshot(row: TripDraftSnapshotRow): TripDraftSnapshot {
     source: row.source ?? "openai_initial_parse",
     tripId: row.trip_id,
   };
+}
+
+async function getTripProcessingRunByIdempotencyKey({
+  idempotencyKey,
+  tripId,
+}: {
+  idempotencyKey: string;
+  tripId: string;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("trip_processing_runs")
+    .select(
+      [
+        "id",
+        "completed_at",
+        "created_at",
+        "error_message",
+        "idempotency_key",
+        "input_char_count",
+        "model",
+        "openai_usage",
+        "run_type",
+        "source_upload_ids",
+        "status",
+        "trip_id",
+      ].join(",")
+    )
+    .eq("trip_id", tripId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+
+  if (error) {
+    return null;
+  }
+
+  return data ? normalizeRun(data as unknown as TripProcessingRunRow) : null;
 }
 
 export async function createTripProcessingRun({
@@ -122,7 +169,9 @@ export async function createTripProcessingRun({
 
   if (error || !data) {
     if (error?.code === "23505") {
-      throw new Error("A processing run for these exact materials already exists.");
+      throw new DuplicateProcessingRunError(
+        await getTripProcessingRunByIdempotencyKey({ idempotencyKey, tripId })
+      );
     }
 
     throw new Error(`Unable to create processing run: ${error?.message ?? "No row"}`);

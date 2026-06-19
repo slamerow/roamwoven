@@ -8,6 +8,7 @@ import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser"
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
+  DuplicateProcessingRunError,
   failTripProcessingRun,
   getLatestTripDraftSnapshot,
 } from "@/lib/extraction/processing-runs";
@@ -118,6 +119,19 @@ export async function POST(
 
     return redirectToData(request, tripId, { extraction: "completed" });
   } catch (error) {
+    if (error instanceof DuplicateProcessingRunError) {
+      const existingStatus = error.existingRun?.status;
+
+      return redirectToData(request, tripId, {
+        error:
+          existingStatus === "completed"
+            ? "spine-exists"
+            : existingStatus === "processing" || existingStatus === "pending"
+              ? "processing-active"
+              : "duplicate-build-blocked",
+      });
+    }
+
     const message =
       error instanceof Error ? error.message : "Trip extraction failed.";
     const errorCode =
