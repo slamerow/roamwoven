@@ -7,7 +7,8 @@ import {
   getPaidCheckoutTripId,
   getStripeSetupState,
 } from "@/lib/billing/stripe";
-import { getMakerTrip, markTripPaid } from "@/lib/trips";
+import { recordCheckoutPaymentAndMarkPaid } from "@/lib/billing/payment-events";
+import { getMakerTrip } from "@/lib/trips";
 import {
   BUILD_CONFIRMATIONS,
   getTripBuildSettings,
@@ -125,7 +126,18 @@ export default async function TripWorkspacePage({
         paidSession.userId &&
         paidSession.userId === user?.id
       ) {
-        await markTripPaid(tripId);
+        await recordCheckoutPaymentAndMarkPaid({
+          amountTotal: paidSession.amountTotal,
+          checkoutSessionId: paidSession.checkoutSessionId,
+          currency: paidSession.currency,
+          customerEmail: paidSession.customerEmail,
+          eventId: null,
+          ownerUserId: paidSession.userId,
+          paymentIntentId: paidSession.paymentIntentId,
+          rawEvent: { source: "checkout_return", sessionId },
+          status: "paid",
+          tripId,
+        });
         checkoutStatus = "verified";
       } else {
         checkoutStatus = "pending";

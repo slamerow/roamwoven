@@ -34,6 +34,7 @@ export type TripReviewDecisionInput =
 export type TripReviewDecisionRow = {
   action: string;
   created_at: string | null;
+  decision_key: string | null;
   id: string;
   note: string | null;
   payload_json: unknown;
@@ -44,6 +45,7 @@ export type TripReviewDecisionRow = {
 
 type SerializedDecision = {
   action: ReviewDecisionAction;
+  decision_key: string;
   id?: string;
   note: string | null;
   payload_json: Record<string, unknown>;
@@ -100,11 +102,24 @@ function isResolvedAction(
   );
 }
 
+export function getReviewDecisionKey(decision: Pick<
+  TripReviewDecisionInput,
+  "action" | "subjectId" | "subjectType" | "tripId"
+>) {
+  return [
+    decision.tripId,
+    decision.subjectType,
+    decision.subjectId,
+    decision.action,
+  ].join(":");
+}
+
 export function serializeTripReviewDecision(
   decision: TripReviewDecisionInput
 ): SerializedDecision {
   const base = {
     action: decision.action,
+    decision_key: getReviewDecisionKey(decision),
     id: decision.id,
     note: decision.note ?? null,
     subject_id: decision.subjectId,
@@ -277,11 +292,14 @@ export async function saveTripReviewDecision(decision: TripReviewDecisionInput) 
   const serialized = serializeTripReviewDecision(decision);
   const { data, error } = await supabase
     .from("trip_review_decisions")
-    .insert({
+    .upsert({
       ...serialized,
       created_by_user_id: user.id,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: "trip_id,decision_key",
     })
-    .select("id,trip_id,action,subject_type,subject_id,payload_json,note,created_at")
+    .select("id,trip_id,action,subject_type,subject_id,payload_json,note,created_at,decision_key")
     .single();
 
   if (error || !data) {

@@ -507,6 +507,7 @@ test("review decisions serialize through the persistence payload contract", () =
 
   assert.deepEqual(serialized, {
     action: "combine",
+    decision_key: "trip-4:item:item-1:combine",
     id: "decision-1",
     note: "Duplicate parser output.",
     payload_json: {
@@ -525,6 +526,7 @@ test("review decisions serialize through the persistence payload contract", () =
   const normalized = normalizeTripReviewDecisionRow({
     action: "combine",
     created_at: "2026-06-18T13:00:00.000Z",
+    decision_key: serialized.decision_key,
     id: "decision-1",
     note: "Duplicate parser output.",
     payload_json: serialized.payload_json,
@@ -644,6 +646,26 @@ test("published snapshot payload compiles traveler app view model", () => {
     payload.travelerApp.privacy.privateDetailCount
   );
   assert.ok(payload.travelerApp.days.length > 80);
+});
+
+test("published snapshot payload redacts protected traveler details", () => {
+  const records = getAsiaDemoStructuredTripRecords();
+  const privateStay = records.stays.find(
+    (stay) => stay.address && stay.addressVisibility !== "public"
+  );
+
+  assert.ok(privateStay);
+
+  const payload = createPublishedTripSnapshotPayload(records);
+  const redactedLeg = payload.travelerApp.legs.find(
+    (leg) => leg.id === privateStay.legId
+  );
+
+  assert.equal(redactedLeg?.stayAddress, null);
+  assert.equal(
+    JSON.stringify(payload).includes(privateStay.address ?? ""),
+    false
+  );
 });
 
 test("env allowlist parser trims empty values", () => {

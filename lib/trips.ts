@@ -281,11 +281,16 @@ export async function softDeleteMakerTrip({
   }
 
   const supabase = await createSupabaseServerClient();
+  const deletedAt = new Date().toISOString();
   const { error } = await supabase
     .from("trips")
     .update({
+      deleted_at: deletedAt,
+      deleted_by_user_id: user.id,
+      deletion_reason:
+        trip.paymentStatus === "paid" ? "maker_deleted_paid_trip" : "maker_deleted",
       status: "deleted",
-      updated_at: new Date().toISOString(),
+      updated_at: deletedAt,
     })
     .eq("id", tripId)
     .eq("owner_user_id", user.id);
@@ -295,23 +300,40 @@ export async function softDeleteMakerTrip({
   }
 }
 
-export async function markTripPaid(tripId: string) {
+export async function markTripPaid({
+  ownerUserId,
+  tripId,
+}: {
+  ownerUserId?: string | null;
+  tripId: string;
+}) {
   if (!hasSupabaseServerConfig()) {
     return;
   }
 
   const supabase = createSupabaseAdminClient();
-  const { error } = await supabase
+  let query = supabase
     .from("trips")
     .update({
       status: "paid",
       payment_status: "paid",
       updated_at: new Date().toISOString(),
     })
-    .eq("id", tripId);
+    .eq("id", tripId)
+    .neq("status", "deleted");
+
+  if (ownerUserId) {
+    query = query.eq("owner_user_id", ownerUserId);
+  }
+
+  const { data, error } = await query.select("id").maybeSingle();
 
   if (error) {
     throw new Error(`Unable to mark trip paid: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("Unable to mark trip paid: trip is missing, deleted, or not owned by the checkout user.");
   }
 }
 

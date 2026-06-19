@@ -10,6 +10,7 @@ Ownership is part of the schema, not just app code:
 - Owner/trip/date indexes are included so dashboard and itinerary queries can scale beyond a small beta.
 - Normal maker reads/writes should use the user-scoped Supabase server client.
 - Service-role access is reserved for trusted backend jobs, such as Stripe webhook payment updates.
+- `trip_payment_events` records checkout/session/payment-intent metadata idempotently before a trip is marked paid.
 - `trip_processing_runs` logs explicit parsing attempts, model/usage metadata, and failure states.
 - `trip_draft_snapshots` stores raw parser JSON drafts before those drafts are converted into editable trip records.
 
@@ -27,3 +28,4 @@ The prototype must keep building without Supabase env vars. In that mode, maker 
 ## Production Patches
 
 - `production-sql-2026-06-18-review-decisions-and-snapshots.sql`: additive patch for `trip_review_decisions`, `published_trip_snapshots`, and `trips.published_snapshot_id`. Run this before testing deployed review decisions or published traveler snapshots.
+- `production-sql-2026-06-18-durability-foundations.sql`: additive patch for payment event audit rows, review-decision idempotency keys, and soft-delete recovery metadata. Run this before deploying the durability foundation code.

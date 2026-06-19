@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createStripeClient } from "@/lib/billing/stripe";
+import {
+  createCheckoutPaymentRecord,
+  recordCheckoutPaymentAndMarkPaid,
+} from "@/lib/billing/payment-events";
 import { getStripeConfig } from "@/lib/env";
-import { markTripPaid } from "@/lib/trips";
 
 export async function POST(request: NextRequest) {
   const { webhookSecret } = getStripeConfig();
@@ -28,10 +31,14 @@ export async function POST(request: NextRequest) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
-    const tripId = session.metadata?.trip_id;
+    const record = createCheckoutPaymentRecord({
+      eventId: event.id,
+      rawEvent: event,
+      session,
+    });
 
-    if (tripId) {
-      await markTripPaid(tripId);
+    if (record) {
+      await recordCheckoutPaymentAndMarkPaid(record);
     }
   }
 

@@ -112,6 +112,13 @@ Backend-ready pieces now exist:
 - First draft-review UX feedback also shifted the page away from internal parser language: headline is now `Check the draft`, technical model/input-character metadata and the `Parsed draft saved` banner are hidden, dates are spelled out in long form, style direction/colors are shown in the review header, `What we found` is collapsible and includes app categories, sections collapse, empty states say `No ... decisions needed`, and review progress is visible. Generated questions now have answer fields, but this is still only a persisted answer decision; the proper next contract is hypothesis-style questions with guessed value, field target, evidence, confidence, and a resolver that applies the answer to structured records.
 - The hypothesis-question contract now exists for new extractions: `missingDetails` can include `subjectType`, `targetField`, `guessedValue`, `evidence`, `answerType`, and `confidence`. The adapter links questions back to matching records by `relatedTitle`; the review UI shows the guess/evidence and offers `Yes, use this`; answering a targeted question applies the answer to a whitelisted structured record field and marks the record confirmed. Next improvement is richer matching/resolution for duplicate records and non-text/vision-derived evidence.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
+- CTO durability pass started before new product work:
+  - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.
+  - `/t/[token]` only renders the trip's active `published_snapshot_id`; older share tokens stop resolving after a republish/token rotation.
+  - Stripe checkout now writes durable `trip_payment_events`, verifies the checkout owner, expected Stripe price, expected amount, expected currency, payment status, and deleted-trip state before marking a trip paid.
+  - Soft delete now writes `deleted_at`, `deleted_by_user_id`, and `deletion_reason`; late payment webhooks cannot resurrect deleted trips.
+  - Review decisions now use a stable `decision_key` and `upsert`, so repeated Confirm/Edit/Protect/etc. clicks update the current decision instead of appending duplicate conflicting rows.
+  - New additive SQL: `db/production-sql-2026-06-18-durability-foundations.sql`. Run this before deploying the matching app code.
 - Checkout sessions now pass `receipt_email` to Stripe using the signed-in user's email. This is the quick checkout-email path; a branded Roamwoven post-purchase email still needs a real email provider later.
 - Stripe sandbox promo code `QA100` is active for Roamwoven test builds. It is 100% off once, valid, capped at 10 total redemptions, and currently showed 1 out of 10 redemptions used in the Stripe dashboard, so there are 9 remaining test uses before another code is needed.
 
@@ -284,6 +291,12 @@ Latest checks after the draft-review UX and final-travel-day fix:
 - `npm run build`
 
 Latest checks after the maker trip soft-delete and published-token guard:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after the CTO durability foundation pass:
 
 - `npm test`
 - `npm run typecheck`

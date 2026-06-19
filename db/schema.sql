@@ -21,9 +21,17 @@ create table if not exists trips (
   photo_count integer not null default 0,
   photo_storage_bytes bigint not null default 0,
   photo_sharing_enabled boolean not null default true,
+  deleted_at timestamptz,
+  deleted_by_user_id uuid references auth.users(id) on delete set null,
+  deletion_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists trips
+  add column if not exists deleted_at timestamptz,
+  add column if not exists deleted_by_user_id uuid references auth.users(id) on delete set null,
+  add column if not exists deletion_reason text;
 
 create table if not exists trip_uploads (
   id uuid primary key default gen_random_uuid(),
@@ -153,13 +161,41 @@ create table if not exists trip_draft_snapshots (
 create table if not exists trip_review_decisions (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references trips(id) on delete cascade,
+  decision_key text not null,
   action text not null,
   subject_type text not null,
   subject_id text not null,
   payload_json jsonb not null default '{}'::jsonb,
   note text,
   created_by_user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table if exists trip_review_decisions
+  add column if not exists decision_key text,
+  add column if not exists updated_at timestamptz not null default now();
+
+update trip_review_decisions
+set decision_key = concat(trip_id::text, ':', subject_type, ':', subject_id, ':', action)
+where decision_key is null;
+
+alter table if exists trip_review_decisions
+  alter column decision_key set not null;
+
+create table if not exists trip_payment_events (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references trips(id) on delete restrict,
+  owner_user_id uuid not null references auth.users(id) on delete restrict,
+  event_id text,
+  checkout_session_id text not null,
+  payment_intent_id text,
+  amount_total integer,
+  currency text,
+  status text not null,
+  customer_email text,
+  raw_event jsonb not null default '{}'::jsonb,
+  received_at timestamptz not null default now()
 );
 
 create table if not exists published_trip_snapshots (
@@ -185,6 +221,7 @@ alter table trip_processing_runs enable row level security;
 alter table trip_draft_snapshots enable row level security;
 alter table trip_review_decisions enable row level security;
 alter table published_trip_snapshots enable row level security;
+alter table trip_payment_events enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on trips to anon;
@@ -197,6 +234,7 @@ grant select, insert, update, delete on trip_processing_runs to anon;
 grant select, insert, update, delete on trip_draft_snapshots to anon;
 grant select, insert, update, delete on trip_review_decisions to anon;
 grant select, insert, update, delete on published_trip_snapshots to anon;
+grant select on trip_payment_events to anon;
 grant select, insert, update, delete on trips to authenticated;
 grant select, insert, update, delete on trip_uploads to authenticated;
 grant select, insert, update, delete on trip_legs to authenticated;
@@ -207,6 +245,7 @@ grant select, insert, update, delete on trip_processing_runs to authenticated;
 grant select, insert, update, delete on trip_draft_snapshots to authenticated;
 grant select, insert, update, delete on trip_review_decisions to authenticated;
 grant select, insert, update, delete on published_trip_snapshots to authenticated;
+grant select on trip_payment_events to authenticated;
 grant select, insert, update, delete on trips to service_role;
 grant select, insert, update, delete on trip_uploads to service_role;
 grant select, insert, update, delete on trip_legs to service_role;
@@ -217,6 +256,7 @@ grant select, insert, update, delete on trip_processing_runs to service_role;
 grant select, insert, update, delete on trip_draft_snapshots to service_role;
 grant select, insert, update, delete on trip_review_decisions to service_role;
 grant select, insert, update, delete on published_trip_snapshots to service_role;
+grant select, insert, update, delete on trip_payment_events to service_role;
 
 create index if not exists trips_owner_user_id_idx
   on trips(owner_user_id);
@@ -256,11 +296,24 @@ create index if not exists trip_review_decisions_trip_id_idx
 create index if not exists trip_review_decisions_subject_idx
   on trip_review_decisions(trip_id, subject_type, subject_id);
 
+create unique index if not exists trip_review_decisions_trip_key_idx
+  on trip_review_decisions(trip_id, decision_key);
+
 create index if not exists published_trip_snapshots_trip_id_idx
   on published_trip_snapshots(trip_id, version desc);
 
 create unique index if not exists published_trip_snapshots_trip_version_idx
   on published_trip_snapshots(trip_id, version);
+
+create index if not exists trip_payment_events_trip_id_idx
+  on trip_payment_events(trip_id, received_at desc);
+
+create unique index if not exists trip_payment_events_event_id_idx
+  on trip_payment_events(event_id)
+  where event_id is not null;
+
+create unique index if not exists trip_payment_events_checkout_session_idx
+  on trip_payment_events(checkout_session_id);
 
 drop policy if exists "Trip owners can manage trips" on trips;
 drop policy if exists "Trip owners can manage uploads" on trip_uploads;
@@ -272,6 +325,7 @@ drop policy if exists "Trip owners can manage processing runs" on trip_processin
 drop policy if exists "Trip owners can manage draft snapshots" on trip_draft_snapshots;
 drop policy if exists "Trip owners can manage review decisions" on trip_review_decisions;
 drop policy if exists "Trip owners can manage published snapshots" on published_trip_snapshots;
+drop policy if exists "Trip owners can read payment events" on trip_payment_events;
 
 create policy "Trip owners can manage trips"
   on trips
@@ -439,6 +493,17 @@ create policy "Trip owners can manage published snapshots"
     and exists (
       select 1 from trips
       where trips.id = published_trip_snapshots.trip_id
+        and trips.owner_user_id = auth.uid()
+    )
+  );
+
+create policy "Trip owners can read payment events"
+  on trip_payment_events
+  for select
+  using (
+    exists (
+      select 1 from trips
+      where trips.id = trip_payment_events.trip_id
         and trips.owner_user_id = auth.uid()
     )
   );

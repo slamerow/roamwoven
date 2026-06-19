@@ -38,6 +38,9 @@ export async function createTripCheckoutSession(trip: MakerTrip, user: AuthUser)
 
   const stripe = createStripeClient();
   const appUrl = config.appUrl.replace(/\/$/, "");
+  const price = await stripe.prices.retrieve(config.tripPriceId);
+  const expectedAmountTotal = price.unit_amount;
+  const expectedCurrency = price.currency;
 
   return stripe.checkout.sessions.create({
     mode: "payment",
@@ -51,6 +54,10 @@ export async function createTripCheckoutSession(trip: MakerTrip, user: AuthUser)
     client_reference_id: user.id,
     customer_email: user.email ?? undefined,
     metadata: {
+      expected_amount_total:
+        typeof expectedAmountTotal === "number" ? String(expectedAmountTotal) : "",
+      expected_currency: expectedCurrency,
+      price_id: config.tripPriceId,
       trip_id: trip.id,
       trip_name: trip.name,
       user_id: user.id,
@@ -68,6 +75,7 @@ export async function createTripCheckoutSession(trip: MakerTrip, user: AuthUser)
 }
 
 export async function getPaidCheckoutTripId(sessionId: string) {
+  const config = getStripeConfig();
   const stripe = createStripeClient();
   const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -75,7 +83,37 @@ export async function getPaidCheckoutTripId(sessionId: string) {
     return null;
   }
 
+  const expectedAmountTotal = Number(session.metadata?.expected_amount_total);
+  const expectedCurrency = session.metadata?.expected_currency ?? null;
+  const expectedPriceId = session.metadata?.price_id ?? null;
+
+  if (
+    config.tripPriceId &&
+    (!expectedPriceId || expectedPriceId !== config.tripPriceId)
+  ) {
+    return null;
+  }
+
+  if (
+    !Number.isInteger(expectedAmountTotal) ||
+    session.amount_total !== expectedAmountTotal
+  ) {
+    return null;
+  }
+
+  if (!expectedCurrency || session.currency !== expectedCurrency) {
+    return null;
+  }
+
   return {
+    amountTotal: session.amount_total ?? null,
+    checkoutSessionId: session.id,
+    currency: session.currency ?? null,
+    customerEmail: session.customer_details?.email ?? session.customer_email ?? null,
+    paymentIntentId:
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id ?? null,
     tripId: session.metadata?.trip_id ?? null,
     userId: session.metadata?.user_id ?? session.client_reference_id ?? null,
   };

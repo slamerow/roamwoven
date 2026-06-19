@@ -1,9 +1,16 @@
 import { getCurrentUser } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
+import {
+  classifyAddressSensitivity,
+  classifySensitiveText,
+} from "@/lib/traveler-privacy";
 import type {
   StructuredTripRecords,
+  TripItemRecord,
+  TripLegRecord,
   TripSourceConfidence,
+  TripStayRecord,
 } from "@/lib/generated-trip-model";
 import type { TravelerAppViewModel } from "@/lib/traveler-view-model";
 import { getSupabaseConfig } from "@/lib/env";
@@ -41,6 +48,7 @@ type PublishedTripSnapshotRow = {
 };
 
 type TripPublicationStateRow = {
+  published_snapshot_id: string | null;
   status: string | null;
 };
 
@@ -90,10 +98,89 @@ function getLowestConfidence(records: StructuredTripRecords): TripSourceConfiden
   return "high";
 }
 
+function getPrivateSubjectKeys(records: StructuredTripRecords) {
+  return new Set(
+    records.privateDetails.map(
+      (detail) => `${detail.subjectType}:${detail.subjectId}`
+    )
+  );
+}
+
+function redactSensitiveItem(
+  item: TripItemRecord,
+  privateSubjectKeys: Set<string>
+): TripItemRecord {
+  const hasPrivateDetail = privateSubjectKeys.has(`item:${item.id}`);
+  const hasSensitiveDescription = Boolean(classifySensitiveText(item.description));
+  const hasSensitiveAddress = Boolean(
+    classifyAddressSensitivity({
+      address: item.address,
+      context: `${item.title} ${item.description ?? ""}`,
+    })
+  );
+
+  return {
+    ...item,
+    address: hasPrivateDetail || hasSensitiveAddress ? null : item.address,
+    description:
+      hasPrivateDetail || hasSensitiveDescription
+        ? "Protected detail. Enter the trip password to view this in traveler mode."
+        : item.description,
+  };
+}
+
+function redactSensitiveStay(stay: TripStayRecord): TripStayRecord {
+  const shouldRedactAddress =
+    stay.addressVisibility !== "public" ||
+    Boolean(
+      classifyAddressSensitivity({
+        address: stay.address,
+        context: `${stay.name} ${stay.publicLocationLabel ?? ""}`,
+      })
+    );
+
+  return {
+    ...stay,
+    address: shouldRedactAddress ? null : stay.address,
+    confirmationLabel:
+      stay.confirmationVisibility === "public" ? stay.confirmationLabel : null,
+  };
+}
+
+function redactSensitiveLeg(
+  leg: TripLegRecord,
+  redactedStays: TripStayRecord[]
+): TripLegRecord {
+  const stay = redactedStays.find((item) => item.legId === leg.id);
+
+  if (!stay) {
+    return leg;
+  }
+
+  return leg;
+}
+
+export function createPublicSnapshotRecords(
+  records: StructuredTripRecords
+): StructuredTripRecords {
+  const privateSubjectKeys = getPrivateSubjectKeys(records);
+  const stays = records.stays.map(redactSensitiveStay);
+
+  return {
+    ...records,
+    items: records.items.map((item) =>
+      redactSensitiveItem(item, privateSubjectKeys)
+    ),
+    legs: records.legs.map((leg) => redactSensitiveLeg(leg, stays)),
+    stays,
+  };
+}
+
 export function createPublishedTripSnapshotPayload(
   records: StructuredTripRecords
 ): PublishedTripSnapshotPayload {
-  const travelerApp = createTravelerAppViewModel(records);
+  const publicRecords = createPublicSnapshotRecords(records);
+  const travelerApp = createTravelerAppViewModel(publicRecords);
 
   return {
     createdFrom: "structured_trip_records",
@@ -102,7 +189,7 @@ export function createPublishedTripSnapshotPayload(
       dayCount: travelerApp.days.length,
       legCount: travelerApp.legs.length,
       privateDetailCount: travelerApp.privacy.privateDetailCount,
-      sourceConfidence: getLowestConfidence(records),
+      sourceConfidence: getLowestConfidence(publicRecords),
     },
     schemaVersion: 1,
     travelerApp,
@@ -183,7 +270,8 @@ export async function publishTripSnapshot({
       status: "published",
       updated_at: new Date().toISOString(),
     })
-    .eq("id", tripId);
+    .eq("id", tripId)
+    .neq("status", "deleted");
 
   if (tripError) {
     throw new Error(`Unable to mark trip published: ${tripError.message}`);
@@ -215,7 +303,7 @@ export async function getPublishedTripSnapshotByToken(token: string) {
   const snapshot = normalizeSnapshot(data as unknown as PublishedTripSnapshotRow);
   const { data: trip, error: tripError } = await supabase
     .from("trips")
-    .select("status")
+    .select("status,published_snapshot_id")
     .eq("id", snapshot.tripId)
     .maybeSingle();
 
@@ -223,7 +311,12 @@ export async function getPublishedTripSnapshotByToken(token: string) {
     throw new Error(`Unable to load trip publication state: ${tripError.message}`);
   }
 
-  if ((trip as unknown as TripPublicationStateRow | null)?.status === "deleted") {
+  const publicationState = trip as unknown as TripPublicationStateRow | null;
+
+  if (
+    publicationState?.status === "deleted" ||
+    publicationState?.published_snapshot_id !== snapshot.id
+  ) {
     return null;
   }
 
