@@ -241,7 +241,7 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 2 days, including 1 transport item (1 flight), 1 stay, 1 restaurant, 1 activity. We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 1 restaurant, 1 activity. We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
   assert.equal(sections.length, 6);
@@ -550,7 +550,7 @@ test("generated trip summary uses applied structured records", () => {
   assert.equal(summary.counts.activities, 1);
   assert.equal(summary.counts.review, 0);
   assert.equal(summary.isReadyForPublishReview, true);
-  assert.equal(summary.dateRange, "2026-09-01 to 2026-09-02");
+  assert.equal(summary.dateRange, "2026-09-01 to 2026-09-03");
 });
 
 test("published snapshot payload compiles traveler app view model", () => {

@@ -122,6 +122,14 @@ function datesBetweenExclusiveEnd(startDate: string | null, endDate: string | nu
   return dates;
 }
 
+function getFinalLeaveDate(legs: TripLegRecord[]) {
+  return legs
+    .map((leg) => leg.leaveDate)
+    .filter(isIsoDate)
+    .sort()
+    .at(-1) ?? null;
+}
+
 function createTripRecord({
   draft,
   fallbackTripName,
@@ -448,11 +456,13 @@ function createDayRecords({
   transport: TripTransportRecord[];
   tripId: string;
 }): StructuredTripRecords["days"] {
+  const finalLeaveDate = getFinalLeaveDate(legs);
   const dates = Array.from(
     new Set(
       [
         ...items.map((item) => item.date),
         ...transport.map((item) => item.date),
+        finalLeaveDate,
         ...legs.flatMap((leg) =>
           datesBetweenExclusiveEnd(leg.arriveDate, leg.leaveDate)
         ),
@@ -465,7 +475,8 @@ function createDayRecords({
       .filter(
         (leg) =>
           (leg.arriveDate && leg.leaveDate && date >= leg.arriveDate && date < leg.leaveDate) ||
-          leg.arriveDate === date
+          leg.arriveDate === date ||
+          (leg.leaveDate === date && leg.leaveDate === finalLeaveDate)
       )
       .map((leg) => leg.id);
     const dayItems = items.filter((item) => item.date === date);

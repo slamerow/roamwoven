@@ -218,7 +218,7 @@ export function getStructuredReviewSections(
     {
       count: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
       description: "Route spine, dates, cities, languages, and map/weather anchors.",
-      emptyDetail: "No route questions found.",
+      emptyDetail: "No place decisions needed.",
       id: "places",
       items: records.legs
         .filter(needsRecordReview)
@@ -263,7 +263,7 @@ export function getStructuredReviewSections(
     {
       count: records.stays.filter((stay) => isActiveStatus(stay.status)).length,
       description: "Lodging records with dates, public labels, addresses, and access privacy.",
-      emptyDetail: "Stay records look usable for this draft.",
+      emptyDetail: "No stay decisions needed.",
       id: "stays",
       items: records.stays
         .filter(needsRecordReview)
@@ -316,7 +316,7 @@ export function getStructuredReviewSections(
     {
       count: records.transport.filter((item) => isActiveStatus(item.status)).length,
       description: "Flights, trains, transfers, drives, and other critical movement.",
-      emptyDetail: "Transport records look usable for this draft.",
+      emptyDetail: "No transport decisions needed.",
       id: "transport",
       items: records.transport
         .filter(needsRecordReview)
@@ -376,7 +376,7 @@ export function getStructuredReviewSections(
     {
       count: records.items.filter((item) => isActiveStatus(item.status)).length,
       description: "Activities, restaurants, notes, rest days, and other traveler cards.",
-      emptyDetail: "Traveler cards look usable for this draft.",
+      emptyDetail: "No card decisions needed.",
       id: "cards",
       items: records.items
         .filter(needsRecordReview)
@@ -436,7 +436,7 @@ export function getStructuredReviewSections(
     {
       count: records.privateDetails.length,
       description: "Sensitive addresses, confirmations, access notes, and private details.",
-      emptyDetail: "Private details have default protection decisions.",
+      emptyDetail: "Private details are protected by default.",
       id: "private-details",
       items: records.privateDetails
         .filter((detail) => detail.reviewRequired)
@@ -461,12 +461,6 @@ export function getStructuredReviewSections(
               type: "select",
               value: detail.visibility,
             }),
-            field({
-              label: "Reason",
-              name: "reason",
-              type: "textarea",
-              value: detail.reason,
-            }),
           ],
           id: detail.id,
           meta: detail.detailType,
@@ -480,7 +474,7 @@ export function getStructuredReviewSections(
     {
       count: records.reviewQuestions.filter(isOpenQuestion).length,
       description: "Generated questions that materially affect the traveler app.",
-      emptyDetail: "No missing-detail questions found.",
+      emptyDetail: "No trip questions needed.",
       id: "questions",
       items: records.reviewQuestions.filter(isOpenQuestion).map((question) => ({
         combineOptions: [],

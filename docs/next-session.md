@@ -88,7 +88,7 @@ Backend-ready pieces now exist:
 - The initial parse route now refuses to run if the trip is already processing or a draft/spine already exists. The first parsed draft is validated for V1 spine basics before a snapshot is saved.
 - The draft-review screen now derives its first review surface from the generated trip model instead of a flat parser queue. The review contract lives in `lib/generated-trip-review.ts`. When a parsed draft exists, it says what Roamwoven found in human terms, such as legs across days plus flights/stays/activities/restaurants, and shows the number of things the maker needs to confirm before the traveler app is assembled.
 - The model-backed draft-review sections are Places, Stays, Transport, Cards, Private details, and Questions. Confident records stay summarized; only records/questions marked for review expand into confirmation cards.
-- Draft day generation in `lib/extraction/draft-to-structured-trip.ts` now follows Wren's leave-date-exclusive rule. A Sep 1 to Sep 3 leg creates Sep 1 and Sep 2 as trip days unless another dated record lands on Sep 3.
+- Draft day generation in `lib/extraction/draft-to-structured-trip.ts` treats intermediate leg leave dates as overlap boundaries, but includes the final leg leave date as the travel-home day. A Sep 1 to Sep 3 final leg creates Sep 1, Sep 2, and Sep 3 as trip days; intermediate leg leave dates are still covered by the next leg's arrive date or dated transport records.
 - The generated-trip review decision contract now exists in `lib/generated-trip-decisions.ts`. Decisions are confirm, edit, protect, delete/ignore, combine, and answer-question. Delete/ignore marks records as `ignored`; protect changes visibility; answer-question records the answer and should resolve into one of the other structured operations.
 - Review-decision persistence now exists in `db/schema.sql` and `lib/review-decisions.ts`. The table is `trip_review_decisions`, with action/subject columns plus `payload_json` for action-specific fields. The additive production SQL in `db/production-sql-2026-06-18-review-decisions-and-snapshots.sql` has been run successfully in Supabase.
 - The structured draft-review cards now write decisions through `app/maker/trips/[tripId]/data/decisions/route.ts`. Confirm, Protect, Ignore, Mark answered, record-specific Edit forms, and item Combine persist to `trip_review_decisions`; the page reloads from structured records plus applied saved decisions so resolved items leave the queue.
@@ -108,6 +108,7 @@ Backend-ready pieces now exist:
   - The extraction material reader now uses `pdfjs-dist/legacy/build/pdf.mjs` directly for text-only PDF extraction and removes the unused `pdf-parse` dependency. This should be deployed before asking the user to click `Build parsed draft` again.
 - Cost-control guardrail: the initial parse button is now framed as a one-time build for the saved material set. The client disables the submit button while the form is pending, and the server/database idempotency key blocks repeated AI calls for the same trip/material set before `extractTripDraftWithOpenAI` can run.
 - First real-draft review feedback from the Andalucía extraction exposed a real data-contract issue, not a copy bug: dining reservations were flowing through the generic `activities` draft bucket and could be counted as activities even though the generated traveler app needs typed cards. The extraction schema now requires `activities[].itemType`, the adapter backfills `restaurant` from older drafts with dining language, restaurant cards get their own category/count, and the draft-review cards now label section totals as `Found` separately from records that need confirmation.
+- First draft-review UX feedback also shifted the page away from internal parser language: headline is now `Check the draft`, technical model/input-character metadata and the `Parsed draft saved` banner are hidden, dates are spelled out in long form, style direction/colors are shown in the review header, `What we found` is collapsible and includes app categories, sections collapse, empty states say `No ... decisions needed`, and review progress is visible. Generated questions now have answer fields, but this is still only a persisted answer decision; the proper next contract is hypothesis-style questions with guessed value, field target, evidence, confidence, and a resolver that applies the answer to structured records.
 
 Live Supabase dev setup is partially complete:
 
@@ -266,6 +267,12 @@ Latest checks after the OpenAI extraction allowlist guardrail:
 - `npm run typecheck` after build regenerated `.next/types`
 
 Latest checks after the Andalucía dining-card/count-contract fix:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after the draft-review UX and final-travel-day fix:
 
 - `npm test`
 - `npm run typecheck`

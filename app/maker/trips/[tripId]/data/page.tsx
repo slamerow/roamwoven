@@ -6,9 +6,12 @@ import {
   AlertCircle,
   BedDouble,
   CheckCircle2,
+  ChevronDown,
   FileText,
+  ListChecks,
   LockKeyhole,
   MapPinned,
+  Palette,
   Route,
   Sparkles,
   Trash2,
@@ -38,7 +41,10 @@ import {
   type TripReviewDecision,
 } from "@/lib/generated-trip-decisions";
 import { listTripReviewDecisions } from "@/lib/review-decisions";
-import { type TripStyleSettings } from "@/lib/style-settings-config";
+import {
+  getThemeDirection,
+  type TripStyleSettings,
+} from "@/lib/style-settings-config";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
@@ -112,6 +118,67 @@ function getTransportLabel(value: unknown) {
 
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatDisplayDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const day = date.getUTCDate();
+  const suffix =
+    day % 100 >= 11 && day % 100 <= 13
+      ? "th"
+      : day % 10 === 1
+        ? "st"
+        : day % 10 === 2
+          ? "nd"
+          : day % 10 === 3
+            ? "rd"
+            : "th";
+  const month = new Intl.DateTimeFormat("en", {
+    month: "long",
+    timeZone: "UTC",
+  }).format(date);
+  const year = date.getUTCFullYear();
+
+  return `${month} ${day}${suffix}, ${year}`;
+}
+
+function formatDisplayDateRange(records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null) {
+  if (!records) {
+    return null;
+  }
+
+  const arriveDates = records.legs
+    .map((leg) => leg.arriveDate)
+    .filter(Boolean)
+    .sort() as string[];
+  const leaveDates = records.legs
+    .map((leg) => leg.leaveDate)
+    .filter(Boolean)
+    .sort() as string[];
+  const dayDates = records.days.map((day) => day.date).sort();
+  const firstDate = records.trip.startDate ?? arriveDates[0] ?? dayDates[0] ?? null;
+  const lastDate =
+    records.trip.endDate ??
+    leaveDates.at(-1) ??
+    dayDates.at(-1) ??
+    null;
+  const formattedFirst = formatDisplayDate(firstDate);
+  const formattedLast = formatDisplayDate(lastDate);
+
+  if (formattedFirst && formattedLast && formattedFirst !== formattedLast) {
+    return `${formattedFirst} - ${formattedLast}`;
+  }
+
+  return formattedFirst ?? formattedLast;
 }
 
 function formatScannedSummary(draft: unknown) {
@@ -297,6 +364,45 @@ function ReviewDecisionButton({
   );
 }
 
+function ReviewQuestionAnswerForm({
+  item,
+  tripId,
+}: {
+  item: StructuredReviewItem;
+  tripId: string;
+}) {
+  if (item.subjectType !== "review_question") {
+    return null;
+  }
+
+  return (
+    <form
+      action={`/maker/trips/${tripId}/data/decisions`}
+      className="mt-4 rounded-md border border-ink/10 bg-white p-3"
+      method="post"
+    >
+      <input name="action" type="hidden" value="answer_question" />
+      <input name="subjectId" type="hidden" value={item.subjectId} />
+      <input name="subjectType" type="hidden" value={item.subjectType} />
+      <label>
+        <span className="text-xs font-semibold text-ink/55">Answer</span>
+        <textarea
+          className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
+          name="answerValue"
+          placeholder="Tell Roamwoven what is correct."
+          required
+        />
+      </label>
+      <button
+        className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
+        type="submit"
+      >
+        Save answer
+      </button>
+    </form>
+  );
+}
+
 function EditFieldInput({ field }: { field: StructuredReviewEditField }) {
   const baseClass =
     "mt-1 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss/40";
@@ -452,22 +558,41 @@ function StructuredRecordReview({
     (count, section) => count + section.items.length,
     0
   );
+  const foundCount = sections.reduce((count, section) => count + section.count, 0);
+  const completedCount = Math.max(foundCount - reviewCount, 0);
+  const progressPercent = foundCount > 0 ? (completedCount / foundCount) * 100 : 100;
 
   return (
     <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-ink">
-            Confirm what needs attention
+            Review these items
           </h2>
           <p className="mt-2 text-sm leading-6 text-ink/60">
-            Roamwoven keeps confident details quiet and only asks about the
-            records that need a decision.
+            Roamwoven found {pluralize(foundCount, "record")} and pulled the
+            uncertain or private ones into a shorter decision list.
           </p>
         </div>
-        <span className="text-sm font-semibold text-moss">
-          {pluralize(reviewCount, "item")} to review
-        </span>
+        <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
+          {reviewCount === 0
+            ? "Ready for summary"
+            : `${pluralize(reviewCount, "item")} left`}
+        </div>
+      </div>
+      <div className="mt-5 rounded-md bg-paper p-4">
+        <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+          <span>Draft check</span>
+          <span>
+            {completedCount}/{foundCount || completedCount} reviewed
+          </span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+          <div
+            className="h-full rounded-full bg-moss"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -475,11 +600,11 @@ function StructuredRecordReview({
           const Icon = sectionIcons[section.id] ?? Sparkles;
 
           return (
-            <section
+            <details
               className="rounded-md border border-ink/10 bg-paper p-4"
               key={section.id}
             >
-              <div className="flex items-start justify-between gap-3">
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-ink">
                     {section.title}
@@ -488,8 +613,11 @@ function StructuredRecordReview({
                     {section.description}
                   </p>
                 </div>
-                <Icon className="shrink-0 text-moss" size={18} />
-              </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Icon className="text-moss" size={18} />
+                  <ChevronDown className="text-ink/35" size={16} />
+                </div>
+              </summary>
               <p className="mt-4 text-2xl font-semibold text-ink">
                 {section.count}
               </p>
@@ -501,26 +629,28 @@ function StructuredRecordReview({
                   ? `${section.items.length} need confirmation`
                   : section.emptyDetail}
               </p>
-            </section>
+            </details>
           );
         })}
       </div>
 
-      <div className="mt-6 space-y-4">
+      <div className="mt-6 space-y-3">
         {sections.map((section) =>
           section.items.length > 0 ? (
-            <section
+            <details
+              open
               className="rounded-md border border-ink/10 bg-white p-4"
               key={section.id}
             >
-              <div className="flex items-center justify-between gap-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-ink">
                   {section.title}
                 </p>
-                <span className="text-xs font-semibold text-moss">
+                <span className="inline-flex items-center gap-2 text-xs font-semibold text-moss">
                   {pluralize(section.items.length, "item")}
+                  <ChevronDown size={16} />
                 </span>
-              </div>
+              </summary>
               <div className="mt-3 grid gap-3">
                 {section.items.map((item) => {
                   const ItemIcon = toneIcon(item.tone);
@@ -548,19 +678,12 @@ function StructuredRecordReview({
                         <p className="mt-2 text-sm leading-6 text-ink/60">
                           {item.detail}
                         </p>
+                        <ReviewQuestionAnswerForm item={item} tripId={tripId} />
                         <ReviewEditForm item={item} tripId={tripId} />
                         <ReviewCombineForm item={item} tripId={tripId} />
                         <div className="mt-4 flex flex-wrap gap-2">
                           {item.subjectType === "review_question" ? (
-                            <ReviewDecisionButton
-                              action="answer_question"
-                              icon={<CheckCircle2 size={14} />}
-                              item={item}
-                              tone="positive"
-                              tripId={tripId}
-                            >
-                              Mark answered
-                            </ReviewDecisionButton>
+                            null
                           ) : (
                             <ReviewDecisionButton
                               action="confirm"
@@ -598,7 +721,7 @@ function StructuredRecordReview({
                   );
                 })}
               </div>
-            </section>
+            </details>
           ) : null
         )}
       </div>
@@ -708,7 +831,15 @@ function RealTripFirstPass({
     getDraftString(overview, "title") ??
     style.appName ??
     tripName;
-  const dateRange = getDraftString(overview, "dateRange");
+  const dateRange =
+    formatDisplayDateRange(reviewedStructuredDraft) ??
+    getDraftString(overview, "dateRange");
+  const theme = getThemeDirection(style.themeDirection);
+  const categoryParts = reviewedStructuredDraft
+    ? reviewedStructuredDraft.categories
+        .map((category) => `${category.label} (${category.enabled ? "on" : "off"})`)
+        .slice(0, 8)
+    : [];
 
   return (
     <>
@@ -733,12 +864,6 @@ function RealTripFirstPass({
                       : "Parsing failed. Check the processing run details and try again with a smaller text input."}
         </p>
       ) : null}
-      {extractionStatus === "completed" ? (
-        <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
-          Parsed draft saved.
-        </p>
-      ) : null}
-
       <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
         {latestDraft ? (
           <>
@@ -752,28 +877,80 @@ function RealTripFirstPass({
                 </h2>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
                   {structuredDiscoverySummary
-                    ? structuredDiscoverySummary
+                    ? (
+                        <>
+                          <strong className="font-semibold text-ink">
+                            {structuredDiscoverySummary.split(" before ")[0]}
+                          </strong>
+                          {structuredDiscoverySummary.includes(" before ")
+                            ? ` before ${structuredDiscoverySummary
+                                .split(" before ")
+                                .slice(1)
+                                .join(" before ")}`
+                            : ""}
+                        </>
+                      )
                     : `We scanned ${pluralize(scannedCount, "item")} and found ${pluralize(reviewItems.length, "thing")} to review.`}
                 </p>
               </div>
-              <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
-                {latestRun?.status === "completed"
-                  ? "Processed"
-                  : latestRun?.status ?? "Pending"}
+              <div className="rounded-md bg-paper px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <Palette size={16} />
+                  {theme.name}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  {[style.primaryColor, style.secondaryColor, style.accentColor, style.softColor]
+                    .filter(Boolean)
+                    .map((color) => (
+                      <span
+                        aria-hidden="true"
+                        className="h-5 w-5 rounded-full border border-ink/10"
+                        key={color}
+                        style={{ backgroundColor: color ?? undefined }}
+                      />
+                    ))}
+                </div>
               </div>
             </div>
-            <div className="mt-5 rounded-md bg-paper px-4 py-3 text-sm leading-6 text-ink/70">
-              {scannedParts.length > 0
-                ? scannedParts.join(" · ")
-                : "No structured records were found yet."}
-            </div>
-            {latestRun ? (
-              <p className="mt-3 text-xs text-ink/45">
-                Parsed {formatRunDate(latestDraft.createdAt)} ·{" "}
-                {latestRun.model ?? "unknown model"} ·{" "}
-                {latestRun.inputCharCount} input characters
-              </p>
-            ) : null}
+            <details className="mt-5 rounded-md bg-paper px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-ink">
+                <span className="inline-flex items-center gap-2">
+                  <ListChecks size={16} />
+                  What we found
+                </span>
+                <ChevronDown className="text-ink/40" size={16} />
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(scannedParts.length > 0
+                  ? scannedParts
+                  : ["No structured records were found yet."]
+                ).map((part) => (
+                  <span
+                    className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
+                    key={part}
+                  >
+                    {part}
+                  </span>
+                ))}
+              </div>
+              {categoryParts.length > 0 ? (
+                <div className="mt-3 border-t border-ink/10 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">
+                    App categories
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {categoryParts.map((part) => (
+                      <span
+                        className="rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink/60"
+                        key={part}
+                      >
+                        {part}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </details>
           </>
         ) : (
           <>
@@ -1127,13 +1304,13 @@ export default async function StructuredDataPage({
         <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-4xl font-semibold text-ink">
-              Review what needs attention
+              Check the draft
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
               {makerTrip.isDemo
-                ? "Review the details that need a decision before the trip app is built."
+                ? "Review the decisions for the demo trip before the traveler app is built."
                 : latestDraft
-                  ? `Resolve the questions and flagged details for ${makerTrip.name}.`
+                  ? `${makerTrip.name} is parsed. Confirm the few decisions left before the traveler app is assembled.`
                   : `Process ${makerTrip.name} into the first structured trip draft.`}
             </p>
           </div>
