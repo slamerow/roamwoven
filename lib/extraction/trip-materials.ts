@@ -130,6 +130,8 @@ async function extractPdfText(file: Blob) {
   ensurePdfParserGlobals();
 
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+
   const buffer = await file.arrayBuffer();
   const task = pdfjs.getDocument({
     data: new Uint8Array(buffer),
