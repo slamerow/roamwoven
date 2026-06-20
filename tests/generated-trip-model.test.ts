@@ -1427,6 +1427,114 @@ test("answering a targeted question updates the structured record", () => {
   assert.equal(getStructuredReviewCount(updated), 0);
 });
 
+test("explicit source todo language on activity cards becomes an open review question", () => {
+  const draft = {
+    activities: [
+      {
+        category: "art_culture",
+        date: "2019-01-16",
+        description:
+          "Plan for about 2 hours. Changing of the Guard is at 12:00 PM. Need to decide which ticket to get.",
+        itemType: "activity",
+        sourceFilename: "central-europe.pdf",
+        title: "Prague Castle",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-15",
+        city: "Prague",
+        country: "Czechia",
+        leaveDate: "2019-01-18",
+      },
+    ],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      destinationSummary: "Prague",
+      title: "Central Europe",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-explicit-todo",
+  });
+  const castle = records.items[0];
+  const question = records.reviewQuestions[0];
+
+  assert.ok(castle);
+  assert.ok(question);
+  assert.equal(castle.title, "Prague Castle");
+  assert.equal(castle.date, "2019-01-16");
+  assert.equal(castle.reviewRequired, false);
+  assert.equal(question.status, "open");
+  assert.equal(question.subjectId, castle.id);
+  assert.equal(question.subjectType, "item");
+  assert.equal(question.targetField, "description");
+  assert.equal(
+    question.prompt,
+    "Have you chosen which ticket to get for Prague Castle?"
+  );
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
+test("model-supplied source todo questions stay open and do not duplicate fallback questions", () => {
+  const draft = {
+    activities: [
+      {
+        category: "art_culture",
+        date: "2019-01-16",
+        description:
+          "Plan for about 2 hours. Changing of the Guard is at 12:00 PM. Need to decide which ticket to get.",
+        itemType: "activity",
+        sourceFilename: "central-europe.pdf",
+        title: "Prague Castle",
+      },
+    ],
+    missingDetails: [
+      {
+        answerType: "text",
+        confidence: "medium",
+        evidence: "The itinerary says: Need to decide which ticket to get.",
+        guessedValue: null,
+        prompt: "Have you chosen which Prague Castle ticket to get?",
+        reason: "The source explicitly marks the ticket choice as undecided.",
+        relatedTitle: "Prague Castle",
+        subjectType: "item",
+        targetField: "ticketType",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2019-01-15",
+        city: "Prague",
+        country: "Czechia",
+        leaveDate: "2019-01-18",
+      },
+    ],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      destinationSummary: "Prague",
+      title: "Central Europe",
+    },
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-explicit-todo-model-question",
+  });
+  const castle = records.items[0];
+
+  assert.ok(castle);
+  assert.equal(records.reviewQuestions.length, 1);
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.equal(records.reviewQuestions[0]?.subjectId, castle.id);
+  assert.equal(records.reviewQuestions[0]?.targetField, "ticketType");
+});
+
 test("review decisions serialize through the persistence payload contract", () => {
   const serialized = serializeTripReviewDecision({
     action: "combine",

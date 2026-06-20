@@ -402,6 +402,18 @@ function getQuestionClusterKey(question: TripReviewQuestionRecord) {
     return "title";
   }
 
+  if (target.includes("time") || /\b(time|start time|pick a time)\b/i.test(question.prompt)) {
+    return "time";
+  }
+
+  if (target.includes("ticket") || /\b(ticket|which ticket)\b/i.test(question.prompt)) {
+    return "ticket";
+  }
+
+  if (target.includes("booking") || /\b(book|booking|reserve|reservation)\b/i.test(question.prompt)) {
+    return "booking";
+  }
+
   return (
     target ||
     question.prompt
@@ -627,6 +639,50 @@ function normalizeText(value: string | null) {
     ?.toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim() ?? "";
+}
+
+function hasExplicitSourceTodoText(...values: Array<string | null>) {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+
+  return /\b(need to decide|needs? to decide|still need to|to be decided|to decide|pick a time|choose (a |the |which )?(ticket|time|tour|option)|which ticket|book this|book later|reserve later|confirm later|decide later|not booked yet|ticket to get)\b/.test(
+    text
+  ) || (/\btbd\b/.test(text) && /\b(ticket|time|book|booking|reserve|reservation|option|tour)\b/.test(text));
+}
+
+function createExplicitTodoQuestionPrompt(item: TripItemRecord) {
+  const text = [item.title, item.description].filter(Boolean).join(" ");
+
+  if (/\bticket\b/i.test(text)) {
+    return `Have you chosen which ticket to get for ${item.title}?`;
+  }
+
+  if (/\b(time|start)\b/i.test(text)) {
+    return `Have you picked a time for ${item.title}?`;
+  }
+
+  if (/\b(book|reserve|reservation)\b/i.test(text)) {
+    return `Have you booked ${item.title} yet?`;
+  }
+
+  return `Have you decided the remaining detail for ${item.title}?`;
+}
+
+function createExplicitTodoQuestionTargetField(item: TripItemRecord) {
+  const text = [item.title, item.description].filter(Boolean).join(" ");
+
+  if (/\bticket\b/i.test(text)) {
+    return "description";
+  }
+
+  if (/\b(time|start)\b/i.test(text)) {
+    return "startTime";
+  }
+
+  if (/\b(book|reserve|reservation)\b/i.test(text)) {
+    return "description";
+  }
+
+  return "description";
 }
 
 function isGenericStayName(value: string) {
@@ -1309,7 +1365,7 @@ function createReviewQuestions({
     return null;
   };
 
-  return getArray(draft, "missingDetails").flatMap((item, index) => {
+  const draftQuestions = getArray(draft, "missingDetails").flatMap((item, index) => {
     const detail = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
@@ -1323,6 +1379,13 @@ function createReviewQuestions({
     const prompt = getString(detail, "prompt");
     const reason = getString(detail, "reason");
     const targetField = getString(detail, "targetField");
+    const isExplicitSourceTodo = hasExplicitSourceTodoText(
+      prompt,
+      reason,
+      evidence,
+      guessedValue,
+      relatedTitle
+    );
 
     const dismissOptionalDetail = isDismissibleOptionalMissingDetail({
       hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
@@ -1349,7 +1412,7 @@ function createReviewQuestions({
         targetField,
       })
         ? "dismissed"
-      : dismissOptionalDetail
+      : dismissOptionalDetail && !isExplicitSourceTodo
         ? "dismissed"
         : shouldTreatAsNote({
         answerType,
@@ -1384,7 +1447,41 @@ function createReviewQuestions({
       targetField,
       tripId,
     }];
-  }).filter((question, index, questions) => {
+  });
+  const questionKeys = new Set(
+    draftQuestions.map(
+      (question) => `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`
+    )
+  );
+  const explicitTodoQuestions = items
+    .filter((item) => hasExplicitSourceTodoText(item.title, item.description))
+    .flatMap((item, index): TripReviewQuestionRecord[] => {
+      const targetField = createExplicitTodoQuestionTargetField(item);
+      const prompt = createExplicitTodoQuestionPrompt(item);
+      const question: TripReviewQuestionRecord = {
+        answerType: "text",
+        answerValue: null,
+        createdAt: null,
+        evidence: item.description,
+        guessedValue: null,
+        id: `${tripId}-explicit-todo-question-${index + 1}`,
+        prompt,
+        reason:
+          "The itinerary itself marks this activity detail as undecided, so Roamwoven will keep the card and ask once here.",
+        resolvedAt: null,
+        sourceConfidence: "medium",
+        status: "open",
+        subjectId: item.id,
+        subjectType: "item",
+        targetField,
+        tripId,
+      };
+      const key = `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`;
+
+      return questionKeys.has(key) ? [] : [question];
+    });
+
+  return [...draftQuestions, ...explicitTodoQuestions].filter((question, index, questions) => {
     if (question.status !== "open" && question.status !== "noted") {
       return true;
     }

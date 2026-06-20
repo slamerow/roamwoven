@@ -130,6 +130,7 @@ Backend-ready pieces now exist:
   - If answering the first review queue unlocks genuine new ambiguity, the preferred UX is a tiny second review round of 1-3 follow-up questions, not dumping all hypothetical follow-ups into the first pass. This needs a deliberate resolver/generation pass later.
   - Facts should not be surfaced as calls. Calls are non-obvious decisions that a human trip-planner could confidently infer, such as "no hotel night 1 because you're on an overnight flight." Calls should be statements, not questions.
   - Optional missing-detail rule: if a time-bound reservation, pickup, tour, or appointment has a usable anchor such as a name, address/location, provider, route, confirmation, or enough descriptive context, make the card and usually omit missing nice-to-have fields from review. If it only has a generic type plus time, ask a targeted question because the card is not identifiable enough.
+  - Explicit source to-do rule: if the itinerary itself says something like `Need to decide`, `pick a time`, `which ticket`, `book later`, or `TBD` tied to a ticket/time/booking decision, create the activity card and keep that unresolved detail as an open targeted question. Do not turn it into a `Calls we made` note, and do not block publishing if the maker leaves it as a reminder.
   - Medium-confidence contextual guesses that would move stays, transport, or dated cards should remain Questions only when two answers are genuinely plausible. Strong contextual evidence is enough for `Calls we made` when a reasonable human trip-planner would confidently make the same call from ordering, arrival/departure sequence, bag-drop/check-in flow, or surrounding itinerary context.
   - Commercial/public venue addresses such as hotels, hostels, shops, restaurants, museums, or activity locations should not be treated as private details just because they are exact street addresses. Private homes, rentals/Airbnb, apartments, access codes, booking controls, and personal notes remain protected.
   - If a readable PDF contains screenshot-like transport cards, the current pipeline may mark the upload `text_ready` from embedded PDF text and skip OCR, causing image-only train/flight blocks to be missed. The OCR prompt now calls out transport timeline cards, but the proper fix is a mixed-PDF extraction strategy that can combine PDF text and OCR for selected pages/regions without OCRing every readable PDF by default.
@@ -361,6 +362,12 @@ Latest checks after trip-summary pre-publish QA surface:
 - `npm run build`
 
 Latest checks after day-by-day trip-summary review:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after explicit source TODO extraction rule:
 
 - `npm test`
 - `npm run typecheck`
