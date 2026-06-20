@@ -1577,6 +1577,11 @@ test("generated trip summary uses applied structured records", () => {
       ?.group,
     "Art and culture"
   );
+  assert.equal(summary.days.length, 1);
+  assert.equal(summary.days[0]?.label, "Day 2 · September 2");
+  assert.equal(summary.days[0]?.title, "Paris");
+  assert.equal(summary.days[0]?.entries[0]?.title, "Museum visit");
+  assert.equal(summary.days[0]?.entries[0]?.detail, undefined);
 });
 
 test("published snapshot payload compiles traveler app view model", () => {

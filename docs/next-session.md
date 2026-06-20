@@ -141,6 +141,7 @@ Backend-ready pieces now exist:
   - Date formatting bug on summary page: `2019-01-12 to 2019-01-25` is not acceptable. Use friendly month-spelled date ranges, consistent with legs/stays/transport review formatting.
   - The summary-specifics implementation is now wired: `lib/generated-trip-summary.ts` produces friendly date ranges and section rows, and `app/maker/trips/[tripId]/summary/page.tsx` renders expandable Legs, Transport, Stays, Activities, Protected details, and Review items. Activities are category-grouped and truncated to a pre-publish sample; the page was checked locally on desktop and mobile for overflow.
   - Follow-up summary QA fixed the demo adapter where `seedTrip.dateRange` was incorrectly stored as `destinationSummary`, and fixed the traveler view model where `trip.dateRange` was incorrectly derived from `destinationSummary`. The demo summary now shows `June 27 - November 8, 2026` as the structured date range and destination cities underneath. Protected-detail summary counts now exclude public/hidden detail records, and Review items now include privacy/record-review buckets as well as open questions.
+  - Summary page direction shifted from abstract buckets to a day-by-day pre-publish review: Day N + date/location, stay/travel rows first, then activities with collapsed descriptions. This is the surface for evaluating whether extraction got activity count, titles, descriptions, and placement right without bloating the short review-prompt page. The summary header now lightly reflects saved design choices with theme name and color swatches; privacy remains a quiet protected-details note, not a dominant review section.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
 - CTO durability pass started before new product work:
   - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.
@@ -354,6 +355,12 @@ Latest checks after Central Europe review-feedback pass:
 - `npm run build`
 
 Latest checks after trip-summary pre-publish QA surface:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after day-by-day trip-summary review:
 
 - `npm test`
 - `npm run typecheck`

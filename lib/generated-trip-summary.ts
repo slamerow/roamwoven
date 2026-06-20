@@ -18,6 +18,24 @@ export type GeneratedTripSummarySection = {
   title: string;
 };
 
+export type GeneratedTripSummaryDayEntry = {
+  detail?: string;
+  id: string;
+  kind: "transport" | "stay" | "activity" | "review";
+  meta: string;
+  needsReview: boolean;
+  title: string;
+};
+
+export type GeneratedTripSummaryDay = {
+  date: string;
+  entries: GeneratedTripSummaryDayEntry[];
+  id: string;
+  label: string;
+  needsReview: boolean;
+  title: string;
+};
+
 export type GeneratedTripSummaryView = {
   counts: {
     activities: number;
@@ -29,6 +47,7 @@ export type GeneratedTripSummaryView = {
     transport: number;
   };
   dateRange: string;
+  days: GeneratedTripSummaryDay[];
   destination: string;
   sections: GeneratedTripSummarySection[];
   isReadyForPublishReview: boolean;
@@ -147,6 +166,154 @@ function formatDestination(records: StructuredTripRecords) {
 
 function formatTime(value: string | null) {
   return value?.trim() ?? "";
+}
+
+function formatDayLabel(date: string, dayNumber: number) {
+  return `Day ${dayNumber} · ${formatDate(date, false) || date}`;
+}
+
+function titleForDay(records: StructuredTripRecords, day: StructuredTripRecords["days"][number]) {
+  const primaryLeg = records.legs.find((leg) => leg.id === day.primaryLegId);
+
+  if (primaryLeg?.displayName) {
+    return primaryLeg.displayName;
+  }
+
+  return day.title;
+}
+
+function createTransportEntry(
+  item: StructuredTripRecords["transport"][number]
+): GeneratedTripSummaryDayEntry {
+  return {
+    detail: [
+      [item.departureLocation, item.arrivalLocation].filter(Boolean).join(" -> "),
+      item.provider,
+      [formatTime(item.departureTime), formatTime(item.arrivalTime)]
+        .filter(Boolean)
+        .join(" - "),
+      item.description,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    id: item.id,
+    kind: "transport",
+    meta: item.transportType.replaceAll("_", " "),
+    needsReview: item.reviewRequired,
+    title: item.routeLabel,
+  };
+}
+
+function createStayEntriesForDay(
+  stay: StructuredTripRecords["stays"][number],
+  date: string
+): GeneratedTripSummaryDayEntry[] {
+  const entries: GeneratedTripSummaryDayEntry[] = [];
+  const addressDetail = stay.address
+    ? stay.addressVisibility === "public"
+      ? stay.address
+      : "Exact address protected"
+    : undefined;
+
+  if (
+    stay.checkInDate &&
+    stay.checkOutDate &&
+    stay.checkInDate <= date &&
+    date < stay.checkOutDate
+  ) {
+    entries.push({
+      detail: addressDetail,
+      id: `${stay.id}-staying-${date}`,
+      kind: "stay",
+      meta:
+        stay.checkInDate === date
+          ? [stay.checkInTime, "Check-in"].filter(Boolean).join(" · ")
+          : "Stay",
+      needsReview: stay.reviewRequired,
+      title: `Staying: ${stay.name}`,
+    });
+  }
+
+  if (stay.checkOutDate === date) {
+    entries.push({
+      detail: addressDetail,
+      id: `${stay.id}-check-out`,
+      kind: "stay",
+      meta: [stay.checkOutTime, "Check-out"].filter(Boolean).join(" · "),
+      needsReview: stay.reviewRequired,
+      title: `Check out: ${stay.name}`,
+    });
+  }
+
+  return entries;
+}
+
+function createActivityEntry(
+  item: StructuredTripRecords["items"][number],
+  categoryById: Map<string, StructuredTripRecords["categories"][number]>
+): GeneratedTripSummaryDayEntry {
+  const category = categoryById.get(item.categoryId);
+
+  return {
+    detail: item.description ?? item.locationName ?? item.address ?? undefined,
+    id: item.id,
+    kind: item.reviewRequired ? "review" : "activity",
+    meta: [formatTime(item.startTime), category?.label].filter(Boolean).join(" · "),
+    needsReview: item.reviewRequired,
+    title: item.title,
+  };
+}
+
+function createSummaryDays(
+  records: StructuredTripRecords,
+  activeItems: StructuredTripRecords["items"]
+): GeneratedTripSummaryDay[] {
+  const activeTransport = records.transport.filter((item) =>
+    isActiveStatus(item.status)
+  );
+  const activeStays = records.stays.filter((stay) => isActiveStatus(stay.status));
+  const categoryById = new Map(
+    records.categories.map((category) => [category.id, category])
+  );
+  const datedItems = activeItems.filter((item) => item.date);
+  const undatedItems = activeItems.filter((item) => !item.date);
+
+  const days = records.days
+    .filter((day) => day.date !== "needs-placement")
+    .map((day) => {
+      const entries = [
+        ...activeTransport
+          .filter((item) => item.date === day.date)
+          .map(createTransportEntry),
+        ...activeStays.flatMap((stay) => createStayEntriesForDay(stay, day.date)),
+        ...datedItems
+          .filter((item) => item.date === day.date)
+          .map((item) => createActivityEntry(item, categoryById)),
+      ];
+
+      return {
+        date: day.date,
+        entries,
+        id: day.id,
+        label: formatDayLabel(day.date, day.dayNumber),
+        needsReview: day.reviewRequired || entries.some((entry) => entry.needsReview),
+        title: titleForDay(records, day),
+      };
+    })
+    .filter((day) => day.entries.length > 0);
+
+  if (undatedItems.length > 0) {
+    days.push({
+      date: "needs-placement",
+      entries: undatedItems.map((item) => createActivityEntry(item, categoryById)),
+      id: `${records.trip.id}-needs-placement`,
+      label: "Needs placement",
+      needsReview: true,
+      title: "Cards without a date",
+    });
+  }
+
+  return days;
 }
 
 function createReviewItems(
@@ -331,6 +498,7 @@ export function createGeneratedTripSummaryView(
         .length,
     },
     dateRange: formatDateRange(records),
+    days: createSummaryDays(records, activeItems),
     destination: formatDestination(records),
     sections: createSummarySections(records, activeItems, review),
     isReadyForPublishReview: review === 0,
