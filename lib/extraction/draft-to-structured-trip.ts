@@ -208,7 +208,7 @@ function isCorePlanningTarget({
   return false;
 }
 
-function isOptionalMissingDetail({
+function isDismissibleOptionalMissingDetail({
   hasUsableAnchor,
   prompt,
   reason,
@@ -230,19 +230,21 @@ function isOptionalMissingDetail({
   const target = targetField?.toLowerCase().split("/").pop() ?? "";
   const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
 
+  const optionalLabelPattern =
+    /\b(address|company|location|name|operator|provider|title|url|website)\b/;
+  const materialGapPattern =
+    /\b(cannot|can't|critical|essential|material|required|unusable|where)\b|not identifiable|hard to identify|can't identify|cannot identify/;
+
   if (
-    subjectType === "transport" &&
-    hasUsableAnchor &&
-    (target.includes("provider") ||
-      target.includes("company") ||
-      /\b(company|provider|operator)\b/.test(text))
+    !hasUsableAnchor ||
+    !optionalLabelPattern.test(`${target} ${text}`) ||
+    materialGapPattern.test(text)
   ) {
-    return true;
+    return false;
   }
 
   if (
     subjectType === "item" &&
-    hasUsableAnchor &&
     (target.includes("url") || target.includes("website"))
   ) {
     return true;
@@ -250,7 +252,6 @@ function isOptionalMissingDetail({
 
   if (
     subjectType === "item" &&
-    hasUsableAnchor &&
     (target.includes("address") ||
       target.includes("location") ||
       target.includes("name") ||
@@ -259,7 +260,12 @@ function isOptionalMissingDetail({
     return true;
   }
 
-  return false;
+  return (
+    subjectType === "transport" &&
+    (target.includes("provider") ||
+      target.includes("company") ||
+      /\b(company|provider|operator)\b/.test(text))
+  );
 }
 
 function isPublicVenueAddressDetail({
@@ -1238,6 +1244,15 @@ function createReviewQuestions({
     const reason = getString(detail, "reason");
     const targetField = getString(detail, "targetField");
 
+    const dismissOptionalDetail = isDismissibleOptionalMissingDetail({
+      hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
+      prompt,
+      reason,
+      subjectId,
+      subjectType,
+      targetField,
+    });
+
     const status: TripReviewQuestionRecord["status"] = isObviousFactCall({
       confidence,
       evidence,
@@ -1247,15 +1262,9 @@ function createReviewQuestions({
       subjectId,
     })
       ? "dismissed"
-      : isOptionalMissingDetail({
-        hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
-        prompt,
-        reason,
-        subjectId,
-        subjectType,
-        targetField,
-      }) ||
-      shouldTreatAsNote({
+      : dismissOptionalDetail
+        ? "dismissed"
+        : shouldTreatAsNote({
         answerType,
         confidence,
         evidence,

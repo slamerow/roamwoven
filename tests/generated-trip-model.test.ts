@@ -588,7 +588,7 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
-test("optional transport provider questions become calls", () => {
+test("optional transport provider gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -628,12 +628,12 @@ test("optional transport provider questions become calls", () => {
     (section) => section.id === "notes"
   );
 
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(notes?.count, 1);
+  assert.equal(notes?.count, 0);
 });
 
-test("optional train operator questions become calls", () => {
+test("optional train operator gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -671,7 +671,7 @@ test("optional train operator questions become calls", () => {
     tripId: "trip-train-provider",
   });
 
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
@@ -718,7 +718,7 @@ test("generic time-bound reservation without an anchor stays a question", () => 
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
-test("anchored time-bound card missing optional address becomes a call", () => {
+test("anchored time-bound card missing optional address stays out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -757,7 +757,7 @@ test("anchored time-bound card missing optional address becomes a call", () => {
     tripId: "trip-anchored-baths",
   });
 
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
