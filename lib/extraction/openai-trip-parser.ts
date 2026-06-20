@@ -1,4 +1,5 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
+import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
 export type TripExtractionMaterial = {
   filename: string;
@@ -22,26 +23,7 @@ const tripDraftSchema = {
         properties: {
           address: { type: ["string", "null"] },
           category: {
-            enum: [
-              "activity",
-              "admin_logistics",
-              "arrival_departure",
-              "art_class",
-              "art_culture",
-              "beach_water",
-              "food_class",
-              "food_dining",
-              "kid_activity",
-              "nature_outdoors",
-              "note",
-              "rest_day",
-              "scenic_ride",
-              "shopping_tailor",
-              "social",
-              "temple_shrine",
-              "transport",
-              "wellness_and_relaxation",
-            ],
+            enum: TRIP_CATEGORY_IDS,
           },
           date: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
@@ -250,7 +232,18 @@ const systemPrompt = [
   "Do not invent details. Use null when a date, time, address, provider, or confirmation is missing.",
   "Preserve the traveler's mental model: broad day arcs can remain anchor activities; split only reservation-backed, map-critical, permit-backed, or time-specific stops.",
   "For every traveler card in activities, set itemType to activity, note, admin, rest_day, social, or placeholder. Dining reservations, restaurants, cafes, bars, winery visits, and meal plans should usually be itemType activity with category food_dining.",
-  "For every traveler card, also set category to the Wren-style organization bucket travelers would browse under: food_dining, art_culture, nature_outdoors, beach_water, scenic_ride, shopping_tailor, temple_shrine, wellness_and_relaxation, kid_activity, social, rest_day, admin_logistics, arrival_departure, food_class, art_class, transport, note, or activity.",
+  `For every traveler card, also set category to the traveler-browse bucket, not the record type. Allowed category values are: ${TRIP_CATEGORY_IDS.join(", ")}.`,
+  "Never use activity, note, or transport as a category. Those can be item types or separate transport records, but card categories should answer where a traveler would browse the plan.",
+  "Use arrival_departure for flights, train transfers, airport/station arrivals, lodging check-ins/check-outs, and explicit drop-bags cards that need to appear in the daily traveler timeline.",
+  "Create a check-in or drop-bags activity card with category arrival_departure for every lodging switch when the source gives a lodging change or bag-drop instruction. Keep the lodging itself in stays too.",
+  "Use tours_tickets for timed entry, ticketed tours, guided tours, walking tours, castle/palace visits with ticket decisions, and similar reservation-like sightseeing. Use art_culture for broader museums, galleries, landmarks, libraries, statues, and cultural sights when the key thing is browsing the place rather than managing a ticket/tour.",
+  "Use nightlife_entertainment for shows, performances, Ferris wheels, cocktail bars, evening entertainment, and nightlife. Use food_dining when the main point is a meal, cafe, brewery, beer hall, or tasting stop.",
+  "Use scenic_ride only when the ride itself is part of the experience, such as a road trip, scenic train/boat ride, panorama train, or route worth browsing as an activity. Ordinary transport belongs in transport records and arrival_departure cards when needed in the daily timeline.",
+  "Walking-tour and neighborhood-route rule: if a day lists a self-guided walk or neighborhood exploration followed by untimed stroll-by stops, create one anchor activity and put the stops in the description. Split out stops with their own time, reservation, ticket, booking, or strong map-critical purpose.",
+  "Same-site cluster rule: if multiple sub-stops are clearly part of one complex or visit, create one activity card with sub-stops in the description. For example, a palace visit can include gardens, show, train pass, viewpoints, and related ticket notes in one card.",
+  "Named-stop rule: if a dated day lists named landmarks directly and they are not clearly inside a walking-route anchor or same-site cluster, create standalone activity cards rather than dropping them into a vague day summary.",
+  "Flexible-options rule: if the source lists a cluster of optional ideas that fits one dated window, create one flexible activity card with the options in the description. Ask a question only when the choice affects a booking, ticket, route, or core day placement.",
+  "Duplicate-place rule: if the same place appears on multiple days, do not silently create duplicate cards. Place it once when context is clear; if two placements are genuinely plausible, create one targeted missingDetails question.",
   "Flag private addresses, door codes, confirmation numbers, personal notes, and host contact details as sensitiveDetails instead of exposing them casually.",
   "Default sensitiveDetails should include exact private home addresses, exact rental or Airbnb addresses, door/gate/lockbox codes, Wi-Fi passwords, host phone numbers or emails, confirmation numbers, booking references, ticket numbers, passport/ID/payment details, and child/medical/personal safety notes.",
   "Hotel and hostel names, public landmarks, restaurants, shops, museums, commercial venue addresses, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
@@ -287,7 +280,7 @@ const spineSystemPrompt = [
 const activitiesSystemPrompt = [
   systemPrompt,
   "This stage extracts only traveler cards and related review details: activities, missingDetails, and sensitiveDetails. Do not repeat places, stays, transport, or tripOverview.",
-  "Include restaurants and dining reservations as activities with category food_dining. Keep broad day arcs as anchor activities when they match the traveler's mental model.",
+  "Include restaurants and dining reservations as activities with category food_dining. Keep broad day arcs as anchor activities when they match the traveler's mental model, but keep timed/ticketed/booked cards separate.",
 ].join(" ");
 
 function formatMaterials(materials: TripExtractionMaterial[]) {

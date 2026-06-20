@@ -213,9 +213,12 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(records.stays[0]?.legId, records.legs[0]?.id);
   assert.equal(records.transport[0]?.transportType, "flight");
   assert.equal(records.transport[0]?.confirmationVisibility, "traveler_password");
-  assert.equal(records.items.length, 2);
+  assert.equal(records.items.length, 3);
   assert.equal(records.items[1]?.itemType, "activity");
   assert.equal(records.items[1]?.categoryId, "food_dining");
+  assert.equal(records.items[2]?.itemType, "admin");
+  assert.equal(records.items[2]?.categoryId, "arrival_departure");
+  assert.equal(records.items[2]?.title, "Check in: Prague apartment");
   assert.ok(
     records.categories.some((category) => category.categoryKey === "food_dining"),
     "expected dining activities to use the food and dining category"
@@ -236,7 +239,219 @@ test("draft parser output compiles into structured records", () => {
   );
   assert.ok(records.days.length >= 2, "expected days from records");
   assert.equal(viewModel.trip.title, "Central Europe");
-  assert.equal(viewModel.cards.length, 2);
+  assert.equal(viewModel.cards.length, 3);
+});
+
+test("category taxonomy canonicalizes old aliases and avoids generic buckets", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "wellness_&_relaxation",
+          date: "2026-09-02",
+          itemType: "activity",
+          title: "Sauna reservation",
+        },
+        {
+          category: "transport",
+          date: "2026-09-03",
+          description: "Pick up bags at the station after arrival.",
+          itemType: "admin",
+          title: "Station arrival and bag pickup",
+        },
+        {
+          category: "activity",
+          date: "2026-09-04",
+          description: "Visit a wildlife sanctuary.",
+          itemType: "activity",
+          title: "Wildlife sanctuary",
+        },
+      ],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Taxonomy test",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-category-taxonomy",
+  });
+
+  assert.deepEqual(
+    records.items.map((item) => item.categoryId),
+    ["wellness_relaxation", "arrival_departure", "animal_experience"]
+  );
+  assert.equal(
+    records.categories.some((category) =>
+      ["activity", "note", "transport"].includes(category.categoryKey)
+    ),
+    false
+  );
+});
+
+test("walking-route anchors keep untimed stops on one traveler card", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-14",
+          description:
+            "Self-guided walking route with Charles Bridge, Astronomical Clock, Lucerna Arcade, and Dancing House as stroll-by stops.",
+          itemType: "activity",
+          title: "Prague self-guided walking tour",
+        },
+        {
+          category: "tours_tickets",
+          date: "2019-01-14",
+          description: "Timed/ticketed tour listed separately from the walking route.",
+          itemType: "activity",
+          startTime: "15:00",
+          title: "Catacombs tour",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-15",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-walking-anchor",
+  });
+
+  assert.equal(records.items.length, 2);
+  assert.equal(records.items[0]?.title, "Prague self-guided walking tour");
+  assert.match(records.items[0]?.description ?? "", /Charles Bridge/);
+  assert.match(records.items[0]?.description ?? "", /Dancing House/);
+  assert.equal(records.items[1]?.title, "Catacombs tour");
+  assert.equal(records.items[1]?.startTime, "15:00");
+});
+
+test("same-site activity clusters stay on one card with sub-stops", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-19",
+          description:
+            "Include the Gloriette, Orangeriegarten, Palm House, Apple Strudel Show, and Panorama Train Pass during the same palace visit.",
+          itemType: "activity",
+          title: "Schonbrunn Palace",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-same-site-cluster",
+  });
+
+  assert.equal(records.items.length, 1);
+  assert.equal(records.items[0]?.categoryId, "tours_tickets");
+  assert.match(records.items[0]?.description ?? "", /Apple Strudel Show/);
+  assert.match(records.items[0]?.description ?? "", /Panorama Train Pass/);
+});
+
+test("lodging switches synthesize check-in cards without duplicating explicit bag-drop cards", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2019-01-13",
+          description: "Drop bags before afternoon sightseeing.",
+          itemType: "admin",
+          title: "Drop bags at The Yellow",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-15",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: "Via Palestro 44, Rome",
+          checkIn: "2019-01-13",
+          checkInTime: "14:30",
+          checkOut: "2019-01-14",
+          firstNightDate: "2019-01-13",
+          name: "The Yellow",
+          nights: 1,
+        },
+        {
+          address: "Private apartment address",
+          checkIn: "2019-01-14",
+          checkInTime: "15:00",
+          checkOut: "2019-01-15",
+          firstNightDate: "2019-01-14",
+          name: "Prague Airbnb",
+          nights: 1,
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-check-in-cards",
+  });
+
+  const checkInCards = records.items.filter(
+    (item) => item.categoryId === "arrival_departure"
+  );
+
+  assert.equal(checkInCards.length, 2);
+  assert.ok(
+    checkInCards.some((item) => item.title === "Drop bags at The Yellow")
+  );
+  assert.ok(
+    checkInCards.some((item) => item.title === "Check in: Prague Airbnb")
+  );
+  assert.equal(
+    records.items.some((item) => item.title === "Check in: The Yellow"),
+    false
+  );
 });
 
 test("explicit stay nights infer checkout without review", () => {
@@ -1107,7 +1322,7 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 3 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
   assert.equal(sections.length, 7);

@@ -13,45 +13,13 @@ import type {
   TripSourceConfidence,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
+import {
+  canonicalizeTripCategoryId,
+  getTripCategoryEmoji,
+  getTripCategoryLabel,
+} from "@/lib/trip-categories";
 
 type DraftObject = Record<string, unknown>;
-
-const defaultCategoryLabels: Record<string, { emoji: string; label: string }> = {
-  activity: { emoji: "✨", label: "Activities" },
-  admin_logistics: { emoji: "📋", label: "Admin and logistics" },
-  arrival_departure: { emoji: "✈️", label: "Arrival and departure" },
-  art_class: { emoji: "🖌️", label: "Art classes" },
-  art_culture: { emoji: "🎨", label: "Art and culture" },
-  beach_water: { emoji: "🏖️", label: "Beach and water" },
-  food_class: { emoji: "👨‍🍳", label: "Food classes" },
-  food_dining: { emoji: "🍜", label: "Food and dining" },
-  kid_activity: { emoji: "🧸", label: "Kid activities" },
-  nature_outdoors: { emoji: "🌿", label: "Nature and outdoors" },
-  note: { emoji: "•", label: "Notes" },
-  rest_day: { emoji: "😴", label: "Rest days" },
-  scenic_ride: { emoji: "🚗", label: "Scenic rides" },
-  shopping_tailor: { emoji: "🛍️", label: "Shopping and tailoring" },
-  social: { emoji: "👥", label: "Social" },
-  temple_shrine: { emoji: "⛩️", label: "Temples and shrines" },
-  transport: { emoji: "🚆", label: "Transport" },
-  wellness_and_relaxation: { emoji: "💆", label: "Wellness and relaxation" },
-};
-
-function getCategoryLabel(categoryId: string) {
-  const category = defaultCategoryLabels[categoryId];
-
-  if (category) {
-    return category.label;
-  }
-
-  return categoryId
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function getCategoryEmoji(categoryId: string) {
-  return defaultCategoryLabels[categoryId]?.emoji ?? "•";
-}
 
 function getObject(value: unknown, key: string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -571,53 +539,91 @@ function normalizeCategoryId({
   itemType: TripItemType;
   title: string;
 }) {
-  const normalized = category?.trim().replaceAll("&", "and");
+  const canonicalCategory = canonicalizeTripCategoryId(category);
 
-  if (normalized) {
-    return normalized;
+  if (canonicalCategory) {
+    return canonicalCategory;
   }
 
-  if (/\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery)\b/.test(
-    `${title} ${description ?? ""}`.toLowerCase()
-  )) {
-    return "food_dining";
-  }
+  const text = `${title} ${description ?? ""}`.toLowerCase();
 
-  if (itemType === "admin") {
-    return "admin_logistics";
+  if (/\b(check[-\s]?in|check[-\s]?out|drop bags?|bag drop|arrival|departure|airport|station|flight|land|lands)\b/.test(text)) {
+    return "arrival_departure";
   }
 
   if (itemType === "rest_day") {
     return "rest_day";
   }
 
-  if (itemType === "note" || itemType === "placeholder") {
-    return "note";
+  if (itemType === "social" || /\b(friend|family|meetup|meet up|visit with)\b/.test(text)) {
+    return "social";
   }
 
-  const text = `${title} ${description ?? ""}`.toLowerCase();
-
-  if (/\b(beach|swim|snorkel|pool|water)\b/.test(text)) {
-    return "beach_water";
+  if (/\b(cooking class|cookery|food tour|market tour|tasting class)\b/.test(text)) {
+    return "food_class";
   }
 
-  if (/\b(hike|park|garden|trail|mountain|nature|outdoors)\b/.test(text)) {
-    return "nature_outdoors";
+  if (/\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery|brewery|beer hall|food hall|market|meal)\b/.test(text)) {
+    return "food_dining";
   }
 
-  if (/\b(museum|gallery|festival|temple|church|mosque|palace|art|culture)\b/.test(text)) {
+  if (/\b(pottery|calligraphy|batik|silk|workshop|craft class|art class|hands[-\s]?on)\b/.test(text)) {
+    return "art_class";
+  }
+
+  if (/\b(temple|shrine|church|cathedral|basilica|mosque|synagogue|religious|st vitus|st\. vitus)\b/.test(text)) {
+    return "temple_shrine";
+  }
+
+  if (/\b(ticket|tickets|tour|guided|entry|reservation|pass|timed|time travel|walking tour|catacombs|castle|palace)\b/.test(text)) {
+    return "tours_tickets";
+  }
+
+  if (/\b(museum|gallery|exhibit|exhibition|library|monument|statue|landmark|art|culture|historic|history|communism|kgb|belvedere|albertina|mumok|kafka)\b/.test(text)) {
     return "art_culture";
   }
 
-  if (/\b(shop|market|tailor|souvenir)\b/.test(text)) {
+  if (/\b(zoo|wildlife|sanctuary|aquarium|animal|elephant|whale shark|whale|dolphin)\b/.test(text)) {
+    return "animal_experience";
+  }
+
+  if (/\b(beach|swim|snorkel|pool|water|boat|kayak|surf|reef)\b/.test(text)) {
+    return "beach_water";
+  }
+
+  if (/\b(hike|park|garden|trail|mountain|nature|outdoors|viewpoint|scenic spot|gloriette|palm house)\b/.test(text)) {
+    return "nature_outdoors";
+  }
+
+  if (/\b(shop|shopping|market|tailor|tailoring|souvenir|mall|boutique)\b/.test(text)) {
     return "shopping_tailor";
   }
 
-  if (/\b(train|drive|ferry|transfer|bus|ride)\b/.test(text)) {
+  if (/\b(spa|massage|sauna|yoga|wellness|relaxation|baths?)\b/.test(text)) {
+    return "wellness_relaxation";
+  }
+
+  if (/\b(playground|kid|kids|child|children|family[-\s]?friendly|toddler|wren)\b/.test(text)) {
+    return "kid_activity";
+  }
+
+  if (/\b(show|concert|theater|theatre|performance|ferris wheel|nightlife|club|cocktail|hemingway bar)\b/.test(text)) {
+    return "nightlife_entertainment";
+  }
+
+  if (/\b(train ride|boat ride|scenic ride|road trip|drive|ferry|cruise|panorama train)\b/.test(text)) {
     return "scenic_ride";
   }
 
-  return "activity";
+  if (/\b(laundry|grocery|groceries|pack|packing|sim card|pharmacy|errand|admin)\b/.test(text)) {
+    return "admin_logistics";
+  }
+
+  if (itemType === "admin" || itemType === "note" || itemType === "placeholder") {
+    return "admin_logistics";
+  }
+
+  return "art_culture";
 }
 
 function isIsoDate(value: string | null): value is string {
@@ -1034,6 +1040,85 @@ function createItemRecords({
   });
 }
 
+function hasStayCheckInCard({
+  items,
+  stay,
+}: {
+  items: TripItemRecord[];
+  stay: TripStayRecord;
+}) {
+  const stayName = normalizeText(stay.name);
+
+  return items.some((item) => {
+    if (item.date !== stay.checkInDate) {
+      return false;
+    }
+
+    const text = normalizeText(
+      [item.title, item.description, item.locationName].filter(Boolean).join(" ")
+    );
+
+    return (
+      /\b(check in|check out|drop bags|bag drop|bags)\b/.test(text) &&
+      (!stayName || text.includes(stayName) || stayName.includes(text))
+    );
+  });
+}
+
+function createStayCheckInItemRecords({
+  items,
+  stays,
+  tripId,
+}: {
+  items: TripItemRecord[];
+  stays: TripStayRecord[];
+  tripId: string;
+}): TripItemRecord[] {
+  return stays.flatMap((stay, index): TripItemRecord[] => {
+    if (!stay.checkInDate || hasStayCheckInCard({ items, stay })) {
+      return [];
+    }
+
+    const title = `Check in: ${stay.name}`;
+    const descriptionParts = [
+      stay.checkInTime ? `Check-in time: ${stay.checkInTime}.` : null,
+      stay.publicLocationLabel ? `Stay area: ${stay.publicLocationLabel}.` : null,
+      stay.address && stay.addressVisibility === "public"
+        ? `Address: ${stay.address}.`
+        : null,
+      stay.address && stay.addressVisibility !== "public"
+        ? "Exact address is saved with protected stay details."
+        : null,
+    ];
+
+    return [
+      {
+        address: stay.addressVisibility === "public" ? stay.address : null,
+        categoryId: "arrival_departure",
+        date: stay.checkInDate,
+        description: descriptionParts.filter(Boolean).join(" ") || null,
+        endTime: null,
+        id: `${stay.id}-check-in-card`,
+        itemType: "admin",
+        latitude: null,
+        legId: stay.legId,
+        locationName: stay.name,
+        longitude: null,
+        parentItemId: null,
+        reviewRequired: false,
+        sortOrder: items.length + index,
+        sourceConfidence: stay.sourceConfidence,
+        startTime: stay.checkInTime,
+        status: "draft",
+        summary: null,
+        title,
+        tripId,
+        url: null,
+      },
+    ];
+  });
+}
+
 function createCategoryRecords({
   items,
   tripId,
@@ -1045,12 +1130,12 @@ function createCategoryRecords({
 
   return keys.map((key, index) => ({
     categoryKey: key,
-    description: getCategoryLabel(key),
-    emoji: getCategoryEmoji(key),
+    description: getTripCategoryLabel(key),
+    emoji: getTripCategoryEmoji(key),
     enabled: true,
     icon: null,
     id: key,
-    label: getCategoryLabel(key),
+    label: getTripCategoryLabel(key),
     sortOrder: index,
     tripId,
   }));
@@ -1538,7 +1623,15 @@ export function createStructuredTripRecordsFromDraft({
   const legs = createLegRecords({ draft, tripId });
   const stays = createStayRecords({ draft, legs, tripId });
   const transport = createTransportRecords({ draft, legs, tripId });
-  const items = createItemRecords({ draft, legs, tripId });
+  const extractedItems = createItemRecords({ draft, legs, tripId });
+  const items = [
+    ...extractedItems,
+    ...createStayCheckInItemRecords({
+      items: extractedItems,
+      stays,
+      tripId,
+    }),
+  ];
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({
     draft,

@@ -15,6 +15,11 @@ import {
   classifyAddressSensitivity,
   classifySensitiveText,
 } from "@/lib/traveler-privacy";
+import {
+  canonicalizeTripCategoryId,
+  getTripCategoryEmoji,
+  getTripCategoryLabel,
+} from "@/lib/trip-categories";
 
 type SeedLeg = {
   arriveDate?: string;
@@ -164,28 +169,6 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
 });
 
-const defaultCategoryLabels: Record<string, { emoji: string; label: string }> = {
-  activity: { emoji: "✨", label: "Activities" },
-  admin_logistics: { emoji: "📋", label: "Admin and logistics" },
-  arrival_departure: { emoji: "✈️", label: "Arrival and departure" },
-  art_class: { emoji: "🖌️", label: "Art classes" },
-  art_culture: { emoji: "🎨", label: "Art and culture" },
-  beach_water: { emoji: "🏖️", label: "Beach and water" },
-  food_class: { emoji: "👨‍🍳", label: "Food classes" },
-  food_dining: { emoji: "🍜", label: "Food and dining" },
-  kid_activity: { emoji: "🧸", label: "Kid activities" },
-  nature_outdoors: { emoji: "🌿", label: "Nature and outdoors" },
-  note: { emoji: "•", label: "Notes" },
-  rest_day: { emoji: "😴", label: "Rest days" },
-  scenic_ride: { emoji: "🚗", label: "Scenic rides" },
-  shopping_tailor: { emoji: "🛍️", label: "Shopping and tailoring" },
-  social: { emoji: "👥", label: "Social" },
-  temple_shrine: { emoji: "⛩️", label: "Temples and shrines" },
-  transport: { emoji: "🚆", label: "Transport" },
-  wellness_and_relaxation: { emoji: "💆", label: "Wellness and relaxation" },
-  "wellness_&_relaxation": { emoji: "💆", label: "Wellness and relaxation" },
-};
-
 function parseDateKey(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day));
@@ -218,23 +201,7 @@ function formatTime(time?: string | null) {
 }
 
 function normalizeCategoryKey(value?: string | null) {
-  return value?.trim().replaceAll("&", "and") || "note";
-}
-
-function getCategoryLabel(categoryId: string) {
-  const category = defaultCategoryLabels[categoryId];
-
-  if (category) {
-    return category.label;
-  }
-
-  return categoryId
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function getCategoryEmoji(categoryId: string) {
-  return defaultCategoryLabels[categoryId]?.emoji ?? "•";
+  return canonicalizeTripCategoryId(value) ?? "admin_logistics";
 }
 
 function createSeedDestinationSummary() {
@@ -440,11 +407,11 @@ function createCategoryRecords({
   return categoryIds.map((categoryId, index) => ({
     categoryKey: categoryId,
     description: null,
-    emoji: getCategoryEmoji(categoryId),
+    emoji: getTripCategoryEmoji(categoryId),
     enabled: true,
     icon: null,
     id: categoryId,
-    label: getCategoryLabel(categoryId),
+    label: getTripCategoryLabel(categoryId),
     sortOrder: index,
     tripId,
   }));
@@ -643,7 +610,7 @@ export function createTravelerAppViewModel(
     return {
       address: item.address,
       categoryId: item.categoryId,
-      categoryLabel: category?.label ?? getCategoryLabel(item.categoryId),
+      categoryLabel: category?.label ?? getTripCategoryLabel(item.categoryId),
       date: item.date,
       description: item.description ?? "Details to be added.",
       endTime: item.endTime,
