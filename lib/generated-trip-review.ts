@@ -21,6 +21,7 @@ export type StructuredReviewCombineOption = {
 };
 
 export type StructuredReviewItem = {
+  answerType?: StructuredTripRecords["reviewQuestions"][number]["answerType"];
   childItems?: Array<{
     detail: string;
     id: string;
@@ -97,6 +98,15 @@ function getSuggestedAnswerLabel(
   }
 
   return "Use suggested answer";
+}
+
+function formatCallTitle(prompt: string) {
+  return prompt
+    .replace(/\s+Is that right\?$/i, ".")
+    .replace(/^This looks like the (.+?) starting /i, "We treated the $1 as starting ")
+    .replace(/^This looks like /i, "We treated ")
+    .replace(/\?$/g, ".")
+    .replace(/\.{2,}$/g, ".");
 }
 
 function itemCombineOptions({
@@ -962,7 +972,7 @@ export function getStructuredReviewSections(
               editFields.length > 0 && question.subjectId
                 ? (question.subjectType as ReviewDecisionSubjectType)
                 : ("review_question" as const),
-            title: question.prompt,
+            title: formatCallTitle(question.prompt),
             tone: "warning" as const,
           };
         }),
@@ -970,7 +980,7 @@ export function getStructuredReviewSections(
         .filter(isNotedQuestion)
         .map((question) =>
           [
-            question.prompt,
+            formatCallTitle(question.prompt),
             question.guessedValue
               ? `Used: ${question.guessedValue}`
               : null,
@@ -988,6 +998,7 @@ export function getStructuredReviewSections(
       id: "questions",
       items: records.reviewQuestions.filter(isOpenQuestion).map((question) => ({
         combineOptions: [],
+        answerType: question.answerType,
         detail: [
           question.guessedValue
             ? `Roamwoven thinks the answer is ${question.guessedValue}.`

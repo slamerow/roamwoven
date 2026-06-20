@@ -412,25 +412,32 @@ function ReviewQuestionAnswerForm({
     return null;
   }
 
+  const isConfirmQuestion = item.answerType === "confirm";
+  const yesAnswer = item.suggestedAnswer ?? "Yes";
+
   return (
     <div className="mt-4 rounded-md border border-ink/10 bg-white p-3">
-      {item.suggestedAnswer ? (
-        <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
-          <input name="action" type="hidden" value="answer_question" />
-          <input name="subjectId" type="hidden" value={item.subjectId} />
-          <input name="subjectType" type="hidden" value={item.subjectType} />
-          <input name="answerValue" type="hidden" value={item.suggestedAnswer} />
-          <button
-            className="inline-flex rounded-md bg-moss px-3 py-2 text-xs font-semibold text-paper"
-            type="submit"
-          >
-            {item.suggestedAnswerLabel ?? "Use suggested answer"}
-          </button>
-        </form>
+      {item.suggestedAnswer || isConfirmQuestion ? (
+        <ReviewDecisionInlineForm
+          action="answer_question"
+          actionUrl={`/maker/trips/${tripId}/data/decisions`}
+          answerValue={yesAnswer}
+          buttonClassName="inline-flex rounded-md bg-moss px-3 py-2 text-xs font-semibold text-paper transition disabled:cursor-wait disabled:opacity-60"
+          subjectId={item.subjectId}
+          subjectType={item.subjectType}
+        >
+          {isConfirmQuestion
+            ? "Yes, that's right"
+            : item.suggestedAnswerLabel ?? "Use suggested answer"}
+        </ReviewDecisionInlineForm>
       ) : null}
-      <details className={item.suggestedAnswer ? "mt-3" : ""}>
+      <details className={item.suggestedAnswer || isConfirmQuestion ? "mt-3" : ""}>
         <summary className="cursor-pointer text-xs font-semibold text-ink/60">
-          {item.suggestedAnswer ? "Change answer" : "Answer question"}
+          {isConfirmQuestion
+            ? "No, edit answer"
+            : item.suggestedAnswer
+              ? "Change answer"
+              : "Answer question"}
         </summary>
         <form
           action={`/maker/trips/${tripId}/data/decisions`}

@@ -148,7 +148,7 @@ function isObviousFactCall({
   reason: string | null;
   subjectId: string | null;
 }) {
-  if (!subjectId || !guessedValue || confidence === "low") {
+  if (!guessedValue || confidence === "low") {
     return false;
   }
 
@@ -235,6 +235,10 @@ function isPrivacyPolicyQuestion({
     target.includes("visibility") ||
     target.includes("privacy") ||
     target.includes("addressvisibility") ||
+    ((target.includes("address") ||
+      target.includes("booking") ||
+      target.includes("confirmation")) &&
+      /\b(private|privacy|sensitive|visibility)\b/.test(text)) ||
     (subjectType === "trip" &&
       /\b(access code|booking reference|confirmation|password|privacy|private|sensitive|visibility|wifi|wi-fi)\b/.test(
         text
@@ -1381,14 +1385,14 @@ function createReviewQuestions({
       tripId,
     }];
   }).filter((question, index, questions) => {
-    if (question.status !== "open") {
+    if (question.status !== "open" && question.status !== "noted") {
       return true;
     }
 
     return (
       questions.findIndex(
         (candidate) =>
-          candidate.status === "open" &&
+          candidate.status === question.status &&
           candidate.subjectId === question.subjectId &&
           candidate.subjectType === question.subjectType &&
           getQuestionClusterKey(candidate) === getQuestionClusterKey(question)

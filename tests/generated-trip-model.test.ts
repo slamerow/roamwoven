@@ -390,7 +390,7 @@ test("strong lodging title guesses become stay names instead of questions", () =
   assert.equal(stay?.name, "The Yellow Hostel");
   assert.equal(stay?.checkInTime, "14:30");
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
 });
 
 test("commercial stay addresses remain public", () => {
@@ -541,6 +541,47 @@ test("strong contextual date calls become notes instead of questions", () => {
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
+test("explicit stay night calls are dismissed as facts", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "The source says Wombats City Hostel Vienna is 3 nights.",
+          guessedValue: "3 nights",
+          prompt: "We treated the Vienna stay as 3 nights. Is that right?",
+          reason:
+            "The stay text lists Wombats City Hostel Vienna and 3 nights.",
+          relatedTitle: null,
+          subjectType: "stay",
+          targetField: "nights",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2019-01-18",
+          checkOut: "2019-01-21",
+          name: "Wombats City Hostel Vienna",
+          nights: 3,
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-explicit-nights-call",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("commercial activity addresses do not become private details", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -585,6 +626,69 @@ test("commercial activity addresses do not become private details", () => {
       context: "Airbnb apartment",
     })?.kind,
     "private_residence"
+  );
+});
+
+test("commercial stay address privacy prompts are dismissed", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence:
+            "Vitae Hostel lists Erzsebet korut 50 and a reservation number.",
+          guessedValue: "Show hostel address publicly; protect reservation number",
+          prompt:
+            "The Budapest hostel address appears to be a private/booking-specific lodging address. Please confirm if it should be treated as sensitive/private in the draft.",
+          reason:
+            "Hotel and hostel addresses are public venue information; reservation numbers remain protected.",
+          relatedTitle: "Vitae Hostel",
+          subjectType: "stay",
+          targetField: "address",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [
+        {
+          detailType: "address",
+          reason: "Hostel address is public venue information.",
+          title: "Vitae Hostel address",
+        },
+        {
+          detailType: "reservation_number",
+          reason: "Reservation numbers should stay behind the trip password.",
+          title: "Vitae Hostel reservation number",
+        },
+      ],
+      stays: [
+        {
+          address: "Erzsebet korut 50, Budapest, Hungary",
+          checkIn: "2019-01-21",
+          checkOut: "2019-01-24",
+          name: "Vitae Hostel",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-hostel-privacy",
+  });
+
+  assert.equal(records.stays[0]?.addressVisibility, "public");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(
+    records.privateDetails.some((detail) => detail.label === "Vitae Hostel address"),
+    false
+  );
+  assert.ok(
+    records.privateDetails.some(
+      (detail) => detail.detailType === "reservation_number"
+    )
   );
 });
 
@@ -1027,10 +1131,13 @@ test("high-confidence parser calls become notes instead of review questions", ()
       {
         answerType: "confirm",
         confidence: "high",
-        evidence: "Outbound flight departs on January 12.",
+        evidence:
+          "Outbound overnight flight departs on January 12 and there is no hotel that night.",
         guessedValue: "Trip starts January 12",
-        prompt: "This looks like the trip starts with the outbound flight on January 12. Is that right?",
-        reason: "The outbound flight is the first dated trip event.",
+        prompt:
+          "This looks like the first trip day starting with the overnight flight on January 12. Is that right?",
+        reason:
+          "The route starts with an overnight flight and no separate hotel night.",
         relatedTitle: null,
         subjectType: "trip",
         targetField: "dateRange",
@@ -1073,7 +1180,11 @@ test("high-confidence parser calls become notes instead of review questions", ()
   assert.equal(records.reviewQuestions[0]?.status, "noted");
   assert.equal(notes?.count, 1);
   assert.equal(questions?.count, 0);
-  assert.match(notes?.summaryItems[0] ?? "", /outbound flight/i);
+  assert.match(notes?.summaryItems[0] ?? "", /overnight flight/i);
+  assert.equal(
+    notes?.items[0]?.title,
+    "We treated the first trip day as starting with the overnight flight on January 12."
+  );
 });
 
 test("review decisions update structured records", () => {
