@@ -125,7 +125,7 @@ function getFoundCountLabel(section: StructuredReviewSection) {
   const labels: Record<string, [string, string]> = {
     activities: ["activity", "activities"],
     legs: ["leg", "legs"],
-    "private-details": ["privacy detail", "privacy details"],
+    "private-details": ["protected detail", "protected details"],
     notes: ["call", "calls"],
     questions: ["question", "questions"],
     stays: ["stay", "stays"],
@@ -930,7 +930,7 @@ function StructuredRecordReview({
                               tripId={tripId}
                             >
                               {item.subjectIds && item.subjectIds.length > 0
-                                ? "Confirm recommended privacy"
+                                ? "Agree with recommendation"
                                 : "Protect"}
                             </ReviewDecisionButton>
                           ) : null}

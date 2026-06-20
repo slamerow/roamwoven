@@ -208,6 +208,40 @@ function isCorePlanningTarget({
   return false;
 }
 
+function isPrivacyPolicyQuestion({
+  prompt,
+  reason,
+  subjectType,
+  targetField,
+}: {
+  prompt: string | null;
+  reason: string | null;
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  const target = targetField?.toLowerCase() ?? "";
+  const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
+
+  if (
+    /\b(ambiguous|can't tell|cannot tell|unclear|not sure|private versus public|public or private|hotel or private|rental or hotel)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    target.includes("sensitive") ||
+    target.includes("visibility") ||
+    target.includes("privacy") ||
+    target.includes("addressvisibility") ||
+    (subjectType === "trip" &&
+      /\b(access code|booking reference|confirmation|password|privacy|private|sensitive|visibility|wifi|wi-fi)\b/.test(
+        text
+      ))
+  );
+}
+
 function isDismissibleOptionalMissingDetail({
   hasUsableAnchor,
   prompt,
@@ -298,6 +332,44 @@ function isPublicVenueAddressDetail({
       commercialStayPattern.test(normalizedTitle)) &&
     !privateControlPattern.test(normalizedTitle) &&
     !privatePlacePattern.test(normalizedTitle)
+  );
+}
+
+function isGenericNonPrivateLogisticsDetail({
+  detailType,
+  reason,
+  title,
+}: {
+  detailType: string;
+  reason: string | null;
+  title: string;
+}) {
+  const text = [detailType, title, reason].filter(Boolean).join(" ").toLowerCase();
+  const sensitivePattern =
+    /\b(access|booking|child|code|confirmation|contact|door|email|emergency|family|gate|guest|host|id|identity|lock|medical|passport|password|payment|phone|private|reference|reservation|room|safety|ticket|wifi|wi-fi)\b/;
+  const logisticsPattern =
+    /\b(arrival|bus|car|drive|drop[-\s]?off|ferry|flight|parking|pickup|pick[-\s]?up|rental|station|taxi|train|transfer|transport)\b/;
+
+  return logisticsPattern.test(text) && !sensitivePattern.test(text);
+}
+
+function isActionableSensitiveDetail({
+  detailType,
+  reason,
+  title,
+}: {
+  detailType: string;
+  reason: string | null;
+  title: string;
+}) {
+  const text = [detailType, title, reason].filter(Boolean).join(" ").toLowerCase();
+
+  if (isGenericNonPrivateLogisticsDetail({ detailType, reason, title })) {
+    return false;
+  }
+
+  return /\b(access|address|booking|child|code|confirmation|contact|door|email|emergency|family|gate|guest|host|id|identity|lock|medical|note|passport|password|payment|phone|private|reference|reservation|room|safety|ticket|wifi|wi-fi)\b/.test(
+    text
   );
 }
 
@@ -973,8 +1045,12 @@ function createPrivateDetailRecords({
       : {};
     const title = getString(detail, "title") ?? `Sensitive detail ${index + 1}`;
     const detailType = getString(detail, "detailType") ?? "sensitive_detail";
+    const reason = getString(detail, "reason");
 
-    if (isPublicVenueAddressDetail({ detailType, title })) {
+    if (
+      isPublicVenueAddressDetail({ detailType, title }) ||
+      !isActionableSensitiveDetail({ detailType, reason, title })
+    ) {
       return [];
     }
 
@@ -982,7 +1058,7 @@ function createPrivateDetailRecords({
       detailType,
       id: `${tripId}-sensitive-${index + 1}`,
       label: title,
-      reason: getString(detail, "reason"),
+      reason,
       reviewRequired: true,
       sourceConfidence: "medium" as const,
       subjectId: tripId,
@@ -1262,6 +1338,13 @@ function createReviewQuestions({
       subjectId,
     })
       ? "dismissed"
+      : isPrivacyPolicyQuestion({
+        prompt,
+        reason,
+        subjectType,
+        targetField,
+      })
+        ? "dismissed"
       : dismissOptionalDetail
         ? "dismissed"
         : shouldTreatAsNote({

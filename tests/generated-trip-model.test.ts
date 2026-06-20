@@ -588,6 +588,127 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
+test("logistics-only sensitive details do not become private notes", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [
+        {
+          detailType: "sensitive_detail",
+          reason: "The source mentions a pickup logistics item.",
+          title: "Pick up rental car",
+        },
+        {
+          detailType: "host_phone",
+          reason: "Host contact details should stay private.",
+          title: "Prague Airbnb host phone",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-logistics-sensitive",
+  });
+
+  assert.equal(records.privateDetails.length, 1);
+  assert.equal(records.privateDetails[0]?.detailType, "host_phone");
+});
+
+test("privacy policy prompts are handled by the privacy recommendation", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "visibility",
+          confidence: "medium",
+          evidence: "The source has an Airbnb address, access code, and Wi-Fi password.",
+          guessedValue: "Keep behind traveler password",
+          prompt:
+            "What is the exact visibility / handling for the Prague Airbnb address and access code?",
+          reason:
+            "The rental address, access code, Wi-Fi network, and password are private rental details.",
+          relatedTitle: "Prague Airbnb",
+          subjectType: "stay",
+          targetField: "addressVisibility",
+        },
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "The source includes access codes and reservation numbers.",
+          guessedValue: "Store as sensitive details",
+          prompt:
+            "Should the booking references and access details be stored as sensitive details?",
+          reason:
+            "Access codes, Wi-Fi passwords, and reservation numbers should not be exposed casually.",
+          relatedTitle: null,
+          subjectType: "trip",
+          targetField: "sensitiveDetails",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [
+        {
+          detailType: "wifi_password",
+          reason: "Wi-Fi passwords should stay behind the trip password.",
+          title: "Prague Airbnb",
+        },
+        {
+          detailType: "wifi_password",
+          reason: "Wi-Fi passwords should stay behind the trip password.",
+          title: "Sleep at Prague Airbnb",
+        },
+        {
+          detailType: "access_code",
+          reason: "Access codes should stay behind the trip password.",
+          title: "Prague Airbnb",
+        },
+        {
+          detailType: "access_code",
+          reason: "Access codes should stay behind the trip password.",
+          title: "Sleep at Prague Airbnb",
+        },
+      ],
+      stays: [
+        {
+          address: "Michalská 431/5",
+          checkIn: "2019-01-14",
+          checkOut: "2019-01-15",
+          name: "Prague Airbnb",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-privacy-policy",
+  });
+  const sections = getStructuredReviewSections(records);
+  const questions = sections.find((section) => section.id === "questions");
+  const privacy = sections.find((section) => section.id === "private-details");
+  const privacyItem = privacy?.items[0];
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(records.reviewQuestions[1]?.status, "dismissed");
+  assert.equal(questions?.items.length, 0);
+  assert.equal(privacy?.items.length, 1);
+  assert.equal(privacyItem?.title, "Confirm recommended privacy");
+  assert.equal(privacyItem?.childItems?.length, 1);
+  assert.equal(
+    privacyItem?.childItems?.[0]?.meta,
+    "Access codes and arrival instructions"
+  );
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
 test("optional transport provider gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -887,10 +1008,14 @@ test("structured review summary uses maker-facing counts", () => {
       "stays",
       "transport",
       "activities",
-      "private-details",
       "notes",
       "questions",
+      "private-details",
     ]
+  );
+  assert.deepEqual(
+    sections.find((section) => section.id === "transport")?.summaryItems,
+    ["Fly to Paris · September 1, 2026"]
   );
   assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
 });

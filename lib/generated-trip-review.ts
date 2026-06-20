@@ -450,10 +450,26 @@ function getPrivacyGroup(detailType: string) {
 
   return {
     id: "private-notes",
-    title: "Personal and private notes",
+    title: "Sensitive personal details",
     detail:
-      "Recommended: keep personal contacts, family logistics, and safety-sensitive notes behind the trip password.",
+      "Recommended: keep host contact info, ID/payment details, medical or safety notes, emergency contacts, and explicitly private notes behind the trip password.",
   };
+}
+
+function getPrivacyRecommendationDetail() {
+  return "Recommended: keep private rental addresses, access codes, Wi-Fi passwords, booking references, room or access details, and sensitive personal details behind the trip password. Hotels, hostels, restaurants, shops, museums, stations, and public venues stay visible.";
+}
+
+function normalizePrivacyLabel(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\b(check into|check in at|sleep at|stay at|staying at)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function getPrivacyDetailLabel(detailType: string) {
+  return getPrivacyGroup(detailType).title;
 }
 
 const itemTypeOptions = [
@@ -477,9 +493,15 @@ export function getStructuredReviewCount(records: StructuredTripRecords | null) 
     return 0;
   }
 
+  const privacyReviewCount = records.privateDetails.some(
+    (detail) => detail.reviewRequired
+  )
+    ? 1
+    : 0;
+
   return (
     records.reviewQuestions.filter(isOpenQuestion).length +
-    records.privateDetails.filter((detail) => detail.reviewRequired).length +
+    privacyReviewCount +
     records.legs.filter(needsRecordReview).length +
     records.stays.filter(needsRecordReview).length +
     records.transport.filter(needsRecordReview).length +
@@ -572,12 +594,13 @@ export function formatStructuredDiscoverySummary(
 export function getStructuredReviewSections(
   records: StructuredTripRecords
 ): StructuredReviewSection[] {
-  const privacyGroups = new Map<
+  const privacySubjectIds: string[] = [];
+  const privacySpecifics = new Map<
     string,
     {
       detail: string;
-      items: StructuredReviewItem["childItems"];
-      subjectIds: string[];
+      id: string;
+      meta: string;
       title: string;
     }
   >();
@@ -586,26 +609,51 @@ export function getStructuredReviewSections(
     .filter((detail) => detail.reviewRequired)
     .forEach((detail) => {
       const group = getPrivacyGroup(detail.detailType);
-      const existing =
-        privacyGroups.get(group.id) ??
-        {
-          detail: group.detail,
-          items: [],
-          subjectIds: [],
-          title: group.title,
-        };
+      const normalizedLabel = normalizePrivacyLabel(detail.label);
+      const dedupeKey = `${group.id}:${normalizedLabel || detail.detailType}`;
 
-      existing.subjectIds.push(detail.id);
-      existing.items?.push({
-        detail:
-          detail.reason ??
-          "This private detail should be reviewed before the app is shared.",
-        id: detail.id,
-        meta: detail.detailType,
-        title: detail.label,
-      });
-      privacyGroups.set(group.id, existing);
+      privacySubjectIds.push(detail.id);
+
+      if (!privacySpecifics.has(dedupeKey)) {
+        privacySpecifics.set(dedupeKey, {
+          detail:
+            detail.reason ??
+            "This private detail should be reviewed before the app is shared.",
+          id: `privacy-specific-${privacySpecifics.size + 1}`,
+          meta: getPrivacyDetailLabel(detail.detailType),
+          title: detail.label,
+        });
+        return;
+      }
+
+      const existing = privacySpecifics.get(dedupeKey);
+
+      if (existing && detail.reason && !existing.detail.includes(detail.reason)) {
+        privacySpecifics.set(dedupeKey, {
+          ...existing,
+          detail: `${existing.detail} ${detail.reason}`,
+        });
+      }
     });
+
+  const privacyItems: StructuredReviewItem[] =
+    privacySubjectIds.length > 0
+      ? [
+        {
+          childItems: Array.from(privacySpecifics.values()),
+          combineOptions: [],
+          detail: getPrivacyRecommendationDetail(),
+          editFields: [],
+          id: "privacy-recommendation",
+          meta: pluralize(privacySubjectIds.length, "detail"),
+          subjectId: privacySubjectIds[0] ?? "privacy-recommendation",
+          subjectIds: privacySubjectIds,
+          subjectType: "private_detail" as const,
+          title: "Confirm recommended privacy",
+          tone: "sensitive" as const,
+        },
+      ]
+      : [];
 
   return [
     {
@@ -793,7 +841,11 @@ export function getStructuredReviewSections(
         })),
       summaryItems: records.transport
         .filter((item) => isActiveStatus(item.status))
-        .map((item) => [item.routeLabel, item.date].filter(Boolean).join(" · ")),
+        .map((item) =>
+          [item.routeLabel, formatReviewDateValue(item.date)]
+            .filter(Boolean)
+            .join(" · ")
+        ),
       title: "Transport",
     },
     {
@@ -875,29 +927,6 @@ export function getStructuredReviewSections(
         })
         .filter((item): item is string => Boolean(item)),
       title: "Activities",
-    },
-    {
-      count: records.privateDetails.length,
-      description: "Recommended privacy groups for addresses, confirmations, access notes, and personal details.",
-      emptyDetail: "Recommended privacy is already applied.",
-      id: "private-details",
-      items: Array.from(privacyGroups.entries()).map(([groupId, group]) => ({
-          combineOptions: [],
-          childItems: group.items,
-          detail: group.detail,
-          editFields: [],
-          id: `privacy-${groupId}`,
-          meta: pluralize(group.subjectIds.length, "detail"),
-          subjectId: group.subjectIds[0] ?? `privacy-${groupId}`,
-          subjectIds: group.subjectIds,
-          subjectType: "private_detail" as const,
-          title: group.title,
-          tone: "sensitive" as const,
-        })),
-      summaryItems: records.privateDetails
-        .filter((detail) => detail.visibility !== "hidden")
-        .map((detail) => detail.label),
-      title: "Privacy",
     },
     {
       count: records.reviewQuestions.filter(isNotedQuestion).length,
@@ -984,6 +1013,17 @@ export function getStructuredReviewSections(
         .filter(isOpenQuestion)
         .map((question) => question.prompt),
       title: "Questions",
+    },
+    {
+      count: records.privateDetails.length,
+      description: "One recommended privacy policy for sensitive trip details.",
+      emptyDetail: "Recommended privacy is already applied.",
+      id: "private-details",
+      items: privacyItems,
+      summaryItems: records.privateDetails
+        .filter((detail) => detail.visibility !== "hidden")
+        .map((detail) => detail.label),
+      title: "Privacy",
     },
   ];
 }
