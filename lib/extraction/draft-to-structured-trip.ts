@@ -120,6 +120,55 @@ function hasHumanConfidentEvidence(...values: Array<string | null>) {
   );
 }
 
+function isNonObviousCallEvidence(...values: Array<string | null>) {
+  const text = values.filter(Boolean).join(" ").toLowerCase();
+
+  return (
+    /\b(no hotel|overnight flight|bag drop|same day|sequence|follows|then|after|before|next|only one|route then moves|moves onward|left out|without a provider|without a company|not needed|enough for the traveler app)\b/.test(
+      text
+    ) &&
+    !/\b(explicitly says|source says|source states|source lists|\d+\s+night(s)?)\b/.test(
+      text
+    )
+  );
+}
+
+function isObviousFactCall({
+  confidence,
+  evidence,
+  guessedValue,
+  prompt,
+  reason,
+  subjectId,
+}: {
+  confidence: TripSourceConfidence;
+  evidence: string | null;
+  guessedValue: string | null;
+  prompt: string | null;
+  reason: string | null;
+  subjectId: string | null;
+}) {
+  if (!subjectId || !guessedValue || confidence === "low") {
+    return false;
+  }
+
+  const text = [prompt, reason, evidence].filter(Boolean).join(" ").toLowerCase();
+
+  if (isNonObviousCallEvidence(prompt, reason, evidence)) {
+    return false;
+  }
+
+  return (
+    /\b(explicit|explicitly|source says|source states|source lists|clearly states|directly states)\b/.test(
+      text
+    ) ||
+    /\b\d+\s+night(s)?\b/.test(text) ||
+    /\b(check[-\s]?in|check[-\s]?out|trip length|trip starts|trip ends|date range)\b/.test(
+      text
+    )
+  );
+}
+
 function isCorePlanningTarget({
   subjectType,
   targetField,
@@ -217,11 +266,16 @@ function isPublicVenueAddressDetail({
   const normalizedTitle = title.toLowerCase();
   const publicVenuePattern =
     /\b(bar|bistro|boutique|cafe|café|church|gallery|jewelry|jewellery|landmark|market|museum|restaurant|retail|shop|shopping|showroom|station|store|venue)\b/;
+  const commercialStayPattern = /\b(hotel|hostel|inn|motel|resort|lodge)\b/;
+  const privateControlPattern =
+    /\b(access|booking|code|confirmation|door|gate|lock|password|room)\b/;
   const privatePlacePattern =
-    /\b(access|airbnb|apartment|door|flat|gate|home|host|hotel|hostel|lodging|lock|rental|residence|room|stay)\b/;
+    /\b(airbnb|apartment|flat|home|host|lodging|rental|residence|stay)\b/;
 
   return (
-    publicVenuePattern.test(normalizedTitle) &&
+    (publicVenuePattern.test(normalizedTitle) ||
+      commercialStayPattern.test(normalizedTitle)) &&
+    !privateControlPattern.test(normalizedTitle) &&
     !privatePlacePattern.test(normalizedTitle)
   );
 }
@@ -434,12 +488,24 @@ function isGenericStayName(value: string) {
   const normalized = normalizeText(value);
   return (
     /^stay \d+$/.test(normalized) ||
-    normalized.includes("rome stay") ||
-    normalized.includes("vienna stay") ||
-    normalized.includes("budapest stay") ||
+    /^[a-z]+ stay$/.test(normalized) ||
     normalized.includes("hostel stay") ||
     normalized.includes("lodging")
   );
+}
+
+function isCommercialStayName(value: string | null) {
+  const normalized = normalizeText(value);
+
+  return /\b(hotel|hostel|inn|motel|resort|lodge)\b/.test(normalized);
+}
+
+function shouldProtectStayAddress(stay: { address: string | null; name: string }) {
+  if (!stay.address) {
+    return false;
+  }
+
+  return !isCommercialStayName(stay.name);
 }
 
 function getStayNameGuess({
@@ -461,11 +527,28 @@ function getStayNameGuess({
       const subjectType = getString(item, "subjectType");
       const targetField = normalizeText(getString(item, "targetField"));
       const guessedValue = getString(item, "guessedValue");
+      const text = normalizeText(
+        [
+          getString(item, "prompt"),
+          getString(item, "reason"),
+          getString(item, "evidence"),
+          getString(item, "relatedTitle"),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
 
       return (
-        subjectType === "stay" &&
         Boolean(guessedValue) &&
-        (targetField.includes("title") || targetField.includes("name"))
+        (subjectType === "stay" ||
+          text.includes("lodging") ||
+          text.includes("hostel") ||
+          text.includes("hotel") ||
+          text.includes("check in")) &&
+        (targetField.includes("title") ||
+          targetField.includes("name") ||
+          text.includes("lodging title") ||
+          text.includes("correct lodging"))
       );
     });
 
@@ -623,7 +706,7 @@ function createStayRecords({
     return {
       accessDetailsVisibility: "traveler_password",
       address: getString(stay, "address"),
-      addressVisibility: getString(stay, "address")
+      addressVisibility: shouldProtectStayAddress({ address: getString(stay, "address"), name })
         ? "traveler_password"
         : "public",
       bookingUrl: null,
@@ -784,12 +867,12 @@ function createPrivateDetailRecords({
   tripId: string;
 }): TripPrivateDetailRecord[] {
   const stayDetails = stays
-    .filter((stay) => stay.address)
+    .filter((stay) => shouldProtectStayAddress(stay))
     .map((stay) => ({
       detailType: "private_address",
       id: `${stay.id}-address`,
       label: "Exact stay address",
-      reason: "Exact lodging addresses should default behind traveler mode.",
+      reason: "Exact private rental and residence addresses should default behind traveler mode.",
       reviewRequired: false,
       sourceConfidence: "medium" as const,
       subjectId: stay.id,
@@ -1070,8 +1153,16 @@ function createReviewQuestions({
     const reason = getString(detail, "reason");
     const targetField = getString(detail, "targetField");
 
-    const status: TripReviewQuestionRecord["status"] =
-      isOptionalMissingDetail({
+    const status: TripReviewQuestionRecord["status"] = isObviousFactCall({
+      confidence,
+      evidence,
+      guessedValue,
+      prompt,
+      reason,
+      subjectId,
+    })
+      ? "dismissed"
+      : isOptionalMissingDetail({
         prompt,
         reason,
         subjectId,

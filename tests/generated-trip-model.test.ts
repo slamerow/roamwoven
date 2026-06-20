@@ -328,16 +328,11 @@ test("explicit stay nights infer check-in from checkout", () => {
     tripId: "trip-stay-checkin",
   });
   const stay = records.stays[0];
-  const notes = getStructuredReviewSections(records).find(
-    (section) => section.id === "notes"
-  );
-
   assert.equal(stay?.checkInDate, "2019-01-18");
   assert.equal(stay?.checkOutDate, "2019-01-21");
   assert.equal(stay?.reviewRequired, false);
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
-  assert.equal(notes?.count, 1);
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
 });
 
 test("strong lodging title guesses become stay names instead of questions", () => {
@@ -396,6 +391,74 @@ test("strong lodging title guesses become stay names instead of questions", () =
   assert.equal(stay?.checkInTime, "14:30");
   assert.equal(getStructuredReviewCount(records), 0);
   assert.equal(records.reviewQuestions[0]?.status, "noted");
+});
+
+test("commercial stay addresses remain public", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [
+        {
+          detailType: "address",
+          reason: "The source includes the hostel address.",
+          title: "Wombats City Hostel address",
+        },
+      ],
+      stays: [
+        {
+          address: "Mariahilfer Strasse 137, Vienna, Austria",
+          checkIn: "2019-01-18",
+          checkOut: "2019-01-21",
+          firstNightDate: "2019-01-18",
+          name: "Wombats City Hostel Vienna - The Lounge",
+          nights: 3,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-hostel-address",
+  });
+
+  assert.equal(records.stays[0]?.addressVisibility, "public");
+  assert.equal(records.privateDetails.length, 0);
+});
+
+test("private rental stay addresses remain protected", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: "Private apartment address",
+          checkIn: "2019-01-14",
+          checkOut: "2019-01-15",
+          firstNightDate: "2019-01-14",
+          name: "Prague Airbnb",
+          nights: 1,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-airbnb-address",
+  });
+
+  assert.equal(records.stays[0]?.addressVisibility, "traveler_password");
+  assert.equal(records.privateDetails[0]?.detailType, "private_address");
 });
 
 test("medium-confidence core date guesses stay questions without explicit evidence", () => {

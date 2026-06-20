@@ -424,7 +424,7 @@ function ReviewQuestionAnswerForm({
             className="inline-flex rounded-md bg-moss px-3 py-2 text-xs font-semibold text-paper"
             type="submit"
           >
-            Yes, use this
+            {item.suggestedAnswerLabel ?? "Use suggested answer"}
           </button>
         </form>
       ) : null}

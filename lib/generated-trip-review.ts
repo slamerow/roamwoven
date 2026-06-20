@@ -36,6 +36,7 @@ export type StructuredReviewItem = {
   subjectIds?: string[];
   subjectType: ReviewDecisionSubjectType;
   suggestedAnswer?: string | null;
+  suggestedAnswerLabel?: string;
   title: string;
   tone: StructuredReviewTone;
 };
@@ -68,6 +69,34 @@ function isOpenQuestion(question: StructuredTripRecords["reviewQuestions"][numbe
 
 function isNotedQuestion(question: StructuredTripRecords["reviewQuestions"][number]) {
   return question.status === "noted";
+}
+
+function getSuggestedAnswerLabel(
+  question: StructuredTripRecords["reviewQuestions"][number]
+) {
+  const guessed = question.guessedValue?.toLowerCase() ?? "";
+
+  if (
+    /\b(tbd|not sure|not decided|haven't decided|have not decided|undecided)\b/.test(
+      guessed
+    )
+  ) {
+    return "I haven't decided yet";
+  }
+
+  if (question.answerType === "date") {
+    return "Use this date";
+  }
+
+  if (question.answerType === "time") {
+    return "Use this time";
+  }
+
+  if (question.answerType === "visibility") {
+    return "Use this privacy setting";
+  }
+
+  return "Use suggested answer";
 }
 
 function itemCombineOptions({
@@ -413,9 +442,9 @@ function getPrivacyGroup(detailType: string) {
   ) {
     return {
       id: "addresses",
-      title: "Exact stay addresses",
+      title: "Private stay addresses",
       detail:
-        "Recommended: show hotel or area labels publicly, but keep exact private addresses behind the trip password.",
+        "Recommended: show hotel or hostel addresses publicly, but keep private rentals, homes, and access details behind the trip password.",
     };
   }
 
@@ -947,6 +976,7 @@ export function getStructuredReviewSections(
         subjectId: question.id,
         subjectType: "review_question" as const,
         suggestedAnswer: question.guessedValue,
+        suggestedAnswerLabel: getSuggestedAnswerLabel(question),
         title: question.prompt,
         tone: "question" as const,
       })),
