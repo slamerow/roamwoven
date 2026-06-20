@@ -675,6 +675,92 @@ test("optional train operator questions become calls", () => {
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
+test("generic time-bound reservation without an anchor stays a question", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          address: null,
+          date: "2019-01-14",
+          description: null,
+          itemType: "activity",
+          startTime: "18:30",
+          title: "Dinner reservation",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "The source only says dinner reservation at 6:30.",
+          guessedValue: null,
+          prompt: "What is the restaurant name or address for dinner?",
+          reason:
+            "The card has a time, but no name, address, confirmation, or other identifier.",
+          relatedTitle: "Dinner reservation",
+          subjectType: "item",
+          targetField: "locationName",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-generic-dinner",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
+test("anchored time-bound card missing optional address becomes a call", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          address: null,
+          date: "2019-01-16",
+          description: null,
+          itemType: "activity",
+          startTime: "10:00",
+          title: "Széchenyi Baths",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "The source names Széchenyi Baths and gives a time, but no address.",
+          guessedValue: null,
+          prompt: "We created Széchenyi Baths without an address.",
+          reason:
+            "The named place is enough to identify the card; the address can be added later if needed.",
+          relatedTitle: "Széchenyi Baths",
+          subjectType: "item",
+          targetField: "address",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-anchored-baths",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("duplicate open questions for the same record and field collapse", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

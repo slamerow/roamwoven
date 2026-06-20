@@ -209,12 +209,14 @@ function isCorePlanningTarget({
 }
 
 function isOptionalMissingDetail({
+  hasUsableAnchor,
   prompt,
   reason,
   subjectId,
   subjectType,
   targetField,
 }: {
+  hasUsableAnchor: boolean;
   prompt: string | null;
   reason: string | null;
   subjectId: string | null;
@@ -230,6 +232,7 @@ function isOptionalMissingDetail({
 
   if (
     subjectType === "transport" &&
+    hasUsableAnchor &&
     (target.includes("provider") ||
       target.includes("company") ||
       /\b(company|provider|operator)\b/.test(text))
@@ -239,7 +242,19 @@ function isOptionalMissingDetail({
 
   if (
     subjectType === "item" &&
+    hasUsableAnchor &&
     (target.includes("url") || target.includes("website"))
+  ) {
+    return true;
+  }
+
+  if (
+    subjectType === "item" &&
+    hasUsableAnchor &&
+    (target.includes("address") ||
+      target.includes("location") ||
+      target.includes("name") ||
+      target.includes("title"))
   ) {
     return true;
   }
@@ -315,6 +330,54 @@ function getQuestionClusterKey(question: TripReviewQuestionRecord) {
       .slice(0, 4)
       .join("-") ||
     "general"
+  );
+}
+
+function hasSpecificTitle(value: string | null, genericPatterns: RegExp[]) {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return !genericPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function hasUsableTransportAnchor(record: TripTransportRecord | null) {
+  if (!record) {
+    return false;
+  }
+
+  return Boolean(
+    record.departureLocation ||
+      record.arrivalLocation ||
+      record.provider ||
+      record.confirmationLabel ||
+      hasSpecificTitle(record.routeLabel, [
+        /^transport \d+$/,
+        /^(car|rental car|train|flight|transfer|bus|drive|ferry)( pickup)?$/,
+      ])
+  );
+}
+
+function hasUsableItemAnchor(record: TripItemRecord | null) {
+  if (!record) {
+    return false;
+  }
+
+  return Boolean(
+    record.address ||
+      record.locationName ||
+      hasSpecificTitle(record.title, [
+        /^activity \d+$/,
+        /^reservation$/,
+        /^(dinner|lunch|breakfast|meal) reservation$/,
+        /^(dinner|lunch|breakfast|meal)$/,
+        /^pickup$/,
+        /^tour$/,
+        /^activity$/,
+      ]) ||
+      (record.description && normalizeText(record.description).length > 20)
   );
 }
 
@@ -1027,6 +1090,28 @@ function createReviewQuestions({
     return typeof value === "string" && value.trim() ? value.trim() : null;
   }
 
+  function hasUsableSubjectAnchor({
+    subjectId,
+    subjectType,
+  }: {
+    subjectId: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+  }) {
+    if (subjectType === "transport") {
+      return hasUsableTransportAnchor(
+        transport.find((item) => item.id === subjectId) ?? null
+      );
+    }
+
+    if (subjectType === "item") {
+      return hasUsableItemAnchor(
+        items.find((item) => item.id === subjectId) ?? null
+      );
+    }
+
+    return Boolean(subjectId);
+  }
+
   function shouldTreatAsNote({
     answerType,
     confidence,
@@ -1163,6 +1248,7 @@ function createReviewQuestions({
     })
       ? "dismissed"
       : isOptionalMissingDetail({
+        hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
         prompt,
         reason,
         subjectId,
