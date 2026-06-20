@@ -237,9 +237,72 @@ function getCategoryEmoji(categoryId: string) {
   return defaultCategoryLabels[categoryId]?.emoji ?? "•";
 }
 
+function createSeedDestinationSummary() {
+  const cities = Array.from(
+    new Set(seedTrip.legs.map((leg) => leg.city).filter(Boolean))
+  );
+
+  return cities.length > 0 ? cities.slice(0, 5).join(" · ") : null;
+}
+
+function parseTripDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatTripDate(value: string | null, includeYear = true) {
+  const date = parseTripDate(value);
+
+  if (!date) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(date);
+}
+
+function formatTripDateRange(start: string | null, end: string | null) {
+  const startDate = parseTripDate(start);
+  const endDate = parseTripDate(end);
+
+  if (!startDate || !endDate) {
+    return formatTripDate(start) || formatTripDate(end);
+  }
+
+  if (start === end) {
+    return formatTripDate(start);
+  }
+
+  const sameYear = startDate.getUTCFullYear() === endDate.getUTCFullYear();
+  const sameMonth = sameYear && startDate.getUTCMonth() === endDate.getUTCMonth();
+
+  if (sameMonth) {
+    const month = new Intl.DateTimeFormat("en", {
+      month: "long",
+      timeZone: "UTC",
+    }).format(startDate);
+
+    return `${month} ${startDate.getUTCDate()}-${endDate.getUTCDate()}, ${startDate.getUTCFullYear()}`;
+  }
+
+  if (sameYear) {
+    return `${formatTripDate(start, false)} - ${formatTripDate(end)}`;
+  }
+
+  return `${formatTripDate(start)} - ${formatTripDate(end)}`;
+}
+
 function createTripSummaryRecord(): TripSummaryRecord {
   return {
-    destinationSummary: seedTrip.dateRange,
+    destinationSummary: createSeedDestinationSummary(),
     endDate: seedTrip.legs.at(-1)?.leaveDate ?? null,
     id: "demo-trip",
     name: seedTrip.name,
@@ -665,7 +728,7 @@ export function createTravelerAppViewModel(
       })),
     },
     trip: {
-      dateRange: records.trip.destinationSummary ?? "",
+      dateRange: formatTripDateRange(records.trip.startDate, records.trip.endDate),
       dayCount: records.days.length,
       destinationSummary: records.trip.destinationSummary,
       id: records.trip.id,

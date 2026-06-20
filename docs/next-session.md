@@ -134,6 +134,13 @@ Backend-ready pieces now exist:
   - Commercial/public venue addresses such as hotels, hostels, shops, restaurants, museums, or activity locations should not be treated as private details just because they are exact street addresses. Private homes, rentals/Airbnb, apartments, access codes, booking controls, and personal notes remain protected.
   - If a readable PDF contains screenshot-like transport cards, the current pipeline may mark the upload `text_ready` from embedded PDF text and skip OCR, causing image-only train/flight blocks to be missed. The OCR prompt now calls out transport timeline cards, but the proper fix is a mixed-PDF extraction strategy that can combine PDF text and OCR for selected pages/regions without OCRing every readable PDF by default.
 - Future calibration loop: Roamwoven should learn from aggregate user behavior, but not by silently self-modifying rules in V1. Store structured signals for review items and later manual edits: shown as call/question/privacy, subject type, target field, confidence, evidence category, accepted/ignored/edited, edit delta, follow-up answers, and final-review edits. Use internal reports to find noisy questions, often-edited calls, privacy recommendations users undo, and fields users commonly add later. Convert strong patterns into prompt/adapter rules and regression tests first; only later consider adaptive scoring/classification once the behavior is well understood.
+- Current Central Europe checkpoint before fresh chat:
+  - Latest pushed extraction/review tuning made the Central Europe PDF produce few/no calls and questions. That is acceptable for this relatively explicit PDF if the trip summary/app preview proves the spine is correct; do not force calls/questions just to hit a count.
+  - Review rules now established: calls are non-obvious statements only, not copied facts and not questions; explicit stay-night facts such as Vienna 3 nights should disappear from review; hotel/hostel/public venue addresses stay public while reservation numbers, room/access details, Wi-Fi passwords, booking controls, and private rental/home details stay protected; privacy defaults should be handled by the single Privacy recommendation, not Questions.
+  - User hit the trip summary page and could not inspect specifics because it showed only counts. Product decision: the summary page should become a compact pre-publish QA surface with expandable specifics for trip spine, stays, transport, privacy, and a grouped/truncated activity sample. It should not require publishing the app just to check whether the extraction got basic records right.
+  - Date formatting bug on summary page: `2019-01-12 to 2019-01-25` is not acceptable. Use friendly month-spelled date ranges, consistent with legs/stays/transport review formatting.
+  - The summary-specifics implementation is now wired: `lib/generated-trip-summary.ts` produces friendly date ranges and section rows, and `app/maker/trips/[tripId]/summary/page.tsx` renders expandable Legs, Transport, Stays, Activities, Protected details, and Review items. Activities are category-grouped and truncated to a pre-publish sample; the page was checked locally on desktop and mobile for overflow.
+  - Follow-up summary QA fixed the demo adapter where `seedTrip.dateRange` was incorrectly stored as `destinationSummary`, and fixed the traveler view model where `trip.dateRange` was incorrectly derived from `destinationSummary`. The demo summary now shows `June 27 - November 8, 2026` as the structured date range and destination cities underneath. Protected-detail summary counts now exclude public/hidden detail records, and Review items now include privacy/record-review buckets as well as open questions.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
 - CTO durability pass started before new product work:
   - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.
@@ -341,6 +348,12 @@ Latest checks after Eastern Europe review-friction and bounded-inference pass:
 - `npm run build`
 
 Latest checks after Central Europe review-feedback pass:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after trip-summary pre-publish QA surface:
 
 - `npm test`
 - `npm run typecheck`

@@ -64,6 +64,12 @@ test("Asia seed compiles into structured records and traveler view model", () =>
   );
 
   assert.equal(viewModel.trip.id, records.trip.id);
+  assert.equal(
+    records.trip.destinationSummary,
+    "Seattle · Maui (Kihei) · Hana · Honolulu · Sapporo (CTS)"
+  );
+  assert.equal(viewModel.trip.dateRange, "June 27 - November 8, 2026");
+  assert.equal(viewModel.trip.destinationSummary, records.trip.destinationSummary);
   assert.equal(viewModel.cards.length, records.items.length);
   assert.equal(viewModel.days[0]?.cards[0]?.title, "Fly to Seattle");
   assert.equal(viewModel.days[0]?.legName, "Seattle");
@@ -1561,7 +1567,16 @@ test("generated trip summary uses applied structured records", () => {
   assert.equal(summary.counts.activities, 1);
   assert.equal(summary.counts.review, 0);
   assert.equal(summary.isReadyForPublishReview, true);
-  assert.equal(summary.dateRange, "2026-09-01 to 2026-09-03");
+  assert.equal(summary.dateRange, "September 1-3, 2026");
+  assert.equal(
+    summary.sections.find((section) => section.id === "legs")?.items[0]?.meta,
+    "September 1-3, 2026"
+  );
+  assert.equal(
+    summary.sections.find((section) => section.id === "activities")?.items[0]
+      ?.group,
+    "Art and culture"
+  );
 });
 
 test("published snapshot payload compiles traveler app view model", () => {
