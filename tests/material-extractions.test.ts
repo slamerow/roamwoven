@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   completeMaterialExtractionOcr,
+  failMaterialExtractionOcr,
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
   type MaterialExtractionRecord,
@@ -65,6 +66,25 @@ export default async function run() {
     });
 
     assert.equal(material, null);
+  });
+
+  await test("readable PDFs awaiting OCR can still seed fallback text", () => {
+    const material = materialFromCheckpoint({
+      filename: "image-rich-itinerary.pdf",
+      record: checkpoint({
+        failureClass: "ocr_backfill_needed",
+        status: "ocr_needed",
+        textContent: "Readable PDF text while OCR is pending.",
+      }),
+      type: "pdf_text",
+    });
+
+    assert.deepEqual(material, {
+      filename: "image-rich-itinerary.pdf",
+      sourceUploadId: "upload-1",
+      text: "Readable PDF text while OCR is pending.",
+      type: "pdf_text",
+    });
   });
 
   await test("checkpoint writes cap stored text while preserving extracted character count", async () => {
@@ -180,6 +200,109 @@ export default async function run() {
       assert.equal(record.metadata.ocrProvider, "test-ocr");
       assert.equal(record.metadata.source, "unit-test");
       assert.equal((savedPayload as Record<string, unknown> | null)?.status, "text_ready");
+    } finally {
+      require("@/lib/supabase/server").createSupabaseServerClient =
+        originalCreateSupabaseServerClient;
+    }
+  });
+
+  await test("completed OCR backfills existing PDF text instead of replacing it", async () => {
+    const originalCreateSupabaseServerClient =
+      require("@/lib/supabase/server").createSupabaseServerClient;
+
+    require("@/lib/supabase/server").createSupabaseServerClient = async () => ({
+      from: () => ({
+        upsert: (payload: Record<string, unknown>) => ({
+          select: () => ({
+            single: async () => ({
+              data: {
+                id: "checkpoint-1",
+                completed_at: "2026-06-19T12:00:00.000Z",
+                created_at: "2026-06-19T12:00:00.000Z",
+                error_message: null,
+                extracted_char_count: payload.extracted_char_count,
+                extraction_method: payload.extraction_method,
+                failure_class: payload.failure_class,
+                metadata: payload.metadata,
+                status: payload.status,
+                text_content: payload.text_content,
+                trip_id: payload.trip_id,
+                updated_at: payload.updated_at,
+                upload_id: payload.upload_id,
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    });
+
+    try {
+      const record = await completeMaterialExtractionOcr({
+        provider: "test-ocr",
+        record: checkpoint({
+          metadata: { pdfTextCharCount: 23 },
+          status: "ocr_processing",
+          textContent: "PDF text: flight summary.",
+        }),
+        text: "OCR text: Budapest Keleti arrival.",
+      });
+
+      assert.equal(record.status, "text_ready");
+      assert.match(record.textContent ?? "", /PDF text: flight summary/);
+      assert.match(record.textContent ?? "", /Budapest Keleti/);
+      assert.equal(record.metadata.ocrBackfilledPdfText, true);
+    } finally {
+      require("@/lib/supabase/server").createSupabaseServerClient =
+        originalCreateSupabaseServerClient;
+    }
+  });
+
+  await test("failed OCR keeps readable PDF text available for extraction", async () => {
+    const originalCreateSupabaseServerClient =
+      require("@/lib/supabase/server").createSupabaseServerClient;
+
+    require("@/lib/supabase/server").createSupabaseServerClient = async () => ({
+      from: () => ({
+        upsert: (payload: Record<string, unknown>) => ({
+          select: () => ({
+            single: async () => ({
+              data: {
+                id: "checkpoint-1",
+                completed_at: "2026-06-19T12:00:00.000Z",
+                created_at: "2026-06-19T12:00:00.000Z",
+                error_message: payload.error_message,
+                extracted_char_count: payload.extracted_char_count,
+                extraction_method: payload.extraction_method,
+                failure_class: payload.failure_class,
+                metadata: payload.metadata,
+                status: payload.status,
+                text_content: payload.text_content,
+                trip_id: payload.trip_id,
+                updated_at: payload.updated_at,
+                upload_id: payload.upload_id,
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    });
+
+    try {
+      const record = await failMaterialExtractionOcr({
+        errorMessage: "OCR provider timeout.",
+        provider: "test-ocr",
+        record: checkpoint({
+          status: "ocr_processing",
+          textContent: "Readable PDF text survives.",
+        }),
+      });
+
+      assert.equal(record.status, "text_ready");
+      assert.equal(record.extractionMethod, "pdf_text");
+      assert.equal(record.textContent, "Readable PDF text survives.");
+      assert.equal(record.metadata.ocrFailedButPdfTextReady, true);
     } finally {
       require("@/lib/supabase/server").createSupabaseServerClient =
         originalCreateSupabaseServerClient;

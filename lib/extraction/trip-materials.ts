@@ -409,14 +409,18 @@ export async function getTripExtractionMaterials(uploads: TripUpload[]) {
           const record = await upsertMaterialExtractionCheckpoint({
             extractedCharCount: text.length,
             extractionMethod: "pdf_text",
-            failureClass: readable ? null : "pdf_text_too_sparse",
+            failureClass: readable
+              ? "ocr_backfill_needed"
+              : "pdf_text_too_sparse",
             metadata: {
               fileName: upload.originalFilename,
               fileSizeBytes: upload.fileSizeBytes,
               fileType: upload.fileType,
+              ocrBackfillRequested: readable,
               minReadableTextLength: MIN_READABLE_PDF_TEXT_LENGTH,
+              pdfTextCharCount: text.length,
             },
-            status: readable ? "text_ready" : "ocr_needed",
+            status: "ocr_needed",
             textContent: readable ? text : null,
             tripId: upload.tripId,
             uploadId: upload.id,

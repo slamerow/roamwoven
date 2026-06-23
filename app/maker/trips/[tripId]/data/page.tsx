@@ -464,36 +464,32 @@ function ReviewQuestionAnswerForm({
               ? "Change answer"
               : "Answer question"}
         </summary>
-        <form
-          action={`/maker/trips/${tripId}/data/decisions`}
-          className="mt-3"
-          method="post"
+        <ReviewDecisionInlineForm
+          action="answer_question"
+          actionUrl={`/maker/trips/${tripId}/data/decisions`}
+          buttonClassName="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper transition disabled:cursor-wait disabled:opacity-60"
+          extraFields={
+            <label className="block">
+              <span className="text-xs font-semibold text-ink/55">Answer</span>
+              <textarea
+                className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
+                defaultValue={item.suggestedAnswer ?? ""}
+                name="answerValue"
+                placeholder="Tell Roamwoven what is correct."
+                aria-label="Answer"
+                required
+              />
+              <p className="mt-1 text-xs leading-5 text-ink/45">
+                It is okay to write “not sure yet.” Roamwoven can keep a TBD card
+                and you can fill it in later.
+              </p>
+            </label>
+          }
+          subjectId={item.subjectId}
+          subjectType={item.subjectType}
         >
-          <input name="action" type="hidden" value="answer_question" />
-          <input name="subjectId" type="hidden" value={item.subjectId} />
-          <input name="subjectType" type="hidden" value={item.subjectType} />
-          <label>
-            <span className="text-xs font-semibold text-ink/55">Answer</span>
-            <textarea
-              className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
-              defaultValue={item.suggestedAnswer ?? ""}
-              name="answerValue"
-              placeholder="Tell Roamwoven what is correct."
-              aria-label="Answer"
-              required
-            />
-            <p className="mt-1 text-xs leading-5 text-ink/45">
-              It is okay to write “not sure yet.” Roamwoven can keep a TBD card
-              and you can fill it in later.
-            </p>
-          </label>
-          <button
-            className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
-            type="submit"
-          >
-            Save answer
-          </button>
-        </form>
+          Save answer
+        </ReviewDecisionInlineForm>
       </details>
     </div>
   );
@@ -697,7 +693,14 @@ function StructuredRecordReview({
             materials. Expand a group to spot-check the titles and dates.
           </p>
         </div>
-        <div className="rounded-md bg-white/75 px-4 py-3 text-sm font-semibold text-ink shadow-sm">
+        <div
+          className="rounded-md bg-white/75 px-4 py-3 text-sm font-semibold text-ink shadow-sm"
+          data-count={reviewCount}
+          data-count-noun="item"
+          data-count-suffix=" left"
+          data-zero-label="Ready for summary"
+          data-review-total-count
+        >
           {reviewCount === 0
             ? "Ready for summary"
             : `${pluralize(reviewCount, "item")} left`}
@@ -726,6 +729,7 @@ function StructuredRecordReview({
             <details
               className="rounded-md border border-[color:var(--review-primary)] bg-white/70 p-4 shadow-sm"
               key={section.id}
+              open={section.id === "city-tips" && section.summaryItems.length > 0}
             >
               <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
                 <div>
@@ -885,14 +889,22 @@ function StructuredRecordReview({
             <details
               open
               className="rounded-md border border-ink/10 bg-white p-4"
+              data-review-section
               key={section.id}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-ink">
                   {section.title}
                 </p>
-                <span className="inline-flex items-center gap-2 text-xs font-semibold text-moss">
-                  {pluralize(section.items.length, "item")}
+                <span
+                  className="inline-flex items-center gap-2 text-xs font-semibold text-moss"
+                  data-count={section.items.length}
+                  data-count-noun="item"
+                  data-review-section-count
+                >
+                  <span data-review-count-label>
+                    {pluralize(section.items.length, "item")}
+                  </span>
                   <ChevronDown size={16} />
                 </span>
               </summary>
@@ -902,7 +914,7 @@ function StructuredRecordReview({
 
                   return (
                     <div
-                      className="flex gap-3 rounded-md bg-paper p-4"
+                      className="flex gap-3 rounded-md bg-paper p-4 transition-opacity data-[review-item-saved=true]:opacity-45"
                       data-review-item
                       key={item.id}
                     >

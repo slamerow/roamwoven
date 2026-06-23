@@ -366,6 +366,54 @@ function canPatchTargetField(
   );
 }
 
+function normalizeAnswerTargetField({
+  subjectType,
+  targetField,
+}: {
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  const rawField = targetField?.split(/[/.]/).pop() ?? null;
+
+  if (!rawField) {
+    return null;
+  }
+
+  if (subjectType === "stay") {
+    if (rawField === "checkIn") {
+      return "checkInDate";
+    }
+
+    if (rawField === "checkOut") {
+      return "checkOutDate";
+    }
+
+    if (rawField === "title") {
+      return "name";
+    }
+  }
+
+  return rawField;
+}
+
+function patchDescriptionAnswer(
+  record: { description: string | null },
+  answerValue: string
+) {
+  const existingDescription = record.description?.trim();
+  const answer = answerValue.trim();
+
+  if (!existingDescription) {
+    return answer;
+  }
+
+  if (existingDescription.toLowerCase().includes(answer.toLowerCase())) {
+    return existingDescription;
+  }
+
+  return `${existingDescription}\n\n${answer}`;
+}
+
 function patchAnswerTarget({
   decision,
   question,
@@ -378,26 +426,45 @@ function patchAnswerTarget({
   const value =
     decision.answerValue.trim() ||
     (question.answerType === "confirm" ? question.guessedValue : null);
+  const targetField = normalizeAnswerTargetField({
+    subjectType: question.subjectType,
+    targetField: question.targetField,
+  });
 
   if (
     !value ||
+    !targetField ||
     !question.subjectId ||
-    !canPatchTargetField(question.subjectType, question.targetField)
+    !canPatchTargetField(question.subjectType, targetField)
   ) {
     return records;
   }
 
   const changes = {
-    [question.targetField as string]: value,
+    [targetField]: value,
     reviewRequired: false,
     status: "confirmed",
   };
 
   return applyToRecord(records, question.subjectType, question.subjectId, {
-    item: (record) => ({ ...record, ...changes }) as TripItemRecord,
+    item: (record) =>
+      ({
+        ...record,
+        ...changes,
+        ...(targetField === "description"
+          ? { description: patchDescriptionAnswer(record, value) }
+          : {}),
+      }) as TripItemRecord,
     leg: (record) => ({ ...record, ...changes }) as TripLegRecord,
     stay: (record) => ({ ...record, ...changes }) as TripStayRecord,
-    transport: (record) => ({ ...record, ...changes }) as TripTransportRecord,
+    transport: (record) =>
+      ({
+        ...record,
+        ...changes,
+        ...(targetField === "description"
+          ? { description: patchDescriptionAnswer(record, value) }
+          : {}),
+      }) as TripTransportRecord,
   });
 }
 

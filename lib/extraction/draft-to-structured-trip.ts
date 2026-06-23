@@ -120,6 +120,7 @@ function isObviousFactCall({
   prompt,
   reason,
   subjectId,
+  targetField,
 }: {
   confidence: TripSourceConfidence;
   evidence: string | null;
@@ -127,21 +128,40 @@ function isObviousFactCall({
   prompt: string | null;
   reason: string | null;
   subjectId: string | null;
+  targetField: string | null;
 }) {
   if (!guessedValue || confidence === "low") {
     return false;
   }
 
   const text = [prompt, reason, evidence].filter(Boolean).join(" ").toLowerCase();
+  const normalizedTarget = targetField?.toLowerCase() ?? "";
+  const softLabelTarget =
+    normalizedTarget.includes("title") || normalizedTarget.includes("name");
+  const explicitFactEvidence =
+    /\b(explicit|explicitly|source says|source states|source lists|clearly states|directly states|\d+\s+night(s)?)\b/.test(
+      text
+    );
+
+  if (
+    confidence !== "high" &&
+    !explicitFactEvidence &&
+    !softLabelTarget &&
+    prompt &&
+    (/\?\s*$/.test(prompt.trim()) ||
+      /\b(is that correct|is that right|should we|do you want|please confirm)\b/.test(
+        text
+      ))
+  ) {
+    return false;
+  }
 
   if (isNonObviousCallEvidence(prompt, reason, evidence)) {
     return false;
   }
 
   return (
-    /\b(explicit|explicitly|source says|source states|source lists|clearly states|directly states)\b/.test(
-      text
-    ) ||
+    explicitFactEvidence ||
     /\b\d+\s+night(s)?\b/.test(text) ||
     /\b(check[-\s]?in|check[-\s]?out|trip length|trip starts|trip ends|date range)\b/.test(
       text
@@ -361,14 +381,25 @@ function isActionableSensitiveDetail({
 
 function getQuestionClusterKey(question: TripReviewQuestionRecord) {
   const target = question.targetField?.toLowerCase() ?? "";
+  const text = `${target} ${question.prompt.toLowerCase()}`;
 
   if (
-    target.includes("date") ||
-    target.includes("checkin") ||
-    target.includes("check-in") ||
-    target.includes("checkout") ||
-    target.includes("check-out")
+    text.includes("checkin") ||
+    text.includes("check-in") ||
+    text.includes("check in")
   ) {
+    return "checkin-date";
+  }
+
+  if (
+    text.includes("checkout") ||
+    text.includes("check-out") ||
+    text.includes("check out")
+  ) {
+    return "checkout-date";
+  }
+
+  if (target.includes("date")) {
     return "date";
   }
 
@@ -511,6 +542,45 @@ function normalizeTransportType(value: string | null): TripTransportType {
   }
 
   return "other";
+}
+
+function isRedundantLocalAirportTransfer({
+  arrival,
+  departure,
+  description,
+  provider,
+  title,
+  transportType,
+}: {
+  arrival: string | null;
+  departure: string | null;
+  description: string | null;
+  provider: string | null;
+  title: string;
+  transportType: TripTransportType;
+}) {
+  const text = normalizeText(
+    [title, description, departure, arrival, provider].filter(Boolean).join(" ")
+  );
+
+  if (!text.includes("airport")) {
+    return false;
+  }
+
+  if (
+    /\b(confirmation|driver|private transfer|reservation|reserved|shuttle|ticket|voucher)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    transportType === "transfer" ||
+    /\b(leave for airport|move to airport|public transport|take public transport|taxi to airport|airport transfer|go to airport|wake.*airport)\b/.test(
+      text
+    )
+  ) && /\b(before|flight|fly|depart|departure|ryanair|delta|airport)\b/.test(text);
 }
 
 function normalizeItemType(value: string | null, title: string, description: string | null): TripItemType {
@@ -699,6 +769,16 @@ function formatReadableDate(year: string, month: string, day: string) {
   return `${monthName} ${dayNumber}${ordinalSuffix(dayNumber)}, ${parsed.getUTCFullYear()}`;
 }
 
+function formatReadableIsoDate(value: string | null) {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return value ?? "";
+  }
+
+  return formatReadableDate(match[1], match[2], match[3]);
+}
+
 function cleanTravelerText(value: string | null) {
   return value
     ?.replace(/\b(\d{4})(\d{2})(\d{2})\b/g, (_match, year, month, day) =>
@@ -765,7 +845,7 @@ function isCityTipCandidate({
 
   const normalizedCategory = normalizeText(category);
   const genericTipHeader =
-    /\b(eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
+    /\b(eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
       text
     );
   const daySpecificCluster =
@@ -786,10 +866,10 @@ function isCityTipCandidate({
   }
 
   return (
-    /\b(tips?|ideas?|recommendations?|eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
+    /\b(tips?|ideas?|recommendations?|eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
       text
     ) &&
-    /\b(city|food|eat|restaurant|cafe|coffee|bar|beer|hall|drink|shop|shopping|local)\b/.test(
+    /\b(city|food|eat|restaurant|cafe|cafes|coffee|bar|bars|beer|hall|halls|drink|shop|shopping|local)\b/.test(
       text
     )
   );
@@ -991,8 +1071,71 @@ function getStayNameGuess({
     getString(matchingCandidate ?? null, "guessedValue") ??
     (isGenericStayName(fallbackName) && candidates.length === 1
       ? getString(candidates[0], "guessedValue")
-      : null)
+    : null)
   );
+}
+
+function getStayDateGuess({
+  dateKind,
+  draft,
+  stayName,
+}: {
+  dateKind: "checkIn" | "checkOut";
+  draft: unknown;
+  stayName: string;
+}) {
+  const normalizedName = normalizeText(stayName);
+  const targetPatterns =
+    dateKind === "checkIn"
+      ? ["checkin", "check in", "check-in", "checkindate", "start"]
+      : ["checkout", "check out", "check-out", "checkoutdate", "leave"];
+  const candidates = getArray(draft, "missingDetails")
+    .map((item) =>
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as DraftObject)
+        : null
+    )
+    .filter((item): item is DraftObject => Boolean(item))
+    .filter((item) => {
+      const subjectType = getString(item, "subjectType");
+      const guessedValue = getString(item, "guessedValue");
+      const targetField = normalizeText(getString(item, "targetField"));
+      const text = normalizeText(
+        [
+          getString(item, "prompt"),
+          getString(item, "reason"),
+          getString(item, "evidence"),
+          getString(item, "relatedTitle"),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
+
+      return (
+        subjectType === "stay" &&
+        isIsoDate(guessedValue) &&
+        targetPatterns.some(
+          (pattern) => targetField.includes(pattern) || text.includes(pattern)
+        )
+      );
+    });
+
+  const matchingCandidate = candidates.find((item) => {
+    const relatedTitle = normalizeText(getString(item, "relatedTitle"));
+    const prompt = normalizeText(getString(item, "prompt"));
+    const reason = normalizeText(getString(item, "reason"));
+
+    return (
+      Boolean(normalizedName) &&
+      ((Boolean(relatedTitle) &&
+        (relatedTitle.includes(normalizedName) ||
+          normalizedName.includes(relatedTitle))) ||
+        prompt.includes(normalizedName) ||
+        reason.includes(normalizedName))
+    );
+  });
+
+  return getString(matchingCandidate ?? null, "guessedValue");
 }
 
 function datesBetweenExclusiveEnd(startDate: string | null, endDate: string | null) {
@@ -1130,14 +1273,31 @@ function createStayRecords({
       getStayNameGuess({ draft, fallbackName }) ?? fallbackName;
     const nights = getNumber(stay, "nights");
     const rawCheckOut = getString(stay, "checkOut");
+    const guessedCheckIn = getStayDateGuess({
+      dateKind: "checkIn",
+      draft,
+      stayName: name,
+    });
+    const guessedCheckOut = getStayDateGuess({
+      dateKind: "checkOut",
+      draft,
+      stayName: name,
+    });
     const checkIn =
       getString(stay, "checkIn") ??
       getString(stay, "firstNightDate") ??
-      (rawCheckOut && nights && nights > 0 ? subtractDays(rawCheckOut, nights) : null);
+      (rawCheckOut && nights && nights > 0 ? subtractDays(rawCheckOut, nights) : null) ??
+      guessedCheckIn;
+    const leg = findLegForDate(legs, checkIn);
+    const inferredCheckOut =
+      checkIn && leg?.leaveDate && leg.leaveDate > checkIn
+        ? leg.leaveDate
+        : null;
     const checkOut =
       rawCheckOut ??
-      (checkIn && nights && nights > 0 ? addDays(checkIn, nights) : null);
-    const leg = findLegForDate(legs, checkIn);
+      (checkIn && nights && nights > 0 ? addDays(checkIn, nights) : null) ??
+      guessedCheckOut ??
+      inferredCheckOut;
 
     return {
       accessDetailsVisibility: "traveler_password",
@@ -1185,9 +1345,22 @@ function createTransportRecords({
       cleanTravelerText(getString(transport, "title")) ?? `Transport ${index + 1}`;
     const date = getString(transport, "date");
     const leg = findLegForDate(legs, date);
+    const description = cleanTravelerText(getString(transport, "description"));
+    const transportType = normalizeTransportType(getString(transport, "type"));
+    const departure = getString(transport, "departure");
+    const arrival = getString(transport, "arrival");
+    const provider = getString(transport, "provider");
+    const redundantLocalAirportTransfer = isRedundantLocalAirportTransfer({
+      arrival,
+      departure,
+      description,
+      provider,
+      title,
+      transportType,
+    });
 
     return {
-      arrivalLocation: getString(transport, "arrival"),
+      arrivalLocation: arrival,
       arrivalTime: getStringFromKeys(transport, ["arrivalTime", "endTime"]),
       bookingUrl: null,
       bookingUrlVisibility: "traveler_password",
@@ -1196,24 +1369,24 @@ function createTransportRecords({
         ? "traveler_password"
         : "public",
       date,
-      departureLocation: getString(transport, "departure"),
+      departureLocation: departure,
       departureTime: getStringFromKeys(transport, [
         "departureTime",
         "startTime",
         "time",
       ]),
-      description: cleanTravelerText(getString(transport, "description")),
+      description,
       fromLegId: null,
       id: `${tripId}-transport-${slugify(title)}-${index + 1}`,
       legId: leg?.id ?? null,
       privateDetailIds: [],
-      provider: getString(transport, "provider"),
-      reviewRequired: !date,
+      provider,
+      reviewRequired: redundantLocalAirportTransfer ? false : !date,
       routeLabel: title,
       sourceConfidence: "medium",
-      status: "draft",
+      status: redundantLocalAirportTransfer ? "ignored" : "draft",
       toLegId: null,
-      transportType: normalizeTransportType(getString(transport, "type")),
+      transportType,
       tripId,
     };
   });
@@ -1654,11 +1827,36 @@ function createReviewQuestions({
       return true;
     }
 
-    return (
+    if (
       /\b(two flight cards|two flight legs|split|connection|connects? through|kept .* legs?)\b/.test(
         text
       ) && /\b(airport|flight|dca|jfk|fco)\b/.test(text)
-    );
+    ) {
+      return true;
+    }
+
+    if (
+      target.includes("description") &&
+      /\b(airport transfer|public transport|move to airport|go to airport|leave for airport)\b/.test(
+        text
+      ) &&
+      /\b(flight|fly|ryanair|delta|departure|before)\b/.test(text)
+    ) {
+      return true;
+    }
+
+    if (
+      (target.includes("departure") || target.includes("arrival")) &&
+      /\b(train|rail)\b/.test(text) &&
+      /\b(route transition|city transition|next stay|previous stay|current city|current leg|next leg|train to)\b/.test(
+        text
+      ) &&
+      /\b(guessed|suggested|answer|source|evidence|route)\b/.test(text)
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   function isStatementStyleCall({
@@ -1875,6 +2073,7 @@ function createReviewQuestions({
       prompt,
       reason,
       subjectId,
+      targetField,
     })
       ? "dismissed"
       : isPrivacyPolicyQuestion({
@@ -1929,6 +2128,53 @@ function createReviewQuestions({
       (question) => `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`
     )
   );
+  const rawStays = getArray(draft, "stays");
+  const inferredStayCheckOutQuestions = stays.flatMap((stay, index) => {
+    const rawStay = rawStays[index];
+    const stayDraft =
+      rawStay && typeof rawStay === "object" && !Array.isArray(rawStay)
+        ? (rawStay as DraftObject)
+        : null;
+    const rawCheckOut = getString(stayDraft, "checkOut");
+    const rawNights = getNumber(stayDraft, "nights");
+
+    if (
+      rawCheckOut ||
+      rawNights ||
+      !stay.checkInDate ||
+      !stay.checkOutDate ||
+      stay.checkOutDate <= stay.checkInDate
+    ) {
+      return [];
+    }
+
+    const question: TripReviewQuestionRecord = {
+      answerType: "date",
+      answerValue: null,
+      createdAt: null,
+      evidence: `The stay starts on ${formatReadableIsoDate(stay.checkInDate)} and the next leg begins on ${formatReadableIsoDate(stay.checkOutDate)}.`,
+      guessedValue: stay.checkOutDate,
+      id: `${tripId}-inferred-stay-checkout-${index + 1}`,
+      prompt: `This looks like ${stay.name} checks out on ${formatReadableIsoDate(stay.checkOutDate)}. Is that correct?`,
+      reason:
+        "Roamwoven inferred the checkout date from the next leg so the stay can show a complete date range.",
+      resolvedAt: null,
+      sourceConfidence: "medium",
+      status: "open",
+      subjectId: stay.id,
+      subjectType: "stay",
+      targetField: "checkOutDate",
+      tripId,
+    };
+    const key = `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`;
+
+    if (questionKeys.has(key)) {
+      return [];
+    }
+
+    questionKeys.add(key);
+    return [question];
+  });
   const explicitTodoQuestions = items
     .filter((item) => hasExplicitSourceTodoText(item.title, item.description))
     .flatMap((item, index): TripReviewQuestionRecord[] => {
@@ -1957,7 +2203,7 @@ function createReviewQuestions({
       return questionKeys.has(key) ? [] : [question];
     });
 
-  return [...draftQuestions, ...explicitTodoQuestions].filter((question, index, questions) => {
+  return [...draftQuestions, ...inferredStayCheckOutQuestions, ...explicitTodoQuestions].filter((question, index, questions) => {
     if (question.status !== "open" && question.status !== "noted") {
       return true;
     }

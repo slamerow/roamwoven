@@ -1913,6 +1913,71 @@ test("leg leave dates infer from the next leg arrival when missing", () => {
   ]);
 });
 
+test("stay summaries can use guessed check-in and inferred checkout with confirmation questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "date",
+          confidence: "medium",
+          evidence:
+            "The lodging is listed under the arrival day but does not spell out first night separately.",
+          guessedValue: "2026-09-01",
+          prompt:
+            "This looks like Left Bank Hotel starts on September 1. Is that the correct check-in date?",
+          reason: "The traveler app needs a check-in date for the stay.",
+          relatedTitle: "Left Bank Hotel",
+          subjectType: "stay",
+          targetField: "checkIn",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Paris",
+          country: "France",
+        },
+        {
+          arriveDate: "2026-09-04",
+          city: "Lyon",
+          country: "France",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: null,
+          checkOut: null,
+          name: "Left Bank Hotel",
+          nights: null,
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "France",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-stay-date-guesses",
+  });
+  const sections = getStructuredReviewSections(records);
+  const stay = records.stays[0];
+  const questions = records.reviewQuestions.filter(
+    (question) => question.status === "open"
+  );
+
+  assert.equal(stay?.checkInDate, "2026-09-01");
+  assert.equal(stay?.checkOutDate, "2026-09-04");
+  assert.deepEqual(sections.find((section) => section.id === "stays")?.summaryItems, [
+    "Left Bank Hotel\nCheck-in September 1, 2026 · Check-out September 4, 2026",
+  ]);
+  assert.equal(questions.length, 2);
+  assert.equal(questions[0]?.targetField, "checkIn");
+  assert.equal(questions[1]?.targetField, "checkOutDate");
+  assert.match(questions[1]?.prompt ?? "", /checks out on September 4th, 2026/i);
+});
+
 test("high-confidence parser calls become notes instead of review questions", () => {
   const draft = {
     activities: [],
@@ -2063,6 +2128,140 @@ test("routine DCA JFK FCO transport label prompts are dismissed", () => {
     },
     fallbackTripName: "Fallback trip",
     tripId: "trip-routine-dca-jfk-fco",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
+test("ordinary airport moves before flights are ignored when the flight card is enough", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2019-01-14",
+          description: "Ryanair FR8331 Rome Ciampino to Prague, 9:20 AM.",
+          itemType: "activity",
+          title: "Fly Rome to Prague",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence:
+            "Wake at 6:00 AM to take public transport to Rome Ciampino before the Ryanair flight.",
+          guessedValue: "airport transfer/public transport to Rome Ciampino",
+          prompt:
+            "We treated the 6:00 AM move as an airport transfer to Rome Ciampino before the Ryanair flight. Is that the right interpretation?",
+          reason:
+            "The source says to take public transport to the airport before the flight.",
+          relatedTitle: "Airport transfer to Rome Ciampino",
+          subjectType: "transport",
+          targetField: "description",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Rome Ciampino Airport",
+          arrivalTime: null,
+          confirmation: null,
+          date: "2019-01-14",
+          departure: null,
+          departureTime: "06:00",
+          description:
+            "Wake at 6:00 AM to take public transport to Rome Ciampino before the Ryanair flight.",
+          provider: null,
+          title: "Airport transfer to Rome Ciampino",
+          type: "transfer",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-airport-transfer-noise",
+  });
+
+  assert.equal(records.transport[0]?.status, "ignored");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
+test("clear train leg transitions do not ask for prior origin city", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence:
+            "Friday, January 18 says Train to Vienna and the next stay is in Vienna.",
+          guessedValue: "Prague to Vienna train",
+          prompt:
+            "We have the Vienna train but not the exact route details in the source. What city did this train depart from?",
+          reason:
+            "The city transition and that the next stay is in Vienna are clear, but the exact route is not in the train line itself.",
+          relatedTitle: "Train to Vienna",
+          subjectType: "transport",
+          targetField: "departure",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-18",
+        },
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna",
+          arrivalTime: null,
+          confirmation: "1beb5005",
+          date: "2019-01-18",
+          departure: "Prague",
+          departureTime: null,
+          description: "Train to Vienna. Train code: 1beb5005.",
+          provider: null,
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-train-origin-noise",
   });
 
   assert.equal(records.reviewQuestions[0]?.status, "dismissed");
@@ -2301,6 +2500,68 @@ test("answering a targeted question updates the structured record", () => {
   assert.equal(updatedQuestion?.answerValue, "2026-09-02");
   assert.equal(updatedQuestion?.status, "answered");
   assert.equal(getStructuredReviewCount(updated), 0);
+});
+
+test("answering an open description question folds the answer into the activity card", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2026-09-02",
+          description:
+            "Prague Castle visit. Need to decide which ticket or tour option to get.",
+          itemType: "activity",
+          title: "Prague Castle",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Prague",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-description-answer",
+  });
+  const castle = records.items[0];
+  const question = records.reviewQuestions[0];
+
+  assert.ok(castle);
+  assert.ok(question);
+  assert.equal(question.targetField, "description");
+
+  const updated = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "Use Prague Castle Circuit B and keep St. Vitus as optional.",
+    createdAt: "2026-06-18T16:00:00.000Z",
+    id: "decision-description-answer",
+    resolvedAction: "edit",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "trip-description-answer",
+  });
+  const updatedCastle = updated.items[0];
+  const updatedQuestion = updated.reviewQuestions[0];
+
+  assert.match(
+    updatedCastle?.description ?? "",
+    /Need to decide which ticket or tour option/
+  );
+  assert.match(updatedCastle?.description ?? "", /Circuit B/);
+  assert.equal(updatedCastle?.reviewRequired, false);
+  assert.equal(updatedCastle?.status, "confirmed");
+  assert.equal(updatedQuestion?.status, "answered");
 });
 
 test("explicit source todo language on activity cards becomes an open review question", () => {

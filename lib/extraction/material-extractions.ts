@@ -147,6 +147,40 @@ function trimStoredTextContent(value: string | null) {
   };
 }
 
+function combineExtractedText({
+  existingText,
+  ocrText,
+}: {
+  existingText: string | null;
+  ocrText: string;
+}) {
+  const existing = existingText?.trim() ?? "";
+  const ocr = ocrText.trim();
+
+  if (!existing) {
+    return ocr;
+  }
+
+  if (!ocr) {
+    return existing;
+  }
+
+  if (existing.includes(ocr)) {
+    return existing;
+  }
+
+  if (ocr.includes(existing)) {
+    return ocr;
+  }
+
+  return [
+    "[PDF text layer]",
+    existing,
+    "[OCR text from embedded images]",
+    ocr,
+  ].join("\n\n");
+}
+
 export async function upsertMaterialExtractionCheckpoint(
   input: MaterialExtractionCheckpointInput
 ) {
@@ -298,16 +332,27 @@ export async function completeMaterialExtractionOcr({
   record: MaterialExtractionRecord;
   text: string;
 }) {
+  const combinedText = combineExtractedText({
+    existingText: record.textContent,
+    ocrText: text,
+  });
+
   return upsertMaterialExtractionCheckpoint({
-    extractedCharCount: text.trim().length,
+    extractedCharCount: combinedText.trim().length,
     extractionMethod: "ocr",
     metadata: {
       ...record.metadata,
       ...metadata,
+      ...(record.textContent?.trim()
+        ? {
+            ocrBackfilledPdfText: true,
+            originalPdfTextCharCount: record.textContent.trim().length,
+          }
+        : {}),
       ocrProvider: provider,
     },
     status: "text_ready",
-    textContent: text,
+    textContent: combinedText,
     tripId: record.tripId,
     uploadId: record.uploadId,
   });
@@ -326,6 +371,26 @@ export async function failMaterialExtractionOcr({
   provider: string;
   record: MaterialExtractionRecord;
 }) {
+  if (record.textContent?.trim()) {
+    return upsertMaterialExtractionCheckpoint({
+      errorMessage,
+      extractedCharCount: record.textContent.trim().length,
+      extractionMethod: "pdf_text",
+      failureClass: `${failureClass}_pdf_text_fallback`,
+      metadata: {
+        ...record.metadata,
+        ...metadata,
+        ocrErrorMessage: errorMessage,
+        ocrFailedButPdfTextReady: true,
+        ocrProvider: provider,
+      },
+      status: "text_ready",
+      textContent: record.textContent,
+      tripId: record.tripId,
+      uploadId: record.uploadId,
+    });
+  }
+
   return upsertMaterialExtractionCheckpoint({
     errorMessage,
     extractionMethod: "ocr",
@@ -350,7 +415,12 @@ export function materialFromCheckpoint({
   record: MaterialExtractionRecord;
   type: TripExtractionMaterial["type"];
 }): TripExtractionMaterial | null {
-  if (record.status !== "text_ready" || !record.textContent?.trim()) {
+  const canUseText =
+    record.status === "text_ready" ||
+    (record.status === "ocr_needed" &&
+      record.failureClass === "ocr_backfill_needed");
+
+  if (!canUseText || !record.textContent?.trim()) {
     return null;
   }
 

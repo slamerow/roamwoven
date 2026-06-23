@@ -72,7 +72,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
       text
     );
   const genericTipHeader =
-    /\b(eat\s*:|food\s*:|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i.test(
+    /\b(eat\s*:|food\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i.test(
       text
     );
 
@@ -88,7 +88,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   return (
     item.itemType === "note" &&
     Boolean(item.legId) &&
-    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i.test(
+    /\b(tips?|ideas?|recommendations?|eat\s*:|food\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i.test(
       text
     )
   );
