@@ -96,6 +96,7 @@ const itemExpectations = [
     id: "jan15-klementinum",
     label: "Klementinum tour",
     requiredKeywords: ["klementinum"],
+    requiredTitleKeywords: ["klementinum"],
     startTime: "14:30",
   },
   {
@@ -166,12 +167,33 @@ const itemExpectations = [
     requiredKeywords: ["beer"],
   },
   {
+    categoryId: "food_dining",
+    date: null,
+    description:
+      "Loose Prague food and local notes that are not attached to a dated reservation.",
+    id: "prague-food-city-tip",
+    itemType: "note",
+    label: "Prague food ideas",
+    requiredKeywords: ["prague", "food"],
+    requiredTitleKeywords: ["prague", "food"],
+  },
+  {
+    categoryId: "arrival_departure",
+    date: "2019-01-17",
+    description: "Pick up the rental car before driving to Kutna Hora.",
+    id: "jan17-rental-car-pickup-card",
+    label: "Pick up rental car",
+    requiredKeywords: ["pick", "rental", "car"],
+    requiredTitleKeywords: ["rental", "car"],
+  },
+  {
     categoryId: "temple_shrine",
     date: "2019-01-17",
     description: "Sedlec Ossuary visit in Kutna Hora.",
     id: "jan17-sedlec",
     label: "Sedlec Ossuary",
     requiredKeywords: ["sedlec"],
+    requiredTitleKeywords: ["sedlec"],
   },
   {
     categoryId: "temple_shrine",
@@ -180,6 +202,7 @@ const itemExpectations = [
     id: "jan17-st-barbara",
     label: "Church of St Barbara",
     requiredKeywords: ["barbara"],
+    requiredTitleKeywords: ["barbara"],
   },
   {
     categoryId: "tours_tickets",
@@ -188,6 +211,7 @@ const itemExpectations = [
     id: "jan17-silver-mines",
     label: "Silver mines",
     requiredKeywords: ["silver", "mines"],
+    requiredTitleKeywords: ["silver"],
   },
   {
     categoryId: "shopping_tailor",
@@ -204,6 +228,7 @@ const itemExpectations = [
     id: "jan18-albertina",
     label: "Albertina",
     requiredKeywords: ["albertina"],
+    requiredTitleKeywords: ["albertina"],
   },
   {
     categoryId: "art_culture",
@@ -212,6 +237,7 @@ const itemExpectations = [
     id: "jan18-state-hall-library",
     label: "State Hall Library",
     requiredKeywords: ["state", "hall", "library"],
+    requiredTitleKeywords: ["state", "library"],
   },
   {
     categoryId: "tours_tickets",
@@ -220,6 +246,7 @@ const itemExpectations = [
     id: "jan18-time-travel",
     label: "Time Travel Vienna",
     requiredKeywords: ["time", "travel", "vienna"],
+    requiredTitleKeywords: ["time", "travel"],
   },
   {
     categoryId: "art_culture",
@@ -228,6 +255,7 @@ const itemExpectations = [
     id: "jan18-belvedere",
     label: "Upper and Lower Belvedere",
     requiredKeywords: ["belvedere"],
+    requiredTitleKeywords: ["belvedere"],
   },
   {
     categoryId: "tours_tickets",
@@ -237,6 +265,7 @@ const itemExpectations = [
     id: "jan19-schonbrunn",
     label: "Schonbrunn Palace",
     requiredKeywords: ["schonbrunn"],
+    requiredTitleKeywords: ["schonbrunn"],
   },
   {
     categoryId: "nightlife_entertainment",
@@ -253,6 +282,7 @@ const itemExpectations = [
     id: "jan19-mumok",
     label: "Mumok Museum",
     requiredKeywords: ["mumok"],
+    requiredTitleKeywords: ["mumok"],
   },
   {
     categoryId: "art_culture",
@@ -261,6 +291,7 @@ const itemExpectations = [
     id: "jan19-hundertwasser",
     label: "Hundertwasser Haus",
     requiredKeywords: ["hundertwasser"],
+    requiredTitleKeywords: ["hundertwasser"],
   },
   {
     categoryId: "art_culture",
@@ -269,6 +300,7 @@ const itemExpectations = [
     id: "jan19-natural-history",
     label: "Natural History Museum",
     requiredKeywords: ["natural", "history"],
+    requiredTitleKeywords: ["natural", "history"],
   },
   {
     categoryId: "food_dining",
@@ -368,6 +400,7 @@ const transportExpectations = [
     label: "Flight to JFK",
     provider: "Delta",
     requiredKeywords: ["jfk"],
+    requiredTitleKeywords: ["jfk"],
     type: "flight",
   },
   {
@@ -378,6 +411,7 @@ const transportExpectations = [
     label: "Flight to FCO",
     provider: "Delta",
     requiredKeywords: ["fco"],
+    requiredTitleKeywords: ["fco"],
     type: "flight",
   },
   {
@@ -388,6 +422,7 @@ const transportExpectations = [
     label: "Fly to Prague",
     provider: "Ryanair",
     requiredKeywords: ["prague"],
+    requiredTitleKeywords: ["prague"],
     type: "flight",
   },
   {
@@ -398,6 +433,7 @@ const transportExpectations = [
     label: "Pick up rental car",
     provider: "Rental car",
     requiredKeywords: ["rental", "car"],
+    requiredTitleKeywords: ["rental", "car"],
     type: "rental_car",
   },
   {
@@ -408,27 +444,43 @@ const transportExpectations = [
     label: "Train to Vienna",
     provider: null,
     requiredKeywords: ["vienna"],
+    requiredTitleKeywords: ["vienna"],
     type: "train",
   },
   {
-    arrival: "Budapest",
+    arrival: "Budapest Keleti",
     date: "2019-01-21",
     departure: "Vienna",
+    forbiddenKeywords: ["mazel tov", "thermal baths"],
     id: "jan21-train-budapest",
     label: "Train to Budapest",
     provider: null,
-    requiredKeywords: ["budapest"],
+    requiredKeywords: ["budapest", "keleti"],
+    requiredTitleKeywords: ["budapest"],
     type: "train",
+  },
+] as const;
+
+const reviewExpectations = [
+  {
+    date: "2019-01-15",
+    id: "jan15-prague-tour-choice-question",
+    label: "Confirm Prague tour choice",
+    recordTypes: ["question" as const],
+    requiredKeywords: ["which", "prague", "tour"],
   },
 ] as const;
 
 export const centralEuropeFirstHalfExpectations: ExpectedTimelineRecord[] = [
   ...transportExpectations.map((item) => ({
     date: item.date,
+    forbiddenKeywords: "forbiddenKeywords" in item ? item.forbiddenKeywords : undefined,
     id: item.id,
     label: item.label,
     recordTypes: ["transport" as const],
     requiredKeywords: item.requiredKeywords,
+    requiredTitleKeywords:
+      "requiredTitleKeywords" in item ? item.requiredTitleKeywords : undefined,
   })),
   ...itemExpectations.map((item) => ({
     categoryId: item.categoryId,
@@ -437,6 +489,8 @@ export const centralEuropeFirstHalfExpectations: ExpectedTimelineRecord[] = [
     label: item.label,
     recordTypes: ["item" as const],
     requiredKeywords: item.requiredKeywords,
+    requiredTitleKeywords:
+      "requiredTitleKeywords" in item ? item.requiredTitleKeywords : undefined,
   })),
   ...stayExpectations.map((item) => ({
     categoryId: "arrival_departure",
@@ -445,7 +499,9 @@ export const centralEuropeFirstHalfExpectations: ExpectedTimelineRecord[] = [
     label: item.label,
     recordTypes: ["item" as const],
     requiredKeywords: item.requiredKeywords,
+    requiredTitleKeywords: ["check"],
   })),
+  ...reviewExpectations,
 ];
 
 export function createCentralEuropeFirstHalfDraft() {
@@ -456,12 +512,32 @@ export function createCentralEuropeFirstHalfDraft() {
       date: item.date,
       description: item.description,
       endTime: null,
-      itemType: item.categoryId === "admin_logistics" ? "admin" : "activity",
+      itemType:
+        "itemType" in item
+          ? item.itemType
+          : item.categoryId === "admin_logistics"
+            ? "admin"
+            : "activity",
       sourceFilename,
       startTime: "startTime" in item ? item.startTime : null,
       title: item.label,
     })),
-    missingDetails: [],
+    missingDetails: [
+      {
+        answerType: "choice",
+        confidence: "medium",
+        evidence:
+          "The source has multiple Prague tour-like entries around the morning walking tour and another timed Prague activity.",
+        guessedValue: null,
+        prompt:
+          "Which Prague tour should be listed for the 9:00 AM Prague walking tour?",
+        reason:
+          "The source appears to contain more than one Prague tour or ticketed Prague option, so the traveler card needs the chosen tour.",
+        relatedTitle: "Prague walking tour",
+        subjectType: "item",
+        targetField: "description",
+      },
+    ],
     places: [
       {
         arriveDate: "2019-01-13",

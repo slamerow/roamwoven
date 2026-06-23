@@ -1,14 +1,16 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 
-type TimelineRecordType = "item" | "stay" | "transport";
+type TimelineRecordType = "callout" | "item" | "question" | "stay" | "transport";
 
 export type ExpectedTimelineRecord = {
   categoryId?: string;
-  date: string;
+  date: string | null;
+  forbiddenKeywords?: readonly string[];
   id: string;
   label: string;
   recordTypes?: readonly TimelineRecordType[];
   requiredKeywords: readonly string[];
+  requiredTitleKeywords?: readonly string[];
 };
 
 export type ExtractionQaCandidate = {
@@ -16,12 +18,13 @@ export type ExtractionQaCandidate = {
   date: string | null;
   id: string;
   label: string;
+  labelSearchText: string;
   recordType: TimelineRecordType;
   searchText: string;
 };
 
 export type ExtractionQaMissingRecord = {
-  date: string;
+  date: string | null;
   expectedId: string;
   label: string;
   requiredKeywords: readonly string[];
@@ -35,9 +38,25 @@ export type ExtractionQaCategoryMismatch = {
   expectedLabel: string;
 };
 
+export type ExtractionQaContentMismatch = {
+  actualId: string;
+  actualLabel: string;
+  forbiddenKeywords: readonly string[];
+  expectedId: string;
+  expectedLabel: string;
+};
+
+export type ExtractionQaOverCompressedRecord = {
+  actualId: string;
+  actualLabel: string;
+  expectedIds: string[];
+  expectedLabels: string[];
+};
+
 export type ExtractionQaReport = {
   actualCountByDate: Record<string, number>;
   categoryMismatches: ExtractionQaCategoryMismatch[];
+  contentMismatches: ExtractionQaContentMismatch[];
   expectedCountByDate: Record<string, number>;
   matched: Array<{
     actualId: string;
@@ -46,6 +65,7 @@ export type ExtractionQaReport = {
     expectedLabel: string;
   }>;
   missing: ExtractionQaMissingRecord[];
+  overCompressed: ExtractionQaOverCompressedRecord[];
   score: number;
 };
 
@@ -76,14 +96,47 @@ function countByDate(
 }
 
 function createCandidates(records: StructuredTripRecords[]): ExtractionQaCandidate[] {
-  return records.flatMap((recordSet) => [
-    ...recordSet.items
+  return records.flatMap((recordSet) => {
+    const itemById = new Map(recordSet.items.map((item) => [item.id, item]));
+    const stayById = new Map(recordSet.stays.map((stay) => [stay.id, stay]));
+    const transportById = new Map(
+      recordSet.transport.map((item) => [item.id, item])
+    );
+    const legById = new Map(recordSet.legs.map((leg) => [leg.id, leg]));
+
+    function questionDate(question: StructuredTripRecords["reviewQuestions"][number]) {
+      if (!question.subjectId) {
+        return null;
+      }
+
+      if (question.subjectType === "item") {
+        return itemById.get(question.subjectId)?.date ?? null;
+      }
+
+      if (question.subjectType === "stay") {
+        return stayById.get(question.subjectId)?.checkInDate ?? null;
+      }
+
+      if (question.subjectType === "transport") {
+        return transportById.get(question.subjectId)?.date ?? null;
+      }
+
+      if (question.subjectType === "leg") {
+        return legById.get(question.subjectId)?.arriveDate ?? null;
+      }
+
+      return null;
+    }
+
+    return [
+      ...recordSet.items
       .filter((item) => item.status !== "ignored")
       .map((item) => ({
         categoryId: item.categoryId,
         date: item.date,
         id: item.id,
         label: item.title,
+        labelSearchText: normalizeSearchText(item.title),
         recordType: "item" as const,
         searchText: normalizeSearchText(
           [
@@ -104,6 +157,7 @@ function createCandidates(records: StructuredTripRecords[]): ExtractionQaCandida
         date: item.date,
         id: item.id,
         label: item.routeLabel,
+        labelSearchText: normalizeSearchText(item.routeLabel),
         recordType: "transport" as const,
         searchText: normalizeSearchText(
           [
@@ -111,6 +165,7 @@ function createCandidates(records: StructuredTripRecords[]): ExtractionQaCandida
             item.departureLocation,
             item.arrivalLocation,
             item.provider,
+            item.description,
             item.transportType,
           ]
             .filter(Boolean)
@@ -124,12 +179,35 @@ function createCandidates(records: StructuredTripRecords[]): ExtractionQaCandida
         date: stay.checkInDate,
         id: stay.id,
         label: stay.name,
+        labelSearchText: normalizeSearchText(stay.name),
         recordType: "stay" as const,
         searchText: normalizeSearchText(
           [stay.name, stay.publicLocationLabel, stay.address].filter(Boolean).join(" ")
         ),
       })),
-  ]);
+      ...recordSet.reviewQuestions
+        .filter((question) => question.status === "open" || question.status === "noted")
+        .map((question) => ({
+          categoryId: null,
+          date: questionDate(question),
+          id: question.id,
+          label: question.prompt,
+          labelSearchText: normalizeSearchText(question.prompt),
+          recordType: question.status === "open" ? "question" as const : "callout" as const,
+          searchText: normalizeSearchText(
+            [
+              question.prompt,
+              question.reason,
+              question.evidence,
+              question.guessedValue,
+              question.targetField,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          ),
+        })),
+    ];
+  });
 }
 
 function matchesExpectation(
@@ -145,6 +223,10 @@ function matchesExpectation(
   return (
     candidate.date === expectation.date &&
     allowedRecordTypes.includes(candidate.recordType) &&
+    (expectation.requiredTitleKeywords?.every((keyword) =>
+      containsKeyword(candidate.labelSearchText, keyword)
+    ) ??
+      true) &&
     expectation.requiredKeywords.every((keyword) =>
       containsKeyword(candidate.searchText, keyword)
     )
@@ -163,9 +245,28 @@ export function evaluateTripExtractionCoverage({
   const matched: ExtractionQaReport["matched"] = [];
   const missing: ExtractionQaMissingRecord[] = [];
   const categoryMismatches: ExtractionQaCategoryMismatch[] = [];
+  const contentMismatches: ExtractionQaContentMismatch[] = [];
+  const usedCandidateIds = new Set<string>();
+  const overCompressed = candidates
+    .map((candidate) => ({
+      candidate,
+      expectations: expectations.filter((expectation) =>
+        matchesExpectation(candidate, expectation)
+      ),
+    }))
+    .filter((match) => match.expectations.length > 1)
+    .map((match) => ({
+      actualId: match.candidate.id,
+      actualLabel: match.candidate.label,
+      expectedIds: match.expectations.map((expectation) => expectation.id),
+      expectedLabels: match.expectations.map((expectation) => expectation.label),
+    }));
 
   for (const expectation of expectations) {
-    const candidate = candidates.find((item) => matchesExpectation(item, expectation));
+    const candidate = candidates.find(
+      (item) =>
+        !usedCandidateIds.has(item.id) && matchesExpectation(item, expectation)
+    );
 
     if (!candidate) {
       missing.push({
@@ -177,6 +278,7 @@ export function evaluateTripExtractionCoverage({
       continue;
     }
 
+    usedCandidateIds.add(candidate.id);
     matched.push({
       actualId: candidate.id,
       actualLabel: candidate.label,
@@ -197,14 +299,30 @@ export function evaluateTripExtractionCoverage({
         expectedLabel: expectation.label,
       });
     }
+
+    const forbiddenMatches = expectation.forbiddenKeywords?.filter((keyword) =>
+      containsKeyword(candidate.searchText, keyword)
+    );
+
+    if (forbiddenMatches?.length) {
+      contentMismatches.push({
+        actualId: candidate.id,
+        actualLabel: candidate.label,
+        forbiddenKeywords: forbiddenMatches,
+        expectedId: expectation.id,
+        expectedLabel: expectation.label,
+      });
+    }
   }
 
   return {
     actualCountByDate: countByDate(candidates.map((item) => item.date)),
     categoryMismatches,
+    contentMismatches,
     expectedCountByDate: countByDate(expectations.map((item) => item.date)),
     matched,
     missing,
+    overCompressed,
     score: expectations.length > 0 ? matched.length / expectations.length : 1,
   };
 }

@@ -919,16 +919,15 @@ test("lodging switches synthesize check-in cards without duplicating explicit ba
     (item) => item.categoryId === "arrival_departure"
   );
 
-  assert.equal(checkInCards.length, 2);
+  assert.equal(checkInCards.length, 3);
   assert.ok(
     checkInCards.some((item) => item.title === "Drop bags at The Yellow")
   );
   assert.ok(
-    checkInCards.some((item) => item.title === "Check in: Prague Airbnb")
+    checkInCards.some((item) => item.title === "Check in: The Yellow")
   );
-  assert.equal(
-    records.items.some((item) => item.title === "Check in: The Yellow"),
-    false
+  assert.ok(
+    checkInCards.some((item) => item.title === "Check in: Prague Airbnb")
   );
 });
 

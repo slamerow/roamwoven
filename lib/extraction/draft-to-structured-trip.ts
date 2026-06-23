@@ -492,6 +492,7 @@ function getAnswerType(
   value: string | null
 ): TripReviewQuestionRecord["answerType"] {
   if (
+    value === "choice" ||
     value === "date" ||
     value === "time" ||
     value === "visibility" ||
@@ -529,12 +530,19 @@ function slugify(value: string) {
 }
 
 function normalizeTransportType(value: string | null): TripTransportType {
-  if (value === "flight" || value === "train" || value === "ferry") {
+  if (
+    value === "flight" ||
+    value === "train" ||
+    value === "ferry" ||
+    value === "rental_car" ||
+    value === "bus" ||
+    value === "drive"
+  ) {
     return value;
   }
 
   if (value === "car") {
-    return "drive";
+    return "rental_car";
   }
 
   if (value === "transfer") {
@@ -542,6 +550,35 @@ function normalizeTransportType(value: string | null): TripTransportType {
   }
 
   return "other";
+}
+
+function cleanTransportDescription(value: string | null) {
+  const description = cleanTravelerText(value);
+
+  if (!description) {
+    return null;
+  }
+
+  const segments = description
+    .split(/(?<=[.!?])\s+|;\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (segments.length <= 1) {
+    return description;
+  }
+
+  const transportDetailPattern =
+    /\b(arrival|arrive|arrives|bag|bags|boarding|bus|car|check[-\s]?in|coach|confirmation|depart|departs|departure|driver|drop[-\s]?off|duration|ferry|flight|gate|land|lands|leave|leaves|luggage|operator|pickup|pick[-\s]?up|platform|provider|rail|reservation|route|seat|station|terminal|ticket|train|transfer|voucher)\b/i;
+  const destinationPlanPattern =
+    /\b(after arrival|bar|breakfast|cafe|café|cathedral|church|city plans?|dinner|food|gallery|lunch|museum|palace|plans? for|restaurant|shopping|sightseeing|tour|visit|walk|walking)\b/i;
+  const kept = segments.filter(
+    (segment) =>
+      transportDetailPattern.test(segment) ||
+      !destinationPlanPattern.test(segment)
+  );
+
+  return kept.length > 0 ? kept.join(" ") : description;
 }
 
 function isRedundantLocalAirportTransfer({
@@ -631,7 +668,7 @@ function normalizeCategoryId({
 
   const text = `${title} ${description ?? ""}`.toLowerCase();
 
-  if (/\b(check[-\s]?in|check[-\s]?out|drop bags?|bag drop|arrival|departure|airport|station|flight|land|lands)\b/.test(text)) {
+  if (/\b(check[-\s]?in|check[-\s]?out|drop bags?|bag drop|arrival|departure|airport|station|flight|land|lands|pickup|pick[-\s]?up|drop[-\s]?off|rental car)\b/.test(text)) {
     return "arrival_departure";
   }
 
@@ -1345,7 +1382,9 @@ function createTransportRecords({
       cleanTravelerText(getString(transport, "title")) ?? `Transport ${index + 1}`;
     const date = getString(transport, "date");
     const leg = findLegForDate(legs, date);
-    const description = cleanTravelerText(getString(transport, "description"));
+    const description = cleanTransportDescription(
+      getString(transport, "description")
+    );
     const transportType = normalizeTransportType(getString(transport, "type"));
     const departure = getString(transport, "departure");
     const arrival = getString(transport, "arrival");
@@ -1484,7 +1523,7 @@ function hasStayCheckInCard({
 }) {
   const stayName = normalizeText(stay.name);
   const lodgingArrivalPattern =
-    /\b(arrive|arrival|check in|drop bags|bag drop|bags)\b/;
+    /\b(arrive|arrival|check in)\b/;
   const lodgingPlacePattern =
     /\b(airbnb|apartment|flat|hostel|hotel|inn|lodging|rental|stay)\b/;
 
