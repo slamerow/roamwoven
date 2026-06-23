@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -341,6 +341,28 @@ const sectionIcons: Record<string, typeof Sparkles> = {
   transport: Route,
 };
 
+type ReviewStyleVars = CSSProperties & {
+  "--review-accent": string;
+  "--review-primary": string;
+  "--review-secondary": string;
+  "--review-soft": string;
+};
+
+function getReviewStyleVars({
+  style,
+  theme,
+}: {
+  style: TripStyleSettings;
+  theme: ReturnType<typeof getThemeDirection>;
+}): ReviewStyleVars {
+  return {
+    "--review-accent": style.accentColor ?? style.primaryColor,
+    "--review-primary": style.primaryColor,
+    "--review-secondary": style.secondaryColor ?? style.primaryColor,
+    "--review-soft": style.softColor ?? theme.surface,
+  };
+}
+
 function toneIcon(tone: StructuredReviewItem["tone"]) {
   if (tone === "sensitive") {
     return LockKeyhole;
@@ -630,10 +652,12 @@ function ReviewCombineForm({
 
 function StructuredRecordReview({
   completedDecisionCount,
+  reviewStyle,
   sections,
   tripId,
 }: {
   completedDecisionCount: number;
+  reviewStyle: ReviewStyleVars;
   sections: StructuredReviewSection[];
   tripId: string;
 }) {
@@ -659,7 +683,10 @@ function StructuredRecordReview({
       : 100;
 
   return (
-    <section className="mt-6 rounded-md border border-ink/10 bg-white p-5">
+    <section
+      className="mt-6 rounded-md border border-[color:var(--review-primary)] bg-[var(--review-soft)] p-5"
+      style={reviewStyle}
+    >
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-ink">
@@ -670,13 +697,13 @@ function StructuredRecordReview({
             materials. Expand a group to spot-check the titles and dates.
           </p>
         </div>
-        <div className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink">
+        <div className="rounded-md bg-white/75 px-4 py-3 text-sm font-semibold text-ink shadow-sm">
           {reviewCount === 0
             ? "Ready for summary"
             : `${pluralize(reviewCount, "item")} left`}
         </div>
       </div>
-      <div className="mt-5 rounded-md bg-paper p-4">
+      <div className="mt-5 rounded-md bg-white/70 p-4">
         <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
           <span>Draft check</span>
           <span>
@@ -685,22 +712,25 @@ function StructuredRecordReview({
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
           <div
-            className="h-full rounded-full bg-moss"
+            className="h-full rounded-full bg-[var(--review-primary)]"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
       </div>
 
       {noteSections.length > 0 ? (
-        <section className="mt-5 rounded-md border border-moss/20 bg-moss/10 p-4">
+        <section className="mt-5 rounded-md border border-[color:var(--review-primary)] bg-white/70 p-4">
           <div className="flex items-start gap-3">
-            <ListChecks className="mt-0.5 shrink-0 text-moss" size={18} />
+            <ListChecks
+              className="mt-0.5 shrink-0 text-[var(--review-primary)]"
+              size={18}
+            />
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold text-ink">
                   Calls we made
                 </h3>
-                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-moss">
+                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[var(--review-primary)]">
                   {pluralize(
                     noteSections.reduce(
                       (count, section) => count + section.summaryItems.length,
@@ -769,7 +799,7 @@ function StructuredRecordReview({
 
           return (
             <details
-              className="rounded-md border border-ink/10 bg-paper p-4"
+              className="rounded-md border border-[color:var(--review-primary)] bg-white/70 p-4 shadow-sm"
               key={section.id}
             >
               <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
@@ -778,7 +808,7 @@ function StructuredRecordReview({
                     <p className="text-sm font-semibold text-ink">
                       {section.title}
                     </p>
-                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-moss">
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[var(--review-primary)]">
                       {getFoundCountLabel(section)}
                     </span>
                   </div>
@@ -787,7 +817,10 @@ function StructuredRecordReview({
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <Icon className="text-moss" size={18} />
+                  <Icon
+                    className="text-[var(--review-primary)]"
+                    size={18}
+                  />
                   <ChevronDown className="text-ink/35" size={16} />
                 </div>
               </summary>
@@ -1141,6 +1174,7 @@ function RealTripFirstPass({
         })
         .slice(0, 8)
     : [];
+  const reviewStyle = getReviewStyleVars({ style, theme });
 
   return (
     <>
@@ -1149,12 +1183,15 @@ function RealTripFirstPass({
           {extractionErrorMessage}
         </p>
       ) : null}
-      <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
+      <section
+        className="mt-8 rounded-md border border-[color:var(--review-primary)] bg-[var(--review-soft)] p-5"
+        style={reviewStyle}
+      >
         {latestDraft ? (
           <>
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
-                <p className="text-sm font-semibold text-moss">
+                <p className="text-sm font-semibold text-[var(--review-primary)]">
                   {dateRange ?? "Trip draft"}
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold text-ink">
@@ -1168,7 +1205,7 @@ function RealTripFirstPass({
                     : `We scanned ${pluralize(scannedCount, "item")} and found ${pluralize(reviewItems.length, "thing")} to review.`}
                 </p>
               </div>
-              <div className="rounded-md bg-paper px-4 py-3">
+              <div className="rounded-md bg-white/75 px-4 py-3 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-semibold text-ink">
                   <Palette size={16} />
                   {theme.name}
@@ -1287,6 +1324,7 @@ function RealTripFirstPass({
       {latestDraft && reviewedStructuredDraft ? (
         <StructuredRecordReview
           completedDecisionCount={reviewDecisions.length}
+          reviewStyle={reviewStyle}
           sections={structuredSections}
           tripId={tripId}
         />

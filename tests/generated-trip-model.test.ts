@@ -466,6 +466,46 @@ test("full-day overview cards are ignored while specific activities remain", () 
   assert.equal(summary.counts.activities, 1);
 });
 
+test("sightseeing route cards with named stops are not silently ignored", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2026-09-02",
+          description:
+            "Buda morning sightseeing with Fisherman's Bastion, Matthias Church, Castle Hill, and Shoes on the Danube listed as stops.",
+          itemType: "activity",
+          title: "Budapest morning sightseeing day",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Budapest",
+          country: "Hungary",
+          leaveDate: "2026-09-03",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-sightseeing-route-card",
+  });
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(records.items[0]?.status, "draft");
+  assert.equal(viewModel.cards.length, 1);
+  assert.equal(viewModel.cards[0]?.title, "Budapest morning sightseeing day");
+  assert.match(viewModel.cards[0]?.description ?? "", /Fisherman's Bastion/);
+});
+
 test("lodging arrival cards prevent duplicate synthetic check-ins", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -2048,7 +2088,11 @@ test("explicit source todo language on activity cards becomes an open review que
   assert.equal(question.targetField, "description");
   assert.equal(
     question.prompt,
-    "Have you chosen which ticket to get for Prague Castle?"
+    "Which ticket or tour option should be listed for Prague Castle?"
+  );
+  assert.equal(
+    question.reason,
+    "The source marks this activity detail as undecided, so this needs your choice."
   );
   assert.equal(getStructuredReviewCount(records), 1);
 });

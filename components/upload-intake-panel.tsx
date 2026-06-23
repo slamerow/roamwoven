@@ -103,11 +103,16 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
       >
         <UploadCloud className="text-tide" size={34} />
         <span className="mt-4 text-base font-semibold text-ink">
-          {isDragging ? "Drop them here" : "Drop files here or choose files"}
+          {isDragging
+            ? "Drop them here"
+            : files.length > 0
+              ? "Add more files"
+              : "Drop files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
-          For this parser pass, use PDFs, screenshots/images, text files, or
-          pasted notes.
+          {files.length > 0
+            ? "Your materials are queued below. Add another PDF, screenshot, image, text file, or note if needed."
+            : "For this parser pass, use PDFs, screenshots/images, text files, or pasted notes."}
         </span>
         <input
           ref={fileInputRef}

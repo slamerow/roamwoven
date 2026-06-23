@@ -109,11 +109,16 @@ export function CreateTripForm({ error }: { error?: string }) {
       >
         <UploadCloud className="text-tide" size={34} />
         <span className="mt-4 text-base font-semibold text-ink">
-          {isDragging ? "Drop them here" : "Drag files here or choose files"}
+          {isDragging
+            ? "Drop them here"
+            : files.length > 0
+              ? "Add more files"
+              : "Drag files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
-          Start with PDFs, screenshots/images, text files, or notes. Roamwoven
-          saves these now and waits until checkout to process them.
+          {files.length > 0
+            ? "Your materials are saved below. Add another PDF, screenshot, image, text file, or note if needed."
+            : "Start with PDFs, screenshots/images, text files, or notes. Roamwoven saves these now and waits until checkout to process them."}
         </span>
         <input
           ref={fileInputRef}

@@ -1782,7 +1782,7 @@ function createReviewQuestions({
         id: `${tripId}-explicit-todo-question-${index + 1}`,
         prompt,
         reason:
-          "The itinerary itself marks this activity detail as undecided, so Roamwoven will keep the card and ask once here.",
+          "The source marks this activity detail as undecided, so this needs your choice.",
         resolvedAt: null,
         sourceConfidence: "medium",
         status: "open",

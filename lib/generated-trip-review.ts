@@ -71,7 +71,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   return (
     item.itemType === "note" &&
     Boolean(item.legId) &&
-    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
+    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i.test(
       text
     )
   );
@@ -1128,7 +1128,7 @@ export function getStructuredReviewSections(
         answerType: question.answerType,
         detail: [
           question.guessedValue
-            ? `Roamwoven thinks the answer is ${question.guessedValue}.`
+            ? `Suggested answer: ${question.guessedValue}.`
             : null,
           question.evidence ? `Evidence: ${question.evidence}` : null,
           question.reason,
