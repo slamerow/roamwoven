@@ -791,12 +791,15 @@ function isFullDayOverviewCandidate({
     return false;
   }
 
-  const overviewTitle =
-    /\b(day \d+|overview|full day|day overview|today overview)\b/.test(
+  const explicitDayOnlyTitle =
+    /^day\s*\d+\s*[:.-]?\s*(overview|summary|plan|itinerary|agenda)?$/.test(
       titleText
-    ) ||
-    /\b(explore|sightseeing|wander|walking around)\b/.test(titleText) &&
-      /\b(day|morning|afternoon|evening)\b/.test(titleText);
+    );
+  const overviewTitle =
+    explicitDayOnlyTitle ||
+    /\b(day overview|today overview|full[-\s]?day overview|overview of the day|daily summary|day summary)\b/.test(
+      titleText
+    );
   const listLikeDescription =
     (description?.split(/,|;|\band\b|->|-/).filter((part) => part.trim().length > 4)
       .length ?? 0) >= 3;
@@ -820,7 +823,7 @@ function createExplicitTodoQuestionPrompt(item: TripItemRecord) {
   const text = [item.title, item.description].filter(Boolean).join(" ");
 
   if (/\bticket\b/i.test(text)) {
-    return `Have you chosen which ticket to get for ${item.title}?`;
+    return `Which ticket or tour option should be listed for ${item.title}?`;
   }
 
   if (/\b(time|start)\b/i.test(text)) {
@@ -1537,6 +1540,29 @@ function createReviewQuestions({
     return Boolean(subjectId);
   }
 
+  function isStatementStyleCall({
+    answerType,
+    guessedValue,
+    prompt,
+  }: {
+    answerType: TripReviewQuestionRecord["answerType"];
+    guessedValue: string | null;
+    prompt: string | null;
+  }) {
+    if (!guessedValue || !prompt || /\?\s*$/.test(prompt.trim())) {
+      return false;
+    }
+
+    const normalizedPrompt = normalizeText(prompt);
+
+    return (
+      answerType === "confirm" ||
+      /\b(appears|assumed|classified|kept|mapped|placed|set|split|treated|used)\b/.test(
+        normalizedPrompt
+      )
+    );
+  }
+
   function shouldTreatAsNote({
     answerType,
     confidence,
@@ -1568,6 +1594,10 @@ function createReviewQuestions({
     }
 
     if (subjectType === "trip" && guessedValue) {
+      return true;
+    }
+
+    if (isStatementStyleCall({ answerType, guessedValue, prompt })) {
       return true;
     }
 
@@ -1697,6 +1727,8 @@ function createReviewQuestions({
         ? "dismissed"
       : dismissOptionalDetail && !isExplicitSourceTodo
         ? "dismissed"
+        : isExplicitSourceTodo
+          ? "open"
         : shouldTreatAsNote({
         answerType,
         confidence,
