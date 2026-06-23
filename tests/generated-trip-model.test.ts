@@ -366,6 +366,87 @@ test("food reservations stay activities while loose food lists become tips", () 
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague beer hall ideas");
 });
 
+test("day-specific sightseeing clusters do not become city tips", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2026-09-02",
+          description:
+            "Great Synagogue, Jewish history, Gellert Baths, Pinball Museum, Konyv Bar, Tokaji, Mazel Tov restaurant, and the Hilton wine cellar are listed for the first Budapest day.",
+          itemType: "activity",
+          title: "Budapest first-day ideas",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Budapest",
+          country: "Hungary",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-day-specific-ideas",
+  });
+  const sections = getStructuredReviewSections(records);
+  const item = records.items[0];
+
+  assert.equal(item?.itemType, "activity");
+  assert.equal(item?.date, "2026-09-02");
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 0);
+  assert.equal(sections.find((section) => section.id === "activities")?.count, 1);
+});
+
+test("eat and food list headers can become city tips", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          date: "2026-09-02",
+          description:
+            "Eat: Country Life, trdelnik, Mistral Cafe, Malostranska Beseda, Cafe Louvre. Food: garlic soup or onion soup.",
+          itemType: "activity",
+          title: "Prague food notes",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-eat-food-tip",
+  });
+  const sections = getStructuredReviewSections(records);
+  const item = records.items[0];
+
+  assert.equal(item?.itemType, "note");
+  assert.equal(item?.date, null);
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
+});
+
 test("loose food ideas without a clear leg do not become city tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -1476,6 +1557,49 @@ test("optional transport provider gaps with usable anchors stay out of review", 
   assert.equal(notes?.count, 0);
 });
 
+test("optional transport provider gaps can dismiss without an exact related title", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence:
+            "Thursday, January 17th Kutna Hora. Pick up car at 9 am. Reservation number: 81486. Revolucni 1044/23.",
+          guessedValue: "car pickup at Revolucni 1044/23",
+          prompt:
+            "The car pickup has an address but no provider name. Use the pickup location as given and leave provider null.",
+          reason:
+            "The source gives the pickup time, reservation number, and address, but not the rental company.",
+          relatedTitle: null,
+          subjectType: "transport",
+          targetField: "provider",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          date: "2019-01-17",
+          departure: "Revolucni 1044/23",
+          title: "Rental car pickup",
+          type: "rental_car",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-provider-no-related-title",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("optional train operator gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -1737,10 +1861,56 @@ test("structured review summary uses maker-facing counts", () => {
     ]
   );
   assert.deepEqual(
+    sections.find((section) => section.id === "legs")?.summaryItems,
+    ["Paris · September 1-3, 2026"]
+  );
+  assert.deepEqual(
+    sections.find((section) => section.id === "stays")?.summaryItems,
+    [
+      "Left Bank Hotel\nCheck-in September 1, 2026 · Check-out September 3, 2026",
+    ]
+  );
+  assert.deepEqual(
     sections.find((section) => section.id === "transport")?.summaryItems,
     ["Fly to Paris · September 1, 2026"]
   );
   assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
+});
+
+test("leg leave dates infer from the next leg arrival when missing", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          country: "Czechia",
+        },
+        {
+          arriveDate: "2026-09-04",
+          city: "Vienna",
+          country: "Austria",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-leg-inferred-leave",
+  });
+  const sections = getStructuredReviewSections(records);
+
+  assert.equal(records.legs[0]?.leaveDate, "2026-09-04");
+  assert.deepEqual(sections.find((section) => section.id === "legs")?.summaryItems, [
+    "Prague · September 1-4, 2026",
+    "Vienna · September 4, 2026",
+  ]);
 });
 
 test("high-confidence parser calls become notes instead of review questions", () => {
@@ -1804,6 +1974,99 @@ test("high-confidence parser calls become notes instead of review questions", ()
     notes?.items[0]?.title,
     "We treated the first trip day as starting with the overnight flight on January 12."
   );
+});
+
+test("question-shaped stay prompts stay questions instead of calls", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "high",
+          evidence:
+            "The Prague Airbnb check-in appears after 3:00 PM on Monday, January 14th.",
+          guessedValue: "2019-01-14",
+          prompt:
+            "The Prague Airbnb check-in is after 3:00 PM on Monday, January 14th. Should we treat January 14th as the first night in Prague.",
+          reason:
+            "The source implies this from check-in sequence but asks for treatment as first night.",
+          relatedTitle: "Prague Airbnb",
+          subjectType: "stay",
+          targetField: "checkInDate",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2019-01-14",
+          name: "Prague Airbnb",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-question-shaped-call",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.equal(getStructuredReviewCount(records), 1);
+});
+
+test("routine DCA JFK FCO transport label prompts are dismissed", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence:
+            "Saturday, January 12th: DCA -> JFK 5:00 PM -> 6:41 PM. Delta Flight 444 JFK -> FCO 7:46 PM -> 10:15 AM Sunday, January 13th.",
+          guessedValue:
+            "Washington, D.C. area airport departure before the JFK connection.",
+          prompt:
+            "The first flight begins at DCA and connects through JFK. What should we use as the departure airport/city for the trip overview or transport record?",
+          reason:
+            "The source shows DCA, but not the city label or any broader airport naming beyond the code.",
+          relatedTitle: "DCA to JFK",
+          subjectType: "transport",
+          targetField: "departure",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "JFK",
+          date: "2019-01-12",
+          departure: "DCA",
+          title: "DCA to JFK",
+          type: "flight",
+        },
+        {
+          arrival: "FCO",
+          date: "2019-01-12",
+          departure: "JFK",
+          title: "JFK to FCO",
+          type: "flight",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-routine-dca-jfk-fco",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("review decisions update structured records", () => {
@@ -2095,6 +2358,47 @@ test("explicit source todo language on activity cards becomes an open review que
     "The source marks this activity detail as undecided, so this needs your choice."
   );
   assert.equal(getStructuredReviewCount(records), 1);
+});
+
+test("grouped route cards keep specific unresolved ticket questions recoverable", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-16",
+          description:
+            "Walking route through Lesser Town, St. Vitus Cathedral, and Prague Castle. Prague Castle: Need to decide which ticket to get.",
+          itemType: "activity",
+          title: "Prague Castle and Lesser Town",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-15",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        destinationSummary: "Prague",
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-grouped-prague-ticket",
+  });
+
+  assert.equal(records.reviewQuestions.length, 1);
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.equal(
+    records.reviewQuestions[0]?.prompt,
+    "Which ticket or tour option should be listed for Prague Castle?"
+  );
 });
 
 test("model-supplied source todo questions stay open and do not duplicate fallback questions", () => {

@@ -241,12 +241,13 @@ function isDismissibleOptionalMissingDetail({
   subjectType: TripReviewQuestionRecord["subjectType"];
   targetField: string | null;
 }) {
-  if (!subjectId) {
-    return false;
-  }
-
   const target = targetField?.toLowerCase().split("/").pop() ?? "";
   const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
+  const hasTextualTransportAnchor =
+    subjectType === "transport" &&
+    /\b(address|airport|confirmation|location|pickup|pick up|reservation|route|station|\d{1,2}\s*(am|pm))\b/.test(
+      text
+    );
 
   const optionalLabelPattern =
     /\b(address|company|location|name|operator|provider|title|url|website)\b/;
@@ -254,7 +255,8 @@ function isDismissibleOptionalMissingDetail({
     /\b(cannot|can't|critical|essential|material|required|unusable|where)\b|not identifiable|hard to identify|can't identify|cannot identify/;
 
   if (
-    !hasUsableAnchor ||
+    (!subjectId && !hasTextualTransportAnchor) ||
+    (!hasUsableAnchor && !hasTextualTransportAnchor) ||
     !optionalLabelPattern.test(`${target} ${text}`) ||
     materialGapPattern.test(text)
   ) {
@@ -733,11 +735,15 @@ function findLegForText(
 }
 
 function isCityTipCandidate({
+  category,
+  date,
   description,
   itemType,
   startTime,
   title,
 }: {
+  category: string | null;
+  date: string | null;
   description: string | null;
   itemType: TripItemType;
   startTime: string | null;
@@ -757,8 +763,30 @@ function isCityTipCandidate({
     return false;
   }
 
+  const normalizedCategory = normalizeText(category);
+  const genericTipHeader =
+    /\b(eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
+      text
+    );
+  const daySpecificCluster =
+    /\b(first[-\s]?day|second[-\s]?day|third[-\s]?day|day \d+|for the .* day|morning|afternoon|evening)\b/.test(
+      text
+    );
+
+  if (
+    date &&
+    daySpecificCluster &&
+    !genericTipHeader &&
+    normalizedCategory !== "food dining" &&
+    normalizedCategory !== "food_dining" &&
+    normalizedCategory !== "shopping tailor" &&
+    normalizedCategory !== "shopping_tailor"
+  ) {
+    return false;
+  }
+
   return (
-    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options)\b/.test(
+    /\b(tips?|ideas?|recommendations?|eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
       text
     ) &&
     /\b(city|food|eat|restaurant|cafe|coffee|bar|beer|hall|drink|shop|shopping|local)\b/.test(
@@ -819,11 +847,33 @@ function hasExplicitSourceTodoText(...values: Array<string | null>) {
   ) || (/\btbd\b/.test(text) && /\b(ticket|time|book|booking|reserve|reservation|option|tour)\b/.test(text));
 }
 
+function getExplicitTodoQuestionSubject(item: TripItemRecord) {
+  const text = [item.description, item.title].filter(Boolean).join(" ");
+
+  if (/\bticket\b/i.test(text)) {
+    const colonSubject = text.match(
+      /\b([A-Z][A-Za-z'&]+(?:\s+[A-Z][A-Za-z'&]+){0,5})\s*:\s*(?:[Nn]eed to decide|.*which ticket)/
+    );
+    const ticketSubject = text.match(
+      /\b(?:which|what|choose|chosen)?\s*([A-Z][A-Za-z'&]+(?:\s+[A-Z][A-Za-z'&]+){0,5})\s+(?:ticket|tickets|tour option|tour options?)\b/
+    );
+    const subject =
+      cleanTravelerText(colonSubject?.[1] ?? null) ??
+      cleanTravelerText(ticketSubject?.[1] ?? null);
+
+    if (subject) {
+      return subject;
+    }
+  }
+
+  return item.title;
+}
+
 function createExplicitTodoQuestionPrompt(item: TripItemRecord) {
   const text = [item.title, item.description].filter(Boolean).join(" ");
 
   if (/\bticket\b/i.test(text)) {
-    return `Which ticket or tour option should be listed for ${item.title}?`;
+    return `Which ticket or tour option should be listed for ${getExplicitTodoQuestionSubject(item)}?`;
   }
 
   if (/\b(time|start)\b/i.test(text)) {
@@ -1000,23 +1050,38 @@ function createLegRecords({
   draft: unknown;
   tripId: string;
 }): TripLegRecord[] {
-  return getArray(draft, "places").map((item, index) => {
+  const places = getArray(draft, "places");
+
+  return places.map((item, index) => {
     const place = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
+    const nextPlace = places[index + 1];
+    const nextPlaceObject =
+      nextPlace && typeof nextPlace === "object" && !Array.isArray(nextPlace)
+        ? (nextPlace as DraftObject)
+        : null;
     const city = getString(place, "city") ?? `Stop ${index + 1}`;
     const country = getString(place, "country");
     const key = slugify([city, country].filter(Boolean).join("-"));
+    const arriveDate = getString(place, "arriveDate");
+    const explicitLeaveDate = getString(place, "leaveDate");
+    const nextArriveDate = getString(nextPlaceObject, "arriveDate");
+    const leaveDate =
+      explicitLeaveDate ??
+      (arriveDate && nextArriveDate && nextArriveDate > arriveDate
+        ? nextArriveDate
+        : null);
 
     return {
-      arriveDate: getString(place, "arriveDate"),
+      arriveDate,
       city,
       country,
       displayName: city,
       id: `${tripId}-leg-${key}-${index + 1}`,
       language: null,
       latitude: null,
-      leaveDate: getString(place, "leaveDate"),
+      leaveDate,
       legKey: key,
       longitude: null,
       region: null,
@@ -1178,7 +1243,10 @@ function createItemRecords({
     );
     const startTime = getString(activity, "startTime");
     const endTime = getString(activity, "endTime");
+    const sourceCategory = getString(activity, "category");
     const cityTipCandidate = isCityTipCandidate({
+      category: sourceCategory,
+      date,
       description,
       itemType: originalItemType,
       startTime,
@@ -1198,7 +1266,7 @@ function createItemRecords({
     const finalDate = cityTip ? null : date;
     const leg = candidateLeg;
     const categoryId = normalizeCategoryId({
-      category: getString(activity, "category"),
+      category: sourceCategory,
       description,
       itemType,
       title,
@@ -1540,6 +1608,59 @@ function createReviewQuestions({
     return Boolean(subjectId);
   }
 
+  function isRoutineTransportExtractionDetail({
+    evidence,
+    hasUsableAnchor,
+    prompt,
+    reason,
+    subjectType,
+    targetField,
+  }: {
+    evidence: string | null;
+    hasUsableAnchor: boolean;
+    prompt: string | null;
+    reason: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+    targetField: string | null;
+  }) {
+    if (subjectType !== "transport") {
+      return false;
+    }
+
+    const target = targetField?.toLowerCase() ?? "";
+    const text = [prompt, reason, evidence, targetField]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const hasTextualTransportAnchor =
+      /\b(airport|bus|confirmation|connection|connects?|drive|ferry|flight|pickup|pick up|reservation|route|station|train|transfer|dca|jfk|fco)\b/.test(
+        text
+      );
+
+    if (!hasUsableAnchor && !hasTextualTransportAnchor) {
+      return false;
+    }
+
+    if (/\b(no hotel|first night|first trip night|sleep on|overnight)\b/.test(text)) {
+      return false;
+    }
+
+    if (
+      (target.includes("departure") || target.includes("arrival")) &&
+      /\b(airport\/city|broader airport|city label|airport naming|beyond the code|airport code)\b/.test(
+        text
+      )
+    ) {
+      return true;
+    }
+
+    return (
+      /\b(two flight cards|two flight legs|split|connection|connects? through|kept .* legs?)\b/.test(
+        text
+      ) && /\b(airport|flight|dca|jfk|fco)\b/.test(text)
+    );
+  }
+
   function isStatementStyleCall({
     answerType,
     guessedValue,
@@ -1560,6 +1681,29 @@ function createReviewQuestions({
       /\b(appears|assumed|classified|kept|mapped|placed|set|split|treated|used)\b/.test(
         normalizedPrompt
       )
+    );
+  }
+
+  function isQuestionShapedPrompt(prompt: string | null) {
+    if (!prompt) {
+      return false;
+    }
+
+    const normalizedPrompt = normalizeText(prompt);
+
+    return (
+      /\?\s*$/.test(prompt.trim()) ||
+      /\b(should we|do you want|what should we use|would you like|can we treat|should roamwoven)\b/.test(
+        normalizedPrompt
+      )
+    );
+  }
+
+  function isLegacyConfirmableCallPrompt(prompt: string | null) {
+    return Boolean(
+      prompt &&
+        /^this looks like\b/i.test(prompt.trim()) &&
+        /\bis that right\?\s*$/i.test(prompt.trim())
     );
   }
 
@@ -1585,6 +1729,13 @@ function createReviewQuestions({
     targetField: string | null;
   }) {
     const normalizedTarget = targetField?.toLowerCase() ?? "";
+
+    if (
+      isQuestionShapedPrompt(prompt) &&
+      !(confidence === "high" && isLegacyConfirmableCallPrompt(prompt))
+    ) {
+      return false;
+    }
 
     if (
       normalizedTarget.includes("visibility") ||
@@ -1708,6 +1859,14 @@ function createReviewQuestions({
       subjectType,
       targetField,
     });
+    const dismissRoutineTransportDetail = isRoutineTransportExtractionDetail({
+      evidence,
+      hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
+      prompt,
+      reason,
+      subjectType,
+      targetField,
+    });
 
     const status: TripReviewQuestionRecord["status"] = isObviousFactCall({
       confidence,
@@ -1724,6 +1883,8 @@ function createReviewQuestions({
         subjectType,
         targetField,
       })
+        ? "dismissed"
+      : dismissRoutineTransportDetail
         ? "dismissed"
       : dismissOptionalDetail && !isExplicitSourceTodo
         ? "dismissed"

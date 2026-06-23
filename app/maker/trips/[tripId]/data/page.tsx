@@ -718,81 +718,6 @@ function StructuredRecordReview({
         </div>
       </div>
 
-      {noteSections.length > 0 ? (
-        <section className="mt-5 rounded-md border border-[color:var(--review-primary)] bg-white/70 p-4">
-          <div className="flex items-start gap-3">
-            <ListChecks
-              className="mt-0.5 shrink-0 text-[var(--review-primary)]"
-              size={18}
-            />
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold text-ink">
-                  Calls we made
-                </h3>
-                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[var(--review-primary)]">
-                  {pluralize(
-                    noteSections.reduce(
-                      (count, section) => count + section.summaryItems.length,
-                      0
-                    ),
-                    "call"
-                  )}
-                </span>
-              </div>
-              <p className="mt-1 text-sm leading-6 text-ink/60">
-                These are reasonable itinerary calls Roamwoven used to keep the
-                draft moving. No action needed unless something looks wrong.
-              </p>
-              <div className="mt-3 grid gap-2">
-                {noteSections.flatMap((section) =>
-                  section.items.slice(0, 6).map((item) => (
-                    <div
-                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
-                      key={item.id}
-                    >
-                      <p>{item.title}</p>
-                      {item.detail ? (
-                        <details className="mt-2">
-                          <summary className="cursor-pointer text-ink/45">
-                            Evidence and details
-                          </summary>
-                          <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
-                            {item.detail.split("\n").map((line) => (
-                              <p className="font-medium text-ink/55" key={line}>
-                                {line.trim()}
-                              </p>
-                            ))}
-                          </div>
-                        </details>
-                      ) : null}
-                      <ReviewEditForm
-                        item={item}
-                        summaryLabel="Edit call"
-                        tripId={tripId}
-                      />
-                    </div>
-                  ))
-                )}
-                {noteSections.reduce(
-                  (count, section) => count + section.items.length,
-                  0
-                ) > 6 ? (
-                  <p className="px-3 text-xs font-semibold text-ink/40">
-                    +
-                    {noteSections.reduce(
-                      (count, section) => count + section.items.length,
-                      0
-                    ) - 6}{" "}
-                    more
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         {foundSections.map((section) => {
           const Icon = sectionIcons[section.id] ?? Sparkles;
@@ -870,6 +795,81 @@ function StructuredRecordReview({
           );
         })}
       </div>
+
+      {noteSections.length > 0 ? (
+        <section className="mt-5 rounded-md border border-[color:var(--review-primary)] bg-white/70 p-4">
+          <div className="flex items-start gap-3">
+            <ListChecks
+              className="mt-0.5 shrink-0 text-[var(--review-primary)]"
+              size={18}
+            />
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-ink">
+                  Calls we made
+                </h3>
+                <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[var(--review-primary)]">
+                  {pluralize(
+                    noteSections.reduce(
+                      (count, section) => count + section.summaryItems.length,
+                      0
+                    ),
+                    "call"
+                  )}
+                </span>
+              </div>
+              <p className="mt-1 text-sm leading-6 text-ink/60">
+                These are reasonable itinerary calls Roamwoven used to keep the
+                draft moving. No action needed unless something looks wrong.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {noteSections.flatMap((section) =>
+                  section.items.slice(0, 6).map((item) => (
+                    <div
+                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
+                      key={item.id}
+                    >
+                      <p>{item.title}</p>
+                      {item.detail ? (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-ink/45">
+                            Evidence and details
+                          </summary>
+                          <div className="mt-2 space-y-1 border-t border-ink/10 pt-2">
+                            {item.detail.split("\n").map((line) => (
+                              <p className="font-medium text-ink/55" key={line}>
+                                {line.trim()}
+                              </p>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                      <ReviewEditForm
+                        item={item}
+                        summaryLabel="Edit call"
+                        tripId={tripId}
+                      />
+                    </div>
+                  ))
+                )}
+                {noteSections.reduce(
+                  (count, section) => count + section.items.length,
+                  0
+                ) > 6 ? (
+                  <p className="px-3 text-xs font-semibold text-ink/40">
+                    +
+                    {noteSections.reduce(
+                      (count, section) => count + section.items.length,
+                      0
+                    ) - 6}{" "}
+                    more
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-6 border-t border-ink/10 pt-5">
         <h3 className="text-lg font-semibold text-ink">Needs review</h3>

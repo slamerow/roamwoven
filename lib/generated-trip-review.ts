@@ -67,6 +67,23 @@ function needsRecordReview(record: { reviewRequired: boolean; status: TripRecord
 
 function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   const text = [item.title, item.description].filter(Boolean).join(" ");
+  const daySpecificCluster =
+    /\b(first[-\s]?day|second[-\s]?day|third[-\s]?day|day \d+|for the .* day|morning|afternoon|evening)\b/i.test(
+      text
+    );
+  const genericTipHeader =
+    /\b(eat\s*:|food\s*:|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i.test(
+      text
+    );
+
+  if (
+    daySpecificCluster &&
+    !genericTipHeader &&
+    item.categoryId !== "food_dining" &&
+    item.categoryId !== "shopping_tailor"
+  ) {
+    return false;
+  }
 
   return (
     item.itemType === "note" &&
@@ -766,7 +783,7 @@ export function getStructuredReviewSections(
     },
     {
       count: records.stays.filter((stay) => isActiveStatus(stay.status)).length,
-      description: "Lodging records with dates, public labels, addresses, and access privacy.",
+      description: "Lodging records with check-in, check-out, and stay privacy.",
       emptyDetail: "No stay decisions needed.",
       id: "stays",
       items: records.stays
@@ -820,20 +837,19 @@ export function getStructuredReviewSections(
         .map((stay) =>
           [
             stay.name,
-            formatReviewDateRange(stay.checkInDate, stay.checkOutDate) ||
-              [
-                stay.checkInDate
-                  ? `Check-in ${formatReviewDateValue(stay.checkInDate)}`
-                  : null,
-                stay.checkOutDate
-                  ? `Check-out ${formatReviewDateValue(stay.checkOutDate)}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(" · "),
+            [
+              stay.checkInDate
+                ? `Check-in ${formatReviewDateValue(stay.checkInDate)}`
+                : null,
+              stay.checkOutDate
+                ? `Check-out ${formatReviewDateValue(stay.checkOutDate)}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
           ]
             .filter(Boolean)
-            .join(" · ")
+            .join("\n")
         ),
       title: "Stays",
     },
