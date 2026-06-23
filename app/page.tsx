@@ -116,8 +116,8 @@ export default function HomePage() {
           <p className="mt-5 max-w-2xl text-lg leading-8 text-ink/75">
             I&apos;m a travel planning nerd. When I took my family on a five-month
             sabbatical across 11 countries, I used AI to build the travel app
-            of my dreams. Roamwoven lets you build your own superapp in just 30
-            to 60 minutes.
+            of my dreams. Roamwoven lets you build your own superapp in just 15
+            to 20 minutes.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
