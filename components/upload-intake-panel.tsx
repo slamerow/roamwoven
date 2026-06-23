@@ -106,8 +106,8 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
           {isDragging ? "Drop them here" : "Drop files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
-          PDFs, screenshots, Word docs, spreadsheets, and saved confirmations all
-          belong here.
+          For this parser pass, use PDFs, screenshots/images, text files, or
+          pasted notes.
         </span>
         <input
           ref={fileInputRef}

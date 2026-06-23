@@ -112,9 +112,8 @@ export function CreateTripForm({ error }: { error?: string }) {
           {isDragging ? "Drop them here" : "Drag files here or choose files"}
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
-          Start with PDFs, screenshots, confirmations, docs, spreadsheets, or
-          notes. Roamwoven saves these now and waits until checkout to process
-          them.
+          Start with PDFs, screenshots/images, text files, or notes. Roamwoven
+          saves these now and waits until checkout to process them.
         </span>
         <input
           ref={fileInputRef}

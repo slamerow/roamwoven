@@ -27,6 +27,7 @@ import {
   type TripDraftSnapshot,
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
+import { canSeedInitialExtraction } from "@/lib/extraction/material-capabilities";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
   formatStructuredDiscoverySummary,
@@ -1005,7 +1006,7 @@ function getExtractionErrorMessage(error?: string) {
   }
 
   if (error === "no-text-materials") {
-    return "No pasted notes, plain text files, or readable text-based PDFs are available for this parser pass.";
+    return "No pasted notes, plain text files, PDFs, or supported image files are available for this parser pass.";
   }
 
   if (error === "ocr-needed") {
@@ -1079,16 +1080,8 @@ function RealTripFirstPass({
 }) {
   const noteCount = uploads.filter((upload) => upload.storagePath === null).length;
   const fileCount = uploads.length - noteCount;
-  const textMaterialCount = uploads.filter(
-    (upload) =>
-      upload.userNote?.trim() ||
-      (upload.storagePath &&
-        ((upload.fileType === "text/plain" &&
-          Number(upload.fileSizeBytes ?? 0) <= 250 * 1024) ||
-          (upload.fileType === "application/pdf" &&
-            Number(upload.fileSizeBytes ?? 0) <= 10 * 1024 * 1024)))
-  ).length;
-  const canExtract = extractionEnabled && textMaterialCount > 0;
+  const extractionReadyMaterialCount = uploads.filter(canSeedInitialExtraction).length;
+  const canExtract = extractionEnabled && extractionReadyMaterialCount > 0;
   const latestRunFailed = latestRun?.status === "failed";
   const extractionErrorMessage = getExtractionErrorMessage(error);
   const draft = latestDraft?.draftJson ?? null;
@@ -1281,7 +1274,7 @@ function RealTripFirstPass({
             />
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
-                ? "This one-time build reads pasted notes, plain text files, and readable text-based PDFs. Roamwoven blocks repeated builds for the same saved materials before another AI call can start."
+                ? "This one-time build reads pasted notes, plain text files, PDFs, and screenshots/images. Roamwoven tries OCR for scanned PDFs and images before the trip draft model runs."
                 : "AI extraction is not enabled for this trip in this environment."}
               {" "}Once a trip spine exists, later docs should update that spine instead of rebuilding from scratch.
             </p>
