@@ -165,7 +165,36 @@ function formatDestination(records: StructuredTripRecords) {
 }
 
 function formatTime(value: string | null) {
-  return value?.trim() ?? "";
+  const time = value?.trim();
+
+  if (!time) {
+    return "";
+  }
+
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+
+  if (!match) {
+    return time;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return time;
+  }
+
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
 function formatDayLabel(date: string, dayNumber: number) {
@@ -234,17 +263,6 @@ function createStayEntriesForDay(
     });
   }
 
-  if (stay.checkOutDate === date) {
-    entries.push({
-      detail: addressDetail,
-      id: `${stay.id}-check-out`,
-      kind: "stay",
-      meta: [stay.checkOutTime, "Check-out"].filter(Boolean).join(" · "),
-      needsReview: stay.reviewRequired,
-      title: `Check out: ${stay.name}`,
-    });
-  }
-
   return entries;
 }
 
@@ -264,6 +282,18 @@ function createActivityEntry(
   };
 }
 
+function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
+  const text = [item.title, item.description].filter(Boolean).join(" ");
+
+  return (
+    item.itemType === "note" &&
+    Boolean(item.legId) &&
+    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
+      text
+    )
+  );
+}
+
 function createSummaryDays(
   records: StructuredTripRecords,
   activeItems: StructuredTripRecords["items"]
@@ -276,7 +306,9 @@ function createSummaryDays(
     records.categories.map((category) => [category.id, category])
   );
   const datedItems = activeItems.filter((item) => item.date);
-  const undatedItems = activeItems.filter((item) => !item.date);
+  const undatedItems = activeItems.filter(
+    (item) => !item.date && !isLegLevelTip(item)
+  );
 
   const days = records.days
     .filter((day) => day.date !== "needs-placement")

@@ -63,6 +63,7 @@ type ProtectedTravelerDetail = {
 
 type TravelerItem = TravelerAppViewModel["cards"][number];
 type TravelerDay = TravelerAppViewModel["days"][number];
+type TravelerLeg = TravelerAppViewModel["legs"][number];
 type ActiveTab = TravelerTabId;
 type OverlayKind = "unlock" | TravelerToolId;
 
@@ -96,6 +97,105 @@ function getItemSensitivity(item: TravelerItem) {
 
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function parseIsoDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatShortDate(value: string | null) {
+  const date = parseIsoDate(value);
+
+  if (!date) {
+    return value ?? "";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function formatClockTime(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const [hourRaw, minuteRaw] = value.split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return value;
+  }
+
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
+function formatDayHeading(value: string | null) {
+  const date = parseIsoDate(value);
+
+  if (!date) {
+    return value ?? "Needs date";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    weekday: "short",
+  })
+    .format(date)
+    .toUpperCase();
+}
+
+function countNights(start: string | null, end: string | null) {
+  const startDate = parseIsoDate(start);
+  const endDate = parseIsoDate(end);
+
+  if (!startDate || !endDate || endDate <= startDate) {
+    return null;
+  }
+
+  return Math.round(
+    (endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)
+  );
+}
+
+function formatLegSubtitle(leg: TravelerLeg) {
+  const nights = countNights(leg.arriveDate, leg.leaveDate);
+
+  return [
+    leg.dateRange,
+    nights ? formatCount(nights, "night") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatLegActivityMeta(item: TravelerItem) {
+  return [
+    formatShortDate(item.date),
+    [item.time, formatClockTime(item.endTime)].filter(Boolean).join(" - "),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function categoryEmoji(category: string | null | undefined) {
@@ -483,7 +583,13 @@ function TodayPanel({
   );
 }
 
-function LegsPanel({ trip }: { trip: TravelerAppViewModel }) {
+function LegsPanel({
+  onSelect,
+  trip,
+}: {
+  onSelect: (leg: TravelerLeg) => void;
+  trip: TravelerAppViewModel;
+}) {
   return (
     <div className="space-y-3">
       {trip.legs.map((leg, index) => (
@@ -491,16 +597,22 @@ function LegsPanel({ trip }: { trip: TravelerAppViewModel }) {
           className="relative flex w-full items-center justify-between overflow-hidden rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 pl-5 text-left shadow-[var(--shadow-card)] outline outline-1 outline-black/5 transition hover:-translate-y-0.5"
           key={leg.id}
           type="button"
+          onClick={() => onSelect(leg)}
         >
           <span className="absolute bottom-0 right-0 top-0 w-2 bg-[var(--color-brass)]" />
           <span className="min-w-0">
             <span className="truncate text-lg font-semibold">{leg.city}</span>
             <span className="mt-1 block text-sm text-[var(--color-muted)]">
-              {[leg.arriveDate, leg.leaveDate].filter(Boolean).join(" - ")} ·{" "}
-              {leg.country}
+              {[formatLegSubtitle(leg), leg.country].filter(Boolean).join(" · ")}
             </span>
             <span className="mt-1 block truncate text-sm text-[var(--color-muted)]">
-              {leg.stayName ?? "Stay details"}
+              {[
+                leg.stayName ?? "Stay details",
+                leg.cardCount ? formatCount(leg.cardCount, "activity", "activities") : null,
+                leg.tips.length > 0 ? formatCount(leg.tips.length, "tip") : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           </span>
           {index === 0 ? (
@@ -690,6 +802,125 @@ function PhraseTool() {
   );
 }
 
+function LegDetail({
+  leg,
+  onClose,
+  onOpenPhotos,
+  onSelectItem,
+  unlocked,
+}: {
+  leg: TravelerLeg;
+  onClose: () => void;
+  onOpenPhotos: () => void;
+  onSelectItem: (item: TravelerItem) => void;
+  unlocked: boolean;
+}) {
+  return (
+    <Overlay closeLabel="Close leg" onClose={onClose}>
+      <p className="text-sm font-semibold text-[var(--color-muted)]">
+        {formatLegSubtitle(leg)}
+      </p>
+      <h2 className="mt-4 text-5xl font-semibold leading-none">{leg.city}</h2>
+      {leg.country ? (
+        <p className="mt-4 text-2xl font-bold text-[var(--color-leather)]">
+          {leg.country}
+        </p>
+      ) : null}
+
+      <button
+        className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-green)] px-4 py-4 text-base font-semibold text-white shadow-lg shadow-emerald-950/20"
+        type="button"
+        onClick={onOpenPhotos}
+      >
+        <Images size={19} />
+        Photos from {leg.city}
+      </button>
+
+      <section className="mt-7 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-bold text-[var(--color-muted)]">
+              <MapPin size={16} />
+              Stay
+            </p>
+            <h3 className="mt-3 text-xl font-semibold">
+              {leg.stayName ?? "Stay details"}
+            </h3>
+            {unlocked && leg.stayAddress ? (
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                {leg.stayAddress}
+              </p>
+            ) : null}
+          </div>
+          <ChevronRight className="shrink-0 text-[var(--color-muted)]" size={20} />
+        </div>
+      </section>
+
+      {leg.tips.length > 0 ? (
+        <section className="mt-7">
+          <p className="text-lg font-semibold">City tips</p>
+          <div className="mt-3 space-y-3">
+            {leg.tips.map((tip) => (
+              <article
+                className="rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)]"
+                key={tip.id}
+              >
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-leather)]">
+                  {tip.categoryLabel}
+                </p>
+                <h3 className="mt-2 text-lg font-semibold">{tip.title}</h3>
+                {tip.description ? (
+                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                    {tip.description}
+                  </p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="mt-8 space-y-7">
+        {leg.days.length > 0 ? (
+          leg.days.map((day) => (
+            <section key={day.id}>
+              <p className="text-lg font-semibold text-[var(--color-leather)]">
+                {formatDayHeading(day.date)}
+              </p>
+              <div className="mt-3 space-y-3">
+                {day.cards.map((item) => (
+                  <button
+                    className="w-full rounded-xl border border-white/70 bg-[var(--color-surface)] p-4 text-left shadow-[var(--shadow-card)] outline outline-1 outline-black/5"
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelectItem(item)}
+                  >
+                    <p className="text-sm font-semibold text-[var(--color-muted)]">
+                      {formatLegActivityMeta(item)}
+                    </p>
+                    <h3 className="mt-2 text-xl font-semibold leading-snug">
+                      {item.title}
+                    </h3>
+                    {item.description ? (
+                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--color-muted)]">
+                        {item.description}
+                      </p>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))
+        ) : (
+          <p className="rounded-xl border border-white/60 bg-[var(--color-surface)] p-4 text-sm font-semibold text-[var(--color-muted)] shadow-[var(--shadow-card)]">
+            Activities for this leg will appear here once they are added.
+          </p>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
 function ActivityDetail({
   protectedDetails,
   item,
@@ -759,6 +990,7 @@ export function TravelerAppShell({
     Record<string, ProtectedTravelerDetail>
   >({});
   const [selectedItem, setSelectedItem] = useState<TravelerItem | null>(null);
+  const [selectedLeg, setSelectedLeg] = useState<TravelerLeg | null>(null);
   const todayDay = trip.days[0];
   const categories = useMemo(() => categoriesForTrip(trip), [trip]);
   const publicProtectedDetailsById = useMemo(
@@ -929,7 +1161,9 @@ export function TravelerAppShell({
               unlocked={unlocked}
             />
           ) : null}
-          {activeTab === "legs" ? <LegsPanel trip={trip} /> : null}
+          {activeTab === "legs" ? (
+            <LegsPanel onSelect={setSelectedLeg} trip={trip} />
+          ) : null}
           {activeTab === "categories" ? (
             <CategoriesPanel categories={categories} />
           ) : null}
@@ -993,6 +1227,22 @@ export function TravelerAppShell({
               .filter(
                 (detail): detail is ProtectedTravelerDetail => Boolean(detail)
               )}
+            unlocked={unlocked}
+          />
+        ) : null}
+
+        {selectedLeg ? (
+          <LegDetail
+            leg={selectedLeg}
+            onClose={() => setSelectedLeg(null)}
+            onOpenPhotos={() => {
+              setSelectedLeg(null);
+              setOverlay("photos");
+            }}
+            onSelectItem={(item) => {
+              setSelectedLeg(null);
+              setSelectedItem(item);
+            }}
             unlocked={unlocked}
           />
         ) : null}

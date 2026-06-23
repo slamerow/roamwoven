@@ -46,6 +46,18 @@ function getString(value: DraftObject | null, key: string) {
   return typeof child === "string" && child.trim() ? child.trim() : null;
 }
 
+function getStringFromKeys(value: DraftObject | null, keys: string[]) {
+  for (const key of keys) {
+    const child = getString(value, key);
+
+    if (child) {
+      return child;
+    }
+  }
+
+  return null;
+}
+
 function getNumber(value: DraftObject | null, key: string) {
   const child = value?.[key];
 
@@ -647,6 +659,155 @@ function normalizeText(value: string | null) {
     .trim() ?? "";
 }
 
+function ordinalSuffix(day: number) {
+  if (day % 100 >= 11 && day % 100 <= 13) {
+    return "th";
+  }
+
+  if (day % 10 === 1) {
+    return "st";
+  }
+
+  if (day % 10 === 2) {
+    return "nd";
+  }
+
+  if (day % 10 === 3) {
+    return "rd";
+  }
+
+  return "th";
+}
+
+function formatReadableDate(year: string, month: string, day: string) {
+  const parsed = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day))
+  );
+
+  if (Number.isNaN(parsed.getTime())) {
+    return `${year}-${month}-${day}`;
+  }
+
+  const monthName = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  }).format(parsed);
+  const dayNumber = parsed.getUTCDate();
+
+  return `${monthName} ${dayNumber}${ordinalSuffix(dayNumber)}, ${parsed.getUTCFullYear()}`;
+}
+
+function cleanTravelerText(value: string | null) {
+  return value
+    ?.replace(/\b(\d{4})(\d{2})(\d{2})\b/g, (_match, year, month, day) =>
+      formatReadableDate(year, month, day)
+    )
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (_match, year, month, day) =>
+      formatReadableDate(year, month, day)
+    )
+    .replace(/\bsource notes?\b/gi, "trip notes")
+    .trim() ?? null;
+}
+
+function findLegForText(
+  legs: TripLegRecord[],
+  title: string,
+  description: string | null
+) {
+  const text = normalizeText([title, description].filter(Boolean).join(" "));
+
+  if (!text) {
+    return null;
+  }
+
+  return (
+    legs.find((leg) =>
+      [leg.displayName, leg.city, leg.country]
+        .filter(Boolean)
+        .some((value) => {
+          const normalized = normalizeText(value ?? null);
+          return Boolean(normalized) && text.includes(normalized);
+        })
+    ) ?? null
+  );
+}
+
+function isCityTipCandidate({
+  description,
+  itemType,
+  startTime,
+  title,
+}: {
+  description: string | null;
+  itemType: TripItemType;
+  startTime: string | null;
+  title: string;
+}) {
+  const text = normalizeText([title, description].filter(Boolean).join(" "));
+
+  if (!text || startTime) {
+    return false;
+  }
+
+  if (
+    /\b(reservation|reserved|booked|booking|ticket|tickets|tour|timed|meet|pickup|pick up|at \d{1,2})\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|check out foods like|good beer halls|beer halls are|food options|drink options)\b/.test(
+      text
+    ) &&
+    /\b(city|food|eat|restaurant|cafe|coffee|bar|beer|hall|drink|shop|shopping|local)\b/.test(
+      text
+    )
+  );
+}
+
+function isFullDayOverviewCandidate({
+  description,
+  endTime,
+  itemType,
+  startTime,
+  title,
+}: {
+  description: string | null;
+  endTime: string | null;
+  itemType: TripItemType;
+  startTime: string | null;
+  title: string;
+}) {
+  if (itemType === "note" || startTime || endTime) {
+    return false;
+  }
+
+  const titleText = normalizeText(title);
+  const text = normalizeText([title, description].filter(Boolean).join(" "));
+
+  if (!text) {
+    return false;
+  }
+
+  const overviewTitle =
+    /\b(day \d+|overview|full day|day overview|today overview)\b/.test(
+      titleText
+    ) ||
+    /\b(explore|sightseeing|wander|walking around)\b/.test(titleText) &&
+      /\b(day|morning|afternoon|evening)\b/.test(titleText);
+  const listLikeDescription =
+    (description?.split(/,|;|\band\b|->|-/).filter((part) => part.trim().length > 4)
+      .length ?? 0) >= 3;
+  const materialStandaloneSignal =
+    /\b(reservation|reserved|booked|booking|ticket|tickets|entry|timed|tour|guided|confirmation)\b/.test(
+      text
+    );
+
+  return overviewTitle && listLikeDescription && !materialStandaloneSignal;
+}
+
 function hasExplicitSourceTodoText(...values: Array<string | null>) {
   const text = values.filter(Boolean).join(" ").toLowerCase();
 
@@ -952,13 +1113,14 @@ function createTransportRecords({
     const transport = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const title = getString(transport, "title") ?? `Transport ${index + 1}`;
+    const title =
+      cleanTravelerText(getString(transport, "title")) ?? `Transport ${index + 1}`;
     const date = getString(transport, "date");
     const leg = findLegForDate(legs, date);
 
     return {
       arrivalLocation: getString(transport, "arrival"),
-      arrivalTime: null,
+      arrivalTime: getStringFromKeys(transport, ["arrivalTime", "endTime"]),
       bookingUrl: null,
       bookingUrlVisibility: "traveler_password",
       confirmationLabel: getString(transport, "confirmation"),
@@ -967,8 +1129,12 @@ function createTransportRecords({
         : "public",
       date,
       departureLocation: getString(transport, "departure"),
-      departureTime: null,
-      description: null,
+      departureTime: getStringFromKeys(transport, [
+        "departureTime",
+        "startTime",
+        "time",
+      ]),
+      description: cleanTravelerText(getString(transport, "description")),
       fromLegId: null,
       id: `${tripId}-transport-${slugify(title)}-${index + 1}`,
       legId: leg?.id ?? null,
@@ -998,15 +1164,34 @@ function createItemRecords({
     const activity = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const title = getString(activity, "title") ?? `Activity ${index + 1}`;
-    const description = getString(activity, "description");
+    const title =
+      cleanTravelerText(getString(activity, "title")) ?? `Activity ${index + 1}`;
+    const description = cleanTravelerText(getString(activity, "description"));
     const date = getString(activity, "date");
-    const leg = findLegForDate(legs, date);
-    const itemType = normalizeItemType(
+    const originalItemType = normalizeItemType(
       getString(activity, "itemType"),
       title,
       description
     );
+    const startTime = getString(activity, "startTime");
+    const endTime = getString(activity, "endTime");
+    const cityTip = isCityTipCandidate({
+      description,
+      itemType: originalItemType,
+      startTime,
+      title,
+    });
+    const itemType = cityTip ? "note" : originalItemType;
+    const fullDayOverview = isFullDayOverviewCandidate({
+      description,
+      endTime,
+      itemType,
+      startTime,
+      title,
+    });
+    const finalDate = cityTip ? null : date;
+    const leg =
+      findLegForDate(legs, date) ?? findLegForText(legs, title, description);
     const categoryId = normalizeCategoryId({
       category: getString(activity, "category"),
       description,
@@ -1017,9 +1202,9 @@ function createItemRecords({
     return {
       address: getString(activity, "address"),
       categoryId,
-      date,
+      date: finalDate,
       description,
-      endTime: getString(activity, "endTime"),
+      endTime,
       id: `${tripId}-item-${slugify(title)}-${index + 1}`,
       itemType,
       latitude: null,
@@ -1027,11 +1212,15 @@ function createItemRecords({
       locationName: null,
       longitude: null,
       parentItemId: null,
-      reviewRequired: !date,
+      reviewRequired: !finalDate && !cityTip && !fullDayOverview,
       sortOrder: index,
       sourceConfidence: "medium",
-      startTime: getString(activity, "startTime"),
-      status: !date ? "needs_review" : "draft",
+      startTime,
+      status: fullDayOverview
+        ? "ignored"
+        : !finalDate && !cityTip
+          ? "needs_review"
+          : "draft",
       summary: null,
       title,
       tripId,
@@ -1048,6 +1237,10 @@ function hasStayCheckInCard({
   stay: TripStayRecord;
 }) {
   const stayName = normalizeText(stay.name);
+  const lodgingArrivalPattern =
+    /\b(arrive|arrival|check in|drop bags|bag drop|bags)\b/;
+  const lodgingPlacePattern =
+    /\b(airbnb|apartment|flat|hostel|hotel|inn|lodging|rental|stay)\b/;
 
   return items.some((item) => {
     if (item.date !== stay.checkInDate) {
@@ -1059,8 +1252,11 @@ function hasStayCheckInCard({
     );
 
     return (
-      /\b(check in|check out|drop bags|bag drop|bags)\b/.test(text) &&
-      (!stayName || text.includes(stayName) || stayName.includes(text))
+      lodgingArrivalPattern.test(text) &&
+      (!stayName ||
+        text.includes(stayName) ||
+        stayName.includes(text) ||
+        lodgingPlacePattern.test(text))
     );
   });
 }

@@ -64,6 +64,24 @@ function needsRecordReview(record: { reviewRequired: boolean; status: TripRecord
   return record.reviewRequired && isActiveStatus(record.status);
 }
 
+function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
+  const text = [item.title, item.description].filter(Boolean).join(" ");
+
+  return (
+    item.itemType === "note" &&
+    Boolean(item.legId) &&
+    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
+      text
+    )
+  );
+}
+
+function getReviewActivityItems(records: StructuredTripRecords) {
+  return records.items.filter(
+    (item) => isActiveStatus(item.status) && !isLegLevelTip(item)
+  );
+}
+
 function isOpenQuestion(question: StructuredTripRecords["reviewQuestions"][number]) {
   return question.status === "open";
 }
@@ -527,10 +545,11 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
   const flights = records.transport.filter(
     (item) => item.transportType === "flight"
   ).length;
-  const foodAndDining = records.items.filter(
+  const activityItems = getReviewActivityItems(records);
+  const foodAndDining = activityItems.filter(
     (item) => item.categoryId === "food_dining"
   ).length;
-  const activities = records.items.length;
+  const activities = activityItems.length;
 
   return [
     records.transport.length
@@ -552,10 +571,11 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
     return [];
   }
 
-  const foodAndDining = records.items.filter(
+  const activityItems = getReviewActivityItems(records);
+  const foodAndDining = activityItems.filter(
     (item) => item.categoryId === "food_dining"
   ).length;
-  const activities = records.items.length;
+  const activities = activityItems.length;
 
   return [
     records.legs.length ? pluralize(records.legs.length, "leg") : null,
@@ -859,7 +879,7 @@ export function getStructuredReviewSections(
       title: "Transport",
     },
     {
-      count: records.items.filter((item) => isActiveStatus(item.status)).length,
+      count: getReviewActivityItems(records).length,
       description: "Activities table rows, each with a Wren-style category.",
       emptyDetail: "No activity decisions needed.",
       id: "activities",
@@ -918,8 +938,8 @@ export function getStructuredReviewSections(
         })),
       summaryItems: records.categories
         .map((category) => {
-          const items = records.items.filter(
-            (item) => item.categoryId === category.id && isActiveStatus(item.status)
+          const items = getReviewActivityItems(records).filter(
+            (item) => item.categoryId === category.id
           );
 
           if (items.length === 0) {

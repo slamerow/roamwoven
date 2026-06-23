@@ -80,8 +80,11 @@ export type TravelerDayView = {
 
 export type TravelerLegView = {
   arriveDate: string | null;
+  cardCount: number;
   city: string;
   country: string | null;
+  dateRange: string;
+  days: TravelerLegDayView[];
   displayName: string;
   id: string;
   language: string | null;
@@ -91,6 +94,23 @@ export type TravelerLegView = {
   stayAddress: string | null;
   stayName: string | null;
   timezone: string | null;
+  tips: TravelerLegTipView[];
+};
+
+export type TravelerLegDayView = {
+  cards: TravelerCardView[];
+  date: string;
+  id: string;
+  label: string;
+  title: string;
+};
+
+export type TravelerLegTipView = {
+  categoryId: string;
+  categoryLabel: string;
+  description: string | null;
+  id: string;
+  title: string;
 };
 
 export type TravelerCategoryView = {
@@ -589,6 +609,22 @@ function primaryCategory(cards: TravelerCardView[]) {
   );
 }
 
+function isActiveItem(item: TripItemRecord) {
+  return item.status !== "ignored";
+}
+
+function isLegLevelTip(item: TripItemRecord) {
+  const text = [item.title, item.description].filter(Boolean).join(" ");
+
+  return (
+    item.itemType === "note" &&
+    Boolean(item.legId) &&
+    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
+      text
+    )
+  );
+}
+
 export function createTravelerAppViewModel(
   records: StructuredTripRecords
 ): TravelerAppViewModel {
@@ -604,7 +640,29 @@ export function createTravelerAppViewModel(
     privateDetailIdsBySubject.set(key, ids);
   }
 
-  const cards: TravelerCardView[] = records.items.map((item) => {
+  const activeItems = records.items.filter(isActiveItem);
+  const tipItems = activeItems.filter(isLegLevelTip);
+  const cardItems = activeItems.filter((item) => !isLegLevelTip(item));
+  const tipsByLegId = new Map<string, TravelerLegTipView[]>();
+
+  for (const item of tipItems) {
+    if (!item.legId) {
+      continue;
+    }
+
+    const category = categoryById.get(item.categoryId);
+    const tips = tipsByLegId.get(item.legId) ?? [];
+    tips.push({
+      categoryId: item.categoryId,
+      categoryLabel: category?.label ?? getTripCategoryLabel(item.categoryId),
+      description: item.description,
+      id: item.id,
+      title: item.title,
+    });
+    tipsByLegId.set(item.legId, tips);
+  }
+
+  const cards: TravelerCardView[] = cardItems.map((item) => {
     const category = categoryById.get(item.categoryId);
 
     return {
@@ -659,11 +717,25 @@ export function createTravelerAppViewModel(
     days: dayViews,
     legs: records.legs.map((leg) => {
       const stay = records.stays.find((item) => item.legId === leg.id);
+      const legCards = cards.filter((card) => card.legId === leg.id);
+      const legDays = records.days
+        .filter((day) => day.legIds.includes(leg.id) || day.primaryLegId === leg.id)
+        .map((day) => ({
+          cards: legCards.filter((card) => card.date === day.date),
+          date: day.date,
+          id: day.id,
+          label: `Day ${day.dayNumber}`,
+          title: day.title,
+        }))
+        .filter((day) => day.cards.length > 0);
 
       return {
         arriveDate: leg.arriveDate,
+        cardCount: legCards.length,
         city: leg.city,
         country: leg.country,
+        dateRange: formatTripDateRange(leg.arriveDate, leg.leaveDate),
+        days: legDays,
         displayName: leg.displayName,
         id: leg.id,
         language: leg.language,
@@ -673,6 +745,7 @@ export function createTravelerAppViewModel(
         stayAddress: stay?.address ?? null,
         stayName: stay?.name ?? null,
         timezone: leg.timezone,
+        tips: tipsByLegId.get(leg.id) ?? [],
       };
     }),
     phrases: records.phrases.map((phrase) => ({
@@ -699,7 +772,7 @@ export function createTravelerAppViewModel(
       dayCount: records.days.length,
       destinationSummary: records.trip.destinationSummary,
       id: records.trip.id,
-      itemCount: records.items.length,
+      itemCount: cards.length + tipItems.length,
       name: records.trip.name,
       title: records.trip.travelerAppTitle,
     },
