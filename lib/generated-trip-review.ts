@@ -3,6 +3,7 @@ import type {
   StructuredTripRecords,
   TripRecordStatus,
 } from "@/lib/generated-trip-model";
+import { getTripCategoryLabel } from "@/lib/trip-categories";
 
 export type StructuredReviewTone = "question" | "sensitive" | "warning";
 
@@ -64,7 +65,7 @@ function needsRecordReview(record: { reviewRequired: boolean; status: TripRecord
   return record.reviewRequired && isActiveStatus(record.status);
 }
 
-function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
+function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   const text = [item.title, item.description].filter(Boolean).join(" ");
 
   return (
@@ -78,7 +79,13 @@ function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
 
 function getReviewActivityItems(records: StructuredTripRecords) {
   return records.items.filter(
-    (item) => isActiveStatus(item.status) && !isLegLevelTip(item)
+    (item) => isActiveStatus(item.status) && !isCityTipItem(item)
+  );
+}
+
+function getCityTipItems(records: StructuredTripRecords) {
+  return records.items.filter(
+    (item) => isActiveStatus(item.status) && isCityTipItem(item)
   );
 }
 
@@ -550,6 +557,7 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
     (item) => item.categoryId === "food_dining"
   ).length;
   const activities = activityItems.length;
+  const cityTips = getCityTipItems(records).length;
 
   return [
     records.transport.length
@@ -563,6 +571,7 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
           foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
         }`
       : null,
+    cityTips ? pluralize(cityTips, "city tip") : null,
   ].filter(Boolean);
 }
 
@@ -576,6 +585,7 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
     (item) => item.categoryId === "food_dining"
   ).length;
   const activities = activityItems.length;
+  const cityTips = getCityTipItems(records).length;
 
   return [
     records.legs.length ? pluralize(records.legs.length, "leg") : null,
@@ -588,6 +598,7 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
           foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
         }`
       : null,
+    cityTips ? pluralize(cityTips, "city tip") : null,
   ].filter(Boolean);
 }
 
@@ -684,6 +695,21 @@ export function getStructuredReviewSections(
         },
       ]
       : [];
+  const categoryOptions = records.categories.map((category) => ({
+    label: category.label,
+    value: category.id,
+  }));
+  const legOptions = records.legs
+    .filter((leg) => isActiveStatus(leg.status))
+    .map((leg) => ({
+      label: [leg.displayName, leg.country].filter(Boolean).join(", "),
+      value: leg.id,
+    }));
+  const legById = new Map(records.legs.map((leg) => [leg.id, leg]));
+  const categoryById = new Map(
+    records.categories.map((category) => [category.id, category])
+  );
+  const cityTipItems = getCityTipItems(records);
 
   return [
     {
@@ -884,7 +910,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No activity decisions needed.",
       id: "activities",
       items: records.items
-        .filter(needsRecordReview)
+        .filter((item) => needsRecordReview(item) && !isCityTipItem(item))
         .map((item) => ({
           combineOptions: itemCombineOptions({
             currentItemId: item.id,
@@ -957,6 +983,87 @@ export function getStructuredReviewSections(
         })
         .filter((item): item is string => Boolean(item)),
       title: "Activities",
+    },
+    {
+      count: cityTipItems.length,
+      description: "General city-level food ideas, local notes, and tips that live under Legs.",
+      emptyDetail: "No city tips found.",
+      id: "city-tips",
+      items: cityTipItems
+        .filter(needsRecordReview)
+        .map((item) => {
+          const leg = item.legId ? legById.get(item.legId) : null;
+          const category = categoryById.get(item.categoryId);
+
+          return {
+            combineOptions: [],
+            detail:
+              item.description ??
+              "This tip needs enough context to place it under the right leg.",
+            editFields: [
+              field({ label: "Title", name: "title", value: item.title }),
+              field({
+                label: "City / leg",
+                name: "legId",
+                options: legOptions,
+                type: "select",
+                value: item.legId,
+              }),
+              field({
+                label: "Category",
+                name: "categoryId",
+                options: categoryOptions,
+                type: "select",
+                value: item.categoryId,
+              }),
+              field({
+                label: "Card type",
+                name: "itemType",
+                options: itemTypeOptions,
+                type: "select",
+                value: item.itemType,
+              }),
+              field({
+                helpText:
+                  "Only add a date if this should become a specific traveler activity.",
+                label: "Activity date",
+                name: "date",
+                type: "date",
+                value: item.date,
+              }),
+              field({
+                label: "Description",
+                name: "description",
+                type: "textarea",
+                value: item.description,
+              }),
+            ],
+            id: item.id,
+            meta: [
+              leg?.displayName,
+              category?.label ?? getTripCategoryLabel(item.categoryId),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            subjectId: item.id,
+            subjectType: "item" as const,
+            title: item.title,
+            tone: "warning" as const,
+          };
+        }),
+      summaryItems: cityTipItems.map((item) => {
+        const leg = item.legId ? legById.get(item.legId) : null;
+        const category = categoryById.get(item.categoryId);
+
+        return [
+          [leg?.displayName, item.title].filter(Boolean).join(" · "),
+          category?.label ?? getTripCategoryLabel(item.categoryId),
+          item.description,
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }),
+      title: "City tips",
     },
     {
       count: records.reviewQuestions.filter(isNotedQuestion).length,

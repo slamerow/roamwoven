@@ -276,6 +276,7 @@ test("city tips attach to legs without becoming activity cards", () => {
   });
   const viewModel = createTravelerAppViewModel(records);
   const summary = createGeneratedTripSummaryView(records);
+  const sections = getStructuredReviewSections(records);
   const tip = records.items.find((item) => item.title === "Prague food ideas");
 
   assert.equal(tip?.itemType, "note");
@@ -284,6 +285,12 @@ test("city tips attach to legs without becoming activity cards", () => {
   assert.equal(tip?.reviewRequired, false);
   assert.equal(viewModel.cards.some((card) => card.title === "Prague food ideas"), false);
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague food ideas");
+  assert.equal(sections.find((section) => section.id === "activities")?.count, 0);
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
+  assert.equal(
+    sections.find((section) => section.id === "city-tips")?.summaryItems[0],
+    "Prague · Prague food ideas\nFood and dining\nPrague food ideas: cafes, casual restaurants, and beer halls to consider."
+  );
   assert.equal(summary.counts.activities, 0);
   assert.equal(
     summary.days.some((day) =>
@@ -334,6 +341,7 @@ test("food reservations stay activities while loose food lists become tips", () 
     tripId: "trip-food-tips",
   });
   const viewModel = createTravelerAppViewModel(records);
+  const sections = getStructuredReviewSections(records);
 
   assert.equal(
     records.items.find((item) => item.title === "Dinner at Bellevue")?.itemType,
@@ -348,12 +356,63 @@ test("food reservations stay activities while loose food lists become tips", () 
       ?.itemType,
     "note"
   );
+  assert.equal(sections.find((section) => section.id === "activities")?.count, 1);
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
   assert.equal(viewModel.cards.map((card) => card.title).includes("Dinner at Bellevue"), true);
   assert.equal(
     viewModel.cards.map((card) => card.title).includes("Prague beer hall ideas"),
     false
   );
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague beer hall ideas");
+});
+
+test("loose food ideas without a clear leg do not become city tips", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          date: null,
+          description: "Food ideas: check out foods like dumplings and noodles.",
+          itemType: "activity",
+          title: "Food ideas",
+        },
+      ],
+      missingDetails: [],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "City tips test",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-city-tip-review",
+  });
+  const sections = getStructuredReviewSections(records);
+  const activities = sections.find((section) => section.id === "activities");
+
+  assert.equal(records.items[0]?.itemType, "activity");
+  assert.equal(records.items[0]?.status, "needs_review");
+  assert.equal(getStructuredReviewCount(records), 1);
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 0);
+  assert.equal(activities?.count, 1);
+  assert.equal(activities?.items[0]?.title, "Food ideas");
+  assert.deepEqual(
+    activities?.items[0]?.editFields.map((field) => field.name),
+    [
+      "title",
+      "itemType",
+      "date",
+      "startTime",
+      "endTime",
+      "locationName",
+      "address",
+      "url",
+      "description",
+    ]
+  );
 });
 
 test("full-day overview cards are ignored while specific activities remain", () => {
@@ -1623,7 +1682,7 @@ test("structured review summary uses maker-facing counts", () => {
     "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 3 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
-  assert.equal(sections.length, 7);
+  assert.equal(sections.length, 8);
   assert.deepEqual(
     sections.map((section) => section.id),
     [
@@ -1631,6 +1690,7 @@ test("structured review summary uses maker-facing counts", () => {
       "stays",
       "transport",
       "activities",
+      "city-tips",
       "notes",
       "questions",
       "private-details",

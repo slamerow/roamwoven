@@ -43,10 +43,12 @@ function isSubjectType(value: string): value is ReviewDecisionSubjectType {
 const editableFieldsBySubject: Partial<Record<ReviewDecisionSubjectType, string[]>> = {
   item: [
     "address",
+    "categoryId",
     "date",
     "description",
     "endTime",
     "itemType",
+    "legId",
     "locationName",
     "startTime",
     "title",
@@ -99,8 +101,17 @@ function parseEditChanges(
   }
 
   if (Object.keys(changes).length > 0 && subjectType !== "review_question") {
-    changes.reviewRequired = false;
-    changes.status = "confirmed";
+    if (
+      subjectType === "item" &&
+      changes.itemType === "activity" &&
+      !changes.date
+    ) {
+      changes.reviewRequired = true;
+      changes.status = "needs_review";
+    } else {
+      changes.reviewRequired = false;
+      changes.status = "confirmed";
+    }
   }
 
   return changes;

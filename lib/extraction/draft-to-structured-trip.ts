@@ -1175,12 +1175,15 @@ function createItemRecords({
     );
     const startTime = getString(activity, "startTime");
     const endTime = getString(activity, "endTime");
-    const cityTip = isCityTipCandidate({
+    const cityTipCandidate = isCityTipCandidate({
       description,
       itemType: originalItemType,
       startTime,
       title,
     });
+    const candidateLeg =
+      findLegForDate(legs, date) ?? findLegForText(legs, title, description);
+    const cityTip = cityTipCandidate && Boolean(candidateLeg);
     const itemType = cityTip ? "note" : originalItemType;
     const fullDayOverview = isFullDayOverviewCandidate({
       description,
@@ -1190,8 +1193,7 @@ function createItemRecords({
       title,
     });
     const finalDate = cityTip ? null : date;
-    const leg =
-      findLegForDate(legs, date) ?? findLegForText(legs, title, description);
+    const leg = candidateLeg;
     const categoryId = normalizeCategoryId({
       category: getString(activity, "category"),
       description,
@@ -1212,7 +1214,7 @@ function createItemRecords({
       locationName: null,
       longitude: null,
       parentItemId: null,
-      reviewRequired: !finalDate && !cityTip && !fullDayOverview,
+      reviewRequired: cityTip ? false : !finalDate && !fullDayOverview,
       sortOrder: index,
       sourceConfidence: "medium",
       startTime,
