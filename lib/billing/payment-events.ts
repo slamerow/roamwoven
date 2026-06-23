@@ -111,6 +111,28 @@ export function createCheckoutPaymentRecord({
   };
 }
 
+export const PAYMENT_EVENT_CONFLICT_TARGET = "checkout_session_id";
+
+export function createCheckoutPaymentEventPayload(record: CheckoutPaymentRecord) {
+  const payload: Record<string, unknown> = {
+    amount_total: record.amountTotal,
+    checkout_session_id: record.checkoutSessionId,
+    currency: record.currency,
+    customer_email: record.customerEmail,
+    owner_user_id: record.ownerUserId,
+    payment_intent_id: record.paymentIntentId,
+    status: record.status,
+    trip_id: record.tripId,
+  };
+
+  if (record.eventId) {
+    payload.event_id = record.eventId;
+    payload.raw_event = record.rawEvent;
+  }
+
+  return payload;
+}
+
 export async function recordCheckoutPaymentAndMarkPaid(
   record: CheckoutPaymentRecord
 ) {
@@ -120,20 +142,9 @@ export async function recordCheckoutPaymentAndMarkPaid(
 
   const supabase = createSupabaseAdminClient();
   const { error } = await supabase.from("trip_payment_events").upsert(
+    createCheckoutPaymentEventPayload(record),
     {
-      amount_total: record.amountTotal,
-      checkout_session_id: record.checkoutSessionId,
-      currency: record.currency,
-      customer_email: record.customerEmail,
-      event_id: record.eventId,
-      owner_user_id: record.ownerUserId,
-      payment_intent_id: record.paymentIntentId,
-      raw_event: record.rawEvent,
-      status: record.status,
-      trip_id: record.tripId,
-    },
-    {
-      onConflict: record.eventId ? "event_id" : "checkout_session_id",
+      onConflict: PAYMENT_EVENT_CONFLICT_TARGET,
     }
   );
 
