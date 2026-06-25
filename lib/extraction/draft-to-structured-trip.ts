@@ -1200,6 +1200,38 @@ function getFinalLeaveDate(legs: TripLegRecord[]) {
     .at(-1) ?? null;
 }
 
+function collectDraftDates(draft: unknown) {
+  const dates: string[] = [];
+  const addDate = (value: string | null) => {
+    if (isIsoDate(value)) {
+      dates.push(value);
+    }
+  };
+  const addObjectDates = (collection: string, fields: string[]) => {
+    for (const item of getArray(draft, collection)) {
+      const object =
+        item && typeof item === "object" && !Array.isArray(item)
+          ? (item as DraftObject)
+          : null;
+
+      if (!object) {
+        continue;
+      }
+
+      for (const field of fields) {
+        addDate(getString(object, field));
+      }
+    }
+  };
+
+  addObjectDates("activities", ["date"]);
+  addObjectDates("transport", ["date"]);
+  addObjectDates("places", ["arriveDate", "leaveDate"]);
+  addObjectDates("stays", ["checkIn", "firstNightDate", "checkOut"]);
+
+  return Array.from(new Set(dates)).sort();
+}
+
 function createTripRecord({
   draft,
   fallbackTripName,
@@ -1211,14 +1243,14 @@ function createTripRecord({
 }): TripSummaryRecord {
   const overview = getObject(draft, "tripOverview");
   const title = getString(overview, "title") ?? fallbackTripName;
-  const dateRange = getString(overview, "dateRange");
+  const draftDates = collectDraftDates(draft);
 
   return {
     destinationSummary: getString(overview, "destinationSummary"),
-    endDate: null,
+    endDate: draftDates.at(-1) ?? null,
     id: tripId,
     name: fallbackTripName,
-    startDate: null,
+    startDate: draftDates[0] ?? null,
     travelerAppTitle: title,
   };
 }

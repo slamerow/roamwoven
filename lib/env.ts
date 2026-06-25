@@ -56,7 +56,7 @@ export function getOpenAIConfig() {
     ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",
-      60000
+      120000
     ),
     maxOutputTokens: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS",

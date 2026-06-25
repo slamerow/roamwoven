@@ -125,7 +125,7 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
 function getFoundCountLabel(section: StructuredReviewSection) {
   const labels: Record<string, [string, string]> = {
     activities: ["activity", "activities"],
-    "city-tips": ["city tip", "city tips"],
+    "city-tips": ["city note/tip", "city notes/tips"],
     legs: ["leg", "legs"],
     "private-details": ["protected detail", "protected details"],
     notes: ["call", "calls"],

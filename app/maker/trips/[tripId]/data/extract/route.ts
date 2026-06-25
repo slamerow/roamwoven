@@ -189,9 +189,9 @@ export async function POST(
     materials,
     totalCharBudget: getOpenAIConfig().maxInputChars,
   });
-  const inputCharCount = optimizedMaterials.summary.submittedCharCount;
+  const inputCharCount = optimizedMaterials.summary.rawCharCount;
 
-  if (optimizedMaterials.materials.length === 0 || inputCharCount === 0) {
+  if (materials.length === 0 || inputCharCount === 0) {
     return redirectToData(request, tripId, {
       error: getNoMaterialErrorCode(materialCheckpointSummary),
     });
@@ -204,7 +204,7 @@ export async function POST(
     rawCharCount: optimizedMaterials.summary.rawCharCount,
     ocrSummary,
     statusCounts: materialCheckpointSummary.byStatus,
-    submittedCharCount: optimizedMaterials.summary.submittedCharCount,
+    budgetedSpineCharCount: optimizedMaterials.summary.submittedCharCount,
     truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
     tripId,
   });
@@ -222,7 +222,7 @@ export async function POST(
       tripId,
     });
     const result = await extractTripDraftWithOpenAI({
-      materials: optimizedMaterials.materials,
+      materials,
       tripName: trip.name,
     });
     extractionUsage = result.usage;

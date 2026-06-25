@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import {
+  createActivityExtractionChunks,
+  isSuspiciouslyEmptyActivityChunkResult,
+} from "@/lib/extraction/openai-trip-parser";
 import { parseOptionalEnvList } from "@/lib/env";
 import {
   applyReviewDecision,
@@ -44,6 +48,210 @@ function test(name: string, fn: () => void) {
     throw error;
   }
 }
+
+test("activity extraction chunks preserve dated sections from the middle of long materials", () => {
+  const sourceText = [
+    "Saturday, January 12th",
+    "Fly to Rome.",
+    "Sunday, January 13th",
+    "Colosseum at 2 PM.",
+    "Monday, January 14th",
+    "Prague walk.",
+    "Tuesday, January 15th",
+    "Klementinum 2:30 Tour.",
+    "Wednesday, January 16th",
+    "R2D2 far away.",
+    "Thursday, January 17th",
+    "Sedlec Ossuary, St. Barbara, Silver Mines.",
+    "Friday, January 18th",
+    "Albertina and Belvedere.",
+    "Saturday, January 19th",
+    "Schonbrunn Palace complex and Mumok.",
+  ].join("\n");
+
+  const chunks = createActivityExtractionChunks(
+    [
+      {
+        filename: "central-europe.pdf",
+        text: sourceText,
+        type: "pdf_text",
+      },
+    ],
+    500
+  );
+
+  assert.ok(chunks.length >= 8, "expected one chunk per dated section");
+  assert.ok(
+    chunks.some((chunk) => /January 17th/.test(chunk.label)),
+    "expected middle day heading to survive as its own chunk"
+  );
+  assert.ok(
+    chunks.some((chunk) => /Sedlec Ossuary/.test(chunk.materials[0]?.text ?? "")),
+    "expected middle-day activities to survive chunking"
+  );
+});
+
+test("activity chunks with source-backed activity signals cannot quietly return empty", () => {
+  const [chunk] = createActivityExtractionChunks([
+    {
+      filename: "central-europe.pdf",
+      text: [
+        "Thursday, January 17th",
+        "Pick up car at 9 am.",
+        "Sedlec Ossuary, St. Barbara church, and Silver Mines.",
+      ].join("\n"),
+      type: "pdf_text",
+    },
+  ]);
+
+  assert.ok(chunk, "expected an activity extraction chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    true,
+    "dated named venues should trigger activity recovery"
+  );
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk,
+      stage: {
+        activities: [
+          {
+            title: "Sedlec Ossuary",
+          },
+        ],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    false,
+    "chunks with extracted cards should not be suspicious"
+  );
+
+  const [transportOnlyChunk] = createActivityExtractionChunks([
+    {
+      filename: "train-ticket.pdf",
+      text: "Train ticket Vienna to Budapest. Departure station Wien Hbf. Seat 42.",
+      type: "pdf_text",
+    },
+  ]);
+
+  assert.ok(transportOnlyChunk, "expected a transport-only chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk: transportOnlyChunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    false,
+    "transport-only chunks should not trigger activity recovery"
+  );
+
+  const [foodTipsChunk] = createActivityExtractionChunks([
+    {
+      filename: "city-notes.pdf",
+      text: [
+        "Budapest",
+        "Eat: langos, chimney cake, paprika.",
+        "Beer halls: Szimpla Kert, For Sale Pub.",
+      ].join("\n"),
+      type: "pdf_text",
+    },
+  ]);
+
+  assert.ok(foodTipsChunk, "expected a food tips chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk: foodTipsChunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    true,
+    "food recommendations should trigger city notes/tips recovery"
+  );
+
+  const [localNotesChunk] = createActivityExtractionChunks([
+    {
+      filename: "city-notes.pdf",
+      text: [
+        "Budapest notes",
+        "Find gypsy music if there is time.",
+        "Vaci Utca is skippable.",
+      ].join("\n"),
+      type: "pdf_text",
+    },
+  ]);
+
+  assert.ok(localNotesChunk, "expected a local notes chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk: localNotesChunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    true,
+    "local notes should trigger city notes/tips recovery"
+  );
+
+  const [lodgingOnlyChunk] = createActivityExtractionChunks([
+    {
+      filename: "lodging.pdf",
+      text: "Airbnb check-in after 3:00 PM. Host sends apartment access details.",
+      type: "pdf_text",
+    },
+  ]);
+
+  assert.ok(lodgingOnlyChunk, "expected a lodging-only chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk: lodgingOnlyChunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    false,
+    "lodging-only chunks should not trigger activity recovery"
+  );
+
+  const [weakTicketChunk] = createActivityExtractionChunks([
+    {
+      filename: "admin-note.pdf",
+      text: "Ticket note: keep receipts together for later.",
+      type: "note",
+    },
+  ]);
+
+  assert.ok(weakTicketChunk, "expected a weak ticket note chunk");
+  assert.equal(
+    isSuspiciouslyEmptyActivityChunkResult({
+      chunk: weakTicketChunk,
+      stage: {
+        activities: [],
+        missingDetails: [],
+        sensitiveDetails: [],
+      },
+    }),
+    false,
+    "weak ticket admin notes should not trigger activity recovery"
+  );
+});
 
 test("Asia seed compiles into structured records and traveler view model", () => {
   const records = getAsiaDemoStructuredTripRecords();
@@ -242,7 +450,111 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(viewModel.cards.length, 3);
 });
 
-test("city tips attach to legs without becoming activity cards", () => {
+test("trip dates start with first actual travel day before first lodging leg", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          address: "Via Palestro 44",
+          checkIn: "2019-01-13",
+          checkInTime: "14:30",
+          checkOut: "2019-01-14",
+          checkOutTime: null,
+          firstNightDate: "2019-01-13",
+          name: "The Yellow",
+          nights: 1,
+          sourceFilename: "central-europe.pdf",
+        },
+      ],
+      transport: [
+        {
+          arrival: "JFK",
+          arrivalTime: "18:41",
+          confirmation: "GHFHPG",
+          date: "2019-01-12",
+          departure: "DCA",
+          departureTime: "17:00",
+          description: null,
+          provider: "Delta",
+          sourceFilename: "central-europe.pdf",
+          title: "Flight to JFK",
+          type: "flight",
+        },
+      ],
+      tripOverview: {
+        confidence: "high",
+        dateRange: "January 12-14, 2019",
+        destinationSummary: "Rome",
+        title: "test",
+      },
+    },
+    fallbackTripName: "test",
+    tripId: "date-range-regression",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.equal(records.trip.startDate, "2019-01-12");
+  assert.equal(summary.dateRange, "January 12-14, 2019");
+});
+
+test("unrecovered activity chunk gaps remain open review blockers", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "low",
+          evidence: "Thursday, January 17th",
+          guessedValue: null,
+          prompt:
+            "Roamwoven could not confidently extract activities from Thursday, January 17th. Review this source section and add any missing activities before publishing.",
+          reason:
+            "Automatic extraction and a second pass returned no traveler cards even though this source section appears to contain activity or notes/tips details.",
+          relatedTitle: null,
+          subjectType: "trip",
+          targetField: null,
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-17",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        confidence: "medium",
+        dateRange: "January 17-18, 2019",
+        destinationSummary: "Prague",
+        title: "test",
+      },
+    },
+    fallbackTripName: "test",
+    tripId: "chunk-blocker",
+  });
+
+  assert.equal(getStructuredReviewCount(records), 1);
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+  assert.match(records.reviewQuestions[0]?.prompt ?? "", /could not confidently extract/i);
+});
+
+test("city notes and tips attach to legs without becoming activity cards", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -366,7 +678,7 @@ test("food reservations stay activities while loose food lists become tips", () 
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague beer hall ideas");
 });
 
-test("day-specific sightseeing clusters do not become city tips", () => {
+test("day-specific sightseeing clusters do not become city notes or tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -407,7 +719,7 @@ test("day-specific sightseeing clusters do not become city tips", () => {
   assert.equal(sections.find((section) => section.id === "activities")?.count, 1);
 });
 
-test("eat and food list headers can become city tips", () => {
+test("eat and food list headers can become city notes and tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -447,7 +759,7 @@ test("eat and food list headers can become city tips", () => {
   assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
 });
 
-test("loose food ideas without a clear leg do not become city tips", () => {
+test("loose food ideas without a clear leg do not become city notes or tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -465,7 +777,7 @@ test("loose food ideas without a clear leg do not become city tips", () => {
       stays: [],
       transport: [],
       tripOverview: {
-        title: "City tips test",
+        title: "City notes test",
       },
     },
     fallbackTripName: "Fallback trip",

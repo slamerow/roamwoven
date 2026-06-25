@@ -588,7 +588,7 @@ export function getStructuredFoundParts(records: StructuredTripRecords | null) {
           foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
         }`
       : null,
-    cityTips ? pluralize(cityTips, "city tip") : null,
+    cityTips ? pluralize(cityTips, "city note/tip", "city notes/tips") : null,
   ].filter(Boolean);
 }
 
@@ -615,7 +615,7 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
           foodAndDining ? ` (${pluralize(foodAndDining, "food and dining")})` : ""
         }`
       : null,
-    cityTips ? pluralize(cityTips, "city tip") : null,
+    cityTips ? pluralize(cityTips, "city note/tip", "city notes/tips") : null,
   ].filter(Boolean);
 }
 
@@ -1002,8 +1002,8 @@ export function getStructuredReviewSections(
     },
     {
       count: cityTipItems.length,
-      description: "General city-level food ideas, local notes, and tips that live under Legs.",
-      emptyDetail: "No city tips found.",
+      description: "City-level food ideas, local notes, loose travel notes, and tips grouped under Legs.",
+      emptyDetail: "No city notes or tips found.",
       id: "city-tips",
       items: cityTipItems
         .filter(needsRecordReview)
@@ -1015,7 +1015,7 @@ export function getStructuredReviewSections(
             combineOptions: [],
             detail:
               item.description ??
-              "This tip needs enough context to place it under the right leg.",
+              "This city note needs enough context to place it under the right leg.",
             editFields: [
               field({ label: "Title", name: "title", value: item.title }),
               field({
@@ -1079,7 +1079,7 @@ export function getStructuredReviewSections(
           .filter(Boolean)
           .join("\n");
       }),
-      title: "City tips",
+      title: "City notes & tips",
     },
     {
       count: records.reviewQuestions.filter(isNotedQuestion).length,
