@@ -13,6 +13,7 @@ import type {
   TripSourceConfidence,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
+import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
 import {
   canonicalizeTripCategoryId,
   getTripCategoryEmoji,
@@ -903,10 +904,10 @@ function isCityTipCandidate({
   }
 
   return (
-    /\b(tips?|ideas?|recommendations?|eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
+    /\b(tips?|ideas?|recommendations?|also noted|could visit|maybe visit|if time|possible sights?|eat|food|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/.test(
       text
     ) &&
-    /\b(city|food|eat|restaurant|cafe|cafes|coffee|bar|bars|beer|hall|halls|drink|shop|shopping|local)\b/.test(
+    /\b(city|food|eat|restaurant|cafe|cafes|coffee|bar|bars|beer|hall|halls|drink|shop|shopping|local|museum|sights?|palace|church|synagogue|park|possible)\b/.test(
       text
     )
   );
@@ -1498,7 +1499,7 @@ function createItemRecords({
     });
     const candidateLeg =
       findLegForDate(legs, date) ?? findLegForText(legs, title, description);
-    const cityTip = cityTipCandidate && Boolean(candidateLeg);
+    const cityTip = (cityTipCandidate || originalItemType === "note") && Boolean(candidateLeg);
     const itemType = cityTip ? "note" : originalItemType;
     const fullDayOverview = isFullDayOverviewCandidate({
       description,
@@ -1592,7 +1593,7 @@ function createStayCheckInItemRecords({
       return [];
     }
 
-    const title = `Check in: ${stay.name}`;
+    const title = `Check in to ${stay.name}`;
     const descriptionParts = [
       stay.checkInTime ? `Check-in time: ${stay.checkInTime}.` : null,
       stay.publicLocationLabel ? `Stay area: ${stay.publicLocationLabel}.` : null,
@@ -2327,11 +2328,12 @@ export function createStructuredTripRecordsFromDraft({
   fallbackTripName: string;
   tripId: string;
 }): StructuredTripRecords {
-  const trip = createTripRecord({ draft, fallbackTripName, tripId });
-  const legs = createLegRecords({ draft, tripId });
-  const stays = createStayRecords({ draft, legs, tripId });
-  const transport = createTransportRecords({ draft, legs, tripId });
-  const extractedItems = createItemRecords({ draft, legs, tripId });
+  const consolidatedDraft = consolidateTripDraft(draft).draft;
+  const trip = createTripRecord({ draft: consolidatedDraft, fallbackTripName, tripId });
+  const legs = createLegRecords({ draft: consolidatedDraft, tripId });
+  const stays = createStayRecords({ draft: consolidatedDraft, legs, tripId });
+  const transport = createTransportRecords({ draft: consolidatedDraft, legs, tripId });
+  const extractedItems = createItemRecords({ draft: consolidatedDraft, legs, tripId });
   const items = [
     ...extractedItems,
     ...createStayCheckInItemRecords({
@@ -2342,7 +2344,7 @@ export function createStructuredTripRecordsFromDraft({
   ];
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({
-    draft,
+    draft: consolidatedDraft,
     stays,
     transport,
     tripId,
@@ -2359,7 +2361,7 @@ export function createStructuredTripRecordsFromDraft({
     phrases: [],
     privateDetails,
     reviewQuestions: createReviewQuestions({
-      draft,
+      draft: consolidatedDraft,
       items,
       legs,
       stays,

@@ -72,7 +72,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
       text
     );
   const genericTipHeader =
-    /\b(eat\s*:|food\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i.test(
+    /\b(notes?\s*&\s*tips?|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|local notes?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|also noted|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i.test(
       text
     );
 
@@ -88,7 +88,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   return (
     item.itemType === "note" &&
     Boolean(item.legId) &&
-    /\b(tips?|ideas?|recommendations?|eat\s*:|food\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i.test(
+    /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?|also noted|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i.test(
       text
     )
   );
@@ -922,7 +922,7 @@ export function getStructuredReviewSections(
     },
     {
       count: getReviewActivityItems(records).length,
-      description: "Activities table rows, each with a Wren-style category.",
+      description: "Places, meals, events, logistics, and plans found in your materials.",
       emptyDetail: "No activity decisions needed.",
       id: "activities",
       items: records.items

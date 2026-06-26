@@ -347,7 +347,7 @@ export default async function TripSummaryPage({
               ["Legs", summary?.counts.places ?? 0],
               ["Transport", summary?.counts.transport ?? 0],
               ["Stays", summary?.counts.stays ?? 0],
-              ["Activities", summary?.counts.activities ?? 0],
+              ["Plans", summary?.counts.plans ?? 0],
               ["Review", summary?.counts.review ?? 0],
             ].map(([label, count]) => (
               <div key={label} className="rounded-md bg-paper p-4">

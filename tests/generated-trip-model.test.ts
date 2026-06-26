@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
   createActivityExtractionChunks,
@@ -253,6 +254,157 @@ test("activity chunks with source-backed activity signals cannot quietly return 
   );
 });
 
+test("draft consolidation suppresses duplicate travel activities without dropping local movement", () => {
+  const { debug, draft } = consolidateTripDraft({
+    activities: [
+      {
+        category: "arrival_departure",
+        date: "2026-09-02",
+        itemType: "activity",
+        title: "Fly to Rome",
+      },
+      {
+        category: "arrival_departure",
+        date: "2026-09-02",
+        description: "Take metro to the airport from Keleti at 2:30 PM.",
+        itemType: "activity",
+        startTime: "14:30",
+        title: "Take metro to airport",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Budapest",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    stays: [],
+    transport: [
+      {
+        arrival: "Rome FCO",
+        date: "2026-09-02",
+        departure: "Budapest BUD",
+        title: "Budapest to Rome",
+        type: "flight",
+      },
+    ],
+  }) as {
+    debug: ReturnType<typeof consolidateTripDraft>["debug"];
+    draft: { activities: Array<{ title?: string }> };
+  };
+
+  assert.deepEqual(
+    draft.activities.map((activity) => activity.title),
+    ["Take metro to airport"]
+  );
+  assert.equal(debug.suppressedTransportActivities[0]?.removedTitle, "Fly to Rome");
+  assert.equal(
+    debug.suppressedTransportActivities[0]?.matchedTransportTitle,
+    "Budapest to Rome"
+  );
+});
+
+test("draft consolidation removes broad parent cards when named children cover them", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2026-09-02",
+          description:
+            "Old Town Square, Jewish Quarter, and Klementinum are listed for the day.",
+          itemType: "activity",
+          title: "Prague history sights",
+        },
+        {
+          category: "tours_tickets",
+          date: "2026-09-02",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Old Town and Jewish Quarter Hidden Secrets",
+        },
+        {
+          category: "tours_tickets",
+          date: "2026-09-02",
+          itemType: "activity",
+          startTime: "14:30",
+          title: "Klementinum Tour",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          leaveDate: "2026-09-03",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Prague",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-parent-child-prune",
+  });
+  const titles = records.items.map((item) => item.title);
+
+  assert.equal(titles.includes("Prague history sights"), false);
+  assert.equal(titles.includes("Old Town and Jewish Quarter Hidden Secrets"), true);
+  assert.equal(titles.includes("Klementinum Tour"), true);
+});
+
+test("city note merging removes places that already became scheduled activities", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          date: "2026-09-02",
+          description: "Mazel Tov, Konyv Bar, and Ruszwurm are food ideas.",
+          itemType: "activity",
+          title: "Budapest food ideas",
+        },
+        {
+          category: "food_dining",
+          date: "2026-09-03",
+          description: "Dinner reservation.",
+          itemType: "activity",
+          startTime: "18:30",
+          title: "Dinner at Mazel Tov",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Budapest",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Budapest",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-city-note-dedupe",
+  });
+  const note = records.items.find((item) => item.title === "Budapest Notes & Tips");
+
+  assert.equal(note?.itemType, "note");
+  assert.doesNotMatch(note?.description ?? "", /Mazel Tov/i);
+  assert.match(note?.description ?? "", /Konyv Bar/i);
+  assert.match(note?.description ?? "", /Ruszwurm/i);
+  assert.equal(
+    records.items.some((item) => item.title === "Dinner at Mazel Tov"),
+    true
+  );
+});
+
 test("Asia seed compiles into structured records and traveler view model", () => {
   const records = getAsiaDemoStructuredTripRecords();
   const viewModel = getAsiaDemoTravelerAppViewModel();
@@ -426,7 +578,7 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(records.items[1]?.categoryId, "food_dining");
   assert.equal(records.items[2]?.itemType, "admin");
   assert.equal(records.items[2]?.categoryId, "arrival_departure");
-  assert.equal(records.items[2]?.title, "Check in: Prague apartment");
+  assert.equal(records.items[2]?.title, "Check in to Prague apartment");
   assert.ok(
     records.categories.some((category) => category.categoryKey === "food_dining"),
     "expected dining activities to use the food and dining category"
@@ -589,24 +741,26 @@ test("city notes and tips attach to legs without becoming activity cards", () =>
   const viewModel = createTravelerAppViewModel(records);
   const summary = createGeneratedTripSummaryView(records);
   const sections = getStructuredReviewSections(records);
-  const tip = records.items.find((item) => item.title === "Prague food ideas");
+  const tip = records.items.find((item) => item.title === "Prague Notes & Tips");
 
   assert.equal(tip?.itemType, "note");
   assert.equal(tip?.date, null);
   assert.equal(tip?.legId, records.legs[0]?.id);
   assert.equal(tip?.reviewRequired, false);
-  assert.equal(viewModel.cards.some((card) => card.title === "Prague food ideas"), false);
-  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague food ideas");
+  assert.equal(viewModel.cards.some((card) => card.title === "Prague Notes & Tips"), false);
+  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague Notes & Tips");
   assert.equal(sections.find((section) => section.id === "activities")?.count, 0);
   assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
-  assert.equal(
-    sections.find((section) => section.id === "city-tips")?.summaryItems[0],
-    "Prague · Prague food ideas\nFood and dining\nPrague food ideas: cafes, casual restaurants, and beer halls to consider."
+  assert.match(
+    sections.find((section) => section.id === "city-tips")?.summaryItems[0] ?? "",
+    /Prague · Prague Notes & Tips/
   );
+  assert.match(tip?.description ?? "", /cafes/i);
+  assert.match(tip?.description ?? "", /beer halls/i);
   assert.equal(summary.counts.activities, 0);
   assert.equal(
     summary.days.some((day) =>
-      day.entries.some((entry) => entry.title === "Prague food ideas")
+      day.entries.some((entry) => entry.title === "Prague Notes & Tips")
     ),
     false
   );
@@ -664,7 +818,7 @@ test("food reservations stay activities while loose food lists become tips", () 
     "2026-09-02"
   );
   assert.equal(
-    records.items.find((item) => item.title === "Prague beer hall ideas")
+    records.items.find((item) => item.title === "Prague Notes & Tips")
       ?.itemType,
     "note"
   );
@@ -672,13 +826,13 @@ test("food reservations stay activities while loose food lists become tips", () 
   assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
   assert.equal(viewModel.cards.map((card) => card.title).includes("Dinner at Bellevue"), true);
   assert.equal(
-    viewModel.cards.map((card) => card.title).includes("Prague beer hall ideas"),
+    viewModel.cards.map((card) => card.title).includes("Prague Notes & Tips"),
     false
   );
-  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague beer hall ideas");
+  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague Notes & Tips");
 });
 
-test("day-specific sightseeing clusters do not become city notes or tips", () => {
+test("loose day-specific sightseeing ideas become city notes and tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -713,10 +867,11 @@ test("day-specific sightseeing clusters do not become city notes or tips", () =>
   const sections = getStructuredReviewSections(records);
   const item = records.items[0];
 
-  assert.equal(item?.itemType, "activity");
-  assert.equal(item?.date, "2026-09-02");
-  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 0);
-  assert.equal(sections.find((section) => section.id === "activities")?.count, 1);
+  assert.equal(item?.title, "Budapest Notes & Tips");
+  assert.equal(item?.itemType, "note");
+  assert.equal(item?.date, null);
+  assert.equal(sections.find((section) => section.id === "city-tips")?.count, 1);
+  assert.equal(sections.find((section) => section.id === "activities")?.count, 0);
 });
 
 test("eat and food list headers can become city notes and tips", () => {
@@ -1236,10 +1391,10 @@ test("lodging switches synthesize check-in cards without duplicating explicit ba
     checkInCards.some((item) => item.title === "Drop bags at The Yellow")
   );
   assert.ok(
-    checkInCards.some((item) => item.title === "Check in: The Yellow")
+    checkInCards.some((item) => item.title === "Check in to The Yellow")
   );
   assert.ok(
-    checkInCards.some((item) => item.title === "Check in: Prague Airbnb")
+    checkInCards.some((item) => item.title === "Check in to Prague Airbnb")
   );
 });
 
@@ -2148,6 +2303,7 @@ test("structured review summary uses maker-facing counts", () => {
     fallbackTripName: "Fallback trip",
     tripId: "trip-2",
   });
+  const summaryView = createGeneratedTripSummaryView(records);
   const reviewCount = getStructuredReviewCount(records);
   const summary = formatStructuredDiscoverySummary(records, reviewCount);
   const sections = getStructuredReviewSections(records);
@@ -2157,6 +2313,7 @@ test("structured review summary uses maker-facing counts", () => {
     "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 3 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
+  assert.equal(summaryView.counts.plans, 3);
   assert.equal(sections.length, 8);
   assert.deepEqual(
     sections.map((section) => section.id),

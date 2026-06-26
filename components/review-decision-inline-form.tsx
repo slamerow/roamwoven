@@ -102,11 +102,27 @@ export function ReviewDecisionInlineForm({
           const reviewItem = form.closest("[data-review-item]");
 
           if (reviewItem instanceof HTMLElement) {
+            const alreadySaved = reviewItem.dataset.reviewItemSaved === "true";
             reviewItem.dataset.reviewItemSaved = "true";
-            updateVisibleCounts(reviewItem);
-            window.setTimeout(() => {
-              reviewItem.hidden = true;
-            }, 650);
+
+            if (!alreadySaved) {
+              updateVisibleCounts(reviewItem);
+            }
+
+            const body = reviewItem.querySelector("[data-review-item-body]");
+            const completeLabel = reviewItem.querySelector(
+              "[data-review-item-complete-label]"
+            );
+
+            if (body instanceof HTMLElement) {
+              body.hidden = true;
+            }
+
+            if (completeLabel instanceof HTMLElement) {
+              completeLabel.hidden = false;
+              completeLabel.textContent =
+                action === "delete" ? "Ignored" : "Reviewed";
+            }
           }
         } catch {
           setFailed(true);

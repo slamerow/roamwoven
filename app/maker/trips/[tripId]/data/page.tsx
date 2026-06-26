@@ -914,7 +914,7 @@ function StructuredRecordReview({
 
                   return (
                     <div
-                      className="flex gap-3 rounded-md bg-paper p-4 transition-opacity data-[review-item-saved=true]:opacity-45"
+                      className="flex gap-3 rounded-md bg-paper p-4 transition-opacity data-[review-item-saved=true]:opacity-70"
                       data-review-item
                       key={item.id}
                     >
@@ -926,78 +926,85 @@ function StructuredRecordReview({
                         }
                         size={18}
                       />
-                      <div>
-                        <p className="text-sm font-semibold text-ink">
-                          {item.title}
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+                          <span>{item.title}</span>
+                          <span
+                            className="rounded-full bg-moss/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-moss"
+                            data-review-item-complete-label
+                            hidden
+                          />
                         </p>
-                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
-                          {item.meta}
-                        </p>
-                        <p className="mt-2 text-sm leading-6 text-ink/60">
-                          {item.detail}
-                        </p>
-                        <ReviewQuestionAnswerForm item={item} tripId={tripId} />
-                        <ReviewEditForm item={item} tripId={tripId} />
-                        <ReviewCombineForm item={item} tripId={tripId} />
-                        {item.childItems && item.childItems.length > 0 ? (
-                          <details className="mt-4 rounded-md border border-ink/10 bg-white p-3">
-                            <summary className="cursor-pointer text-xs font-semibold text-ink/60">
-                              Review specifics
-                            </summary>
-                            <div className="mt-3 space-y-2">
-                              {item.childItems.map((child) => (
-                                <div
-                                  className="rounded-md bg-paper px-3 py-2"
-                                  key={child.id}
-                                >
-                                  <p className="text-xs font-semibold text-ink">
-                                    {child.title}
-                                  </p>
-                                  <p className="mt-1 text-xs text-ink/45">
-                                    {child.meta}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        ) : null}
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {item.subjectType === "review_question" ||
-                          (item.subjectIds && item.subjectIds.length > 0) ? (
-                            null
-                          ) : (
-                            <ReviewDecisionButton
-                              action="confirm"
-                              icon={<CheckCircle2 size={14} />}
-                              item={item}
-                              tone="positive"
-                              tripId={tripId}
-                            >
-                              Confirm
-                            </ReviewDecisionButton>
-                          )}
-                          {canProtectReviewItem(item) ? (
-                            <ReviewDecisionButton
-                              action="protect"
-                              icon={<LockKeyhole size={14} />}
-                              item={item}
-                              tone="sensitive"
-                              tripId={tripId}
-                            >
-                              {item.subjectIds && item.subjectIds.length > 0
-                                ? "Agree with recommendation"
-                                : "Protect"}
-                            </ReviewDecisionButton>
+                        <div data-review-item-body>
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">
+                            {item.meta}
+                          </p>
+                          <p className="mt-2 text-sm leading-6 text-ink/60">
+                            {item.detail}
+                          </p>
+                          <ReviewQuestionAnswerForm item={item} tripId={tripId} />
+                          <ReviewEditForm item={item} tripId={tripId} />
+                          <ReviewCombineForm item={item} tripId={tripId} />
+                          {item.childItems && item.childItems.length > 0 ? (
+                            <details className="mt-4 rounded-md border border-ink/10 bg-white p-3">
+                              <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+                                Review specifics
+                              </summary>
+                              <div className="mt-3 space-y-2">
+                                {item.childItems.map((child) => (
+                                  <div
+                                    className="rounded-md bg-paper px-3 py-2"
+                                    key={child.id}
+                                  >
+                                    <p className="text-xs font-semibold text-ink">
+                                      {child.title}
+                                    </p>
+                                    <p className="mt-1 text-xs text-ink/45">
+                                      {child.meta}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
                           ) : null}
-                          <ReviewDecisionButton
-                            action="delete"
-                            icon={<Trash2 size={14} />}
-                            item={item}
-                            tone="destructive"
-                            tripId={tripId}
-                          >
-                            Ignore
-                          </ReviewDecisionButton>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {item.subjectType === "review_question" ||
+                            (item.subjectIds && item.subjectIds.length > 0) ? (
+                              null
+                            ) : (
+                              <ReviewDecisionButton
+                                action="confirm"
+                                icon={<CheckCircle2 size={14} />}
+                                item={item}
+                                tone="positive"
+                                tripId={tripId}
+                              >
+                                Confirm
+                              </ReviewDecisionButton>
+                            )}
+                            {canProtectReviewItem(item) ? (
+                              <ReviewDecisionButton
+                                action="protect"
+                                icon={<LockKeyhole size={14} />}
+                                item={item}
+                                tone="sensitive"
+                                tripId={tripId}
+                              >
+                                {item.subjectIds && item.subjectIds.length > 0
+                                  ? "Agree with recommendation"
+                                  : "Protect"}
+                              </ReviewDecisionButton>
+                            ) : null}
+                            <ReviewDecisionButton
+                              action="delete"
+                              icon={<Trash2 size={14} />}
+                              item={item}
+                              tone="destructive"
+                              tripId={tripId}
+                            >
+                              Ignore
+                            </ReviewDecisionButton>
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -40,6 +40,7 @@ export type GeneratedTripSummaryView = {
   counts: {
     activities: number;
     places: number;
+    plans: number;
     privateDetails: number;
     foodAndDining: number;
     review: number;
@@ -288,7 +289,7 @@ function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
   return (
     item.itemType === "note" &&
     Boolean(item.legId) &&
-    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
+    /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?|also noted|possible sights?|local notes?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
       text
     )
   );
@@ -509,16 +510,29 @@ function createSummarySections(
   ];
 }
 
+function countTimelinePlans(days: GeneratedTripSummaryDay[]) {
+  return days.reduce(
+    (count, day) =>
+      count +
+      day.entries.filter(
+        (entry) => entry.kind !== "stay" && entry.kind !== "review"
+      ).length,
+    0
+  );
+}
+
 export function createGeneratedTripSummaryView(
   records: StructuredTripRecords
 ): GeneratedTripSummaryView {
   const activeItems = records.items.filter((item) => isActiveStatus(item.status));
   const review = getStructuredReviewCount(records);
+  const days = createSummaryDays(records, activeItems);
 
   return {
     counts: {
       activities: activeItems.filter((item) => item.itemType === "activity").length,
       places: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
+      plans: countTimelinePlans(days),
       privateDetails: records.privateDetails.filter((detail) =>
         isProtectedVisibility(detail.visibility)
       ).length,
@@ -530,7 +544,7 @@ export function createGeneratedTripSummaryView(
         .length,
     },
     dateRange: formatDateRange(records),
-    days: createSummaryDays(records, activeItems),
+    days,
     destination: formatDestination(records),
     sections: createSummarySections(records, activeItems, review),
     isReadyForPublishReview: review === 0,

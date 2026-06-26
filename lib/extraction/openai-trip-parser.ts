@@ -1,5 +1,6 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
+import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
 import { optimizeTripExtractionMaterials } from "@/lib/extraction/material-budget";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
@@ -1319,11 +1320,12 @@ export async function extractTripDraftWithOpenAI({
     activityResults.map((activityResult) => activityResult.result.json)
   );
 
-  const draft = combineDraftStages({
+  const combinedDraft = combineDraftStages({
     activitiesStage,
     activityFailures,
     spineStage: spineResult.json,
   });
+  const { debug: consolidation, draft } = consolidateTripDraft(combinedDraft);
 
   return {
     draft,
@@ -1354,6 +1356,7 @@ export async function extractTripDraftWithOpenAI({
         message: error instanceof Error ? error.message : "Unknown error.",
         name: error instanceof Error ? error.name : "UnknownError",
       })),
+      consolidation,
       spineMaterialBudget: spineMaterials.summary,
       spine: spineResult.usage,
       staged: true,
