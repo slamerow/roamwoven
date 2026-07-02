@@ -380,6 +380,21 @@ Latest checks after trip assembly correction pass:
 - `npm run typecheck`
 - `npm run build`
 
+Latest checks after canonical record identity cleanup:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Canonical identity QA decisions from the July 2 Czech/Central Europe run:
+
+- Obvious duplicate/composite cleanup belongs in internal assembly debug, not maker-facing Calls. Calls should only explain non-obvious app-shaping choices.
+- Normal check-in/drop-bags flow should fold into the Stay row when it is same-day/same-place as the stay. Separate luggage storage or a separate traveler movement can remain as an activity.
+- If a Travel row already covers rental-car pickup or another movement, the duplicate Activity disappears and useful time/location/details merge into the Travel row.
+- Separate booking/ticket/provider/time wins over grouping. Example: the 9:00 AM Old Town/Jewish Quarter walking tour and 2:30 PM Klementinum ticket are two separate activities; the invented `Prague walking tour and Klementinum` parent should be suppressed.
+- City tips use bullet-level filtering. If scheduled activity bullets are removed but loose bullets remain, keep the city note. Generic `Notes & Tips` wording is not identity evidence across cities.
+- Summary now treats structural duplicate/stay/transport collisions as hard publish-blocking health warnings. Bloat (`7+ visible activity cards`) remains a quiet warning and does not block publish by itself.
+
 Maker UX note:
 
 - App setup now has one required pre-build confirmation: core materials are included. Empty-section handling and recommended privacy language moved into the section/module copy and review behavior instead of separate friction checks.

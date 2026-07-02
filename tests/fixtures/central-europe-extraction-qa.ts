@@ -4,14 +4,6 @@ const sourceFilename = "central-europe.pdf";
 
 const itemExpectations = [
   {
-    categoryId: "arrival_departure",
-    date: "2019-01-13",
-    description: "Drop bags before afternoon Rome sightseeing.",
-    id: "jan13-drop-bags-yellow",
-    label: "Drop bags at The Yellow",
-    requiredKeywords: ["drop", "bags", "yellow"],
-  },
-  {
     categoryId: "tours_tickets",
     date: "2019-01-13",
     description: "Afternoon self-guided Rome walk after landing.",
@@ -176,15 +168,6 @@ const itemExpectations = [
     label: "Prague food ideas",
     requiredKeywords: ["prague", "food"],
     requiredTitleKeywords: ["prague", "food"],
-  },
-  {
-    categoryId: "arrival_departure",
-    date: "2019-01-17",
-    description: "Pick up the rental car before driving to Kutna Hora.",
-    id: "jan17-rental-car-pickup-card",
-    label: "Pick up rental car",
-    requiredKeywords: ["pick", "rental", "car"],
-    requiredTitleKeywords: ["rental", "car"],
   },
   {
     categoryId: "temple_shrine",

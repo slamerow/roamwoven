@@ -125,6 +125,14 @@ function normalizeWords(value: string | null | undefined) {
           "activity",
           "visit",
           "museum",
+          "note",
+          "notes",
+          "tip",
+          "tips",
+          "idea",
+          "ideas",
+          "recommendation",
+          "recommendations",
         ].includes(word)
     );
 }
@@ -158,7 +166,7 @@ function timeFor(record: DraftObject) {
 }
 
 function isTransportActionText(value: string) {
-  return /\b(flight|fly|train|rail|bus|ferry|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to)\b/.test(
+  return /\b(flight|fly|train|rail|bus|ferry|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to|rental car|car pickup|pick up car|pickup car|drive)\b/.test(
     normalizeText(value)
   );
 }
@@ -232,10 +240,6 @@ function findDuplicateTransport(
     return null;
   }
 
-  if (isSeparateLocalMovement(activityText)) {
-    return null;
-  }
-
   const sameDayTransports = transports.filter((transport) => dateFor(transport) === date);
   const scored = sameDayTransports
     .map((transport) => ({
@@ -244,7 +248,79 @@ function findDuplicateTransport(
     }))
     .sort((a, b) => b.score - a.score);
 
-  return scored[0] && scored[0].score >= 2 ? scored[0].transport : null;
+  const best = scored[0];
+
+  if (!best || best.score < 2) {
+    return null;
+  }
+
+  if (
+    isSeparateLocalMovement(activityText) &&
+    best.score < 4 &&
+    normalizeText(getString(best.transport, "type")) !== "rental car"
+  ) {
+    return null;
+  }
+
+  return best.transport;
+}
+
+function appendUniqueSentence(existing: string | null, addition: string | null) {
+  if (!addition) {
+    return existing ?? null;
+  }
+
+  if (!existing) {
+    return addition;
+  }
+
+  const normalizedExisting = normalizeText(existing);
+  const normalizedAddition = normalizeText(addition);
+
+  if (
+    normalizedExisting.includes(normalizedAddition) ||
+    normalizedAddition.includes(normalizedExisting)
+  ) {
+    return existing;
+  }
+
+  return `${existing} ${addition}`;
+}
+
+function mergeTransportActivityDetails(
+  transport: DraftObject,
+  activity: DraftObject
+) {
+  const activityTime = timeFor(activity);
+  const activityEndTime = getString(activity, "endTime");
+  const activityLocation = getStringFromKeys(activity, [
+    "locationName",
+    "address",
+    "departure",
+  ]);
+  const activityDescription = textFor(activity, ["description"]);
+  const transportType = normalizeText(getString(transport, "type"));
+
+  if (!getString(transport, "departureTime") && activityTime) {
+    transport.departureTime = activityTime;
+  }
+
+  if (!getString(transport, "arrivalTime") && activityEndTime) {
+    transport.arrivalTime = activityEndTime;
+  }
+
+  if (
+    activityLocation &&
+    !getString(transport, "departure") &&
+    /\b(rental car|transfer|drive|bus|ferry|other)\b/.test(transportType)
+  ) {
+    transport.departure = activityLocation;
+  }
+
+  transport.description = appendUniqueSentence(
+    getString(transport, "description"),
+    activityDescription
+  );
 }
 
 function hasStandaloneAnchor(record: DraftObject) {
@@ -279,6 +355,23 @@ function isBroadParent(record: DraftObject) {
   );
 }
 
+function isCompositeParent(record: DraftObject) {
+  const title = normalizeText(getString(record, "title"));
+  const description = normalizeText(getString(record, "description"));
+  const text = `${title} ${description}`.trim();
+
+  if (!title) {
+    return false;
+  }
+
+  return (
+    /\b(and|plus|with)\b|\/|\+/.test(title) ||
+    /\b(morning|afternoon|evening).*\b(and|plus|with)\b/.test(text) ||
+    (/\b(walking tour|tour|sightseeing|sights|places)\b/.test(title) &&
+      /\b(and|then|after|also)\b/.test(description))
+  );
+}
+
 function isSameSiteGroup(record: DraftObject) {
   const text = normalizeText(textFor(record));
 
@@ -289,6 +382,18 @@ function isSameSiteGroup(record: DraftObject) {
 
 function isTourGroup(record: DraftObject) {
   return /\b(tour|walking tour|walk)\b/.test(normalizeText(getString(record, "title")));
+}
+
+function isGenericTourTitle(record: DraftObject) {
+  const title = normalizeText(getString(record, "title"));
+
+  return /\b(walking tour|city walking tour|prague walking tour|rome walking tour|vienna walking tour|tour)\b/.test(
+    title
+  );
+}
+
+function isNoteLikeRecord(record: DraftObject) {
+  return getString(record, "itemType") === "note" || isLooseTipActivity(record);
 }
 
 function recordMentionsTitle(record: DraftObject, title: string | null) {
@@ -374,6 +479,7 @@ function suppressTransportDuplicates({
       return true;
     }
 
+    mergeTransportActivityDetails(duplicate, activity);
     debug.suppressedTransportActivities.push({
       date: dateFor(activity),
       matchedTransportTitle:
@@ -382,6 +488,155 @@ function suppressTransportDuplicates({
           .filter(Boolean)
           .join(" to ") || "Transport"),
       removedTitle: getString(activity, "title") ?? "Untitled activity",
+    });
+
+    return false;
+  });
+}
+
+function stayContainsDate(stay: DraftObject, date: string | null) {
+  const parsedDate = parseDate(date);
+  const checkIn = parseDate(
+    getString(stay, "checkIn") ??
+      getString(stay, "checkInDate") ??
+      getString(stay, "firstNightDate")
+  );
+  const checkOut = parseDate(getString(stay, "checkOut") ?? getString(stay, "checkOutDate"));
+
+  if (!parsedDate || !checkIn) {
+    return false;
+  }
+
+  if (!checkOut) {
+    return parsedDate.getTime() === checkIn.getTime();
+  }
+
+  return parsedDate >= checkIn && parsedDate <= checkOut;
+}
+
+function isSeparateBagStorage(value: string) {
+  const text = normalizeText(value);
+
+  return /\b(luggage storage|left luggage|bag storage|locker|lockers|station|airport|storage facility|store bags at)\b/.test(
+    text
+  );
+}
+
+function isStayFlowText(value: string) {
+  return /\b(check in|check-in|checkin|drop bags?|bag drop|arrive|arrival|stay|staying|lodging|hotel|hostel|airbnb|apartment)\b/.test(
+    normalizeText(value)
+  );
+}
+
+function stayMatchScore(activity: DraftObject, stay: DraftObject) {
+  const activityText = normalizeText(textFor(activity));
+  const stayNames = [
+    getString(stay, "name"),
+    getString(stay, "title"),
+    getString(stay, "publicLocationLabel"),
+    getString(stay, "address"),
+  ];
+  let score = 0;
+
+  for (const value of stayNames) {
+    const normalized = normalizeText(value);
+
+    if (!normalized) {
+      continue;
+    }
+
+    if (activityText.includes(normalized)) {
+      score += normalized.length > 8 ? 4 : 3;
+      continue;
+    }
+
+    const words = normalizeWords(normalized);
+    const matches = words.filter((word) => activityText.includes(word));
+
+    if (matches.length >= Math.min(2, words.length)) {
+      score += 2;
+    }
+  }
+
+  if (/\b(hostel|hotel|airbnb|apartment|lodging)\b/.test(activityText)) {
+    score += 1;
+  }
+
+  if (/\b(check in|check-in|checkin|drop bags?|bag drop|arrival)\b/.test(activityText)) {
+    score += 1;
+  }
+
+  return score;
+}
+
+function findDuplicateStay(activity: DraftObject, stays: DraftObject[]) {
+  const date = dateFor(activity);
+  const activityText = textFor(activity);
+
+  if (!date || !activityText || !isStayFlowText(activityText)) {
+    return null;
+  }
+
+  if (isSeparateBagStorage(activityText)) {
+    const explicitlyNamesStay = stays.some((stay) => {
+      const stayName = normalizeText(getString(stay, "name"));
+      return Boolean(stayName && normalizeText(activityText).includes(stayName));
+    });
+
+    if (!explicitlyNamesStay) {
+      return null;
+    }
+  }
+
+  const sameDayStays = stays.filter((stay) => stayContainsDate(stay, date));
+  const scored = sameDayStays
+    .map((stay) => ({ score: stayMatchScore(activity, stay), stay }))
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0] && scored[0].score >= 2 ? scored[0].stay : null;
+}
+
+function mergeStayActivityDetails(stay: DraftObject, activity: DraftObject) {
+  const activityTime = timeFor(activity);
+  const activityDate = dateFor(activity);
+
+  if (
+    activityTime &&
+    !getString(stay, "checkInTime") &&
+    /\b(check in|check-in|checkin|arrival)\b/.test(normalizeText(textFor(activity)))
+  ) {
+    stay.checkInTime = activityTime;
+  }
+
+  if (
+    activityDate &&
+    !getString(stay, "checkIn") &&
+    !getString(stay, "checkInDate")
+  ) {
+    stay.checkIn = activityDate;
+  }
+}
+
+function suppressStayFlowActivities({
+  activities,
+  debug,
+  stays,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+  stays: DraftObject[];
+}) {
+  return activities.filter((activity) => {
+    const duplicate = findDuplicateStay(activity, stays);
+
+    if (!duplicate) {
+      return true;
+    }
+
+    mergeStayActivityDetails(duplicate, activity);
+    debug.foldedLodgingNotes.push({
+      stayTitle: getString(duplicate, "name") ?? null,
+      title: getString(activity, "title") ?? "Lodging flow",
     });
 
     return false;
@@ -402,27 +657,58 @@ function pruneParentChildActivities({
       return;
     }
 
+    if (isNoteLikeRecord(parent)) {
+      return;
+    }
+
     const sameDayChildren = activities
       .map((child, childIndex) => ({ child, childIndex }))
       .filter(
         ({ child, childIndex }) =>
           childIndex !== parentIndex &&
           !removedIndexes.has(childIndex) &&
+          !isNoteLikeRecord(child) &&
           dateFor(child) === dateFor(parent) &&
           childIsContainedInParent(parent, child)
       );
+    const sameTimeTourDuplicates = activities
+      .map((child, childIndex) => ({ child, childIndex }))
+      .filter(
+        ({ child, childIndex }) =>
+          childIndex !== parentIndex &&
+          !removedIndexes.has(childIndex) &&
+          !isNoteLikeRecord(child) &&
+          dateFor(child) === dateFor(parent) &&
+          timeFor(child) &&
+          timeFor(child) === timeFor(parent) &&
+          isGenericTourTitle(parent) &&
+          isTourGroup(child)
+      );
+    const candidateChildren = [...sameDayChildren];
 
-    if (sameDayChildren.length === 0) {
+    for (const duplicate of sameTimeTourDuplicates) {
+      if (
+        !candidateChildren.some(
+          (candidate) => candidate.childIndex === duplicate.childIndex
+        )
+      ) {
+        candidateChildren.push(duplicate);
+      }
+    }
+
+    if (candidateChildren.length === 0) {
       return;
     }
 
-    const standaloneChildren = sameDayChildren.filter(({ child }) =>
+    const standaloneChildren = candidateChildren.filter(({ child }) =>
       hasStandaloneAnchor(child)
     );
 
     if (
-      isBroadParent(parent) &&
-      (sameDayChildren.length >= 2 || standaloneChildren.length > 0)
+      (isBroadParent(parent) || isCompositeParent(parent)) &&
+      (candidateChildren.length >= 2 ||
+        (isCompositeParent(parent) && standaloneChildren.length > 0) ||
+        standaloneChildren.length > 0)
     ) {
       removedIndexes.add(parentIndex);
       debug.removedDuplicateParents.push({
@@ -431,7 +717,7 @@ function pruneParentChildActivities({
           ? "A named/timed child card covered the broad parent."
           : "Named child cards covered the broad parent.",
         removedTitle: getString(parent, "title") ?? "Untitled activity",
-        survivingTitles: sameDayChildren.map(
+        survivingTitles: candidateChildren.map(
           ({ child }) => getString(child, "title") ?? "Untitled activity"
         ),
       });
@@ -914,18 +1200,6 @@ function nonAssemblyMissingDetails(value: unknown) {
 function createAssemblyCalls(
   debug: TripDraftConsolidationDebug
 ): AssemblyMissingDetail[] {
-  const parentCalls = debug.removedDuplicateParents.map((item) => ({
-    answerType: "confirm" as const,
-    assemblySource: "trip_assembly" as const,
-    confidence: "high" as const,
-    evidence: item.survivingTitles.join("; "),
-    guessedValue: item.survivingTitles.join("; ") || "Named child cards",
-    prompt: `We removed ${item.removedTitle} because specific cards covered it.`,
-    reason: item.reason,
-    relatedTitle: item.survivingTitles[0] ?? null,
-    subjectType: "item" as const,
-    targetField: "presentation" as const,
-  }));
   const groupedChildCalls = debug.removedGroupedChildren.map((item) => ({
     answerType: "confirm" as const,
     assemblySource: "trip_assembly" as const,
@@ -953,7 +1227,7 @@ function createAssemblyCalls(
     targetField: "presentation" as const,
   }));
 
-  return [...parentCalls, ...groupedChildCalls, ...cityNoteCalls];
+  return [...groupedChildCalls, ...cityNoteCalls];
 }
 
 export function consolidateTripDraft(draft: unknown): {
@@ -980,9 +1254,10 @@ export function consolidateTripDraft(draft: unknown): {
   let activities = cloneRecordArray(record.activities).map(improvesGenericTourTitle);
 
   activities = suppressTransportDuplicates({ activities, debug, transports });
-  activities = pruneParentChildActivities({ activities, debug });
+  activities = suppressStayFlowActivities({ activities, debug, stays });
   activities = suppressLodgingNotes({ activities, debug, stays });
   activities = mergeCityNotes({ activities, debug, places });
+  activities = pruneParentChildActivities({ activities, debug });
   activities = markOptionalActivities({ activities, debug });
   debug.overproductionRetry = timelinePlanCounts({ activities, transports });
   const assemblyCalls = createAssemblyCalls(debug);

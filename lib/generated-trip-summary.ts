@@ -217,6 +217,104 @@ function formatTime(value: string | null) {
   return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
+function normalizeHealthText(value: string | null | undefined) {
+  return value
+    ?.toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim() ?? "";
+}
+
+function healthTextForItem(item: StructuredTripRecords["items"][number]) {
+  return normalizeHealthText(
+    [item.title, item.description, item.locationName, item.address]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function healthTextForTransport(item: StructuredTripRecords["transport"][number]) {
+  return normalizeHealthText(
+    [
+      item.routeLabel,
+      item.departureLocation,
+      item.arrivalLocation,
+      item.provider,
+      item.confirmationLabel,
+      item.description,
+      item.transportType.replaceAll("_", " "),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function normalizeDuplicateTitle(value: string) {
+  return normalizeHealthText(value)
+    .replace(/\b(reservation|booking|activity|visit|tour|ticket|tickets)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wordsForHealth(value: string) {
+  return normalizeHealthText(value)
+    .split(/\s+/)
+    .filter((word) => word.length > 2)
+    .filter(
+      (word) =>
+        ![
+          "and",
+          "the",
+          "for",
+          "with",
+          "from",
+          "into",
+          "tour",
+          "walk",
+          "day",
+          "trip",
+          "city",
+          "activity",
+          "visit",
+          "reservation",
+          "booking",
+        ].includes(word)
+    );
+}
+
+function healthTextsOverlap(left: string, right: string) {
+  const leftText = normalizeHealthText(left);
+  const rightText = normalizeHealthText(right);
+
+  if (!leftText || !rightText) {
+    return false;
+  }
+
+  if (leftText.includes(rightText) || rightText.includes(leftText)) {
+    return true;
+  }
+
+  const leftWords = wordsForHealth(leftText);
+  const rightWords = wordsForHealth(rightText);
+  const matches = leftWords.filter((word) => rightWords.includes(word));
+
+  return matches.length >= Math.min(2, leftWords.length, rightWords.length);
+}
+
+function isStayFlowItem(item: StructuredTripRecords["items"][number]) {
+  return /\b(check in|checkin|drop bags?|bag drop|arrival|stay|staying|lodging|hotel|hostel|airbnb|apartment)\b/.test(
+    healthTextForItem(item)
+  );
+}
+
+function isTransportFlowItem(item: StructuredTripRecords["items"][number]) {
+  return /\b(flight|fly|train|rail|bus|ferry|airport|station|transfer|depart|departure|arrive|arrival|rental car|car pickup|pick up car|pickup car|drive)\b/.test(
+    healthTextForItem(item)
+  );
+}
+
 function formatDayLabel(date: string, dayNumber: number) {
   return `Day ${dayNumber} · ${formatDate(date, false) || date}`;
 }
@@ -509,6 +607,13 @@ function createSummaryWarnings({
   days: GeneratedTripSummaryDay[];
   records: StructuredTripRecords;
 }): GeneratedTripSummaryWarning[] {
+  const activeItems = records.items.filter(
+    (item) => isActiveStatus(item.status) && item.itemType === "activity"
+  );
+  const activeStays = records.stays.filter((stay) => isActiveStatus(stay.status));
+  const activeTransport = records.transport.filter((item) =>
+    isActiveStatus(item.status)
+  );
   const bloatWarnings = days
     .filter((day) => {
       const sourceDay = records.days.find((item) => item.id === day.id);
@@ -546,8 +651,106 @@ function createSummaryWarnings({
       subjectType: "transport" as const,
       title: `${item.routeLabel} is missing critical travel details`,
     }));
+  const duplicateTitleWarnings = Array.from(
+    activeItems.reduce((groups, item) => {
+      const key = [
+        item.date,
+        item.startTime ?? "",
+        normalizeDuplicateTitle(item.title),
+      ].join("|");
 
-  return [...criticalTransportWarnings, ...bloatWarnings];
+      if (!item.date || !normalizeDuplicateTitle(item.title)) {
+        return groups;
+      }
+
+      groups.set(key, [...(groups.get(key) ?? []), item]);
+      return groups;
+    }, new Map<string, typeof activeItems>())
+  )
+    .filter(([, items]) => items.length > 1)
+    .map(([, items]) => ({
+      detail:
+        "Multiple visible activity cards have the same date, time, and title. Merge or remove the duplicate before publishing.",
+      id: `${items[0]?.id ?? "activity"}-duplicate-title`,
+      severity: "hard" as const,
+      subjectId: items[0]?.id ?? records.trip.id,
+      subjectType: "item" as const,
+      title: `${items[0]?.title ?? "Activity"} appears more than once`,
+    }));
+  const stayCollisionWarnings = activeItems
+    .filter(isStayFlowItem)
+    .flatMap((item) => {
+      const matchingStay = activeStays.find((stay) => {
+        if (!item.date || !stay.checkInDate) {
+          return false;
+        }
+
+        const sameStayWindow =
+          stay.checkOutDate && stay.checkInDate
+            ? stay.checkInDate <= item.date && item.date <= stay.checkOutDate
+            : stay.checkInDate === item.date;
+
+        return (
+          sameStayWindow &&
+          (healthTextsOverlap(item.title, stay.name) ||
+            healthTextsOverlap(item.description ?? "", stay.name) ||
+            /\b(check in|checkin|drop bags?|bag drop|arrival)\b/.test(
+              healthTextForItem(item)
+            ))
+        );
+      });
+
+      if (!matchingStay) {
+        return [];
+      }
+
+      return [
+        {
+          detail:
+            "This card looks like normal stay/check-in/drop-bags flow already covered by the Stay row.",
+          id: `${item.id}-stay-collision`,
+          severity: "hard" as const,
+          subjectId: item.id,
+          subjectType: "item" as const,
+          title: `${item.title} duplicates a stay row`,
+        },
+      ];
+    });
+  const transportCollisionWarnings = activeItems
+    .filter(isTransportFlowItem)
+    .flatMap((item) => {
+      const matchingTransport = activeTransport.find(
+        (transport) =>
+          item.date &&
+          transport.date === item.date &&
+          (healthTextsOverlap(item.title, transport.routeLabel) ||
+            healthTextsOverlap(healthTextForItem(item), healthTextForTransport(transport)))
+      );
+
+      if (!matchingTransport) {
+        return [];
+      }
+
+      return [
+        {
+          detail:
+            "This card looks like movement already covered by the Travel row. Merge the useful details into Travel and remove the duplicate card.",
+          id: `${item.id}-transport-collision`,
+          severity: "hard" as const,
+          subjectId: item.id,
+          subjectType: "item" as const,
+          title: `${item.title} duplicates a travel row`,
+        },
+      ];
+    });
+
+  return [
+    ...criticalTransportWarnings,
+    ...duplicateTitleWarnings,
+    ...stayCollisionWarnings,
+    ...transportCollisionWarnings,
+    ...bloatWarnings,
+  ];
 }
 
 function createReviewItems(
@@ -729,6 +932,7 @@ export function createGeneratedTripSummaryView(
   const review = getStructuredReviewCount(records);
   const days = createSummaryDays(records, activeItems);
   const warnings = createSummaryWarnings({ days, records });
+  const hardWarnings = warnings.filter((warning) => warning.severity === "hard");
 
   return {
     counts: {
@@ -749,7 +953,7 @@ export function createGeneratedTripSummaryView(
     days,
     destination: formatDestination(records),
     sections: createSummarySections(records, activeItems, review),
-    isReadyForPublishReview: review === 0 && warnings.length === 0,
+    isReadyForPublishReview: review === 0 && hardWarnings.length === 0,
     title: records.trip.travelerAppTitle,
     warnings,
   };

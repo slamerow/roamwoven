@@ -305,6 +305,57 @@ test("draft consolidation suppresses duplicate travel activities without droppin
   );
 });
 
+test("draft consolidation merges rental car pickup activities into travel rows", () => {
+  const { debug, draft } = consolidateTripDraft({
+    activities: [
+      {
+        category: "arrival_departure",
+        date: "2019-01-17",
+        description: "Pick up car at 9 am. Reservation number: 81486.",
+        itemType: "activity",
+        startTime: "09:00",
+        title: "Car pickup for Kutna Hora",
+      },
+      {
+        category: "art_culture",
+        date: "2019-01-17",
+        itemType: "activity",
+        title: "Sedlec Ossuary",
+      },
+    ],
+    places: [
+      {
+        arriveDate: "2019-01-14",
+        city: "Prague",
+        leaveDate: "2019-01-18",
+      },
+    ],
+    stays: [],
+    transport: [
+      {
+        date: "2019-01-17",
+        departure: "Revolucni 1044/23",
+        title: "Car pickup for Kutna Hora",
+        type: "rental_car",
+      },
+    ],
+  }) as {
+    debug: ReturnType<typeof consolidateTripDraft>["debug"];
+    draft: {
+      activities: Array<{ title?: string }>;
+      transport: Array<{ departureTime?: string; description?: string; title?: string }>;
+    };
+  };
+
+  assert.deepEqual(
+    draft.activities.map((activity) => activity.title),
+    ["Sedlec Ossuary"]
+  );
+  assert.equal(debug.suppressedTransportActivities[0]?.removedTitle, "Car pickup for Kutna Hora");
+  assert.equal(draft.transport[0]?.departureTime, "09:00");
+  assert.match(draft.transport[0]?.description ?? "", /Reservation number: 81486/);
+});
+
 test("draft consolidation removes broad parent cards when named children cover them", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -354,12 +405,72 @@ test("draft consolidation removes broad parent cards when named children cover t
   assert.equal(titles.includes("Prague history sights"), false);
   assert.equal(titles.includes("Old Town and Jewish Quarter Hidden Secrets"), true);
   assert.equal(titles.includes("Klementinum Tour"), true);
-  assert.ok(
-    records.reviewQuestions.some(
-      (question) =>
-        question.status === "noted" &&
-        /removed Prague history sights/i.test(question.prompt)
-    )
+  assert.equal(
+    records.reviewQuestions.some((question) =>
+      /removed Prague history sights/i.test(question.prompt)
+    ),
+    false
+  );
+});
+
+test("draft consolidation keeps separate timed tickets while removing invented composite parents", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-15",
+          description:
+            "Composite row inferred from the day: walking tour in the morning and Klementinum at 2:30.",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Prague walking tour and Klementinum",
+        },
+        {
+          category: "tours_tickets",
+          date: "2019-01-15",
+          description: "Booking L272-181125-2 with LivingPragueTours.",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Old Town and Jewish Quarter Hidden Secrets",
+        },
+        {
+          category: "tours_tickets",
+          date: "2019-01-15",
+          description: "Separate Klementinum guided tour ticket.",
+          itemType: "activity",
+          startTime: "14:30",
+          title: "Klementinum tour",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-prague-discrete-tickets",
+  });
+  const titles = records.items.map((item) => item.title);
+
+  assert.equal(titles.includes("Prague walking tour and Klementinum"), false);
+  assert.equal(titles.includes("Old Town and Jewish Quarter Hidden Secrets"), true);
+  assert.equal(titles.includes("Klementinum tour"), true);
+  assert.equal(
+    records.reviewQuestions.some((question) =>
+      /Prague walking tour and Klementinum/i.test(question.prompt)
+    ),
+    false
   );
 });
 
@@ -409,6 +520,76 @@ test("city note merging removes places that already became scheduled activities"
   assert.equal(
     records.items.some((item) => item.title === "Dinner at Mazel Tov"),
     true
+  );
+});
+
+test("city note merging preserves separate city notes with generic notes and tips titles", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "admin_logistics",
+          date: null,
+          description: "Prague cafes: Cafe Savoy; beer halls: U Fleku.",
+          itemType: "note",
+          title: "Prague Notes & Tips",
+        },
+        {
+          category: "admin_logistics",
+          date: null,
+          description: "Vienna cafes: Cafe Central; museums: Albertina.",
+          itemType: "note",
+          title: "Vienna Notes & Tips",
+        },
+        {
+          category: "admin_logistics",
+          date: null,
+          description: "Budapest food: Mazel Tov; shopping: Nanushka.",
+          itemType: "note",
+          title: "Budapest Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          leaveDate: "2019-01-21",
+        },
+        {
+          arriveDate: "2019-01-21",
+          city: "Budapest",
+          leaveDate: "2019-01-24",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-city-notes-separate",
+  });
+  const noteTitles = records.items
+    .filter((item) => item.itemType === "note")
+    .map((item) => item.title)
+    .sort();
+
+  assert.deepEqual(noteTitles, [
+    "Budapest Notes & Tips",
+    "Prague Notes & Tips",
+    "Vienna Notes & Tips",
+  ]);
+  assert.equal(
+    records.reviewQuestions.some((question) => /removed Vienna Notes/i.test(question.prompt)),
+    false
   );
 });
 
@@ -1172,7 +1353,7 @@ test("lodging arrival cards prevent duplicate synthetic check-ins", () => {
     records.items.some((item) => item.title === "Check in: The Yellow Hostel"),
     false
   );
-  assert.equal(records.items.length, 1);
+  assert.equal(records.items.length, 0);
 });
 
 test("checkout stays in stay details instead of day summary entries", () => {
@@ -1340,6 +1521,8 @@ test("summary flags days with seven or more visible activities", () => {
     /has a lot of visible cards/.test(warning.title)
   );
   assert.ok(warning);
+  assert.equal(warning.severity, "quiet");
+  assert.equal(summary.isReadyForPublishReview, true);
   const resolved = applyReviewDecision(records, {
     action: "confirm",
     createdAt: "2026-06-18T12:00:00.000Z",
@@ -1351,6 +1534,104 @@ test("summary flags days with seven or more visible activities", () => {
   const resolvedSummary = createGeneratedTripSummaryView(resolved);
 
   assert.equal(resolvedSummary.warnings.length, 0);
+});
+
+test("summary hard-blocks surviving stay and transport duplicate collisions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2026-09-02",
+          description:
+            "Store bags at Central Station luggage storage before going to the hotel.",
+          itemType: "activity",
+          title: "Store bags at Central Station luggage storage",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-02",
+          city: "Paris",
+          country: "France",
+          leaveDate: "2026-09-03",
+        },
+        {
+          arriveDate: "2026-09-03",
+          city: "Lyon",
+          country: "France",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2026-09-02",
+          checkOut: "2026-09-03",
+          name: "Central Station Hotel",
+        },
+      ],
+      transport: [
+        {
+          arrival: "Lyon Part-Dieu",
+          arrivalTime: "12:00",
+          date: "2026-09-03",
+          departure: "Paris Gare de Lyon",
+          departureTime: "10:00",
+          title: "Train to Lyon",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "France",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-summary-health-collisions",
+  });
+  records.items.push({
+    address: null,
+    categoryId: "arrival_departure",
+    date: "2026-09-03",
+    description: "Take train from Paris to Lyon.",
+    endTime: null,
+    id: "manual-transport-duplicate",
+    itemType: "activity",
+    latitude: null,
+    legId: records.legs[1]?.id ?? null,
+    locationName: null,
+    longitude: null,
+    parentItemId: null,
+    reviewRequired: false,
+    sortOrder: 99,
+    sourceConfidence: "high",
+    startTime: "10:00",
+    status: "draft",
+    summary: null,
+    title: "Train to Lyon",
+    tripId: records.trip.id,
+    url: null,
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.ok(
+    summary.warnings.some(
+      (warning) =>
+        warning.severity === "hard" &&
+        /Store bags at Central Station luggage storage duplicates a stay row/.test(
+          warning.title
+        )
+    )
+  );
+  assert.ok(
+    summary.warnings.some(
+      (warning) =>
+        warning.severity === "hard" &&
+        /Train to Lyon duplicates a travel row/.test(warning.title)
+    )
+  );
+  assert.equal(summary.isReadyForPublishReview, false);
 });
 
 test("category taxonomy canonicalizes old aliases and avoids generic buckets", () => {
@@ -1498,6 +1779,21 @@ test("stay rows carry check-in flow without synthetic check-in cards", () => {
         {
           category: "arrival_departure",
           date: "2019-01-13",
+          description: "Arrive in Rome and drop bags at the hostel.",
+          itemType: "admin",
+          title: "Arrive in Rome and drop bags",
+        },
+        {
+          category: "arrival_departure",
+          date: "2019-01-13",
+          description: "Check in at 2:30 PM.",
+          itemType: "admin",
+          startTime: "14:30",
+          title: "Check in to The Yellow",
+        },
+        {
+          category: "arrival_departure",
+          date: "2019-01-13",
           description: "Drop bags before afternoon sightseeing.",
           itemType: "admin",
           title: "Drop bags at The Yellow",
@@ -1553,14 +1849,7 @@ test("stay rows carry check-in flow without synthetic check-in cards", () => {
     (item) => item.categoryId === "arrival_departure"
   );
 
-  assert.equal(checkInCards.length, 1);
-  assert.ok(
-    checkInCards.some((item) => item.title === "Drop bags at The Yellow")
-  );
-  assert.equal(
-    checkInCards.some((item) => /^Check in to /.test(item.title)),
-    false
-  );
+  assert.equal(checkInCards.length, 0);
   assert.ok(
     summary.days.some((day) =>
       day.entries.some(
@@ -1570,6 +1859,54 @@ test("stay rows carry check-in flow without synthetic check-in cards", () => {
           /2:30 PM|14:30/.test(entry.meta)
       )
     )
+  );
+});
+
+test("separate luggage storage survives when it is not the stay check-in flow", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2019-01-13",
+          description: "Store bags at Roma Termini luggage storage before sightseeing.",
+          itemType: "admin",
+          title: "Store bags at Roma Termini luggage storage",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2019-01-13",
+          checkInTime: "14:30",
+          checkOut: "2019-01-14",
+          name: "The Yellow",
+          nights: 1,
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-separate-luggage-storage",
+  });
+
+  assert.equal(
+    records.items.some(
+      (item) => item.title === "Store bags at Roma Termini luggage storage"
+    ),
+    true
   );
 });
 
