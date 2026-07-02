@@ -8,10 +8,12 @@ import {
   CheckCircle2,
   ChevronDown,
   Home,
+  Lightbulb,
   Palette,
   ShieldCheck,
   Sparkles,
   TrainFront,
+  Trash2,
 } from "lucide-react";
 import { MakerProgress } from "@/components/maker-progress";
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
@@ -19,7 +21,9 @@ import {
   createGeneratedTripSummaryView,
   type GeneratedTripSummaryDay,
   type GeneratedTripSummaryDayEntry,
+  type GeneratedTripSummaryWarning,
 } from "@/lib/generated-trip-summary";
+import type { StructuredReviewEditField } from "@/lib/generated-trip-review";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getThemeDirection } from "@/lib/style-settings-config";
 import { getMakerTrip } from "@/lib/trips";
@@ -54,7 +58,130 @@ function createDayCardStyle({
   };
 }
 
-function SummaryEntry({ entry }: { entry: GeneratedTripSummaryDayEntry }) {
+function EditFieldInput({ field }: { field: StructuredReviewEditField }) {
+  const baseClass =
+    "mt-1 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss/40";
+
+  if (field.type === "textarea") {
+    return (
+      <textarea
+        className={`${baseClass} min-h-24`}
+        defaultValue={field.value}
+        name={`field:${field.name}`}
+      />
+    );
+  }
+
+  if (field.type === "select") {
+    return (
+      <select className={baseClass} defaultValue={field.value} name={`field:${field.name}`}>
+        <option value="">Not set</option>
+        {field.options?.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      className={baseClass}
+      defaultValue={field.value}
+      name={`field:${field.name}`}
+      type={field.type}
+    />
+  );
+}
+
+function SummaryEntryActions({
+  entry,
+  tripId,
+}: {
+  entry: GeneratedTripSummaryDayEntry;
+  tripId: string;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {entry.editFields.length > 0 ? (
+        <details className="w-full rounded-md border border-ink/10 bg-white p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+            Edit
+          </summary>
+          <form
+            action={`/maker/trips/${tripId}/data/decisions`}
+            className="mt-3 grid gap-3 md:grid-cols-2"
+            method="post"
+          >
+            <input name="action" type="hidden" value="edit" />
+            <input name="returnTo" type="hidden" value="summary" />
+            <input name="subjectId" type="hidden" value={entry.subjectId} />
+            <input name="subjectType" type="hidden" value={entry.subjectType} />
+            {entry.editFields.map((field) => (
+              <label
+                className={field.type === "textarea" ? "md:col-span-2" : ""}
+                key={field.name}
+              >
+                <span className="text-xs font-semibold text-ink/55">
+                  {field.label}
+                </span>
+                <EditFieldInput field={field} />
+              </label>
+            ))}
+            <div className="md:col-span-2">
+              <button
+                className="inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper"
+                type="submit"
+              >
+                Save edit
+              </button>
+            </div>
+          </form>
+        </details>
+      ) : null}
+
+      {entry.canMoveToCityTip ? (
+        <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
+          <input name="action" type="hidden" value="move_to_city_tip" />
+          <input name="returnTo" type="hidden" value="summary" />
+          <input name="subjectId" type="hidden" value={entry.subjectId} />
+          <input name="subjectType" type="hidden" value={entry.subjectType} />
+          <input name="targetLegId" type="hidden" value={entry.targetLegId ?? ""} />
+          <button
+            className="inline-flex items-center gap-2 rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink/70"
+            type="submit"
+          >
+            <Lightbulb size={14} />
+            Move to city tips
+          </button>
+        </form>
+      ) : null}
+
+      <form action={`/maker/trips/${tripId}/data/decisions`} method="post">
+        <input name="action" type="hidden" value="delete" />
+        <input name="returnTo" type="hidden" value="summary" />
+        <input name="subjectId" type="hidden" value={entry.subjectId} />
+        <input name="subjectType" type="hidden" value={entry.subjectType} />
+        <button
+          className="inline-flex items-center gap-2 rounded-md border border-clay/20 bg-clay/10 px-3 py-2 text-xs font-semibold text-clay"
+          type="submit"
+        >
+          <Trash2 size={14} />
+          Remove
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SummaryEntry({
+  entry,
+  tripId,
+}: {
+  entry: GeneratedTripSummaryDayEntry;
+  tripId: string;
+}) {
   const Icon = ENTRY_ICONS[entry.kind];
   const detailLabel =
     entry.kind === "activity" || entry.kind === "review"
@@ -84,6 +211,7 @@ function SummaryEntry({ entry }: { entry: GeneratedTripSummaryDayEntry }) {
             <p className="mt-1 text-sm leading-6 text-ink/60">{entry.detail}</p>
           </details>
         ) : null}
+        <SummaryEntryActions entry={entry} tripId={tripId} />
       </div>
     </div>
   );
@@ -92,9 +220,11 @@ function SummaryEntry({ entry }: { entry: GeneratedTripSummaryDayEntry }) {
 function SummaryDayCard({
   day,
   style,
+  tripId,
 }: {
   day: GeneratedTripSummaryDay;
   style: CSSProperties;
+  tripId: string;
 }) {
   const stayEntries = day.entries.filter((entry) => entry.kind === "stay");
   const travelEntries = day.entries.filter((entry) => entry.kind === "transport");
@@ -131,21 +261,21 @@ function SummaryDayCard({
         {stayEntries.length > 0 ? (
           <div>
             {stayEntries.map((entry) => (
-              <SummaryEntry entry={entry} key={entry.id} />
+              <SummaryEntry entry={entry} key={entry.id} tripId={tripId} />
             ))}
           </div>
         ) : null}
         {travelEntries.length > 0 ? (
           <div>
             {travelEntries.map((entry) => (
-              <SummaryEntry entry={entry} key={entry.id} />
+              <SummaryEntry entry={entry} key={entry.id} tripId={tripId} />
             ))}
           </div>
         ) : null}
         {activityEntries.length > 0 ? (
           <div>
             {activityEntries.map((entry) => (
-              <SummaryEntry entry={entry} key={entry.id} />
+              <SummaryEntry entry={entry} key={entry.id} tripId={tripId} />
             ))}
           </div>
         ) : null}
@@ -184,9 +314,11 @@ function DesignPreviewStrip({
 function DayByDaySummary({
   days,
   style,
+  tripId,
 }: {
   days: GeneratedTripSummaryDay[];
   style: CSSProperties;
+  tripId: string;
 }) {
   return (
     <section className="mt-8">
@@ -208,7 +340,12 @@ function DayByDaySummary({
       {days.length > 0 ? (
         <div className="mt-5 space-y-4">
           {days.map((day) => (
-            <SummaryDayCard day={day} key={day.id} style={style} />
+            <SummaryDayCard
+              day={day}
+              key={day.id}
+              style={style}
+              tripId={tripId}
+            />
           ))}
         </div>
       ) : (
@@ -216,6 +353,61 @@ function DayByDaySummary({
           No day-by-day records are ready yet.
         </div>
       )}
+    </section>
+  );
+}
+
+function SummaryWarnings({
+  tripId,
+  warnings,
+}: {
+  tripId: string;
+  warnings: GeneratedTripSummaryWarning[];
+}) {
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-8 rounded-md border border-clay/20 bg-white p-5">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 shrink-0 text-clay" size={18} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-ink">Warnings</p>
+          <div className="mt-3 grid gap-3">
+            {warnings.map((warning) => (
+              <div className="rounded-md bg-paper p-4" key={warning.id}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">
+                      {warning.title}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-ink/60">
+                      {warning.detail}
+                    </p>
+                  </div>
+                  <form
+                    action={`/maker/trips/${tripId}/data/decisions`}
+                    method="post"
+                  >
+                    <input name="action" type="hidden" value="confirm" />
+                    <input name="returnTo" type="hidden" value="summary" />
+                    <input name="subjectId" type="hidden" value={warning.subjectId} />
+                    <input name="subjectType" type="hidden" value={warning.subjectType} />
+                    <button
+                      className="inline-flex shrink-0 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink/70"
+                      type="submit"
+                    >
+                      <CheckCircle2 size={14} />
+                      Mark checked
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -371,7 +563,12 @@ export default async function TripSummaryPage({
 
         {summary ? (
           <>
-            <DayByDaySummary days={summary.days} style={dayCardStyle} />
+            <SummaryWarnings tripId={tripId} warnings={summary.warnings} />
+            <DayByDaySummary
+              days={summary.days}
+              style={dayCardStyle}
+              tripId={tripId}
+            />
             <QuietSummarySection
               privateDetailCount={summary.counts.privateDetails}
               reviewCount={summary.counts.review}

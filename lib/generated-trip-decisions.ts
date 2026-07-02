@@ -25,6 +25,7 @@ export type ReviewDecisionAction =
   | "protect"
   | "delete"
   | "combine"
+  | "move_to_city_tip"
   | "answer_question";
 
 type ReviewDecisionBase = {
@@ -71,6 +72,12 @@ export type CombineReviewDecision = ReviewDecisionBase & {
   targetId: string;
 };
 
+export type MoveToCityTipReviewDecision = ReviewDecisionBase & {
+  action: "move_to_city_tip";
+  subjectType: "item";
+  targetLegId?: string | null;
+};
+
 export type AnswerQuestionReviewDecision = ReviewDecisionBase & {
   action: "answer_question";
   answerValue: string;
@@ -84,6 +91,7 @@ export type TripReviewDecision =
   | ProtectReviewDecision
   | DeleteReviewDecision
   | CombineReviewDecision
+  | MoveToCityTipReviewDecision
   | AnswerQuestionReviewDecision;
 
 function updateById<T extends { id: string }>(
@@ -311,6 +319,157 @@ function applyCombine(
   };
 }
 
+function categoryIdForCityTipSection(section: string) {
+  if (section === "Food" || section === "Cafes") {
+    return "food_dining";
+  }
+
+  if (section === "Drinks") {
+    return "nightlife_entertainment";
+  }
+
+  if (section === "Shopping") {
+    return "shopping_tailor";
+  }
+
+  return "admin_logistics";
+}
+
+function cityTipSectionForItem(item: TripItemRecord) {
+  const text = [item.categoryId, item.title, item.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/\b(cafe|coffee|bakery|breakfast|brunch)\b/.test(text)) {
+    return "Cafes";
+  }
+
+  if (/\b(food|dining|restaurant|dinner|lunch|eat|bistro|kitchen|market)\b/.test(text)) {
+    return "Food";
+  }
+
+  if (/\b(bar|beer|wine|cocktail|drink|pub|nightlife)\b/.test(text)) {
+    return "Drinks";
+  }
+
+  if (/\b(shop|shopping|store|boutique|tailor|watch|market)\b/.test(text)) {
+    return "Shopping";
+  }
+
+  return "Notes";
+}
+
+function appendCityTipEntry(description: string | null, section: string, entry: string) {
+  const existing = description?.trim();
+
+  if (!existing) {
+    return `${section}: ${entry}`;
+  }
+
+  if (existing.toLowerCase().includes(entry.toLowerCase())) {
+    return existing;
+  }
+
+  const sectionPattern = new RegExp(`(^|\\n)${section}:\\s*`, "i");
+
+  if (sectionPattern.test(existing)) {
+    return existing.replace(sectionPattern, (match) => `${match}${entry}; `);
+  }
+
+  return `${existing}\n${section}: ${entry}`;
+}
+
+function applyMoveToCityTip(
+  records: StructuredTripRecords,
+  decision: MoveToCityTipReviewDecision
+) {
+  const source = records.items.find((item) => item.id === decision.subjectId);
+
+  if (!source) {
+    return records;
+  }
+
+  const leg =
+    records.legs.find((item) => item.id === decision.targetLegId) ??
+    records.legs.find((item) => item.id === source.legId) ??
+    null;
+
+  if (!leg) {
+    return applyToRecord(records, "item", source.id, {
+      item: (item) => ({
+        ...item,
+        date: null,
+        endTime: null,
+        itemType: "note",
+        reviewRequired: false,
+        startTime: null,
+        status: "confirmed",
+      }),
+    });
+  }
+
+  const section = cityTipSectionForItem(source);
+  const entry = [source.title, source.description]
+    .filter(Boolean)
+    .join(" - ");
+  const title = `${leg.displayName} Notes & Tips`;
+  const existingTip = records.items.find(
+    (item) =>
+      item.id !== source.id &&
+      item.legId === leg.id &&
+      item.itemType === "note" &&
+      item.status !== "ignored" &&
+      /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?)\b/i.test(
+        [item.title, item.description].filter(Boolean).join(" ")
+      )
+  );
+
+  if (!existingTip) {
+    return applyToRecord(records, "item", source.id, {
+      item: (item) => ({
+        ...item,
+        categoryId: categoryIdForCityTipSection(section),
+        date: null,
+        description: appendCityTipEntry(null, section, entry),
+        endTime: null,
+        itemType: "note",
+        legId: leg.id,
+        locationName: null,
+        reviewRequired: false,
+        startTime: null,
+        status: "confirmed",
+        title,
+      }),
+    });
+  }
+
+  return {
+    ...records,
+    items: records.items.map((item) => {
+      if (item.id === existingTip.id) {
+        return {
+          ...item,
+          description: appendCityTipEntry(item.description, section, entry),
+          reviewRequired: false,
+          status: "confirmed" as const,
+        };
+      }
+
+      if (item.id === source.id) {
+        return {
+          ...item,
+          parentItemId: existingTip.id,
+          reviewRequired: false,
+          status: "ignored" as const,
+        };
+      }
+
+      return item;
+    }),
+  };
+}
+
 const answerTargetFields = {
   item: [
     "address",
@@ -515,6 +674,10 @@ export function applyReviewDecision(
 
   if (decision.action === "combine") {
     return applyCombine(records, decision);
+  }
+
+  if (decision.action === "move_to_city_tip") {
+    return applyMoveToCityTip(records, decision);
   }
 
   return applyAnswerQuestion(records, decision);

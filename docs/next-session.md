@@ -143,6 +143,7 @@ Backend-ready pieces now exist:
   - The summary-specifics implementation is now wired: `lib/generated-trip-summary.ts` produces friendly date ranges and section rows, and `app/maker/trips/[tripId]/summary/page.tsx` renders expandable Legs, Transport, Stays, Activities, Protected details, and Review items. Activities are category-grouped and truncated to a pre-publish sample; the page was checked locally on desktop and mobile for overflow.
   - Follow-up summary QA fixed the demo adapter where `seedTrip.dateRange` was incorrectly stored as `destinationSummary`, and fixed the traveler view model where `trip.dateRange` was incorrectly derived from `destinationSummary`. The demo summary now shows `June 27 - November 8, 2026` as the structured date range and destination cities underneath. Protected-detail summary counts now exclude public/hidden detail records, and Review items now include privacy/record-review buckets as well as open questions.
   - Summary page direction shifted from abstract buckets to a day-by-day pre-publish review: Day N + date/location, stay/travel rows first, then activities with collapsed descriptions. This is the surface for evaluating whether extraction got activity count, titles, descriptions, and placement right without bloating the short review-prompt page. The summary header now lightly reflects saved design choices with theme name and color swatches; privacy remains a quiet protected-details note, not a dominant review section.
+  - Trip assembly correction pass: broad parent/child suppression and city-note merges now create statement-style Calls and persist `_assembly.debug` on the draft for internal audit. Summary rows can save structured edits, remove records, move activity cards to city tips, and mark warnings checked through the existing review-decision table. Ordinary synthetic check-in cards were removed; normal check-in/drop-bags context should live on the Stay row unless the source gives a separate traveler movement. Summary now flags 7+ visible activity days and critical flight/train records missing route/time/location details.
 - Maker trips now have an app-level soft-delete path. The trip workspace shows a Danger Zone delete button for real trips; paid trips get an explicit warning that deletion removes the trip from the app and requires contacting support for restore. `listMakerTrips` and `getMakerTrip` hide `status = deleted`, and published traveler snapshot tokens return 404 while the parent trip is deleted. This is intentionally not a hard database delete; backend records remain recoverable by the superadmin.
 - CTO durability pass started before new product work:
   - Published traveler snapshots now redact protected addresses and sensitive card details before JSON is shipped to `/t/[token]`. This is intentionally conservative: client-only traveler mode cannot reveal those secrets until a server-verified unlock path exists.
@@ -368,6 +369,12 @@ Latest checks after day-by-day trip-summary review:
 - `npm run build`
 
 Latest checks after explicit source TODO extraction rule:
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
+Latest checks after trip assembly correction pass:
 
 - `npm test`
 - `npm run typecheck`

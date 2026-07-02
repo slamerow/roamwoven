@@ -2333,15 +2333,7 @@ export function createStructuredTripRecordsFromDraft({
   const legs = createLegRecords({ draft: consolidatedDraft, tripId });
   const stays = createStayRecords({ draft: consolidatedDraft, legs, tripId });
   const transport = createTransportRecords({ draft: consolidatedDraft, legs, tripId });
-  const extractedItems = createItemRecords({ draft: consolidatedDraft, legs, tripId });
-  const items = [
-    ...extractedItems,
-    ...createStayCheckInItemRecords({
-      items: extractedItems,
-      stays,
-      tripId,
-    }),
-  ];
+  const items = createItemRecords({ draft: consolidatedDraft, legs, tripId });
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({
     draft: consolidatedDraft,

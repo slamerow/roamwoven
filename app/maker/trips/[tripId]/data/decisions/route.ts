@@ -11,6 +11,7 @@ type WritableReviewDecisionAction =
   | "confirm"
   | "delete"
   | "edit"
+  | "move_to_city_tip"
   | "protect";
 
 const writableActions: WritableReviewDecisionAction[] = [
@@ -19,6 +20,7 @@ const writableActions: WritableReviewDecisionAction[] = [
   "confirm",
   "delete",
   "edit",
+  "move_to_city_tip",
   "protect",
 ];
 
@@ -68,13 +70,18 @@ const editableFieldsBySubject: Partial<Record<ReviewDecisionSubjectType, string[
     "address",
     "addressVisibility",
     "checkInDate",
+    "checkInTime",
     "checkOutDate",
+    "checkOutTime",
     "name",
     "publicLocationLabel",
   ],
   transport: [
+    "arrivalLocation",
     "arrivalTime",
+    "confirmationLabel",
     "date",
+    "departureLocation",
     "departureTime",
     "description",
     "provider",
@@ -123,13 +130,15 @@ export async function POST(
 ) {
   const { tripId } = await params;
   const trip = await getMakerTrip(tripId);
-  const dataUrl = new URL(`/maker/trips/${tripId}/data`, request.url);
   const wantsJson = request.headers.get("accept")?.includes("application/json");
+  let returnUrl = new URL(`/maker/trips/${tripId}/data`, request.url);
 
   function respond(
     params: { decision?: string; error?: string },
     status = params.error ? 400 : 200
   ) {
+    const dataUrl = new URL(returnUrl);
+
     for (const [key, value] of Object.entries(params)) {
       if (value) {
         dataUrl.searchParams.set(key, value);
@@ -162,7 +171,12 @@ export async function POST(
     const action = String(formData.get("action") ?? "");
     const subjectType = String(formData.get("subjectType") ?? "");
     const subjectId = String(formData.get("subjectId") ?? "");
+    const returnTo = String(formData.get("returnTo") ?? "");
     const note = String(formData.get("note") ?? "").trim() || null;
+
+    if (returnTo === "summary") {
+      returnUrl = new URL(`/maker/trips/${tripId}/summary`, request.url);
+    }
 
     if (!isWritableAction(action) || !isSubjectType(subjectType) || !subjectId) {
       return respond({ error: "decision-invalid" });
@@ -237,6 +251,21 @@ export async function POST(
         subjectId: targetId,
         subjectType,
         targetId,
+        tripId,
+      });
+    } else if (action === "move_to_city_tip") {
+      if (subjectType !== "item") {
+        return respond({ error: "decision-invalid" });
+      }
+
+      const targetLegId = String(formData.get("targetLegId") ?? "").trim() || null;
+
+      await saveTripReviewDecision({
+        action,
+        note,
+        subjectId,
+        subjectType,
+        targetLegId,
         tripId,
       });
     } else {

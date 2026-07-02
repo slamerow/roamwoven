@@ -7,6 +7,7 @@ import {
   type ConfirmReviewDecision,
   type DeleteReviewDecision,
   type EditReviewDecision,
+  type MoveToCityTipReviewDecision,
   type ProtectReviewDecision,
   type ReviewDecisionAction,
   type ReviewDecisionSubjectType,
@@ -29,6 +30,7 @@ export type TripReviewDecisionInput =
   | WithoutServerFields<ProtectReviewDecision>
   | WithoutServerFields<DeleteReviewDecision>
   | WithoutServerFields<CombineReviewDecision>
+  | WithoutServerFields<MoveToCityTipReviewDecision>
   | WithoutServerFields<AnswerQuestionReviewDecision>;
 
 export type TripReviewDecisionRow = {
@@ -60,6 +62,7 @@ const actions: ReviewDecisionAction[] = [
   "confirm",
   "delete",
   "edit",
+  "move_to_city_tip",
   "protect",
 ];
 
@@ -98,6 +101,7 @@ function isResolvedAction(
     value === "confirm" ||
     value === "delete" ||
     value === "edit" ||
+    value === "move_to_city_tip" ||
     value === "protect"
   );
 }
@@ -148,6 +152,15 @@ export function serializeTripReviewDecision(
         mergedChanges: decision.mergedChanges ?? null,
         sourceIds: decision.sourceIds,
         targetId: decision.targetId,
+      },
+    };
+  }
+
+  if (decision.action === "move_to_city_tip") {
+    return {
+      ...base,
+      payload_json: {
+        targetLegId: decision.targetLegId ?? null,
       },
     };
   }
@@ -228,6 +241,16 @@ export function normalizeTripReviewDecisionRow(
       targetId:
         typeof payload.targetId === "string" ? payload.targetId : row.subject_id,
     } as CombineReviewDecision;
+  }
+
+  if (row.action === "move_to_city_tip" && row.subject_type === "item") {
+    return {
+      ...base,
+      action: "move_to_city_tip",
+      subjectType: "item",
+      targetLegId:
+        typeof payload.targetLegId === "string" ? payload.targetLegId : null,
+    } as MoveToCityTipReviewDecision;
   }
 
   if (row.action === "answer_question" && row.subject_type === "review_question") {

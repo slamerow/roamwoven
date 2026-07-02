@@ -2,7 +2,11 @@ import type {
   StructuredTripRecords,
   TripRecordStatus,
 } from "@/lib/generated-trip-model";
-import { getStructuredReviewCount } from "@/lib/generated-trip-review";
+import type { ReviewDecisionSubjectType } from "@/lib/generated-trip-decisions";
+import {
+  getStructuredReviewCount,
+  type StructuredReviewEditField,
+} from "@/lib/generated-trip-review";
 
 export type GeneratedTripSummaryItem = {
   detail?: string;
@@ -19,11 +23,16 @@ export type GeneratedTripSummarySection = {
 };
 
 export type GeneratedTripSummaryDayEntry = {
+  canMoveToCityTip: boolean;
   detail?: string;
+  editFields: StructuredReviewEditField[];
   id: string;
   kind: "transport" | "stay" | "activity" | "review";
   meta: string;
   needsReview: boolean;
+  subjectId: string;
+  subjectType: ReviewDecisionSubjectType;
+  targetLegId?: string | null;
   title: string;
 };
 
@@ -33,6 +42,15 @@ export type GeneratedTripSummaryDay = {
   id: string;
   label: string;
   needsReview: boolean;
+  title: string;
+};
+
+export type GeneratedTripSummaryWarning = {
+  detail: string;
+  id: string;
+  severity: "hard" | "quiet";
+  subjectId: string;
+  subjectType: ReviewDecisionSubjectType;
   title: string;
 };
 
@@ -53,6 +71,7 @@ export type GeneratedTripSummaryView = {
   sections: GeneratedTripSummarySection[];
   isReadyForPublishReview: boolean;
   title: string;
+  warnings: GeneratedTripSummaryWarning[];
 };
 
 function isActiveStatus(status: TripRecordStatus) {
@@ -202,6 +221,127 @@ function formatDayLabel(date: string, dayNumber: number) {
   return `Day ${dayNumber} · ${formatDate(date, false) || date}`;
 }
 
+function field({
+  helpText,
+  label,
+  name,
+  options,
+  type = "text",
+  value,
+}: {
+  helpText?: string;
+  label: string;
+  name: string;
+  options?: StructuredReviewEditField["options"];
+  type?: StructuredReviewEditField["type"];
+  value: string | null;
+}): StructuredReviewEditField {
+  return {
+    helpText,
+    label,
+    name,
+    options,
+    type,
+    value: value ?? "",
+  };
+}
+
+function editFieldsForTransport(
+  item: StructuredTripRecords["transport"][number]
+) {
+  return [
+    field({ label: "Title", name: "routeLabel", value: item.routeLabel }),
+    field({ label: "Date", name: "date", type: "date", value: item.date }),
+    field({
+      label: "Departure",
+      name: "departureLocation",
+      value: item.departureLocation,
+    }),
+    field({
+      label: "Departure time",
+      name: "departureTime",
+      type: "time",
+      value: item.departureTime,
+    }),
+    field({
+      label: "Arrival",
+      name: "arrivalLocation",
+      value: item.arrivalLocation,
+    }),
+    field({
+      label: "Arrival time",
+      name: "arrivalTime",
+      type: "time",
+      value: item.arrivalTime,
+    }),
+    field({ label: "Operator", name: "provider", value: item.provider }),
+    field({
+      label: "Confirmation / code",
+      name: "confirmationLabel",
+      value: item.confirmationLabel,
+    }),
+    field({
+      label: "Details",
+      name: "description",
+      type: "textarea",
+      value: item.description,
+    }),
+  ];
+}
+
+function editFieldsForStay(stay: StructuredTripRecords["stays"][number]) {
+  return [
+    field({ label: "Name", name: "name", value: stay.name }),
+    field({
+      label: "Check-in date",
+      name: "checkInDate",
+      type: "date",
+      value: stay.checkInDate,
+    }),
+    field({
+      label: "Check-in time",
+      name: "checkInTime",
+      type: "time",
+      value: stay.checkInTime,
+    }),
+    field({
+      label: "Check-out date",
+      name: "checkOutDate",
+      type: "date",
+      value: stay.checkOutDate,
+    }),
+    field({
+      label: "Check-out time",
+      name: "checkOutTime",
+      type: "time",
+      value: stay.checkOutTime,
+    }),
+    field({ label: "Address", name: "address", value: stay.address }),
+  ];
+}
+
+function editFieldsForItem(item: StructuredTripRecords["items"][number]) {
+  return [
+    field({ label: "Title", name: "title", value: item.title }),
+    field({ label: "Date", name: "date", type: "date", value: item.date }),
+    field({
+      label: "Start time",
+      name: "startTime",
+      type: "time",
+      value: item.startTime,
+    }),
+    field({
+      label: "End time",
+      name: "endTime",
+      type: "time",
+      value: item.endTime,
+    }),
+    field({ label: "Location", name: "locationName", value: item.locationName }),
+    field({ label: "Address", name: "address", value: item.address }),
+    field({ label: "Description", name: "description", type: "textarea", value: item.description }),
+  ];
+}
+
 function titleForDay(records: StructuredTripRecords, day: StructuredTripRecords["days"][number]) {
   const primaryLeg = records.legs.find((leg) => leg.id === day.primaryLegId);
 
@@ -216,6 +356,7 @@ function createTransportEntry(
   item: StructuredTripRecords["transport"][number]
 ): GeneratedTripSummaryDayEntry {
   return {
+    canMoveToCityTip: false,
     detail: [
       [item.departureLocation, item.arrivalLocation].filter(Boolean).join(" -> "),
       item.provider,
@@ -230,6 +371,9 @@ function createTransportEntry(
     kind: "transport",
     meta: item.transportType.replaceAll("_", " "),
     needsReview: item.reviewRequired,
+    editFields: editFieldsForTransport(item),
+    subjectId: item.id,
+    subjectType: "transport",
     title: item.routeLabel,
   };
 }
@@ -252,7 +396,9 @@ function createStayEntriesForDay(
     date < stay.checkOutDate
   ) {
     entries.push({
+      canMoveToCityTip: false,
       detail: addressDetail,
+      editFields: editFieldsForStay(stay),
       id: `${stay.id}-staying-${date}`,
       kind: "stay",
       meta:
@@ -260,6 +406,8 @@ function createStayEntriesForDay(
           ? [stay.checkInTime, "Check-in"].filter(Boolean).join(" · ")
           : "Stay",
       needsReview: stay.reviewRequired,
+      subjectId: stay.id,
+      subjectType: "stay",
       title: `Staying: ${stay.name}`,
     });
   }
@@ -274,11 +422,16 @@ function createActivityEntry(
   const category = categoryById.get(item.categoryId);
 
   return {
+    canMoveToCityTip: item.itemType === "activity",
     detail: item.description ?? item.locationName ?? item.address ?? undefined,
+    editFields: editFieldsForItem(item),
     id: item.id,
     kind: item.reviewRequired ? "review" : "activity",
     meta: [formatTime(item.startTime), category?.label].filter(Boolean).join(" · "),
     needsReview: item.reviewRequired,
+    subjectId: item.id,
+    subjectType: "item",
+    targetLegId: item.legId,
     title: item.title,
   };
 }
@@ -347,6 +500,54 @@ function createSummaryDays(
   }
 
   return days;
+}
+
+function createSummaryWarnings({
+  days,
+  records,
+}: {
+  days: GeneratedTripSummaryDay[];
+  records: StructuredTripRecords;
+}): GeneratedTripSummaryWarning[] {
+  const bloatWarnings = days
+    .filter((day) => {
+      const sourceDay = records.days.find((item) => item.id === day.id);
+      const activityCount = day.entries.filter(
+        (entry) => entry.kind === "activity" || entry.kind === "review"
+      ).length;
+
+      return activityCount >= 7 && sourceDay?.status !== "confirmed";
+    })
+    .map((day) => ({
+      detail:
+        "This day still has 7 or more visible activity cards after assembly. Consider grouping a true route, moving loose ideas to city tips, or removing duplicates.",
+      id: `${day.id}-activity-bloat`,
+      severity: "quiet" as const,
+      subjectId: day.id,
+      subjectType: "day" as const,
+      title: `${day.label} has a lot of visible cards`,
+    }));
+  const criticalTransportWarnings = records.transport
+    .filter((item) => isActiveStatus(item.status))
+    .filter((item) => item.status !== "confirmed")
+    .filter((item) => item.transportType === "flight" || item.transportType === "train")
+    .filter((item) => {
+      const missingTime = !item.departureTime || !item.arrivalTime;
+      const missingLocation = !item.departureLocation || !item.arrivalLocation;
+
+      return missingTime || missingLocation;
+    })
+    .map((item) => ({
+      detail:
+        "Flights and trains should carry source-backed time and station or airport details whenever the source provides them. Check the source before publishing.",
+      id: `${item.id}-critical-transport-details`,
+      severity: "hard" as const,
+      subjectId: item.id,
+      subjectType: "transport" as const,
+      title: `${item.routeLabel} is missing critical travel details`,
+    }));
+
+  return [...criticalTransportWarnings, ...bloatWarnings];
 }
 
 function createReviewItems(
@@ -527,6 +728,7 @@ export function createGeneratedTripSummaryView(
   const activeItems = records.items.filter((item) => isActiveStatus(item.status));
   const review = getStructuredReviewCount(records);
   const days = createSummaryDays(records, activeItems);
+  const warnings = createSummaryWarnings({ days, records });
 
   return {
     counts: {
@@ -547,7 +749,8 @@ export function createGeneratedTripSummaryView(
     days,
     destination: formatDestination(records),
     sections: createSummarySections(records, activeItems, review),
-    isReadyForPublishReview: review === 0,
+    isReadyForPublishReview: review === 0 && warnings.length === 0,
     title: records.trip.travelerAppTitle,
+    warnings,
   };
 }

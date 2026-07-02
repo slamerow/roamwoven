@@ -354,6 +354,13 @@ test("draft consolidation removes broad parent cards when named children cover t
   assert.equal(titles.includes("Prague history sights"), false);
   assert.equal(titles.includes("Old Town and Jewish Quarter Hidden Secrets"), true);
   assert.equal(titles.includes("Klementinum Tour"), true);
+  assert.ok(
+    records.reviewQuestions.some(
+      (question) =>
+        question.status === "noted" &&
+        /removed Prague history sights/i.test(question.prompt)
+    )
+  );
 });
 
 test("city note merging removes places that already became scheduled activities", () => {
@@ -403,6 +410,68 @@ test("city note merging removes places that already became scheduled activities"
     records.items.some((item) => item.title === "Dinner at Mazel Tov"),
     true
   );
+});
+
+test("summary can move an activity into city tips", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          date: "2026-09-02",
+          description: "Breakfast at Cafe Central.",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Cafe Central breakfast",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Vienna",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-move-to-city-tip",
+  });
+  const source = records.items.find((item) => item.title === "Cafe Central breakfast");
+  assert.ok(source);
+
+  const updated = applyReviewDecision(records, {
+    action: "move_to_city_tip",
+    createdAt: "2026-06-18T12:00:00.000Z",
+    id: "decision-move-city-tip",
+    subjectId: source.id,
+    subjectType: "item",
+    targetLegId: records.legs[0]?.id,
+    tripId: "trip-move-to-city-tip",
+  });
+  const moved = updated.items.find((item) => item.id === source.id);
+  const summary = createGeneratedTripSummaryView(updated);
+  const viewModel = createTravelerAppViewModel(updated);
+
+  assert.equal(moved?.itemType, "note");
+  assert.equal(moved?.date, null);
+  assert.equal(moved?.legId, records.legs[0]?.id);
+  assert.equal(moved?.title, "Vienna Notes & Tips");
+  assert.match(moved?.description ?? "", /Cafe Central/i);
+  assert.equal(summary.counts.activities, 0);
+  assert.equal(
+    summary.days.some((day) =>
+      day.entries.some((entry) => /Cafe Central/i.test(entry.title))
+    ),
+    false
+  );
+  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Vienna Notes & Tips");
 });
 
 test("Asia seed compiles into structured records and traveler view model", () => {
@@ -567,18 +636,25 @@ test("draft parser output compiles into structured records", () => {
     tripId: "trip-1",
   });
   const viewModel = createTravelerAppViewModel(records);
+  const summary = createGeneratedTripSummaryView(records);
 
   assert.equal(records.trip.travelerAppTitle, "Central Europe");
   assert.equal(records.legs.length, 2);
   assert.equal(records.stays[0]?.legId, records.legs[0]?.id);
   assert.equal(records.transport[0]?.transportType, "flight");
   assert.equal(records.transport[0]?.confirmationVisibility, "traveler_password");
-  assert.equal(records.items.length, 3);
+  assert.equal(records.items.length, 2);
   assert.equal(records.items[1]?.itemType, "activity");
   assert.equal(records.items[1]?.categoryId, "food_dining");
-  assert.equal(records.items[2]?.itemType, "admin");
-  assert.equal(records.items[2]?.categoryId, "arrival_departure");
-  assert.equal(records.items[2]?.title, "Check in to Prague apartment");
+  assert.ok(
+    summary.days.some((day) =>
+      day.entries.some(
+        (entry) =>
+          entry.kind === "stay" &&
+          entry.title === "Staying: Prague apartment"
+      )
+    )
+  );
   assert.ok(
     records.categories.some((category) => category.categoryKey === "food_dining"),
     "expected dining activities to use the food and dining category"
@@ -599,7 +675,7 @@ test("draft parser output compiles into structured records", () => {
   );
   assert.ok(records.days.length >= 2, "expected days from records");
   assert.equal(viewModel.trip.title, "Central Europe");
-  assert.equal(viewModel.cards.length, 3);
+  assert.equal(viewModel.cards.length, 2);
 });
 
 test("trip dates start with first actual travel day before first lodging leg", () => {
@@ -1187,6 +1263,96 @@ test("transport times and readable description text are preserved", () => {
   assert.match(summary.days[0]?.entries[0]?.detail ?? "", /8:44 AM - 12:10 PM/);
 });
 
+test("summary flags critical trains when source-backed details are missing", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna",
+          confirmation: "1beb5005",
+          date: "2019-01-18",
+          departure: "Prague",
+          description: "Train to Vienna. Train code: 1beb5005.",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-critical-transport-warning",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.ok(
+    summary.warnings.some((warning) =>
+      /Train to Vienna is missing critical travel details/.test(warning.title)
+    )
+  );
+  assert.equal(summary.isReadyForPublishReview, false);
+});
+
+test("summary flags days with seven or more visible activities", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: Array.from({ length: 7 }, (_value, index) => ({
+        category: "art_culture",
+        date: "2026-09-02",
+        description: `Activity ${index + 1}.`,
+        itemType: "activity",
+        title: `Museum stop ${index + 1}`,
+      })),
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Vienna",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-bloat-warning",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+  const warning = summary.warnings.find((warning) =>
+    /has a lot of visible cards/.test(warning.title)
+  );
+  assert.ok(warning);
+  const resolved = applyReviewDecision(records, {
+    action: "confirm",
+    createdAt: "2026-06-18T12:00:00.000Z",
+    id: "decision-confirm-bloat-warning",
+    subjectId: warning.subjectId,
+    subjectType: warning.subjectType,
+    tripId: "trip-bloat-warning",
+  });
+  const resolvedSummary = createGeneratedTripSummaryView(resolved);
+
+  assert.equal(resolvedSummary.warnings.length, 0);
+});
+
 test("category taxonomy canonicalizes old aliases and avoids generic buckets", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -1325,7 +1491,7 @@ test("same-site activity clusters stay on one card with sub-stops", () => {
   assert.match(records.items[0]?.description ?? "", /Panorama Train Pass/);
 });
 
-test("lodging switches synthesize check-in cards without duplicating explicit bag-drop cards", () => {
+test("stay rows carry check-in flow without synthetic check-in cards", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -1381,20 +1547,29 @@ test("lodging switches synthesize check-in cards without duplicating explicit ba
     fallbackTripName: "Fallback trip",
     tripId: "trip-check-in-cards",
   });
+  const summary = createGeneratedTripSummaryView(records);
 
   const checkInCards = records.items.filter(
     (item) => item.categoryId === "arrival_departure"
   );
 
-  assert.equal(checkInCards.length, 3);
+  assert.equal(checkInCards.length, 1);
   assert.ok(
     checkInCards.some((item) => item.title === "Drop bags at The Yellow")
   );
-  assert.ok(
-    checkInCards.some((item) => item.title === "Check in to The Yellow")
+  assert.equal(
+    checkInCards.some((item) => /^Check in to /.test(item.title)),
+    false
   );
   assert.ok(
-    checkInCards.some((item) => item.title === "Check in to Prague Airbnb")
+    summary.days.some((day) =>
+      day.entries.some(
+        (entry) =>
+          entry.kind === "stay" &&
+          entry.title === "Staying: The Yellow" &&
+          /2:30 PM|14:30/.test(entry.meta)
+      )
+    )
   );
 });
 
@@ -2310,10 +2485,10 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 3 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
   );
   assert.equal(reviewCount, 2);
-  assert.equal(summaryView.counts.plans, 3);
+  assert.equal(summaryView.counts.plans, 2);
   assert.equal(sections.length, 8);
   assert.deepEqual(
     sections.map((section) => section.id),
@@ -3247,6 +3422,52 @@ test("review decisions serialize through the persistence payload contract", () =
     targetId: "item-1",
     tripId: "trip-4",
   });
+
+  const moveSerialized = serializeTripReviewDecision({
+    action: "move_to_city_tip",
+    createdAt: null,
+    id: "decision-2",
+    subjectId: "item-3",
+    subjectType: "item",
+    targetLegId: "leg-vienna",
+    tripId: "trip-4",
+  });
+
+  assert.deepEqual(moveSerialized, {
+    action: "move_to_city_tip",
+    decision_key: "trip-4:item:item-3:move_to_city_tip",
+    id: "decision-2",
+    note: null,
+    payload_json: {
+      targetLegId: "leg-vienna",
+    },
+    subject_id: "item-3",
+    subject_type: "item",
+    trip_id: "trip-4",
+  });
+  assert.deepEqual(
+    normalizeTripReviewDecisionRow({
+      action: "move_to_city_tip",
+      created_at: "2026-06-18T13:00:00.000Z",
+      decision_key: moveSerialized.decision_key,
+      id: "decision-2",
+      note: null,
+      payload_json: moveSerialized.payload_json,
+      subject_id: "item-3",
+      subject_type: "item",
+      trip_id: "trip-4",
+    }),
+    {
+      action: "move_to_city_tip",
+      createdAt: "2026-06-18T13:00:00.000Z",
+      id: "decision-2",
+      note: null,
+      subjectId: "item-3",
+      subjectType: "item",
+      targetLegId: "leg-vienna",
+      tripId: "trip-4",
+    }
+  );
 });
 
 test("generated trip summary uses applied structured records", () => {

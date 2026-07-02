@@ -7,6 +7,19 @@ type NoteSectionName =
   | "Local Notes"
   | "Possible Sights";
 
+type AssemblyMissingDetail = {
+  answerType: "confirm";
+  assemblySource: "trip_assembly";
+  confidence: "high";
+  evidence: string | null;
+  guessedValue: string;
+  prompt: string;
+  reason: string;
+  relatedTitle: string | null;
+  subjectType: "item";
+  targetField: "presentation";
+};
+
 export type TripDraftConsolidationDebug = {
   foldedLodgingNotes: Array<{
     title: string;
@@ -891,6 +904,58 @@ function timelinePlanCounts({
   };
 }
 
+function nonAssemblyMissingDetails(value: unknown) {
+  return asArray(value).filter((item) => {
+    const record = asRecord(item);
+    return getString(record, "assemblySource") !== "trip_assembly";
+  });
+}
+
+function createAssemblyCalls(
+  debug: TripDraftConsolidationDebug
+): AssemblyMissingDetail[] {
+  const parentCalls = debug.removedDuplicateParents.map((item) => ({
+    answerType: "confirm" as const,
+    assemblySource: "trip_assembly" as const,
+    confidence: "high" as const,
+    evidence: item.survivingTitles.join("; "),
+    guessedValue: item.survivingTitles.join("; ") || "Named child cards",
+    prompt: `We removed ${item.removedTitle} because specific cards covered it.`,
+    reason: item.reason,
+    relatedTitle: item.survivingTitles[0] ?? null,
+    subjectType: "item" as const,
+    targetField: "presentation" as const,
+  }));
+  const groupedChildCalls = debug.removedGroupedChildren.map((item) => ({
+    answerType: "confirm" as const,
+    assemblySource: "trip_assembly" as const,
+    confidence: "high" as const,
+    evidence: `${item.removedTitle} was included under ${item.groupedUnder}.`,
+    guessedValue: item.groupedUnder,
+    prompt: `We grouped ${item.removedTitle} under ${item.groupedUnder}.`,
+    reason:
+      "The source treated these as one route, walk, tour, or same-site visit, so the traveler app keeps one card with included stops.",
+    relatedTitle: item.groupedUnder,
+    subjectType: "item" as const,
+    targetField: "presentation" as const,
+  }));
+  const cityNoteCalls = debug.mergedCityNotes.map((item) => ({
+    answerType: "confirm" as const,
+    assemblySource: "trip_assembly" as const,
+    confidence: "high" as const,
+    evidence: item.sourceTitles.join("; ") || null,
+    guessedValue: `${item.city} Notes & Tips`,
+    prompt: `We moved loose ${item.city} recommendations into city notes.`,
+    reason:
+      "Loose food, drink, shopping, and local ideas should not create dated activity cards unless the source ties them to a day.",
+    relatedTitle: `${item.city} Notes & Tips`,
+    subjectType: "item" as const,
+    targetField: "presentation" as const,
+  }));
+
+  return [...parentCalls, ...groupedChildCalls, ...cityNoteCalls];
+}
+
 export function consolidateTripDraft(draft: unknown): {
   debug: TripDraftConsolidationDebug;
   draft: unknown;
@@ -920,12 +985,21 @@ export function consolidateTripDraft(draft: unknown): {
   activities = mergeCityNotes({ activities, debug, places });
   activities = markOptionalActivities({ activities, debug });
   debug.overproductionRetry = timelinePlanCounts({ activities, transports });
+  const assemblyCalls = createAssemblyCalls(debug);
 
   return {
     debug,
     draft: {
       ...record,
+      _assembly: {
+        debug,
+        version: 1,
+      },
       activities,
+      missingDetails: [
+        ...nonAssemblyMissingDetails(record.missingDetails),
+        ...assemblyCalls,
+      ],
       places,
       stays,
       transport: transports,
