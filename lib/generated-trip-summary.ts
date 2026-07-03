@@ -784,6 +784,9 @@ function createSummaryWarnings({
   const activeItems = records.items.filter(
     (item) => isActiveStatus(item.status) && item.itemType === "activity"
   );
+  const unresolvedActiveItems = activeItems.filter(
+    (item) => item.status !== "confirmed"
+  );
   const activeStays = records.stays.filter((stay) => isActiveStatus(stay.status));
   const activeTransport = records.transport.filter((item) =>
     isActiveStatus(item.status)
@@ -829,7 +832,7 @@ function createSummaryWarnings({
       title: `${item.routeLabel} is missing critical travel details`,
     }));
   const duplicateTitleWarnings = Array.from(
-    activeItems.reduce((groups, item) => {
+    unresolvedActiveItems.reduce((groups, item) => {
       const key = [
         item.date,
         item.startTime ?? "",
@@ -842,7 +845,7 @@ function createSummaryWarnings({
 
       groups.set(key, [...(groups.get(key) ?? []), item]);
       return groups;
-    }, new Map<string, typeof activeItems>())
+    }, new Map<string, typeof unresolvedActiveItems>())
   )
     .filter(([, items]) => items.length > 1)
     .map(([, items]) => ({
@@ -854,7 +857,7 @@ function createSummaryWarnings({
       subjectType: "item" as const,
       title: `${items[0]?.title ?? "Activity"} appears more than once`,
     }));
-  const stayCollisionWarnings = activeItems
+  const stayCollisionWarnings = unresolvedActiveItems
     .filter(isStayFlowItem)
     .flatMap((item) => {
       const matchingStay = activeStays.find((stay) => {
@@ -886,7 +889,7 @@ function createSummaryWarnings({
         },
       ];
     });
-  const transportCollisionWarnings = activeItems
+  const transportCollisionWarnings = unresolvedActiveItems
     .filter(isTransportFlowItem)
     .flatMap((item) => {
       const matchingTransport = activeTransport.find(

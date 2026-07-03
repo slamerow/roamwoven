@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
+import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
 import { getStructuredReviewCount } from "@/lib/generated-trip-review";
 import { publishTripSnapshot } from "@/lib/published-snapshots";
 import { getMakerTrip } from "@/lib/trips";
@@ -37,6 +38,14 @@ export async function POST(
     if (getStructuredReviewCount(records) > 0) {
       dataUrl.searchParams.set("error", "review-required");
       return NextResponse.redirect(dataUrl, 303);
+    }
+
+    const summary = createGeneratedTripSummaryView(records);
+
+    if (!summary.isReadyForPublishReview) {
+      const summaryUrl = new URL(`/maker/trips/${tripId}/summary`, request.url);
+      summaryUrl.searchParams.set("error", "summary-warning-required");
+      return NextResponse.redirect(summaryUrl, 303);
     }
 
     await publishTripSnapshot({ records, tripId });

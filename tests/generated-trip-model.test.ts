@@ -5,6 +5,10 @@ import {
   createActivityExtractionChunks,
   isSuspiciouslyEmptyActivityChunkResult,
 } from "@/lib/extraction/openai-trip-parser";
+import {
+  createDraftAuditSnapshot,
+  createTripExtractionAuditReport,
+} from "@/lib/extraction/trip-extraction-audit";
 import { parseOptionalEnvList } from "@/lib/env";
 import {
   applyReviewDecision,
@@ -501,6 +505,85 @@ test("draft consolidation keeps separate timed tickets while removing invented c
     ),
     false
   );
+});
+
+test("extraction audit report compares raw candidates, assembly, and structured output", () => {
+  const rawDraft = {
+    activities: [
+      {
+        category: "art_culture",
+        date: "2026-09-02",
+        description:
+          "Old Town Square, Jewish Quarter, and Klementinum are listed for the day.",
+        itemType: "activity",
+        title: "Prague history sights",
+      },
+      {
+        category: "tours_tickets",
+        date: "2026-09-02",
+        itemType: "activity",
+        startTime: "09:00",
+        title: "Old Town and Jewish Quarter Hidden Secrets",
+      },
+      {
+        category: "tours_tickets",
+        date: "2026-09-02",
+        itemType: "activity",
+        startTime: "14:30",
+        title: "Klementinum Tour",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Prague",
+        country: "Czechia",
+        leaveDate: "2026-09-03",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Prague",
+    },
+  };
+  const { debug, draft } = consolidateTripDraft(rawDraft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-report",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        activityChunks: {
+          count: 1,
+          failed: 0,
+          rescued: 0,
+          succeeded: 1,
+        },
+        audit: {
+          assembledDraft: createDraftAuditSnapshot(draft),
+          preAssemblyDraft: createDraftAuditSnapshot(rawDraft),
+        },
+        consolidation: debug,
+        staged: true,
+      },
+    },
+  });
+
+  assert.equal(report.extraction.staged, true);
+  assert.equal(report.extraction.activityChunks?.succeeded, 1);
+  assert.equal(report.assembly.removedDuplicateParents, 1);
+  assert.deepEqual(report.sourceComparison?.rawOnlyTitles, [
+    "Prague history sights",
+  ]);
+  assert.equal(report.structured.activeActivities, 2);
+  assert.equal(report.structured.hardWarnings, 0);
 });
 
 test("draft consolidation suppresses day overview cards before summary surfaces", () => {
@@ -2068,6 +2151,28 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
     )
   );
   assert.equal(summary.isReadyForPublishReview, false);
+
+  const resolved = summary.warnings
+    .filter((warning) => warning.severity === "hard")
+    .reduce(
+      (currentRecords, warning, index) =>
+        applyReviewDecision(currentRecords, {
+          action: "confirm",
+          createdAt: `2026-06-18T12:00:0${index}.000Z`,
+          id: `decision-confirm-${warning.id}`,
+          subjectId: warning.subjectId,
+          subjectType: warning.subjectType,
+          tripId: records.trip.id,
+        }),
+      records
+    );
+  const resolvedSummary = createGeneratedTripSummaryView(resolved);
+
+  assert.equal(
+    resolvedSummary.warnings.some((warning) => warning.severity === "hard"),
+    false
+  );
+  assert.equal(resolvedSummary.isReadyForPublishReview, true);
 });
 
 test("summary does not hard-block separate luggage storage before hotel check-in", () => {

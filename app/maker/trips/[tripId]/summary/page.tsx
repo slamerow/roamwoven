@@ -459,10 +459,13 @@ function QuietSummarySection({
 
 export default async function TripSummaryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { tripId } = await params;
+  const { error } = await searchParams;
   const trip = await getMakerTrip(tripId);
   const { latestDraft, records } = await getAppliedTripRecords({
     fallbackTripName: trip.name,
@@ -506,6 +509,12 @@ export default async function TripSummaryPage({
           isPaid={trip.isDemo || trip.paymentStatus === "paid"}
           tripId={tripId}
         />
+
+        {error === "summary-warning-required" ? (
+          <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+            Resolve or mark the Summary warnings before publishing.
+          </p>
+        ) : null}
 
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -591,13 +600,20 @@ export default async function TripSummaryPage({
             <ArrowLeft size={16} />
             Back to review queue
           </Link>
-          <Link
-            href={`/maker/trips/${tripId}/publish`}
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
-          >
-            Continue to publish
-            <ArrowRight size={16} />
-          </Link>
+          {summary?.isReadyForPublishReview ? (
+            <Link
+              href={`/maker/trips/${tripId}/publish`}
+              className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
+            >
+              Continue to publish
+              <ArrowRight size={16} />
+            </Link>
+          ) : (
+            <span className="inline-flex items-center gap-2 rounded-md bg-ink/20 px-4 py-3 text-sm font-semibold text-ink/45">
+              Resolve review first
+              <ArrowRight size={16} />
+            </span>
+          )}
         </section>
       </div>
     </main>

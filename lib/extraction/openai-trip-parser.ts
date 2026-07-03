@@ -2,6 +2,7 @@ import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
 import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
 import { optimizeTripExtractionMaterials } from "@/lib/extraction/material-budget";
+import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
 export type TripExtractionMaterial = {
@@ -1325,7 +1326,9 @@ export async function extractTripDraftWithOpenAI({
     activityFailures,
     spineStage: spineResult.json,
   });
+  const preAssemblyDraft = createDraftAuditSnapshot(combinedDraft);
   const { debug: consolidation, draft } = consolidateTripDraft(combinedDraft);
+  const assembledDraft = createDraftAuditSnapshot(draft);
 
   return {
     draft,
@@ -1356,6 +1359,10 @@ export async function extractTripDraftWithOpenAI({
         message: error instanceof Error ? error.message : "Unknown error.",
         name: error instanceof Error ? error.name : "UnknownError",
       })),
+      audit: {
+        assembledDraft,
+        preAssemblyDraft,
+      },
       consolidation,
       spineMaterialBudget: spineMaterials.summary,
       spine: spineResult.usage,
