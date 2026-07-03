@@ -315,6 +315,40 @@ export async function getLatestTripProcessingRun(tripId: string) {
   return data ? normalizeRun(data as unknown as TripProcessingRunRow) : null;
 }
 
+export async function getTripProcessingRun(runId: string) {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("trip_processing_runs")
+    .select(
+      [
+        "id",
+        "completed_at",
+        "created_at",
+        "error_message",
+        "idempotency_key",
+        "input_char_count",
+        "model",
+        "openai_usage",
+        "run_type",
+        "source_upload_ids",
+        "status",
+        "trip_id",
+      ].join(",")
+    )
+    .eq("id", runId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return null;
+    }
+
+    throw new Error(`Unable to load processing run: ${error.message}`);
+  }
+
+  return data ? normalizeRun(data as unknown as TripProcessingRunRow) : null;
+}
+
 export async function getLatestTripDraftSnapshot(tripId: string) {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
