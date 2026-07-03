@@ -621,7 +621,8 @@ export function getStructuredScannedParts(records: StructuredTripRecords | null)
 
 export function formatStructuredDiscoverySummary(
   records: StructuredTripRecords | null,
-  reviewCount = getStructuredReviewCount(records)
+  reviewCount = getStructuredReviewCount(records),
+  options: { blockingIssueCount?: number } = {}
 ) {
   if (!records) {
     return null;
@@ -641,9 +642,12 @@ export function formatStructuredDiscoverySummary(
     : foundParts.length > 0
       ? `We found ${foundParts.join(", ")}.`
       : "We found a parsed trip draft.";
+  const blockingIssueCount = options.blockingIssueCount ?? 0;
   const reviewText =
     reviewCount > 0
       ? `We need you to confirm ${pluralize(reviewCount, "thing")} before this becomes the traveler app.`
+      : blockingIssueCount > 0
+        ? `There ${blockingIssueCount === 1 ? "is" : "are"} ${pluralize(blockingIssueCount, "summary warning")} to resolve before publish review.`
       : "Nothing needs confirmation before this becomes the traveler app.";
 
   return `${foundText} ${reviewText}`;

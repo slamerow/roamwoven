@@ -310,6 +310,7 @@ test("draft consolidation merges rental car pickup activities into travel rows",
     activities: [
       {
         category: "arrival_departure",
+        address: "Revolucni 1044/23",
         date: "2019-01-17",
         description: "Pick up car at 9 am. Reservation number: 81486.",
         itemType: "activity",
@@ -352,8 +353,36 @@ test("draft consolidation merges rental car pickup activities into travel rows",
     ["Sedlec Ossuary"]
   );
   assert.equal(debug.suppressedTransportActivities[0]?.removedTitle, "Car pickup for Kutna Hora");
+  assert.equal(draft.transport[0]?.title, "Pick up rental car for Kutna Hora");
   assert.equal(draft.transport[0]?.departureTime, "09:00");
   assert.match(draft.transport[0]?.description ?? "", /Reservation number: 81486/);
+  assert.match(draft.transport[0]?.description ?? "", /Revolucni 1044\/23/);
+});
+
+test("draft consolidation promotes transport times from descriptions", () => {
+  const { draft } = consolidateTripDraft({
+    activities: [],
+    places: [],
+    stays: [],
+    transport: [
+      {
+        arrival: "Vienna Hbf",
+        date: "2019-01-18",
+        departure: "Praha hl.n.",
+        description:
+          "RegioJet RJ 1033 leaves Praha Hlavni Nadrazi at 09:20 and arrives Wien Hbf at 13:23. Train code 1beb5005.",
+        title: "Train to Vienna",
+        type: "train",
+      },
+    ],
+  }) as {
+    draft: {
+      transport: Array<{ arrivalTime?: string; departureTime?: string }>;
+    };
+  };
+
+  assert.equal(draft.transport[0]?.departureTime, "09:20");
+  assert.equal(draft.transport[0]?.arrivalTime, "13:23");
 });
 
 test("draft consolidation removes broad parent cards when named children cover them", () => {
@@ -474,6 +503,140 @@ test("draft consolidation keeps separate timed tickets while removing invented c
   );
 });
 
+test("draft consolidation suppresses day overview cards before summary surfaces", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Generic overview for the day.",
+          itemType: "activity",
+          title: "Vienna Day 3",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Timed palace visit.",
+          itemType: "activity",
+          startTime: "10:00",
+          title: "Belvedere Palace",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-day-overview-suppression",
+  });
+  const titles = records.items.map((item) => item.title);
+
+  assert.equal(titles.includes("Vienna Day 3"), false);
+  assert.equal(titles.includes("Belvedere Palace"), true);
+});
+
+test("wrong-city loose mentions move to the explicitly named city note", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Prague Jewish Quarter as a thing to check out.",
+          itemType: "activity",
+          title: "Prague Jewish Quarter",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-wrong-city-loose",
+  });
+  const note = records.items.find((item) => item.title === "Prague Notes & Tips");
+
+  assert.ok(note);
+  assert.equal(note?.itemType, "note");
+  assert.equal(note?.date, null);
+  assert.match(note?.description ?? "", /Prague Jewish Quarter/i);
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
+test("wrong-city anchored activities become placement questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-19",
+          description: "Prague tour ticket with provider confirmation.",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Prague Castle timed tour",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-wrong-city-anchored",
+  });
+  const item = records.items.find((item) => item.title === "Prague Castle timed tour");
+  const question = records.reviewQuestions.find((question) =>
+    /Where should Prague Castle timed tour belong/i.test(question.prompt)
+  );
+
+  assert.ok(item);
+  assert.equal(item?.date, null);
+  assert.equal(item?.status, "needs_review");
+  assert.ok(question);
+  assert.equal(question?.status, "open");
+  assert.equal(getStructuredReviewCount(records), 2);
+});
+
 test("city note merging removes places that already became scheduled activities", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -591,6 +754,61 @@ test("city note merging preserves separate city notes with generic notes and tip
     records.reviewQuestions.some((question) => /removed Vienna Notes/i.test(question.prompt)),
     false
   );
+});
+
+test("city note merging creates one note per city with multiple loose note sources", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "admin_logistics",
+          date: null,
+          description: "Metro line tips and ticket machines.",
+          itemType: "note",
+          title: "Budapest transport and shopping notes",
+        },
+        {
+          category: "food_dining",
+          date: null,
+          description: "Food: Mazel Tov; Drinks: Szimpla Kert.",
+          itemType: "note",
+          title: "Budapest Notes & Tips",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-22",
+          description: "Reserved visit.",
+          itemType: "activity",
+          startTime: "10:00",
+          title: "Dohany Street Synagogue",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-21",
+          city: "Budapest",
+          leaveDate: "2019-01-24",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-one-city-note",
+  });
+  const cityNotes = records.items.filter((item) => item.itemType === "note");
+
+  assert.equal(cityNotes.length, 1);
+  assert.equal(cityNotes[0]?.title, "Budapest Notes & Tips");
+  assert.match(cityNotes[0]?.description ?? "", /Metro line tips/i);
+  assert.match(cityNotes[0]?.description ?? "", /Mazel Tov/i);
+  assert.match(cityNotes[0]?.description ?? "", /Szimpla Kert/i);
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("summary can move an activity into city tips", () => {
@@ -1220,7 +1438,7 @@ test("loose food ideas without a clear leg do not become city notes or tips", ()
   );
 });
 
-test("full-day overview cards are ignored while specific activities remain", () => {
+test("full-day overview cards are suppressed while specific activities remain", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -1263,8 +1481,8 @@ test("full-day overview cards are ignored while specific activities remain", () 
   const summary = createGeneratedTripSummaryView(records);
 
   assert.equal(
-    records.items.find((item) => item.title === "Day 6 overview")?.status,
-    "ignored"
+    records.items.some((item) => item.title === "Day 6 overview"),
+    false
   );
   assert.equal(viewModel.cards.length, 1);
   assert.equal(viewModel.cards[0]?.title, "Silver Mines");
@@ -1485,6 +1703,117 @@ test("summary flags critical trains when source-backed details are missing", () 
     )
   );
   assert.equal(summary.isReadyForPublishReview, false);
+});
+
+test("summary does not hard-warn when only train arrival time is missing", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna Hbf",
+          date: "2019-01-18",
+          departure: "Praha hl.n.",
+          departureTime: "09:20",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-missing-arrival-time-ok",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.equal(
+    summary.warnings.some((warning) => /Train to Vienna/.test(warning.title)),
+    false
+  );
+  assert.equal(summary.isReadyForPublishReview, true);
+});
+
+test("summary orders timed transport before invisible day-part activity sorting", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "nightlife_entertainment",
+          date: "2019-01-15",
+          itemType: "activity",
+          title: "Hemingway Bar",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-15",
+          itemType: "activity",
+          title: "Old Town sightseeing",
+        },
+        {
+          category: "food_dining",
+          date: "2019-01-15",
+          itemType: "activity",
+          title: "Cafe breakfast",
+        },
+        {
+          category: "food_dining",
+          date: "2019-01-15",
+          itemType: "activity",
+          startTime: "18:00",
+          title: "Bellevue dinner",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          date: "2019-01-15",
+          departure: "Hotel",
+          departureTime: "08:00",
+          title: "Morning transfer",
+          type: "transfer",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-summary-sorting",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.deepEqual(
+    summary.days[0]?.entries.map((entry) => entry.title),
+    [
+      "Morning transfer",
+      "Cafe breakfast",
+      "Old Town sightseeing",
+      "Bellevue dinner",
+      "Hemingway Bar",
+    ]
+  );
 });
 
 test("summary flags days with seven or more visible activities", () => {
@@ -1772,6 +2101,67 @@ test("same-site activity clusters stay on one card with sub-stops", () => {
   assert.match(records.items[0]?.description ?? "", /Panorama Train Pass/);
 });
 
+test("same-site grouping folds child cards into the surviving visit card", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-19",
+          description: "Same-site visit including the palace grounds.",
+          itemType: "activity",
+          title: "Schonbrunn Palace complex",
+        },
+        {
+          category: "tours_tickets",
+          date: "2019-01-19",
+          description: "Timed show inside the palace visit.",
+          itemType: "activity",
+          startTime: "11:00",
+          title: "Schonbrunn Apple Strudel Show",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Walk the gardens during the same visit.",
+          itemType: "activity",
+          title: "Schonbrunn gardens",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-schonbrunn-grouping",
+  });
+  const titles = records.items.map((item) => item.title);
+  const call = records.reviewQuestions.find((question) =>
+    /We grouped/i.test(question.prompt)
+  );
+
+  assert.deepEqual(titles, ["Schonbrunn Palace complex"]);
+  assert.equal(records.items[0]?.startTime, "11:00");
+  assert.match(records.items[0]?.description ?? "", /Apple Strudel Show/);
+  assert.match(records.items[0]?.description ?? "", /gardens/);
+  assert.ok(call);
+  assert.equal(call?.status, "noted");
+  assert.match(call?.prompt ?? "", /Apple Strudel Show/);
+  assert.match(call?.prompt ?? "", /gardens/);
+});
+
 test("stay rows carry check-in flow without synthetic check-in cards", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -1859,6 +2249,52 @@ test("stay rows carry check-in flow without synthetic check-in cards", () => {
           /2:30 PM|14:30/.test(entry.meta)
       )
     )
+  );
+});
+
+test("early timed bag drop stays visible when it changes traveler movement", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2019-01-13",
+          description: "Drop bags at the hostel at 9:00 AM before sightseeing.",
+          itemType: "admin",
+          startTime: "09:00",
+          title: "Drop bags at The Yellow",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2019-01-13",
+          checkInTime: "14:30",
+          checkOut: "2019-01-14",
+          name: "The Yellow",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-early-bag-drop",
+  });
+
+  assert.equal(
+    records.items.some((item) => item.title === "Drop bags at The Yellow"),
+    true
   );
 });
 
@@ -2855,6 +3291,38 @@ test("structured review summary uses maker-facing counts", () => {
     ["Fly to Paris · September 1, 2026"]
   );
   assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
+});
+
+test("structured discovery summary respects blocking summary warnings", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [],
+      stays: [],
+      transport: [
+        {
+          date: "2026-09-01",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Train test",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-discovery-blocking-warning",
+  });
+  const summaryView = createGeneratedTripSummaryView(records);
+  const summary = formatStructuredDiscoverySummary(records, 0, {
+    blockingIssueCount: summaryView.warnings.filter(
+      (warning) => warning.severity === "hard"
+    ).length,
+  });
+
+  assert.match(summary ?? "", /summary warning/);
+  assert.doesNotMatch(summary ?? "", /Nothing needs confirmation/);
 });
 
 test("leg leave dates infer from the next leg arrival when missing", () => {

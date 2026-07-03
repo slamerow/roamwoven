@@ -38,6 +38,7 @@ import {
   type StructuredReviewItem,
   type StructuredReviewSection,
 } from "@/lib/generated-trip-review";
+import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
 import {
   applyReviewDecisions,
   type TripReviewDecision,
@@ -1157,9 +1158,15 @@ function RealTripFirstPass({
     ? getStructuredReviewSections(reviewedStructuredDraft)
     : [];
   const structuredReviewCount = getStructuredReviewCount(reviewedStructuredDraft);
+  const summaryHardWarningCount = reviewedStructuredDraft
+    ? createGeneratedTripSummaryView(reviewedStructuredDraft).warnings.filter(
+        (warning) => warning.severity === "hard"
+      ).length
+    : 0;
   const structuredDiscoverySummary = formatStructuredDiscoverySummary(
     reviewedStructuredDraft,
-    structuredReviewCount
+    structuredReviewCount,
+    { blockingIssueCount: summaryHardWarningCount }
   );
   const scannedParts = reviewedStructuredDraft
     ? formatStructuredScannedSummary(reviewedStructuredDraft)

@@ -8,16 +8,16 @@ type NoteSectionName =
   | "Possible Sights";
 
 type AssemblyMissingDetail = {
-  answerType: "confirm";
+  answerType: "confirm" | "text" | "choice" | "date";
   assemblySource: "trip_assembly";
-  confidence: "high";
+  confidence: "high" | "medium";
   evidence: string | null;
-  guessedValue: string;
+  guessedValue: string | null;
   prompt: string;
   reason: string;
   relatedTitle: string | null;
   subjectType: "item";
-  targetField: "presentation";
+  targetField: "date" | "placement" | "presentation";
 };
 
 export type TripDraftConsolidationDebug = {
@@ -50,10 +50,21 @@ export type TripDraftConsolidationDebug = {
     groupedUnder: string;
     removedTitle: string;
   }>;
+  suppressedDayOverviews: Array<{
+    date: string | null;
+    removedTitle: string;
+  }>;
   suppressedTransportActivities: Array<{
     date: string | null;
     matchedTransportTitle: string;
     removedTitle: string;
+  }>;
+  wrongCityPlacements: Array<{
+    action: "moved_to_city_notes" | "needs_review";
+    assignedCity: string | null;
+    date: string | null;
+    explicitCity: string;
+    title: string;
   }>;
 };
 
@@ -165,10 +176,117 @@ function timeFor(record: DraftObject) {
   return getStringFromKeys(record, ["startTime", "time", "departureTime"]);
 }
 
+function normalizeClockTime(value: string | null | undefined) {
+  const raw = value?.trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const match = /^(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(raw);
+
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const suffix = match[3]?.toLowerCase();
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  if (suffix === "pm" && hour < 12) {
+    hour += 12;
+  } else if (suffix === "am" && hour === 12) {
+    hour = 0;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function timeToMinutes(value: string | null | undefined) {
+  const normalized = normalizeClockTime(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const [hour, minute] = normalized.split(":").map(Number);
+
+  return hour * 60 + minute;
+}
+
+function extractClockTimes(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  const matches = value.matchAll(/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/gi);
+  const times: string[] = [];
+
+  for (const match of matches) {
+    const time = normalizeClockTime(
+      `${match[1]}:${match[2]}${match[3] ? ` ${match[3]}` : ""}`
+    );
+
+    if (time && !times.includes(time)) {
+      times.push(time);
+    }
+  }
+
+  return times;
+}
+
+function firstKnownTime(record: DraftObject, keys: string[]) {
+  return normalizeClockTime(getStringFromKeys(record, keys));
+}
+
 function isTransportActionText(value: string) {
   return /\b(flight|fly|train|rail|bus|ferry|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to|rental car|car pickup|pick up car|pickup car|drive)\b/.test(
     normalizeText(value)
   );
+}
+
+function isRentalCarText(value: string | null | undefined) {
+  return /\b(rental car|car rental|car pickup|pick up car|pickup car|hire car)\b/.test(
+    normalizeText(value)
+  );
+}
+
+function normalizeRentalCarTitle(transport: DraftObject) {
+  const title = getString(transport, "title");
+  const type = normalizeText(getString(transport, "type"));
+
+  if (!title || type !== "rental car") {
+    return;
+  }
+
+  const normalized = normalizeText(title);
+  const destinationMatch =
+    normalized.match(/\b(?:car pickup|pickup car|pick up car|rental car)(?:\s+(?:for|to))\s+(.+)$/) ??
+    normalized.match(/\b(?:for|to)\s+(.+)$/);
+
+  if (destinationMatch?.[1]) {
+    const destination = destinationMatch[1]
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+    transport.title = `Pick up rental car for ${destination}`;
+    return;
+  }
+
+  if (/\b(car pickup|pickup car|pick up car|rental car)\b/.test(normalized)) {
+    transport.title = "Pick up rental car";
+  }
 }
 
 function isSeparateLocalMovement(value: string) {
@@ -241,6 +359,26 @@ function findDuplicateTransport(
   }
 
   const sameDayTransports = transports.filter((transport) => dateFor(transport) === date);
+  const activityTitle = normalizeText(getString(activity, "title"));
+  const exactTitleMatch = sameDayTransports.find((transport) => {
+    const transportTitle = normalizeText(getString(transport, "title"));
+    return Boolean(activityTitle && transportTitle && activityTitle === transportTitle);
+  });
+
+  if (exactTitleMatch) {
+    return exactTitleMatch;
+  }
+
+  const rentalCarMatch = sameDayTransports.find(
+    (transport) =>
+      normalizeText(getString(transport, "type")) === "rental car" &&
+      isRentalCarText(activityText)
+  );
+
+  if (rentalCarMatch) {
+    return rentalCarMatch;
+  }
+
   const scored = sameDayTransports
     .map((transport) => ({
       score: transportMatchScore(activity, transport),
@@ -291,8 +429,18 @@ function mergeTransportActivityDetails(
   transport: DraftObject,
   activity: DraftObject
 ) {
-  const activityTime = timeFor(activity);
-  const activityEndTime = getString(activity, "endTime");
+  const activityText = textFor(activity, [
+    "title",
+    "description",
+    "departure",
+    "arrival",
+    "address",
+    "locationName",
+  ]);
+  const activityTimes = extractClockTimes(activityText);
+  const activityTime = firstKnownTime(activity, ["startTime", "time", "departureTime"]) ?? activityTimes[0];
+  const activityEndTime =
+    firstKnownTime(activity, ["endTime", "arrivalTime"]) ?? activityTimes[1];
   const activityLocation = getStringFromKeys(activity, [
     "locationName",
     "address",
@@ -317,10 +465,49 @@ function mergeTransportActivityDetails(
     transport.departure = activityLocation;
   }
 
-  transport.description = appendUniqueSentence(
-    getString(transport, "description"),
-    activityDescription
-  );
+  const detailParts = [
+    activityDescription,
+    getString(activity, "address") ? `Address: ${getString(activity, "address")}.` : null,
+    getStringFromKeys(activity, ["phone", "contactPhone", "providerPhone"])
+      ? `Phone: ${getStringFromKeys(activity, ["phone", "contactPhone", "providerPhone"])}.`
+      : null,
+    getStringFromKeys(activity, ["reservation", "bookingNumber", "orderNumber", "confirmation"])
+      ? `Confirmation: ${getStringFromKeys(activity, ["reservation", "bookingNumber", "orderNumber", "confirmation"])}.`
+      : null,
+    getString(activity, "openingHours") ? `Hours: ${getString(activity, "openingHours")}.` : null,
+  ]
+    .filter(Boolean);
+  let description = getString(transport, "description");
+
+  for (const detail of detailParts) {
+    description = appendUniqueSentence(description, detail);
+  }
+
+  transport.description = description;
+}
+
+function promoteTransportExtractedDetails(transports: DraftObject[]) {
+  for (const transport of transports) {
+    normalizeRentalCarTitle(transport);
+
+    const text = textFor(transport, [
+      "title",
+      "description",
+      "departure",
+      "arrival",
+      "provider",
+      "confirmation",
+    ]);
+    const times = extractClockTimes(text);
+
+    if (!getString(transport, "departureTime") && times[0]) {
+      transport.departureTime = times[0];
+    }
+
+    if (!getString(transport, "arrivalTime") && times[1]) {
+      transport.arrivalTime = times[1];
+    }
+  }
 }
 
 function hasStandaloneAnchor(record: DraftObject) {
@@ -434,6 +621,22 @@ function childIsContainedInParent(parent: DraftObject, child: DraftObject) {
   return normalizeText(getString(parent, "title")) !== normalizeText(childTitle);
 }
 
+function childBelongsUnderParent(parent: DraftObject, child: DraftObject) {
+  if (childIsContainedInParent(parent, child)) {
+    return true;
+  }
+
+  if (!isSameSiteGroup(parent)) {
+    return false;
+  }
+
+  const parentWords = normalizeWords(textFor(parent));
+  const childWords = normalizeWords(textFor(child));
+  const sharedWords = childWords.filter((word) => parentWords.includes(word));
+
+  return sharedWords.some((word) => word.length >= 5);
+}
+
 function improvesGenericTourTitle(record: DraftObject) {
   const title = getString(record, "title");
   const description = getString(record, "description");
@@ -461,6 +664,42 @@ function improvesGenericTourTitle(record: DraftObject) {
     ...record,
     title: quotedTitle,
   };
+}
+
+function mergeGroupedChildDetails(parent: DraftObject, child: DraftObject) {
+  const childTitle = getString(child, "title");
+  const childTime = firstKnownTime(child, ["startTime", "time", "departureTime"]);
+  const childEndTime = firstKnownTime(child, ["endTime", "arrivalTime"]);
+  const childDescription = getString(child, "description");
+  const childLabel = [
+    childTitle,
+    [childTime, childEndTime].filter(Boolean).join("-"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  if (childLabel) {
+    parent.description = appendUniqueSentence(
+      getString(parent, "description"),
+      `Includes: ${childLabel}.`
+    );
+  }
+
+  if (childDescription) {
+    parent.description = appendUniqueSentence(
+      getString(parent, "description"),
+      childDescription
+    );
+  }
+
+  const parentTime = firstKnownTime(parent, ["startTime", "time", "departureTime"]);
+
+  if (
+    childTime &&
+    (!parentTime || (timeToMinutes(childTime) ?? Infinity) < (timeToMinutes(parentTime) ?? Infinity))
+  ) {
+    parent.startTime = childTime;
+  }
 }
 
 function suppressTransportDuplicates({
@@ -520,6 +759,46 @@ function isSeparateBagStorage(value: string) {
   return /\b(luggage storage|left luggage|bag storage|locker|lockers|station|airport|storage facility|store bags at)\b/.test(
     text
   );
+}
+
+function activityExplicitlyNamesStay(activityText: string, stay: DraftObject) {
+  const stayName = normalizeText(getString(stay, "name"));
+  const stayTitle = normalizeText(getString(stay, "title"));
+
+  return Boolean(
+    (stayName && normalizeText(activityText).includes(stayName)) ||
+      (stayTitle && normalizeText(activityText).includes(stayTitle))
+  );
+}
+
+function isSeparateStayMovement(activity: DraftObject, stay: DraftObject) {
+  const activityText = textFor(activity);
+  const normalizedText = normalizeText(activityText);
+
+  if (isSeparateBagStorage(activityText) && !activityExplicitlyNamesStay(activityText, stay)) {
+    return true;
+  }
+
+  const activityMinutes = timeToMinutes(timeFor(activity));
+  const stayCheckInMinutes = timeToMinutes(getString(stay, "checkInTime"));
+  const looksLikeBagDrop = /\b(drop bags?|bag drop|left bags?|store bags?)\b/.test(
+    normalizedText
+  );
+
+  if (
+    looksLikeBagDrop &&
+    activityMinutes !== null &&
+    stayCheckInMinutes !== null &&
+    stayCheckInMinutes - activityMinutes >= 120
+  ) {
+    return true;
+  }
+
+  if (looksLikeBagDrop && activityMinutes !== null && stayCheckInMinutes === null) {
+    return activityMinutes < 12 * 60;
+  }
+
+  return false;
 }
 
 function isStayFlowText(value: string) {
@@ -592,8 +871,31 @@ function findDuplicateStay(activity: DraftObject, stays: DraftObject[]) {
   const scored = sameDayStays
     .map((stay) => ({ score: stayMatchScore(activity, stay), stay }))
     .sort((a, b) => b.score - a.score);
+  const best = scored[0];
 
-  return scored[0] && scored[0].score >= 2 ? scored[0].stay : null;
+  if (!best) {
+    return null;
+  }
+
+  if (isSeparateStayMovement(activity, best.stay)) {
+    return null;
+  }
+
+  if (best.score >= 2) {
+    return best.stay;
+  }
+
+  if (
+    best.score >= 1 &&
+    sameDayStays.length === 1 &&
+    /\b(check in|check-in|checkin|drop bags?|bag drop|arrival|arrive|hotel|hostel|airbnb|apartment)\b/.test(
+      normalizeText(activityText)
+    )
+  ) {
+    return best.stay;
+  }
+
+  return null;
 }
 
 function mergeStayActivityDetails(stay: DraftObject, activity: DraftObject) {
@@ -643,6 +945,51 @@ function suppressStayFlowActivities({
   });
 }
 
+function isDayOverviewActivity(activity: DraftObject) {
+  const title = normalizeText(getString(activity, "title"));
+  const text = normalizeText(textFor(activity));
+
+  if (!title || isNoteLikeRecord(activity)) {
+    return false;
+  }
+
+  if (
+    /\b(ticket|tickets|reservation|booking|confirmation|provider|paid|paypal)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\bday\s+\d+\b/.test(title) ||
+    /\b(day overview|day summary|daily overview|daily plan|overview day)\b/.test(
+      title
+    )
+  );
+}
+
+function suppressDayOverviewActivities({
+  activities,
+  debug,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+}) {
+  return activities.filter((activity) => {
+    if (!isDayOverviewActivity(activity)) {
+      return true;
+    }
+
+    debug.suppressedDayOverviews.push({
+      date: dateFor(activity),
+      removedTitle: getString(activity, "title") ?? "Day overview",
+    });
+
+    return false;
+  });
+}
+
 function pruneParentChildActivities({
   activities,
   debug,
@@ -669,7 +1016,7 @@ function pruneParentChildActivities({
           !removedIndexes.has(childIndex) &&
           !isNoteLikeRecord(child) &&
           dateFor(child) === dateFor(parent) &&
-          childIsContainedInParent(parent, child)
+          childBelongsUnderParent(parent, child)
       );
     const sameTimeTourDuplicates = activities
       .map((child, childIndex) => ({ child, childIndex }))
@@ -706,6 +1053,7 @@ function pruneParentChildActivities({
 
     if (
       (isBroadParent(parent) || isCompositeParent(parent)) &&
+      !isSameSiteGroup(parent) &&
       (candidateChildren.length >= 2 ||
         (isCompositeParent(parent) && standaloneChildren.length > 0) ||
         standaloneChildren.length > 0)
@@ -729,10 +1077,13 @@ function pruneParentChildActivities({
     }
 
     for (const { child, childIndex } of sameDayChildren) {
-      if (hasStandaloneAnchor(child)) {
+      const keepStandaloneChild = hasStandaloneAnchor(child) && !isSameSiteGroup(parent);
+
+      if (keepStandaloneChild) {
         continue;
       }
 
+      mergeGroupedChildDetails(parent, child);
       removedIndexes.add(childIndex);
       debug.removedGroupedChildren.push({
         date: dateFor(child),
@@ -746,7 +1097,6 @@ function pruneParentChildActivities({
 }
 
 function isLodgingNoteActivity(activity: DraftObject, stays: DraftObject[]) {
-  const title = getString(activity, "title");
   const text = normalizeText(textFor(activity));
 
   if (!text || timeFor(activity)) {
@@ -758,7 +1108,7 @@ function isLodgingNoteActivity(activity: DraftObject, stays: DraftObject[]) {
   }
 
   if (
-    !/\b(stay|lodging|hotel|hostel|airbnb|apartment|private room|shared bathroom|bathroom|amount due|pay at arrival|check in|check out)\b/.test(
+    !/\b(stay|lodging|hotel|hostel|airbnb|apartment|private room|shared bathroom|bathroom|amount due|payment due|pay at arrival|check in|check out|budget|total|cost|price|paid)\b/.test(
       text
     )
   ) {
@@ -767,8 +1117,8 @@ function isLodgingNoteActivity(activity: DraftObject, stays: DraftObject[]) {
 
   return stays.some((stay) => {
     const stayName = normalizeText(getString(stay, "name"));
-    return Boolean(stayName && title && normalizeText(title).includes(stayName));
-  }) || /\b(private room|shared bathroom|amount due|pay at arrival|lodging note)\b/.test(text);
+    return Boolean(stayName && text.includes(stayName));
+  }) || /\b(private room|shared bathroom|amount due|payment due|pay at arrival|lodging note|hotel budget|lodging budget|total cost|price|paid)\b/.test(text);
 }
 
 function isLooseTipActivity(activity: DraftObject) {
@@ -780,9 +1130,11 @@ function isLooseTipActivity(activity: DraftObject) {
     return false;
   }
 
+  const bookingGuardText = text.replace(/\bticket machines?\b/g, " ");
+
   if (
     /\b(reservation|reserved|booked|booking|ticket|tickets|timed|confirmation|provider|paid|paypal)\b/.test(
-      text
+      bookingGuardText
     )
   ) {
     return false;
@@ -790,7 +1142,7 @@ function isLooseTipActivity(activity: DraftObject) {
 
   return (
     getString(activity, "itemType") === "note" ||
-    /\b(also noted|ideas?|recommendations?|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|local tips?|could visit|maybe visit|if time|possible sights?)\b/.test(
+    /\b(also noted|notes?\s*(?:and|&)?\s*tips?|ideas?|recommendations?|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|shopping notes?|transport notes?|transit tips?|local tips?|could visit|maybe visit|if time|possible sights?|things to check out)\b/.test(
       text
     )
   );
@@ -818,11 +1170,26 @@ function placeContainsDate(place: DraftObject, date: string | null) {
     return parsedDate.getTime() === arrive.getTime();
   }
 
-  return parsedDate >= arrive && parsedDate <= leave;
+  return parsedDate >= arrive && parsedDate < leave;
 }
 
 function cityForPlace(place: DraftObject) {
   return getString(place, "city") ?? getString(place, "displayName");
+}
+
+function findDatePlace(activity: DraftObject, places: DraftObject[]) {
+  return places.find((place) => placeContainsDate(place, dateFor(activity))) ?? null;
+}
+
+function findExplicitCityPlace(activity: DraftObject, places: DraftObject[]) {
+  const text = normalizeText(textFor(activity));
+
+  return (
+    places.find((place) => {
+      const city = normalizeText(cityForPlace(place));
+      return Boolean(city && text.includes(city));
+    }) ?? null
+  );
 }
 
 function findCityForActivity(activity: DraftObject, places: DraftObject[]) {
@@ -843,6 +1210,57 @@ function findCityForActivity(activity: DraftObject, places: DraftObject[]) {
   }
 
   return places.length === 1 ? cityForPlace(places[0]) : null;
+}
+
+function reconcileWrongCityAssignments({
+  activities,
+  debug,
+  places,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+  places: DraftObject[];
+}) {
+  return activities.map((activity) => {
+    const assignedPlace = findDatePlace(activity, places);
+    const explicitPlace = findExplicitCityPlace(activity, places);
+    const assignedCity = assignedPlace ? cityForPlace(assignedPlace) : null;
+    const explicitCity = explicitPlace ? cityForPlace(explicitPlace) : null;
+
+    if (
+      !assignedCity ||
+      !explicitCity ||
+      normalizeText(assignedCity) === normalizeText(explicitCity)
+    ) {
+      return activity;
+    }
+
+    const title = getString(activity, "title") ?? "Untitled activity";
+    const shouldMoveToCityNotes =
+      isLooseTipActivity(activity) || !hasStandaloneAnchor(activity);
+
+    debug.wrongCityPlacements.push({
+      action: shouldMoveToCityNotes ? "moved_to_city_notes" : "needs_review",
+      assignedCity,
+      date: dateFor(activity),
+      explicitCity,
+      title,
+    });
+
+    if (shouldMoveToCityNotes) {
+      return {
+        ...activity,
+        date: null,
+        description: appendUniqueSentence(getString(activity, "description"), title),
+        itemType: "note",
+      };
+    }
+
+    return {
+      ...activity,
+      date: null,
+    };
+  });
 }
 
 function splitNoteText(value: string) {
@@ -1200,34 +1618,71 @@ function nonAssemblyMissingDetails(value: unknown) {
 function createAssemblyCalls(
   debug: TripDraftConsolidationDebug
 ): AssemblyMissingDetail[] {
-  const groupedChildCalls = debug.removedGroupedChildren.map((item) => ({
+  const groupedChildren = new Map<
+    string,
+    {
+      date: string | null;
+      groupedUnder: string;
+      removedTitles: string[];
+    }
+  >();
+
+  for (const item of debug.removedGroupedChildren) {
+    const key = `${item.date ?? ""}|${item.groupedUnder}`;
+    const group =
+      groupedChildren.get(key) ??
+      {
+        date: item.date,
+        groupedUnder: item.groupedUnder,
+        removedTitles: [],
+      };
+
+    if (!group.removedTitles.includes(item.removedTitle)) {
+      group.removedTitles.push(item.removedTitle);
+    }
+
+    groupedChildren.set(key, group);
+  }
+
+  const groupedChildCalls = Array.from(groupedChildren.values()).map((item) => ({
     answerType: "confirm" as const,
     assemblySource: "trip_assembly" as const,
     confidence: "high" as const,
-    evidence: `${item.removedTitle} was included under ${item.groupedUnder}.`,
+    evidence: `${item.removedTitles.join(", ")} ${
+      item.removedTitles.length === 1 ? "was" : "were"
+    } included under ${item.groupedUnder}.`,
     guessedValue: item.groupedUnder,
-    prompt: `We grouped ${item.removedTitle} under ${item.groupedUnder}.`,
+    prompt: `We grouped ${item.removedTitles.join(", ")} into ${item.groupedUnder}.`,
     reason:
       "The source treated these as one route, walk, tour, or same-site visit, so the traveler app keeps one card with included stops.",
     relatedTitle: item.groupedUnder,
     subjectType: "item" as const,
     targetField: "presentation" as const,
   }));
-  const cityNoteCalls = debug.mergedCityNotes.map((item) => ({
-    answerType: "confirm" as const,
-    assemblySource: "trip_assembly" as const,
-    confidence: "high" as const,
-    evidence: item.sourceTitles.join("; ") || null,
-    guessedValue: `${item.city} Notes & Tips`,
-    prompt: `We moved loose ${item.city} recommendations into city notes.`,
-    reason:
-      "Loose food, drink, shopping, and local ideas should not create dated activity cards unless the source ties them to a day.",
-    relatedTitle: `${item.city} Notes & Tips`,
-    subjectType: "item" as const,
-    targetField: "presentation" as const,
-  }));
 
-  return [...groupedChildCalls, ...cityNoteCalls];
+  return groupedChildCalls;
+}
+
+function createWrongCityQuestions(
+  debug: TripDraftConsolidationDebug
+): AssemblyMissingDetail[] {
+  return debug.wrongCityPlacements
+    .filter((item) => item.action === "needs_review")
+    .map((item) => ({
+      answerType: "text" as const,
+      assemblySource: "trip_assembly" as const,
+      confidence: "medium" as const,
+      evidence: item.assignedCity
+        ? `${item.title} mentioned ${item.explicitCity} but was placed in ${item.assignedCity}.`
+        : `${item.title} mentioned ${item.explicitCity}.`,
+      guessedValue: null,
+      prompt: `Where should ${item.title} belong?`,
+      reason:
+        "The source text names a city that conflicts with the dated leg, so this card needs placement before it can appear in the traveler timeline.",
+      relatedTitle: item.title,
+      subjectType: "item" as const,
+      targetField: "placement" as const,
+    }));
 }
 
 export function consolidateTripDraft(draft: unknown): {
@@ -1246,21 +1701,27 @@ export function consolidateTripDraft(draft: unknown): {
     },
     removedDuplicateParents: [],
     removedGroupedChildren: [],
+    suppressedDayOverviews: [],
     suppressedTransportActivities: [],
+    wrongCityPlacements: [],
   };
   const places = cloneRecordArray(record.places);
   const stays = cloneRecordArray(record.stays);
   const transports = cloneRecordArray(record.transport);
   let activities = cloneRecordArray(record.activities).map(improvesGenericTourTitle);
 
+  promoteTransportExtractedDetails(transports);
   activities = suppressTransportDuplicates({ activities, debug, transports });
   activities = suppressStayFlowActivities({ activities, debug, stays });
   activities = suppressLodgingNotes({ activities, debug, stays });
+  activities = suppressDayOverviewActivities({ activities, debug });
+  activities = reconcileWrongCityAssignments({ activities, debug, places });
   activities = mergeCityNotes({ activities, debug, places });
   activities = pruneParentChildActivities({ activities, debug });
   activities = markOptionalActivities({ activities, debug });
   debug.overproductionRetry = timelinePlanCounts({ activities, transports });
   const assemblyCalls = createAssemblyCalls(debug);
+  const wrongCityQuestions = createWrongCityQuestions(debug);
 
   return {
     debug,
@@ -1274,6 +1735,7 @@ export function consolidateTripDraft(draft: unknown): {
       missingDetails: [
         ...nonAssemblyMissingDetails(record.missingDetails),
         ...assemblyCalls,
+        ...wrongCityQuestions,
       ],
       places,
       stays,

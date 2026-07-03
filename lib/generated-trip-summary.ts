@@ -217,6 +217,36 @@ function formatTime(value: string | null) {
   return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
+function timeToMinutes(value: string | null) {
+  const time = value?.trim();
+
+  if (!time) {
+    return null;
+  }
+
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  return hour * 60 + minute;
+}
+
 function normalizeHealthText(value: string | null | undefined) {
   return value
     ?.toLowerCase()
@@ -534,6 +564,73 @@ function createActivityEntry(
   };
 }
 
+function inferredActivityMinutes(item: StructuredTripRecords["items"][number]) {
+  const explicit = timeToMinutes(item.startTime);
+
+  if (explicit !== null) {
+    return explicit;
+  }
+
+  const text = normalizeHealthText(
+    [item.title, item.description, item.categoryId].filter(Boolean).join(" ")
+  );
+
+  if (/\b(breakfast|bakery|coffee|cafe|brunch)\b/.test(text)) {
+    return 9 * 60;
+  }
+
+  if (/\b(lunch|market)\b/.test(text)) {
+    return 12 * 60;
+  }
+
+  if (/\b(dinner|restaurant|supper)\b/.test(text)) {
+    return 19 * 60;
+  }
+
+  if (/\b(bar|pub|cocktail|beer|wine|nightlife|club|music)\b/.test(text)) {
+    return 21 * 60;
+  }
+
+  if (
+    /\b(museum|palace|cathedral|church|synagogue|gallery|park|garden|castle|tour|walk|sightseeing|shopping|shop)\b/.test(
+      text
+    )
+  ) {
+    return 13 * 60;
+  }
+
+  return 15 * 60;
+}
+
+function sortEntriesForDay(
+  entries: Array<{
+    entry: GeneratedTripSummaryDayEntry;
+    sortMinutes: number | null;
+  }>
+) {
+  return entries
+    .map((item, index) => ({ ...item, index }))
+    .sort((left, right) => {
+      const leftMinutes = left.sortMinutes ?? 15 * 60;
+      const rightMinutes = right.sortMinutes ?? 15 * 60;
+
+      if (leftMinutes !== rightMinutes) {
+        return leftMinutes - rightMinutes;
+      }
+
+      const kindOrder: Record<GeneratedTripSummaryDayEntry["kind"], number> = {
+        stay: 0,
+        transport: 1,
+        activity: 2,
+        review: 3,
+      };
+      const kindDelta = kindOrder[left.entry.kind] - kindOrder[right.entry.kind];
+
+      return kindDelta || left.index - right.index;
+    })
+    .map((item) => item.entry);
+}
+
 function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
   const text = [item.title, item.description].filter(Boolean).join(" ");
 
@@ -565,15 +662,30 @@ function createSummaryDays(
   const days = records.days
     .filter((day) => day.date !== "needs-placement")
     .map((day) => {
-      const entries = [
+      const entries = sortEntriesForDay([
         ...activeTransport
           .filter((item) => item.date === day.date)
-          .map(createTransportEntry),
-        ...activeStays.flatMap((stay) => createStayEntriesForDay(stay, day.date)),
+          .map((item) => ({
+            entry: createTransportEntry(item),
+            sortMinutes: timeToMinutes(item.departureTime),
+          })),
+        ...activeStays
+          .flatMap((stay) =>
+            createStayEntriesForDay(stay, day.date).map((entry) => ({
+              entry,
+              sortMinutes:
+                stay.checkInDate === day.date
+                  ? timeToMinutes(stay.checkInTime) ?? 16 * 60
+                  : 0,
+            }))
+          ),
         ...datedItems
           .filter((item) => item.date === day.date)
-          .map((item) => createActivityEntry(item, categoryById)),
-      ];
+          .map((item) => ({
+            entry: createActivityEntry(item, categoryById),
+            sortMinutes: inferredActivityMinutes(item),
+          })),
+      ]);
 
       return {
         date: day.date,
@@ -637,14 +749,14 @@ function createSummaryWarnings({
     .filter((item) => item.status !== "confirmed")
     .filter((item) => item.transportType === "flight" || item.transportType === "train")
     .filter((item) => {
-      const missingTime = !item.departureTime || !item.arrivalTime;
+      const missingDepartureTime = !item.departureTime;
       const missingLocation = !item.departureLocation || !item.arrivalLocation;
 
-      return missingTime || missingLocation;
+      return missingDepartureTime || missingLocation;
     })
     .map((item) => ({
       detail:
-        "Flights and trains should carry source-backed time and station or airport details whenever the source provides them. Check the source before publishing.",
+        "Flights and trains should carry source-backed departure time and station or airport details whenever the source provides them. Missing arrival time alone is not a blocker.",
       id: `${item.id}-critical-transport-details`,
       severity: "hard" as const,
       subjectId: item.id,
