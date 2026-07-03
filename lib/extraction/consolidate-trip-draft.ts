@@ -1,4 +1,11 @@
-type DraftObject = Record<string, unknown>;
+import { type DraftObject } from "@/lib/extraction/draft-value";
+import {
+  ASSEMBLY_VERSION,
+  createEmptyConsolidationDebug,
+  getExistingAssemblyDebug,
+  type TripDraftConsolidationDebug,
+} from "@/lib/extraction/trip-draft-consolidation-debug";
+import { normalizeText } from "@/lib/extraction/traveler-text";
 
 type NoteSectionName =
   | "Food"
@@ -18,54 +25,6 @@ type AssemblyMissingDetail = {
   relatedTitle: string | null;
   subjectType: "item";
   targetField: "date" | "placement" | "presentation";
-};
-
-export type TripDraftConsolidationDebug = {
-  foldedLodgingNotes: Array<{
-    title: string;
-    stayTitle: string | null;
-  }>;
-  mergedCityNotes: Array<{
-    city: string;
-    sections: string[];
-    sourceTitles: string[];
-  }>;
-  normalizedOptionalActivities: Array<{
-    title: string;
-    updatedTitle: string;
-  }>;
-  overproductionRetry: {
-    averagePlansPerDay: number;
-    maxPlansPerDay: number;
-    triggered: boolean;
-  };
-  removedDuplicateParents: Array<{
-    date: string | null;
-    reason: string;
-    removedTitle: string;
-    survivingTitles: string[];
-  }>;
-  removedGroupedChildren: Array<{
-    date: string | null;
-    groupedUnder: string;
-    removedTitle: string;
-  }>;
-  suppressedDayOverviews: Array<{
-    date: string | null;
-    removedTitle: string;
-  }>;
-  suppressedTransportActivities: Array<{
-    date: string | null;
-    matchedTransportTitle: string;
-    removedTitle: string;
-  }>;
-  wrongCityPlacements: Array<{
-    action: "moved_to_city_notes" | "needs_review";
-    assignedCity: string | null;
-    date: string | null;
-    explicitCity: string;
-    title: string;
-  }>;
 };
 
 const NOTE_SECTION_ORDER: NoteSectionName[] = [
@@ -101,16 +60,6 @@ function getStringFromKeys(record: DraftObject, keys: string[]) {
   }
 
   return null;
-}
-
-function normalizeText(value: string | null | undefined) {
-  return value
-    ?.toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim() ?? "";
 }
 
 function normalizeWords(value: string | null | undefined) {
@@ -1142,7 +1091,7 @@ function isLooseTipActivity(activity: DraftObject) {
 
   return (
     getString(activity, "itemType") === "note" ||
-    /\b(also noted|notes?\s*(?:and|&)?\s*tips?|ideas?|recommendations?|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|shopping notes?|transport notes?|transit tips?|local tips?|could visit|maybe visit|if time|possible sights?|things to check out)\b/.test(
+    /\b(also noted|notes?\s*(?:and|&)?\s*tips?|ideas?|recommendations?|eat|where to eat|food|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|shopping notes?|transport notes?|transit tips?|local tips?|could visit|maybe visit|if time|possible sights?|things to check out)\b/.test(
       text
     )
   );
@@ -1690,21 +1639,13 @@ export function consolidateTripDraft(draft: unknown): {
   draft: unknown;
 } {
   const record = asRecord(draft);
-  const debug: TripDraftConsolidationDebug = {
-    foldedLodgingNotes: [],
-    mergedCityNotes: [],
-    normalizedOptionalActivities: [],
-    overproductionRetry: {
-      averagePlansPerDay: 0,
-      maxPlansPerDay: 0,
-      triggered: false,
-    },
-    removedDuplicateParents: [],
-    removedGroupedChildren: [],
-    suppressedDayOverviews: [],
-    suppressedTransportActivities: [],
-    wrongCityPlacements: [],
-  };
+  const existingDebug = getExistingAssemblyDebug(record);
+
+  if (existingDebug) {
+    return { debug: existingDebug, draft };
+  }
+
+  const debug = createEmptyConsolidationDebug();
   const places = cloneRecordArray(record.places);
   const stays = cloneRecordArray(record.stays);
   const transports = cloneRecordArray(record.transport);
@@ -1729,7 +1670,7 @@ export function consolidateTripDraft(draft: unknown): {
       ...record,
       _assembly: {
         debug,
-        version: 1,
+        version: ASSEMBLY_VERSION,
       },
       activities,
       missingDetails: [

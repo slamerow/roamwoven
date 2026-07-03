@@ -7,6 +7,7 @@ import {
   getStructuredReviewCount,
   type StructuredReviewEditField,
 } from "@/lib/generated-trip-review";
+import { normalizeText } from "@/lib/extraction/traveler-text";
 
 export type GeneratedTripSummaryItem = {
   detail?: string;
@@ -247,18 +248,8 @@ function timeToMinutes(value: string | null) {
   return hour * 60 + minute;
 }
 
-function normalizeHealthText(value: string | null | undefined) {
-  return value
-    ?.toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim() ?? "";
-}
-
 function healthTextForItem(item: StructuredTripRecords["items"][number]) {
-  return normalizeHealthText(
+  return normalizeText(
     [item.title, item.description, item.locationName, item.address]
       .filter(Boolean)
       .join(" ")
@@ -266,7 +257,7 @@ function healthTextForItem(item: StructuredTripRecords["items"][number]) {
 }
 
 function healthTextForTransport(item: StructuredTripRecords["transport"][number]) {
-  return normalizeHealthText(
+  return normalizeText(
     [
       item.routeLabel,
       item.departureLocation,
@@ -282,14 +273,14 @@ function healthTextForTransport(item: StructuredTripRecords["transport"][number]
 }
 
 function normalizeDuplicateTitle(value: string) {
-  return normalizeHealthText(value)
+  return normalizeText(value)
     .replace(/\b(reservation|booking|activity|visit|tour|ticket|tickets)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function wordsForHealth(value: string) {
-  return normalizeHealthText(value)
+  return normalizeText(value)
     .split(/\s+/)
     .filter((word) => word.length > 2)
     .filter(
@@ -315,8 +306,8 @@ function wordsForHealth(value: string) {
 }
 
 function healthTextsOverlap(left: string, right: string) {
-  const leftText = normalizeHealthText(left);
-  const rightText = normalizeHealthText(right);
+  const leftText = normalizeText(left);
+  const rightText = normalizeText(right);
 
   if (!leftText || !rightText) {
     return false;
@@ -571,7 +562,7 @@ function inferredActivityMinutes(item: StructuredTripRecords["items"][number]) {
     return explicit;
   }
 
-  const text = normalizeHealthText(
+  const text = normalizeText(
     [item.title, item.description, item.categoryId].filter(Boolean).join(" ")
   );
 

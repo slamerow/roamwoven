@@ -811,6 +811,41 @@ test("city note merging creates one note per city with multiple loose note sourc
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
+test("draft consolidation does not reassemble an already assembled city-note draft", () => {
+  const first = consolidateTripDraft({
+    activities: [
+      {
+        category: "admin_logistics",
+        date: null,
+        description: "Metro line tips and ticket machines.",
+        itemType: "note",
+        title: "Budapest transport and shopping notes",
+      },
+      {
+        category: "food_dining",
+        date: null,
+        description: "Food: Mazel Tov; Drinks: Szimpla Kert.",
+        itemType: "note",
+        title: "Budapest Notes & Tips",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-21",
+        city: "Budapest",
+        leaveDate: "2019-01-24",
+      },
+    ],
+    stays: [],
+    transport: [],
+  });
+  const second = consolidateTripDraft(first.draft);
+
+  assert.strictEqual(second.draft, first.draft);
+  assert.deepEqual(second.debug, first.debug);
+});
+
 test("summary can move an activity into city tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -2160,6 +2195,42 @@ test("same-site grouping folds child cards into the surviving visit card", () =>
   assert.equal(call?.status, "noted");
   assert.match(call?.prompt ?? "", /Apple Strudel Show/);
   assert.match(call?.prompt ?? "", /gardens/);
+});
+
+test("draft consolidation does not reassemble an already assembled same-site grouping", () => {
+  const first = consolidateTripDraft({
+    activities: [
+      {
+        category: "tours_tickets",
+        date: "2019-01-19",
+        description: "Same-site visit including the palace grounds.",
+        itemType: "activity",
+        title: "Schonbrunn Palace complex",
+      },
+      {
+        category: "tours_tickets",
+        date: "2019-01-19",
+        description: "Timed show inside the palace visit.",
+        itemType: "activity",
+        startTime: "11:00",
+        title: "Schonbrunn Apple Strudel Show",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-18",
+        city: "Vienna",
+        leaveDate: "2019-01-21",
+      },
+    ],
+    stays: [],
+    transport: [],
+  });
+  const second = consolidateTripDraft(first.draft);
+
+  assert.strictEqual(second.draft, first.draft);
+  assert.deepEqual(second.debug, first.debug);
 });
 
 test("stay rows carry check-in flow without synthetic check-in cards", () => {
