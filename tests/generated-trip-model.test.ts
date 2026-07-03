@@ -1718,7 +1718,8 @@ test("summary flags critical trains when source-backed details are missing", () 
           confirmation: "1beb5005",
           date: "2019-01-18",
           departure: "Prague",
-          description: "Train to Vienna. Train code: 1beb5005.",
+          description:
+            "Train to Vienna departs 09:20 from Praha hl.n. Train code: 1beb5005.",
           title: "Train to Vienna",
           type: "train",
         },
@@ -1730,6 +1731,10 @@ test("summary flags critical trains when source-backed details are missing", () 
     fallbackTripName: "Fallback trip",
     tripId: "trip-critical-transport-warning",
   });
+  const transport = records.transport[0];
+  assert.ok(transport);
+  transport.departureTime = null;
+  transport.departureLocation = null;
   const summary = createGeneratedTripSummaryView(records);
 
   assert.ok(
@@ -1738,6 +1743,50 @@ test("summary flags critical trains when source-backed details are missing", () 
     )
   );
   assert.equal(summary.isReadyForPublishReview, false);
+});
+
+test("summary does not hard-block critical transport when source lacks the missing detail", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna",
+          confirmation: "1beb5005",
+          date: "2019-01-18",
+          departure: "Prague",
+          description: "Train to Vienna. Train code: 1beb5005.",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-critical-transport-source-incomplete",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.equal(
+    summary.warnings.some((warning) =>
+      /Train to Vienna is missing critical travel details/.test(warning.title)
+    ),
+    false
+  );
+  assert.equal(summary.isReadyForPublishReview, true);
 });
 
 test("summary does not hard-warn when only train arrival time is missing", () => {
@@ -1908,9 +1957,9 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
           category: "arrival_departure",
           date: "2026-09-02",
           description:
-            "Store bags at Central Station luggage storage before going to the hotel.",
+            "Arrive and drop bags at Central Station Hotel before check-in.",
           itemType: "activity",
-          title: "Store bags at Central Station luggage storage",
+          title: "Drop bags at Central Station Hotel",
         },
       ],
       missingDetails: [],
@@ -1957,6 +2006,29 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
   records.items.push({
     address: null,
     categoryId: "arrival_departure",
+    date: "2026-09-02",
+    description: "Arrive and drop bags at Central Station Hotel before check-in.",
+    endTime: null,
+    id: "manual-stay-duplicate",
+    itemType: "activity",
+    latitude: null,
+    legId: records.legs[0]?.id ?? null,
+    locationName: null,
+    longitude: null,
+    parentItemId: null,
+    reviewRequired: false,
+    sortOrder: 98,
+    sourceConfidence: "high",
+    startTime: null,
+    status: "draft",
+    summary: null,
+    title: "Drop bags at Central Station Hotel",
+    tripId: records.trip.id,
+    url: null,
+  });
+  records.items.push({
+    address: null,
+    categoryId: "arrival_departure",
     date: "2026-09-03",
     description: "Take train from Paris to Lyon.",
     endTime: null,
@@ -1983,7 +2055,7 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
     summary.warnings.some(
       (warning) =>
         warning.severity === "hard" &&
-        /Store bags at Central Station luggage storage duplicates a stay row/.test(
+        /Drop bags at Central Station Hotel duplicates a stay row/.test(
           warning.title
         )
     )
@@ -1996,6 +2068,56 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
     )
   );
   assert.equal(summary.isReadyForPublishReview, false);
+});
+
+test("summary does not hard-block separate luggage storage before hotel check-in", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2026-09-02",
+          description:
+            "Store bags at Central Station luggage storage before going to the hotel.",
+          itemType: "activity",
+          title: "Store bags at Central Station luggage storage",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-02",
+          city: "Paris",
+          country: "France",
+          leaveDate: "2026-09-03",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [
+        {
+          checkIn: "2026-09-02",
+          checkOut: "2026-09-03",
+          name: "Central Station Hotel",
+        },
+      ],
+      transport: [],
+      tripOverview: {
+        title: "France",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-summary-health-luggage-storage",
+  });
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.ok(
+    !summary.warnings.some((warning) =>
+      /Store bags at Central Station luggage storage duplicates a stay row/.test(
+        warning.title
+      )
+    )
+  );
+  assert.equal(summary.isReadyForPublishReview, true);
 });
 
 test("category taxonomy canonicalizes old aliases and avoids generic buckets", () => {
@@ -3374,6 +3496,7 @@ test("structured discovery summary respects blocking summary warnings", () => {
       transport: [
         {
           date: "2026-09-01",
+          description: "Train departs 09:20 from Praha hl.n.",
           title: "Train to Vienna",
           type: "train",
         },
@@ -3385,6 +3508,9 @@ test("structured discovery summary respects blocking summary warnings", () => {
     fallbackTripName: "Fallback trip",
     tripId: "trip-discovery-blocking-warning",
   });
+  const transport = records.transport[0];
+  assert.ok(transport);
+  transport.departureTime = null;
   const summaryView = createGeneratedTripSummaryView(records);
   const summary = formatStructuredDiscoverySummary(records, 0, {
     blockingIssueCount: summaryView.warnings.filter(

@@ -272,6 +272,33 @@ function healthTextForTransport(item: StructuredTripRecords["transport"][number]
   );
 }
 
+function rawTransportEvidenceText(item: StructuredTripRecords["transport"][number]) {
+  return [
+    item.routeLabel,
+    item.departureLocation,
+    item.arrivalLocation,
+    item.provider,
+    item.confirmationLabel,
+    item.description,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hasTransportTimeEvidence(item: StructuredTripRecords["transport"][number]) {
+  return /\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(am|pm)\b/i.test(
+    rawTransportEvidenceText(item)
+  );
+}
+
+function hasSpecificTransportLocationEvidence(
+  item: StructuredTripRecords["transport"][number]
+) {
+  return /\b(airport|bahnhof|gare|gate|hbf|hl\.?\s?n\.?|main station|platform|station|terminal)\b/i.test(
+    rawTransportEvidenceText(item)
+  );
+}
+
 function normalizeDuplicateTitle(value: string) {
   return normalizeText(value)
     .replace(/\b(reservation|booking|activity|visit|tour|ticket|tickets)\b/g, " ")
@@ -324,10 +351,54 @@ function healthTextsOverlap(left: string, right: string) {
   return matches.length >= Math.min(2, leftWords.length, rightWords.length);
 }
 
+function healthTextContainsPhrase(text: string, phrase: string | null) {
+  const normalizedPhrase = normalizeText(phrase);
+
+  return Boolean(normalizedPhrase && normalizeText(text).includes(normalizedPhrase));
+}
+
 function isStayFlowItem(item: StructuredTripRecords["items"][number]) {
-  return /\b(check in|checkin|drop bags?|bag drop|arrival|stay|staying|lodging|hotel|hostel|airbnb|apartment)\b/.test(
+  return /\b(check in|checkin|drop bags?|bag drop|store bags?|luggage storage|bag storage|stay|staying|lodging|hotel|hostel|airbnb|apartment)\b/.test(
     healthTextForItem(item)
   );
+}
+
+function isSeparateLuggageStorageItem(item: StructuredTripRecords["items"][number]) {
+  const text = healthTextForItem(item);
+
+  return /\b(luggage storage|bag storage|left luggage|storage locker|lockers?|station storage)\b/.test(
+    text
+  );
+}
+
+function isStayDuplicateFlow({
+  item,
+  stay,
+}: {
+  item: StructuredTripRecords["items"][number];
+  stay: StructuredTripRecords["stays"][number];
+}) {
+  const itemText = healthTextForItem(item);
+  const mentionsStayDirectly =
+    healthTextContainsPhrase(itemText, stay.name) ||
+    healthTextContainsPhrase(itemText, stay.address);
+  const hasCheckInOrBagAction =
+    /\b(check in|checkin|drop bags?|bag drop|store bags?)\b/.test(itemText);
+  const hasLodgingContext =
+    mentionsStayDirectly ||
+    /\b(stay|staying|lodging|hotel|hostel|airbnb|apartment|accommodation|room)\b/.test(
+      itemText
+    );
+
+  if (!hasCheckInOrBagAction || !hasLodgingContext) {
+    return false;
+  }
+
+  if (mentionsStayDirectly) {
+    return true;
+  }
+
+  return !isSeparateLuggageStorageItem(item);
 }
 
 function isTransportFlowItem(item: StructuredTripRecords["items"][number]) {
@@ -743,7 +814,10 @@ function createSummaryWarnings({
       const missingDepartureTime = !item.departureTime;
       const missingLocation = !item.departureLocation || !item.arrivalLocation;
 
-      return missingDepartureTime || missingLocation;
+      return (
+        (missingDepartureTime && hasTransportTimeEvidence(item)) ||
+        (missingLocation && hasSpecificTransportLocationEvidence(item))
+      );
     })
     .map((item) => ({
       detail:
@@ -793,14 +867,7 @@ function createSummaryWarnings({
             ? stay.checkInDate <= item.date && item.date <= stay.checkOutDate
             : stay.checkInDate === item.date;
 
-        return (
-          sameStayWindow &&
-          (healthTextsOverlap(item.title, stay.name) ||
-            healthTextsOverlap(item.description ?? "", stay.name) ||
-            /\b(check in|checkin|drop bags?|bag drop|arrival)\b/.test(
-              healthTextForItem(item)
-            ))
-        );
+        return sameStayWindow && isStayDuplicateFlow({ item, stay });
       });
 
       if (!matchingStay) {
