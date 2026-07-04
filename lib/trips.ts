@@ -54,6 +54,20 @@ const demoTrip: MakerTrip = {
   isDemo: true,
 };
 
+export class MakerTripAuthRequiredError extends Error {
+  constructor() {
+    super("You must be signed in to load this trip.");
+    this.name = "MakerTripAuthRequiredError";
+  }
+}
+
+export class MakerTripNotFoundError extends Error {
+  constructor() {
+    super("Trip not found for the signed-in maker, or it has been deleted.");
+    this.name = "MakerTripNotFoundError";
+  }
+}
+
 function hasSupabaseServerConfig() {
   const { url, anonKey } = getSupabaseConfig();
   return Boolean(url && anonKey);
@@ -127,7 +141,7 @@ export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
   const user = await getCurrentUser();
 
   if (!user) {
-    throw new Error("You must be signed in to load this trip.");
+    throw new MakerTripAuthRequiredError();
   }
 
   const supabase = await createSupabaseServerClient();
@@ -153,10 +167,14 @@ export async function getMakerTrip(tripId: string): Promise<MakerTrip> {
     .eq("id", tripId)
     .eq("owner_user_id", user.id)
     .neq("status", "deleted")
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    throw new Error(`Unable to load trip: ${error?.message ?? "No row"}`);
+  if (error) {
+    throw new Error(`Unable to load trip: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new MakerTripNotFoundError();
   }
 
   return normalizeTrip(data as unknown as TripRow);

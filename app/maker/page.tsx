@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, ClipboardCheck, FileUp, Smartphone } from "lucide-react";
+import {
+  ArrowRight,
+  ClipboardCheck,
+  FileJson,
+  FileUp,
+  Smartphone,
+} from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { listMakerTrips } from "@/lib/trips";
 
@@ -131,7 +137,7 @@ export default async function MakerDashboardPage({
                 </Link>
               </div>
 
-              <div className="mt-6 grid gap-3 md:grid-cols-3">
+              <div className="mt-6 grid gap-3 md:grid-cols-4">
                 <Link
                   href={`/maker/trips/${trip.id}/upload`}
                   className="rounded-md border border-ink/10 bg-paper p-4"
@@ -148,6 +154,15 @@ export default async function MakerDashboardPage({
                   <ClipboardCheck className="text-clay" size={22} />
                   <p className="mt-3 text-sm font-semibold text-ink">
                     Review questions
+                  </p>
+                </Link>
+                <Link
+                  href={`/maker/trips/${trip.id}/data/audit`}
+                  className="rounded-md border border-ink/10 bg-paper p-4"
+                >
+                  <FileJson className="text-tide" size={22} />
+                  <p className="mt-3 text-sm font-semibold text-ink">
+                    Extraction audit
                   </p>
                 </Link>
                 <Link
