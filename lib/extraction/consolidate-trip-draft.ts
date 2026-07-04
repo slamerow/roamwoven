@@ -199,15 +199,27 @@ function firstKnownTime(record: DraftObject, keys: string[]) {
   return normalizeClockTime(getStringFromKeys(record, keys));
 }
 
-function isTransportActionText(value: string) {
-  return /\b(flight|fly|train|rail|bus|ferry|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to|rental car|car pickup|pick up car|pickup car|drive)\b/.test(
+function isRentalCarText(value: string | null | undefined) {
+  return /\b(rental car|car rental|car pickup|pick up car|pickup car|hire car)\b/.test(
     normalizeText(value)
   );
 }
 
-function isRentalCarText(value: string | null | undefined) {
-  return /\b(rental car|car rental|car pickup|pick up car|pickup car|hire car)\b/.test(
+function isScenicRideOrAttractionText(value: string | null | undefined) {
+  return /\b(ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
     normalizeText(value)
+  );
+}
+
+function isTransportActionText(value: string) {
+  const text = normalizeText(value);
+
+  if (isRentalCarText(text) || isScenicRideOrAttractionText(text)) {
+    return false;
+  }
+
+  return /\b(flight|fly|train to|rail to|bus to|ferry to|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to)\b/.test(
+    text
   );
 }
 
@@ -236,6 +248,42 @@ function normalizeRentalCarTitle(transport: DraftObject) {
   if (/\b(car pickup|pickup car|pick up car|rental car)\b/.test(normalized)) {
     transport.title = "Pick up rental car";
   }
+}
+
+function normalizedRentalCarPickupTitle(record: DraftObject) {
+  const title = getString(record, "title");
+  const text = normalizeText(title);
+
+  if (!title || !isRentalCarText(text)) {
+    return title ?? "Pick up rental car";
+  }
+
+  const destinationMatch =
+    text.match(/\b(?:car pickup|pickup car|pick up car|rental car)(?:\s+(?:for|to))\s+(.+)$/) ??
+    text.match(/\b(?:for|to)\s+(.+)$/);
+
+  if (destinationMatch?.[1]) {
+    const destination = destinationMatch[1]
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+    return `Pick up rental car for ${destination}`;
+  }
+
+  return "Pick up rental car";
+}
+
+function isRentalCarTransport(record: DraftObject) {
+  const type = normalizeText(getString(record, "type"));
+  const text = textFor(record, [
+    "title",
+    "description",
+    "departure",
+    "arrival",
+    "provider",
+  ]);
+
+  return type === "rental car" || isRentalCarText(text);
 }
 
 function isSeparateLocalMovement(value: string) {
@@ -459,6 +507,181 @@ function promoteTransportExtractedDetails(transports: DraftObject[]) {
   }
 }
 
+function mergeRentalCarDetailsIntoActivity(
+  activity: DraftObject,
+  source: DraftObject
+) {
+  const departureTime = firstKnownTime(source, [
+    "departureTime",
+    "startTime",
+    "time",
+  ]);
+  const arrivalTime = firstKnownTime(source, ["arrivalTime", "endTime"]);
+  const pickup = getString(source, "departure") ?? getString(source, "address");
+  const dropoff = getString(source, "arrival");
+  const provider = getString(source, "provider");
+  const confirmation = getStringFromKeys(source, [
+    "confirmation",
+    "reservation",
+    "bookingNumber",
+    "orderNumber",
+  ]);
+  let description = getString(activity, "description");
+  const detailParts = [
+    getString(source, "description"),
+    pickup ? `Pickup: ${pickup}.` : null,
+    dropoff ? `Drop-off: ${dropoff}.` : null,
+    provider ? `Provider: ${provider}.` : null,
+    confirmation ? `Confirmation: ${confirmation}.` : null,
+  ].filter(Boolean);
+
+  activity.title = normalizedRentalCarPickupTitle(activity);
+  activity.category = getString(activity, "category") ?? "arrival_departure";
+  activity.itemType = "activity";
+
+  if (!getString(activity, "date") && getString(source, "date")) {
+    activity.date = getString(source, "date");
+  }
+
+  if (!getString(activity, "startTime") && departureTime) {
+    activity.startTime = departureTime;
+  }
+
+  if (!getString(activity, "endTime") && arrivalTime) {
+    activity.endTime = arrivalTime;
+  }
+
+  if (!getString(activity, "address") && pickup) {
+    activity.address = pickup;
+  }
+
+  for (const detail of detailParts) {
+    description = appendUniqueSentence(description, detail);
+  }
+
+  activity.description = description;
+}
+
+function createRentalCarActivityFromTransport(transport: DraftObject) {
+  const activity: DraftObject = {
+    category: "arrival_departure",
+    date: getString(transport, "date"),
+    itemType: "activity",
+    title: normalizedRentalCarPickupTitle(transport),
+  };
+
+  mergeRentalCarDetailsIntoActivity(activity, transport);
+
+  return activity;
+}
+
+function findRentalCarActivityIndex(
+  activities: DraftObject[],
+  transport: DraftObject
+) {
+  const date = dateFor(transport);
+  const transportTitle = normalizeText(getString(transport, "title"));
+
+  return activities.findIndex((activity) => {
+    if (!isRentalCarText(textFor(activity, ["title", "description"]))) {
+      return false;
+    }
+
+    if (date && dateFor(activity) && dateFor(activity) !== date) {
+      return false;
+    }
+
+    const activityTitle = normalizeText(getString(activity, "title"));
+
+    return (
+      !transportTitle ||
+      !activityTitle ||
+      transportTitle === activityTitle ||
+      activityTitle.includes("car") ||
+      transportTitle.includes("car")
+    );
+  });
+}
+
+function rentalCarActivityKey(activity: DraftObject) {
+  if (!isRentalCarText(textFor(activity, ["title", "description"]))) {
+    return null;
+  }
+
+  return `${dateFor(activity) ?? "undated"}|${normalizeText(
+    normalizedRentalCarPickupTitle(activity)
+  )}`;
+}
+
+function normalizeRentalCarPickups({
+  activities,
+  debug,
+  transports,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+  transports: DraftObject[];
+}) {
+  const nextActivities = [...activities];
+  const nextTransports: DraftObject[] = [];
+
+  for (const transport of transports) {
+    if (!isRentalCarTransport(transport)) {
+      nextTransports.push(transport);
+      continue;
+    }
+
+    const matchIndex = findRentalCarActivityIndex(nextActivities, transport);
+    const activity =
+      matchIndex >= 0 && nextActivities[matchIndex]
+        ? nextActivities[matchIndex]
+        : createRentalCarActivityFromTransport(transport);
+
+    if (matchIndex >= 0) {
+      mergeRentalCarDetailsIntoActivity(activity, transport);
+    } else {
+      nextActivities.push(activity);
+    }
+
+    debug.normalizedRentalCarPickups.push({
+      date: dateFor(activity),
+      title: getString(activity, "title") ?? "Pick up rental car",
+    });
+  }
+
+  const retainedActivities: DraftObject[] = [];
+  const seenRentalPickups = new Map<string, DraftObject>();
+
+  for (const activity of nextActivities) {
+    const key = rentalCarActivityKey(activity);
+
+    if (!key) {
+      retainedActivities.push(activity);
+      continue;
+    }
+
+    const existing = seenRentalPickups.get(key);
+
+    if (!existing) {
+      activity.title = normalizedRentalCarPickupTitle(activity);
+      retainedActivities.push(activity);
+      seenRentalPickups.set(key, activity);
+      continue;
+    }
+
+    mergeRentalCarDetailsIntoActivity(existing, activity);
+    debug.normalizedRentalCarPickups.push({
+      date: dateFor(existing),
+      title: getString(existing, "title") ?? "Pick up rental car",
+    });
+  }
+
+  return {
+    activities: retainedActivities,
+    transports: nextTransports,
+  };
+}
+
 function hasStandaloneAnchor(record: DraftObject) {
   const text = normalizeText(textFor(record));
 
@@ -510,14 +733,57 @@ function isCompositeParent(record: DraftObject) {
 
 function isSameSiteGroup(record: DraftObject) {
   const text = normalizeText(textFor(record));
-
-  return /\b(complex|palace|castle|gardens|grounds|campus|estate|including|inside|within)\b/.test(
+  const nearbyOnly = /\b(nearby sights?|nearby sites?|nearby stops?|area sights?|area sites?)\b/.test(
     text
+  );
+  const siteCluster =
+    /\bcluster including\b/.test(text) &&
+    /\b(palace|castle|complex|grounds|gardens)\b/.test(text);
+  const explicitSameVisit =
+    /\b(same site|same-site|same .* visit|same .* complex|inside|within|grounds|campus|estate|complex)\b/.test(
+      text
+    );
+
+  if (nearbyOnly && !explicitSameVisit) {
+    return false;
+  }
+
+  return (
+    siteCluster ||
+    explicitSameVisit ||
+    (/\b(palace|castle)\b/.test(text) &&
+      /\b(gardens?|grounds|complex|inside|within|same .* visit)\b/.test(text))
   );
 }
 
 function isTourGroup(record: DraftObject) {
   return /\b(tour|walking tour|walk)\b/.test(normalizeText(getString(record, "title")));
+}
+
+function isPlannedAreaGroup(record: DraftObject) {
+  const title = normalizeText(getString(record, "title"));
+  const text = normalizeText(textFor(record));
+
+  if (!title || isSameSiteGroup(record)) {
+    return false;
+  }
+
+  if (
+    /\b(notes?|tips?|ideas?|recommendations?|where to eat|food list|restaurant list|shopping ideas?)\b/.test(
+      title
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(explore|wander|stroll|walk|neighborhood|neighbourhood|quarter|district|area|morning|afternoon|evening)\b/.test(
+      title
+    ) &&
+    /\b(explore|wander|stroll|walk|continue|route|stops?|with|including|morning|afternoon|evening)\b/.test(
+      text
+    )
+  );
 }
 
 function isGenericTourTitle(record: DraftObject) {
@@ -575,6 +841,10 @@ function childBelongsUnderParent(parent: DraftObject, child: DraftObject) {
     return true;
   }
 
+  if (isPlannedAreaGroup(parent)) {
+    return !hasStandaloneAnchor(child) && recordMentionsTitle(parent, getString(child, "title"));
+  }
+
   if (!isSameSiteGroup(parent)) {
     return false;
   }
@@ -583,7 +853,23 @@ function childBelongsUnderParent(parent: DraftObject, child: DraftObject) {
   const childWords = normalizeWords(textFor(child));
   const sharedWords = childWords.filter((word) => parentWords.includes(word));
 
-  return sharedWords.some((word) => word.length >= 5);
+  return sharedWords.some(
+    (word) =>
+      word.length >= 5 &&
+      ![
+        "breakfast",
+        "coffee",
+        "dinner",
+        "lunch",
+        "restaurant",
+        "nearby",
+        "prague",
+        "vienna",
+        "budapest",
+        "rome",
+        "paris",
+      ].includes(word)
+  );
 }
 
 function improvesGenericTourTitle(record: DraftObject) {
@@ -1003,6 +1289,7 @@ function pruneParentChildActivities({
     if (
       (isBroadParent(parent) || isCompositeParent(parent)) &&
       !isSameSiteGroup(parent) &&
+      !isPlannedAreaGroup(parent) &&
       (candidateChildren.length >= 2 ||
         (isCompositeParent(parent) && standaloneChildren.length > 0) ||
         standaloneChildren.length > 0)
@@ -1021,7 +1308,7 @@ function pruneParentChildActivities({
       return;
     }
 
-    if (!isTourGroup(parent) && !isSameSiteGroup(parent)) {
+    if (!isTourGroup(parent) && !isSameSiteGroup(parent) && !isPlannedAreaGroup(parent)) {
       return;
     }
 
@@ -1068,6 +1355,104 @@ function isLodgingNoteActivity(activity: DraftObject, stays: DraftObject[]) {
     const stayName = normalizeText(getString(stay, "name"));
     return Boolean(stayName && text.includes(stayName));
   }) || /\b(private room|shared bathroom|amount due|payment due|pay at arrival|lodging note|hotel budget|lodging budget|total cost|price|paid)\b/.test(text);
+}
+
+function hasStrongPlannedActivityLanguage(activity: DraftObject) {
+  const text = normalizeText(textFor(activity));
+
+  if (dateFor(activity) && /\b(breakfast|brunch|lunch|dinner|supper)\b/.test(text)) {
+    return true;
+  }
+
+  return /\b(we will|we'll|we are|we're|going to|plan to|planned|booked|reserved|reservation|take a tour|guided tour|visit|stop|doing this|continue your walk|walk along|route|same .* visit|inside|within|explore|wander|stroll)\b/.test(
+    text
+  );
+}
+
+function isSightOrLoosePlaceText(value: string | null | undefined) {
+  return /\b(aquarium|basilica|cathedral|church|gallery|garden|hall|haus|house|landmark|market|monument|museum|park|palace|square|statue|synagogue|temple|tower|wheel)\b/.test(
+    normalizeText(value)
+  );
+}
+
+function hasWeakRecommendationMarker(activity: DraftObject) {
+  const text = normalizeText(textFor(activity));
+
+  return /\b(optional|maybe|if time|could visit|things to check out|ideas?|recommendations?|possible sights?|open until|open til|hours?|free\s*\d|free admission|not sure|would recommend|recommended)\b/.test(
+    text
+  );
+}
+
+function isWeakDatedCityNoteCandidate(activity: DraftObject) {
+  if (
+    !dateFor(activity) ||
+    timeFor(activity) ||
+    getString(activity, "endTime") ||
+    hasStandaloneAnchor(activity) ||
+    isPlannedAreaGroup(activity) ||
+    isSameSiteGroup(activity) ||
+    isTourGroup(activity) ||
+    hasStrongPlannedActivityLanguage(activity) ||
+    isRentalCarText(textFor(activity)) ||
+    isTransportActionText(textFor(activity))
+  ) {
+    return false;
+  }
+
+  const textWithCategory = [textFor(activity), getString(activity, "category")]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    hasWeakRecommendationMarker(activity) ||
+    isSightOrLoosePlaceText(textFor(activity)) ||
+    /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/.test(
+      normalizeText(textWithCategory)
+    )
+  );
+}
+
+function hasPotentialGroupingParent(
+  activity: DraftObject,
+  activities: DraftObject[]
+) {
+  return activities.some(
+    (parent) =>
+      parent !== activity &&
+      dateFor(parent) === dateFor(activity) &&
+      (isPlannedAreaGroup(parent) || isSameSiteGroup(parent) || isTourGroup(parent)) &&
+      childBelongsUnderParent(parent, activity)
+  );
+}
+
+function shouldMoveToCityNotes(
+  activity: DraftObject,
+  activities: DraftObject[]
+) {
+  if (isLooseTipActivity(activity)) {
+    return true;
+  }
+
+  if (hasPotentialGroupingParent(activity, activities)) {
+    return false;
+  }
+
+  if (!isWeakDatedCityNoteCandidate(activity)) {
+    return false;
+  }
+
+  if (hasWeakRecommendationMarker(activity)) {
+    return true;
+  }
+
+  const sameDateWeakCandidates = activities.filter(
+    (candidate) =>
+      candidate !== activity &&
+      dateFor(candidate) === dateFor(activity) &&
+      isWeakDatedCityNoteCandidate(candidate)
+  );
+
+  return sameDateWeakCandidates.length >= 1;
 }
 
 function isLooseTipActivity(activity: DraftObject) {
@@ -1358,7 +1743,7 @@ function mergeCityNotes({
 }) {
   const retainedActivities: DraftObject[] = [];
   const scheduledSourceActivities = activities.filter(
-    (activity) => !isLooseTipActivity(activity)
+    (activity) => !shouldMoveToCityNotes(activity, activities)
   );
   const noteGroups = new Map<
     string,
@@ -1370,7 +1755,7 @@ function mergeCityNotes({
   >();
 
   for (const activity of activities) {
-    if (!isLooseTipActivity(activity)) {
+    if (!shouldMoveToCityNotes(activity, activities)) {
       retainedActivities.push(activity);
       continue;
     }
@@ -1496,6 +1881,10 @@ function markOptionalActivities({
     const text = normalizeText(textFor(activity));
 
     if (!title || /\(optional\)/i.test(title)) {
+      return activity;
+    }
+
+    if (isPlannedAreaGroup(activity) && /\boptional stops?\b/.test(text)) {
       return activity;
     }
 
@@ -1648,10 +2037,15 @@ export function consolidateTripDraft(draft: unknown): {
   const debug = createEmptyConsolidationDebug();
   const places = cloneRecordArray(record.places);
   const stays = cloneRecordArray(record.stays);
-  const transports = cloneRecordArray(record.transport);
+  let transports = cloneRecordArray(record.transport);
   let activities = cloneRecordArray(record.activities).map(improvesGenericTourTitle);
 
   promoteTransportExtractedDetails(transports);
+  ({ activities, transports } = normalizeRentalCarPickups({
+    activities,
+    debug,
+    transports,
+  }));
   activities = suppressTransportDuplicates({ activities, debug, transports });
   activities = suppressStayFlowActivities({ activities, debug, stays });
   activities = suppressLodgingNotes({ activities, debug, stays });

@@ -39,10 +39,6 @@ function finalTransportMatchesCandidate(
       return false;
     }
 
-    if (kind === "rental_car") {
-      return record.type === "rental_car" || record.type === "drive";
-    }
-
     if (record.type !== kind) {
       return false;
     }
@@ -97,7 +93,7 @@ export function createAuditDiagnostics({
     diagnostics.push({
       code: "critical_transport_not_travel_row",
       detail:
-        "Source-backed transport or rental-car candidates did not become matching travel rows.",
+        "Source-backed flight or intercity train candidates did not become matching travel rows.",
       evidence: unresolvedCritical
         .slice(0, 10)
         .map((item) => `${item.date ?? "undated"} - ${item.title}`),

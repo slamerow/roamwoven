@@ -17,6 +17,10 @@ export type TripDraftConsolidationDebug = {
     title: string;
     updatedTitle: string;
   }>;
+  normalizedRentalCarPickups: Array<{
+    date: string | null;
+    title: string;
+  }>;
   overproductionRetry: {
     averagePlansPerDay: number;
     maxPlansPerDay: number;
@@ -58,6 +62,7 @@ export function createEmptyConsolidationDebug(): TripDraftConsolidationDebug {
     foldedLodgingNotes: [],
     mergedCityNotes: [],
     normalizedOptionalActivities: [],
+    normalizedRentalCarPickups: [],
     overproductionRetry: {
       averagePlansPerDay: 0,
       maxPlansPerDay: 0,

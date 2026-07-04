@@ -49,6 +49,7 @@ test("extraction QA coverage flags missing activities and category drift", () =>
             "R2D2 statue",
             "Schonbrunn Palace",
             "Ferris Wheel",
+            "Hundertwasser Haus",
             "Mazel Tov",
           ].includes(item.title)
       )
@@ -79,6 +80,7 @@ test("extraction QA coverage flags missing activities and category drift", () =>
       "jan16-prague-castle",
       "jan16-r2d2",
       "jan19-ferris-wheel",
+      "jan19-hundertwasser",
       "jan19-schonbrunn",
       "jan21-mazel-tov",
     ]

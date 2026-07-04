@@ -23,6 +23,13 @@ export type GeneratedTripSummarySection = {
   title: string;
 };
 
+export type GeneratedTripSummaryCityNote = {
+  detail: string | null;
+  id: string;
+  meta: string;
+  title: string;
+};
+
 export type GeneratedTripSummaryDayEntry = {
   canMoveToCityTip: boolean;
   detail?: string;
@@ -66,6 +73,7 @@ export type GeneratedTripSummaryView = {
     stays: number;
     transport: number;
   };
+  cityNotes: GeneratedTripSummaryCityNote[];
   dateRange: string;
   days: GeneratedTripSummaryDay[];
   destination: string;
@@ -626,6 +634,29 @@ function createActivityEntry(
   };
 }
 
+function createSummaryCityNotes(
+  records: StructuredTripRecords,
+  activeItems: StructuredTripRecords["items"]
+): GeneratedTripSummaryCityNote[] {
+  const legById = new Map(records.legs.map((leg) => [leg.id, leg]));
+
+  return activeItems
+    .filter((item) => item.itemType === "note")
+    .map((item) => {
+      const leg = item.legId ? legById.get(item.legId) : null;
+      const meta = leg
+        ? [leg.displayName, leg.country].filter(Boolean).join(", ")
+        : "City note";
+
+      return {
+        detail: item.description,
+        id: item.id,
+        meta,
+        title: item.title,
+      };
+    });
+}
+
 function inferredActivityMinutes(item: StructuredTripRecords["items"][number]) {
   const explicit = timeToMinutes(item.startTime);
 
@@ -1122,6 +1153,7 @@ export function createGeneratedTripSummaryView(
       transport: records.transport.filter((item) => isActiveStatus(item.status))
         .length,
     },
+    cityNotes: createSummaryCityNotes(records, activeItems),
     dateRange: formatDateRange(records),
     days,
     destination: formatDestination(records),

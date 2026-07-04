@@ -19,6 +19,7 @@ import { MakerProgress } from "@/components/maker-progress";
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
 import {
   createGeneratedTripSummaryView,
+  type GeneratedTripSummaryCityNote,
   type GeneratedTripSummaryDay,
   type GeneratedTripSummaryDayEntry,
   type GeneratedTripSummaryWarning,
@@ -368,45 +369,131 @@ function SummaryWarnings({
     return null;
   }
 
+  const warningGroups = [
+    {
+      detail: "Structural issues to resolve or mark checked before publish.",
+      severity: "hard" as const,
+      title: "Must fix before publish",
+    },
+    {
+      detail: "Useful shape checks that should not block publishing by themselves.",
+      severity: "quiet" as const,
+      title: "Worth reviewing",
+    },
+  ]
+    .map((group) => ({
+      ...group,
+      warnings: warnings.filter((warning) => warning.severity === group.severity),
+    }))
+    .filter((group) => group.warnings.length > 0);
+
   return (
     <section className="mt-8 rounded-md border border-clay/20 bg-white p-5">
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 shrink-0 text-clay" size={18} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink">Warnings</p>
-          <div className="mt-3 grid gap-3">
-            {warnings.map((warning) => (
-              <div className="rounded-md bg-paper p-4" key={warning.id}>
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">
-                      {warning.title}
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-ink/60">
-                      {warning.detail}
-                    </p>
-                  </div>
-                  <form
-                    action={`/maker/trips/${tripId}/data/decisions`}
-                    method="post"
-                  >
-                    <input name="action" type="hidden" value="confirm" />
-                    <input name="returnTo" type="hidden" value="summary" />
-                    <input name="subjectId" type="hidden" value={warning.subjectId} />
-                    <input name="subjectType" type="hidden" value={warning.subjectType} />
-                    <button
-                      className="inline-flex shrink-0 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink/70"
-                      type="submit"
-                    >
-                      <CheckCircle2 size={14} />
-                      Mark checked
-                    </button>
-                  </form>
+          <p className="text-sm font-semibold text-ink">Summary checks</p>
+          <div className="mt-3 grid gap-4">
+            {warningGroups.map((group) => (
+              <div className="grid gap-3" key={group.severity}>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
+                    {group.title}
+                  </p>
+                  <p className="mt-1 text-xs text-ink/50">{group.detail}</p>
                 </div>
+                {group.warnings.map((warning) => (
+                  <div className="rounded-md bg-paper p-4" key={warning.id}>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-ink">
+                          {warning.title}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-ink/60">
+                          {warning.detail}
+                        </p>
+                      </div>
+                      <form
+                        action={`/maker/trips/${tripId}/data/decisions`}
+                        method="post"
+                      >
+                        <input name="action" type="hidden" value="confirm" />
+                        <input name="returnTo" type="hidden" value="summary" />
+                        <input name="subjectId" type="hidden" value={warning.subjectId} />
+                        <input name="subjectType" type="hidden" value={warning.subjectType} />
+                        <button
+                          className="inline-flex shrink-0 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink/70"
+                          type="submit"
+                        >
+                          <CheckCircle2 size={14} />
+                          Mark checked
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function CityNotesSummary({
+  cityNotes,
+}: {
+  cityNotes: GeneratedTripSummaryCityNote[];
+}) {
+  if (cityNotes.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-8">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-moss">
+            City notes
+          </p>
+          <h2 className="mt-1 text-2xl font-semibold text-ink">
+            Ideas and local notes
+          </h2>
+        </div>
+        <p className="text-sm text-ink/55">
+          {cityNotes.length === 1
+            ? "1 city note"
+            : `${cityNotes.length} city notes`}
+        </p>
+      </div>
+      <div className="mt-5 grid gap-3">
+        {cityNotes.map((note) => (
+          <details
+            className="group rounded-md border border-ink/10 bg-white p-4"
+            key={note.id}
+          >
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink">{note.title}</p>
+                <p className="mt-1 text-xs font-semibold text-ink/45">
+                  {note.meta}
+                </p>
+              </div>
+              <ChevronDown
+                className="mt-0.5 shrink-0 text-ink/45 transition group-open:rotate-180"
+                size={18}
+              />
+            </summary>
+            {note.detail ? (
+              <p className="mt-3 whitespace-pre-line text-sm leading-6 text-ink/60">
+                {note.detail}
+              </p>
+            ) : (
+              <p className="mt-3 text-sm text-ink/50">No note details yet.</p>
+            )}
+          </details>
+        ))}
       </div>
     </section>
   );
@@ -573,6 +660,7 @@ export default async function TripSummaryPage({
         {summary ? (
           <>
             <SummaryWarnings tripId={tripId} warnings={summary.warnings} />
+            <CityNotesSummary cityNotes={summary.cityNotes} />
             <DayByDaySummary
               days={summary.days}
               style={dayCardStyle}

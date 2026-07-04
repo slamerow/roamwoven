@@ -233,6 +233,14 @@ function matchesExpectation(
   );
 }
 
+function canShareCandidateAcrossExpectations(candidate: ExtractionQaCandidate) {
+  return (
+    candidate.recordType === "item" &&
+    candidate.date === null &&
+    /\b(notes?\s*tips?|tips?|ideas?)\b/.test(candidate.labelSearchText)
+  );
+}
+
 export function evaluateTripExtractionCoverage({
   expectations,
   records,
@@ -254,7 +262,11 @@ export function evaluateTripExtractionCoverage({
         matchesExpectation(candidate, expectation)
       ),
     }))
-    .filter((match) => match.expectations.length > 1)
+    .filter(
+      (match) =>
+        match.expectations.length > 1 &&
+        !canShareCandidateAcrossExpectations(match.candidate)
+    )
     .map((match) => ({
       actualId: match.candidate.id,
       actualLabel: match.candidate.label,
@@ -265,7 +277,9 @@ export function evaluateTripExtractionCoverage({
   for (const expectation of expectations) {
     const candidate = candidates.find(
       (item) =>
-        !usedCandidateIds.has(item.id) && matchesExpectation(item, expectation)
+        (canShareCandidateAcrossExpectations(item) ||
+          !usedCandidateIds.has(item.id)) &&
+        matchesExpectation(item, expectation)
     );
 
     if (!candidate) {
@@ -278,7 +292,9 @@ export function evaluateTripExtractionCoverage({
       continue;
     }
 
-    usedCandidateIds.add(candidate.id);
+    if (!canShareCandidateAcrossExpectations(candidate)) {
+      usedCandidateIds.add(candidate.id);
+    }
     matched.push({
       actualId: candidate.id,
       actualLabel: candidate.label,

@@ -76,16 +76,20 @@ export function hasAuditTokenOverlap(a: string, b: string) {
 export function transportKindForAuditText(value: string) {
   const text = value.toLowerCase();
 
+  if (
+    /\b(ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
+      text
+    )
+  ) {
+    return null;
+  }
+
   if (/\b(flight|fly|airport|fco|jfk|dca|terminal)\b/.test(text)) {
     return "flight";
   }
 
-  if (/\b(train|rail|station|hbf|wien|praha)\b/.test(text)) {
+  if (/\b(train to|rail to|station|bahnhof|hbf|hl\.?\s?n\.?)\b/.test(text)) {
     return "train";
-  }
-
-  if (/\b(rental car|pick up car|pickup car|car pickup|car rental)\b/.test(text)) {
-    return "rental_car";
   }
 
   return null;

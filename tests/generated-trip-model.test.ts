@@ -309,7 +309,7 @@ test("draft consolidation suppresses duplicate travel activities without droppin
   );
 });
 
-test("draft consolidation merges rental car pickup activities into travel rows", () => {
+test("draft consolidation keeps day-trip rental car pickup as an activity", () => {
   const { debug, draft } = consolidateTripDraft({
     activities: [
       {
@@ -347,20 +347,27 @@ test("draft consolidation merges rental car pickup activities into travel rows",
   }) as {
     debug: ReturnType<typeof consolidateTripDraft>["debug"];
     draft: {
-      activities: Array<{ title?: string }>;
-      transport: Array<{ departureTime?: string; description?: string; title?: string }>;
+      activities: Array<{
+        address?: string;
+        description?: string;
+        startTime?: string;
+        title?: string;
+      }>;
+      transport: Array<{ title?: string }>;
     };
   };
 
   assert.deepEqual(
     draft.activities.map((activity) => activity.title),
-    ["Sedlec Ossuary"]
+    ["Pick up rental car for Kutna Hora", "Sedlec Ossuary"]
   );
-  assert.equal(debug.suppressedTransportActivities[0]?.removedTitle, "Car pickup for Kutna Hora");
-  assert.equal(draft.transport[0]?.title, "Pick up rental car for Kutna Hora");
-  assert.equal(draft.transport[0]?.departureTime, "09:00");
-  assert.match(draft.transport[0]?.description ?? "", /Reservation number: 81486/);
-  assert.match(draft.transport[0]?.description ?? "", /Revolucni 1044\/23/);
+  assert.equal(draft.transport.length, 0);
+  assert.equal(debug.suppressedTransportActivities.length, 0);
+  assert.equal(debug.normalizedRentalCarPickups[0]?.title, "Pick up rental car for Kutna Hora");
+  assert.equal(draft.activities[0]?.startTime, "09:00");
+  assert.equal(draft.activities[0]?.address, "Revolucni 1044/23");
+  assert.match(draft.activities[0]?.description ?? "", /Reservation number: 81486/);
+  assert.match(draft.activities[0]?.description ?? "", /Pickup: Revolucni 1044\/23/);
 });
 
 test("draft consolidation promotes transport times from descriptions", () => {
@@ -667,6 +674,70 @@ test("extraction audit flags transport candidates that remain activity cards", (
         row.finalRecords.some((record) => record.recordType === "item")
     ),
     true
+  );
+});
+
+test("extraction audit does not require scenic rides or rental pickup as travel rows", () => {
+  const draft = {
+    activities: [
+      {
+        category: "arrival_departure",
+        date: "2026-09-02",
+        description: "Pick up rental car at 9 AM. Confirmation 81486.",
+        itemType: "activity",
+        startTime: "09:00",
+        title: "Pick up rental car for day trip",
+      },
+      {
+        category: "art_culture",
+        date: "2026-09-03",
+        description: "Panorama Train pass and Ferris wheel are optional Vienna sights.",
+        itemType: "activity",
+        title: "Panorama train and Ferris wheel",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Vienna",
+        country: "Austria",
+        leaveDate: "2026-09-04",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const snapshot = createDraftAuditSnapshot(draft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-scenic-rental",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: snapshot,
+          preAssemblyDraft: snapshot,
+        },
+        consolidation: {},
+        staged: true,
+      },
+    },
+  });
+
+  assert.equal(
+    report.diagnostics.some(
+      (diagnostic) => diagnostic.code === "critical_transport_not_travel_row"
+    ),
+    false
   );
 });
 
@@ -2073,7 +2144,7 @@ test("summary flags days with seven or more visible activities", () => {
       activities: Array.from({ length: 7 }, (_value, index) => ({
         category: "art_culture",
         date: "2026-09-02",
-        description: `Activity ${index + 1}.`,
+        description: `Planned museum visit ${index + 1}.`,
         itemType: "activity",
         title: `Museum stop ${index + 1}`,
       })),
@@ -2408,7 +2479,7 @@ test("walking-route anchors keep untimed stops on one traveler card", () => {
   assert.equal(records.items[1]?.startTime, "15:00");
 });
 
-test("same-site activity clusters stay on one card with sub-stops", () => {
+test("same-site activity clusters stay on one card with included stops", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -2445,6 +2516,88 @@ test("same-site activity clusters stay on one card with sub-stops", () => {
   assert.equal(records.items[0]?.categoryId, "tours_tickets");
   assert.match(records.items[0]?.description ?? "", /Apple Strudel Show/);
   assert.match(records.items[0]?.description ?? "", /Panorama Train Pass/);
+});
+
+test("weak dated sightseeing lists become city notes while same-site visits stay activities", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-19",
+          description: "Same-site visit including the palace grounds.",
+          itemType: "activity",
+          title: "Schonbrunn Palace complex",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "During the same palace visit.",
+          itemType: "activity",
+          title: "Schonbrunn gardens",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Open until 11:45 PM.",
+          itemType: "activity",
+          title: "Ferris wheel",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          itemType: "activity",
+          title: "Hundertwasser Haus",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Open until 7:00 PM.",
+          itemType: "activity",
+          title: "Mumok Museum",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description: "Open until 8:30 PM.",
+          itemType: "activity",
+          title: "Natural History Museum",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-weak-vienna-day-list",
+  });
+  const activityTitles = records.items
+    .filter((item) => item.itemType === "activity")
+    .map((item) => item.title);
+  const note = records.items.find((item) => item.itemType === "note");
+  const summary = createGeneratedTripSummaryView(records);
+
+  assert.deepEqual(activityTitles, ["Schonbrunn Palace complex"]);
+  assert.match(records.items[0]?.description ?? "", /Schonbrunn gardens/);
+  assert.equal(note?.title, "Vienna Notes & Tips");
+  assert.match(note?.description ?? "", /Ferris wheel/);
+  assert.match(note?.description ?? "", /Hundertwasser Haus/);
+  assert.match(note?.description ?? "", /Mumok Museum/);
+  assert.match(note?.description ?? "", /Natural History Museum/);
+  assert.equal(summary.cityNotes.length, 1);
+  assert.match(summary.cityNotes[0]?.detail ?? "", /Ferris wheel/);
 });
 
 test("same-site grouping folds child cards into the surviving visit card", () => {
@@ -2506,6 +2659,134 @@ test("same-site grouping folds child cards into the surviving visit card", () =>
   assert.equal(call?.status, "noted");
   assert.match(call?.prompt ?? "", /Apple Strudel Show/);
   assert.match(call?.prompt ?? "", /gardens/);
+});
+
+test("nearby-sights parents do not swallow unrelated child activities", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2019-01-14",
+          description: "Prague Castle and nearby sights: KGB Museum, Kafka Statue, and Peklo.",
+          itemType: "activity",
+          title: "Prague Castle and nearby sights",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-14",
+          itemType: "activity",
+          title: "KGB Museum",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-14",
+          itemType: "activity",
+          title: "Kafka Statue",
+        },
+        {
+          category: "food_dining",
+          date: "2019-01-14",
+          itemType: "activity",
+          title: "Peklo",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-16",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-nearby-sights-not-same-site",
+  });
+  const titles = records.items.map((item) => item.title);
+  const note = records.items.find((item) => item.itemType === "note");
+  const call = records.reviewQuestions.find((question) =>
+    /We grouped/i.test(question.prompt)
+  );
+
+  assert.deepEqual(titles, ["Prague Notes & Tips"]);
+  assert.equal(titles.includes("Prague Castle and nearby sights"), false);
+  assert.match(note?.description ?? "", /KGB Museum/);
+  assert.match(note?.description ?? "", /Kafka Statue/);
+  assert.match(note?.description ?? "", /Peklo/);
+  assert.equal(call, undefined);
+});
+
+test("planned area blocks group included untimed stops without subcards", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2026-09-04",
+          description:
+            "Wander through Condesa with Parque Mexico, Avenida Amsterdam, and Cafe Toscano as optional stops.",
+          itemType: "activity",
+          title: "Explore Condesa morning",
+        },
+        {
+          category: "art_culture",
+          date: "2026-09-04",
+          itemType: "activity",
+          title: "Parque Mexico",
+        },
+        {
+          category: "art_culture",
+          date: "2026-09-04",
+          itemType: "activity",
+          title: "Avenida Amsterdam",
+        },
+        {
+          category: "food_dining",
+          date: "2026-09-04",
+          itemType: "activity",
+          title: "Cafe Toscano",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-04",
+          city: "Mexico City",
+          country: "Mexico",
+          leaveDate: "2026-09-06",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Mexico City",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-planned-area-block",
+  });
+  const call = records.reviewQuestions.find((question) =>
+    /We grouped/i.test(question.prompt)
+  );
+
+  assert.deepEqual(
+    records.items.map((item) => item.title),
+    ["Explore Condesa morning"]
+  );
+  assert.match(records.items[0]?.description ?? "", /Parque Mexico/);
+  assert.match(records.items[0]?.description ?? "", /Avenida Amsterdam/);
+  assert.match(records.items[0]?.description ?? "", /Cafe Toscano/);
+  assert.ok(call);
+  assert.match(call?.prompt ?? "", /Parque Mexico/);
 });
 
 test("draft consolidation does not reassemble an already assembled same-site grouping", () => {
