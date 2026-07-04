@@ -7,11 +7,17 @@ import {
   FileJson,
   GitCompareArrows,
   ListChecks,
+  Search,
 } from "lucide-react";
 import {
   getTripExtractionAuditPayload,
   type TripExtractionAuditPayload,
 } from "@/lib/extraction/trip-extraction-audit-view";
+import {
+  isDiagnosticLineageRow,
+  lineageMatchesQuery,
+  LineageTable,
+} from "./audit-lineage-table";
 
 type AuditReport = NonNullable<TripExtractionAuditPayload["report"]>;
 
@@ -155,13 +161,24 @@ function Notices({ notices }: { notices: string[] }) {
 
 export default async function TripExtractionAuditPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
+  searchParams: Promise<{ q?: string }>;
 }) {
   const { tripId } = await params;
+  const { q = "" } = await searchParams;
+  const lineageQuery = q.trim().toLowerCase();
   const payload = await getTripExtractionAuditPayload(tripId);
   const report = payload.report;
   const chunks = report?.extraction.activityChunks;
+  const searchableRows =
+    report?.lineage.filter((row) => lineageMatchesQuery(row, lineageQuery)) ?? [];
+  const diagnosticLineageRows =
+    report?.lineage
+      .filter(isDiagnosticLineageRow)
+      .slice(0, 80) ?? [];
+  const visibleSearchRows = lineageQuery ? searchableRows.slice(0, 80) : [];
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -229,6 +246,88 @@ export default async function TripExtractionAuditPage({
                   />
                 ))}
               </div>
+            </Section>
+
+            <Section icon={<AlertCircle size={18} />} title="Diagnostics">
+              {report.diagnostics.length ? (
+                <div className="overflow-hidden rounded-md border border-ink/10">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="bg-paper text-xs font-semibold uppercase tracking-wide text-ink/45">
+                      <tr>
+                        <th className="px-3 py-2">Severity</th>
+                        <th className="px-3 py-2">Issue</th>
+                        <th className="px-3 py-2">Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ink/10">
+                      {report.diagnostics.map((diagnostic) => (
+                        <tr key={diagnostic.code} className="align-top">
+                          <td className="px-3 py-3 font-semibold uppercase text-clay">
+                            {diagnostic.severity}
+                          </td>
+                          <td className="px-3 py-3">
+                            <p className="font-semibold text-ink">
+                              {diagnostic.title}
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-ink/55">
+                              {diagnostic.code}
+                            </p>
+                            <p className="mt-2 text-sm leading-5 text-ink/65">
+                              {diagnostic.detail}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 text-ink/65">
+                            <ul className="space-y-2">
+                              {diagnostic.evidence.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm font-semibold text-moss">
+                  No structural audit diagnostics.
+                </p>
+              )}
+            </Section>
+
+            <Section icon={<Search size={18} />} title="Anchor search">
+              <form className="flex flex-col gap-3 md:flex-row">
+                <input
+                  className="min-h-11 flex-1 rounded-md border border-ink/15 bg-white px-3 text-sm text-ink outline-none ring-moss/30 focus:ring-4"
+                  defaultValue={q}
+                  name="q"
+                  placeholder="Search titles, evidence, assembly actions, or final cards"
+                  type="search"
+                />
+                <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-ink px-4 text-sm font-semibold text-paper">
+                  Search
+                </button>
+              </form>
+              {lineageQuery ? (
+                <div className="mt-5">
+                  <LineageTable
+                    rows={visibleSearchRows}
+                    title={`${searchableRows.length} lineage rows match "${q.trim()}". Showing ${visibleSearchRows.length}.`}
+                  />
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-ink/45">
+                  Search for anchors like Train to Vienna, Klementinum, rental car,
+                  or a hotel name.
+                </p>
+              )}
+            </Section>
+
+            <Section title="Lineage review">
+              <LineageTable
+                rows={diagnosticLineageRows}
+                title={`Showing ${diagnosticLineageRows.length} non-boring lineage rows out of ${report.lineage.length}.`}
+              />
             </Section>
 
             <Section title="Source comparison">

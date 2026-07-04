@@ -582,8 +582,92 @@ test("extraction audit report compares raw candidates, assembly, and structured 
   assert.deepEqual(report.sourceComparison?.rawOnlyTitles, [
     "Prague history sights",
   ]);
+  assert.equal(
+    report.lineage.some(
+      (row) =>
+        row.title === "Prague history sights" &&
+        row.status === "removed_in_assembly" &&
+        row.assemblyActions.some(
+          (action) => action.action === "removed_duplicate_parent"
+        )
+    ),
+    true
+  );
   assert.equal(report.structured.activeActivities, 2);
   assert.equal(report.structured.hardWarnings, 0);
+});
+
+test("extraction audit flags transport candidates that remain activity cards", () => {
+  const draft = {
+    activities: [
+      {
+        category: "arrival_departure",
+        date: "2026-09-02",
+        description: "Train to Vienna at 10:42 from Prague main station.",
+        itemType: "activity",
+        startTime: "10:42",
+        title: "Train to Vienna",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2026-09-01",
+        city: "Prague",
+        country: "Czechia",
+        leaveDate: "2026-09-02",
+      },
+      {
+        arriveDate: "2026-09-02",
+        city: "Vienna",
+        country: "Austria",
+        leaveDate: "2026-09-04",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const snapshot = createDraftAuditSnapshot(draft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-transport-diagnostic",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: snapshot,
+          preAssemblyDraft: snapshot,
+        },
+        consolidation: {},
+        staged: true,
+      },
+    },
+  });
+  const transportDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "critical_transport_not_travel_row"
+  );
+
+  assert.ok(transportDiagnostic);
+  assert.equal(transportDiagnostic.severity, "p0");
+  assert.deepEqual(transportDiagnostic.evidence, [
+    "2026-09-02 - Train to Vienna",
+  ]);
+  assert.equal(
+    report.lineage.some(
+      (row) =>
+        row.title === "Train to Vienna" &&
+        row.finalRecords.some((record) => record.recordType === "item")
+    ),
+    true
+  );
 });
 
 test("draft consolidation suppresses day overview cards before summary surfaces", () => {
