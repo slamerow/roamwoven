@@ -134,7 +134,10 @@ function normalizeTransportType(value: string | null): TripTransportType {
   return "other";
 }
 
-function cleanTransportDescription(value: string | null) {
+function cleanTransportDescription(
+  value: string | null,
+  transportType: TripTransportType = "other"
+) {
   const description = cleanTravelerText(value);
 
   if (!description) {
@@ -154,10 +157,22 @@ function cleanTransportDescription(value: string | null) {
     /\b(arrival|arrive|arrives|bag|bags|boarding|bus|car|check[-\s]?in|coach|confirmation|depart|departs|departure|driver|drop[-\s]?off|duration|ferry|flight|gate|land|lands|leave|leaves|luggage|operator|pickup|pick[-\s]?up|platform|provider|rail|reservation|route|seat|station|terminal|ticket|train|transfer|voucher)\b/i;
   const destinationPlanPattern =
     /\b(after arrival|bar|breakfast|cafe|café|cathedral|church|city plans?|dinner|food|gallery|lunch|museum|palace|plans? for|restaurant|shopping|sightseeing|tour|visit|walk|walking)\b/i;
+  const lodgingDirectionPattern =
+    /\b(hostel|hotel|airbnb|apartment|check[-\s]?in|buzzer|door code|lockbox|metro|subway|tram|directions?|walk to the stay)\b/i;
   const kept = segments.filter(
-    (segment) =>
-      transportDetailPattern.test(segment) ||
-      !destinationPlanPattern.test(segment)
+    (segment) => {
+      if (
+        (transportType === "flight" || transportType === "train") &&
+        lodgingDirectionPattern.test(segment)
+      ) {
+        return false;
+      }
+
+      return (
+        transportDetailPattern.test(segment) ||
+        !destinationPlanPattern.test(segment)
+      );
+    }
   );
 
   return kept.length > 0 ? kept.join(" ") : description;
@@ -758,10 +773,11 @@ function createTransportRecords({
       cleanTravelerText(getString(transport, "title")) ?? `Transport ${index + 1}`;
     const date = getString(transport, "date");
     const leg = findLegForDate(legs, date);
-    const description = cleanTransportDescription(
-      getString(transport, "description")
-    );
     const transportType = normalizeTransportType(getString(transport, "type"));
+    const description = cleanTransportDescription(
+      getString(transport, "description"),
+      transportType
+    );
     const departure = getString(transport, "departure");
     const arrival = getString(transport, "arrival");
     const provider = getString(transport, "provider");

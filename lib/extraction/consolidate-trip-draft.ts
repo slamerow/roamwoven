@@ -23,8 +23,8 @@ type AssemblyMissingDetail = {
   prompt: string;
   reason: string;
   relatedTitle: string | null;
-  subjectType: "item";
-  targetField: "date" | "placement" | "presentation";
+  subjectType: "item" | "transport";
+  targetField: "date" | "departureTime" | "placement" | "presentation";
 };
 
 const NOTE_SECTION_ORDER: NoteSectionName[] = [
@@ -914,16 +914,9 @@ function mergeGroupedChildDetails(parent: DraftObject, child: DraftObject) {
     .join(" · ");
 
   if (childLabel) {
-    parent.description = appendUniqueSentence(
+    parent.description = appendIncludedStop(
       getString(parent, "description"),
-      `Includes: ${childLabel}.`
-    );
-  }
-
-  if (childDescription) {
-    parent.description = appendUniqueSentence(
-      getString(parent, "description"),
-      childDescription
+      [childLabel, childDescription].filter(Boolean).join(" - ")
     );
   }
 
@@ -935,6 +928,35 @@ function mergeGroupedChildDetails(parent: DraftObject, child: DraftObject) {
   ) {
     parent.startTime = childTime;
   }
+}
+
+function appendIncludedStop(existing: string | null, stop: string | null) {
+  if (!stop) {
+    return existing ?? null;
+  }
+
+  const cleanedStop = stop.replace(/\s+/g, " ").replace(/[.]\s*$/, "").trim();
+
+  if (!cleanedStop) {
+    return existing ?? null;
+  }
+
+  const normalizedStop = normalizeText(cleanedStop);
+  const normalizedExisting = normalizeText(existing);
+
+  if (normalizedExisting.includes(normalizedStop)) {
+    return existing ?? null;
+  }
+
+  if (!existing) {
+    return `Includes:\n- ${cleanedStop}`;
+  }
+
+  if (/includes:\s*(?:\n|$)/i.test(existing)) {
+    return `${existing.trim()}\n- ${cleanedStop}`;
+  }
+
+  return `${existing.trim()}\nIncludes:\n- ${cleanedStop}`;
 }
 
 function suppressTransportDuplicates({
@@ -1412,6 +1434,65 @@ function isWeakDatedCityNoteCandidate(activity: DraftObject) {
   );
 }
 
+function isFirmDayActivity(activity: DraftObject) {
+  return (
+    !isNoteLikeRecord(activity) &&
+    !isWeakDatedCityNoteCandidate(activity) &&
+    !isDayOverviewActivity(activity)
+  );
+}
+
+function weakDatedCandidatesForDate(
+  activities: DraftObject[],
+  date: string | null
+) {
+  if (!date) {
+    return [];
+  }
+
+  return activities.filter(
+    (candidate) =>
+      candidate !== null &&
+      dateFor(candidate) === date &&
+      !isLooseTipActivity(candidate) &&
+      isWeakDatedCityNoteCandidate(candidate)
+  );
+}
+
+function firmActivitiesForDate(activities: DraftObject[], date: string | null) {
+  if (!date) {
+    return [];
+  }
+
+  return activities.filter(
+    (candidate) => dateFor(candidate) === date && isFirmDayActivity(candidate)
+  );
+}
+
+function shouldRetainWeakDatedCandidate(
+  activity: DraftObject,
+  activities: DraftObject[]
+) {
+  const date = dateFor(activity);
+  const sameDateWeakCandidates = weakDatedCandidatesForDate(activities, date);
+  const weakIndex = sameDateWeakCandidates.indexOf(activity);
+  const firmCount = firmActivitiesForDate(activities, date).length;
+
+  if (weakIndex < 0) {
+    return false;
+  }
+
+  if (firmCount >= 3) {
+    return false;
+  }
+
+  if (firmCount === 0) {
+    return weakIndex < 5;
+  }
+
+  return weakIndex < 4;
+}
+
 function hasPotentialGroupingParent(
   activity: DraftObject,
   activities: DraftObject[]
@@ -1441,18 +1522,7 @@ function shouldMoveToCityNotes(
     return false;
   }
 
-  if (hasWeakRecommendationMarker(activity)) {
-    return true;
-  }
-
-  const sameDateWeakCandidates = activities.filter(
-    (candidate) =>
-      candidate !== activity &&
-      dateFor(candidate) === dateFor(activity) &&
-      isWeakDatedCityNoteCandidate(candidate)
-  );
-
-  return sameDateWeakCandidates.length >= 1;
+  return !shouldRetainWeakDatedCandidate(activity, activities);
 }
 
 function isLooseTipActivity(activity: DraftObject) {
@@ -1544,6 +1614,247 @@ function findCityForActivity(activity: DraftObject, places: DraftObject[]) {
   }
 
   return places.length === 1 ? cityForPlace(places[0]) : null;
+}
+
+function stopLineForActivity(activity: DraftObject) {
+  const title = getString(activity, "title");
+  const description = getString(activity, "description");
+  const time = firstKnownTime(activity, ["startTime", "time", "departureTime"]);
+  const endTime = firstKnownTime(activity, ["endTime", "arrivalTime"]);
+  const timeLabel = [time, endTime].filter(Boolean).join("-");
+  const detail =
+    description && !normalizeText(description).includes(normalizeText(title))
+      ? description
+      : null;
+
+  return [title, timeLabel, detail].filter(Boolean).join(" - ");
+}
+
+function optionTitlePart(activity: DraftObject) {
+  const title = getString(activity, "title") ?? "Option";
+
+  return title
+    .replace(/\s+(museum|gallery)$/i, "")
+    .replace(/^the\s+/i, "")
+    .trim() || title;
+}
+
+function joinOptionTitles(parts: string[]) {
+  if (parts.length <= 1) {
+    return parts[0] ?? "options";
+  }
+
+  if (parts.length === 2) {
+    return `${parts[0]} or ${parts[1]}`;
+  }
+
+  return `${parts.slice(0, -1).join(", ")}, or ${parts[parts.length - 1]}`;
+}
+
+function isMuseumOptionCandidate(activity: DraftObject) {
+  const text = normalizeText(
+    [getString(activity, "title"), getString(activity, "category")].filter(Boolean).join(" ")
+  );
+
+  return (
+    isWeakDatedCityNoteCandidate(activity) &&
+    !hasStandaloneAnchor(activity) &&
+    /\b(museum|gallery)\b/.test(text)
+  );
+}
+
+function categoryForGroupedChildren(children: DraftObject[]) {
+  const categories = children
+    .map((child) => getString(child, "category"))
+    .filter(Boolean);
+  const uniqueCategories = Array.from(new Set(categories));
+
+  if (uniqueCategories.length === 1) {
+    return uniqueCategories[0];
+  }
+
+  return "admin_logistics";
+}
+
+function createOptionActivity({
+  children,
+  date,
+  title,
+}: {
+  children: DraftObject[];
+  date: string | null;
+  title: string;
+}) {
+  return {
+    category: categoryForGroupedChildren(children),
+    date,
+    description: `Possible stops:\n${children
+      .map((child) => `- ${stopLineForActivity(child)}`)
+      .join("\n")}`,
+    endTime: null,
+    itemType: "activity",
+    startTime: null,
+    title,
+  };
+}
+
+function replaceChildrenWithGroupedActivity({
+  activities,
+  children,
+  debug,
+  group,
+}: {
+  activities: DraftObject[];
+  children: Array<{ activity: DraftObject; index: number }>;
+  debug: TripDraftConsolidationDebug;
+  group: DraftObject;
+}) {
+  const childIndexes = new Set(children.map((child) => child.index));
+  const firstIndex = Math.min(...children.map((child) => child.index));
+
+  for (const { activity } of children) {
+    debug.removedGroupedChildren.push({
+      date: dateFor(activity),
+      groupedUnder: getString(group, "title") ?? "Grouped activity",
+      removedTitle: getString(activity, "title") ?? "Untitled activity",
+    });
+  }
+
+  return activities.flatMap((activity, index) => {
+    if (index === firstIndex) {
+      return [group];
+    }
+
+    if (childIndexes.has(index)) {
+      return [];
+    }
+
+    return [activity];
+  });
+}
+
+function groupMuseumOptionActivities({
+  activities,
+  debug,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+}) {
+  let nextActivities = activities;
+  const dates = Array.from(
+    new Set(activities.map((activity) => dateFor(activity)).filter(Boolean))
+  );
+
+  for (const date of dates) {
+    const children = nextActivities
+      .map((activity, index) => ({ activity, index }))
+      .filter(
+        ({ activity }) =>
+          dateFor(activity) === date &&
+          shouldRetainWeakDatedCandidate(activity, nextActivities) &&
+          isMuseumOptionCandidate(activity)
+      );
+
+    if (children.length < 2) {
+      continue;
+    }
+
+    const title = `Museum visit: ${joinOptionTitles(
+      children.map(({ activity }) => optionTitlePart(activity))
+    )}`;
+    const group = createOptionActivity({
+      children: children.map(({ activity }) => activity),
+      date,
+      title,
+    });
+
+    nextActivities = replaceChildrenWithGroupedActivity({
+      activities: nextActivities,
+      children,
+      debug,
+      group,
+    });
+  }
+
+  return nextActivities;
+}
+
+function createFreeTimeActivity({
+  city,
+  date,
+}: {
+  city: string | null;
+  date: string | null;
+}) {
+  return {
+    category: "admin_logistics",
+    date,
+    description: city
+      ? `Flexible time to wander, rest, or add plans in ${city}.`
+      : "Flexible time to wander, rest, or add plans.",
+    endTime: null,
+    itemType: "activity",
+    startTime: null,
+    title: city ? `Free time in ${city}` : "Free time",
+  };
+}
+
+function groupOpenDayLooseActivities({
+  activities,
+  debug,
+  places,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+  places: DraftObject[];
+}) {
+  let nextActivities = activities;
+  const dates = Array.from(
+    new Set(activities.map((activity) => dateFor(activity)).filter(Boolean))
+  );
+
+  for (const date of dates) {
+    const firmCount = firmActivitiesForDate(nextActivities, date).length;
+    const children = nextActivities
+      .map((activity, index) => ({ activity, index }))
+      .filter(
+        ({ activity }) =>
+          dateFor(activity) === date &&
+          shouldRetainWeakDatedCandidate(activity, nextActivities) &&
+          isWeakDatedCityNoteCandidate(activity)
+      );
+
+    if (firmCount > 0 || children.length === 0) {
+      continue;
+    }
+
+    const city = findCityForActivity(children[0].activity, places);
+
+    if (children.length === 1) {
+      const childIndex = children[0].index;
+      nextActivities = nextActivities.flatMap((activity, index) =>
+        index === childIndex
+          ? [activity, createFreeTimeActivity({ city, date })]
+          : [activity]
+      );
+      continue;
+    }
+
+    const group = createOptionActivity({
+      children: children.map(({ activity }) => activity),
+      date,
+      title: city ? `Explore ${city}` : "Explore the area",
+    });
+
+    nextActivities = replaceChildrenWithGroupedActivity({
+      activities: nextActivities,
+      children,
+      debug,
+      group,
+    });
+  }
+
+  return nextActivities;
 }
 
 function reconcileWrongCityAssignments({
@@ -1992,13 +2303,84 @@ function createAssemblyCalls(
     guessedValue: item.groupedUnder,
     prompt: `We grouped ${item.removedTitles.join(", ")} into ${item.groupedUnder}.`,
     reason:
-      "The source treated these as one route, walk, tour, or same-site visit, so the traveler app keeps one card with included stops.",
+      "The source treated these as one route, walk, option set, or same-site visit, so the traveler app keeps one card with included stops.",
     relatedTitle: item.groupedUnder,
     subjectType: "item" as const,
     targetField: "presentation" as const,
   }));
 
   return groupedChildCalls;
+}
+
+function hasExistingTransportDepartureQuestion({
+  existingDetails,
+  title,
+}: {
+  existingDetails: unknown[];
+  title: string;
+}) {
+  const normalizedTitle = normalizeText(title);
+
+  return existingDetails.some((item) => {
+    const detail = asRecord(item);
+    const subjectType = normalizeText(getString(detail, "subjectType"));
+    const targetField = normalizeText(getString(detail, "targetField"));
+    const relatedTitle = normalizeText(getString(detail, "relatedTitle"));
+    const prompt = normalizeText(getString(detail, "prompt"));
+
+    return (
+      subjectType === "transport" &&
+      (targetField.includes("departure") || targetField.includes("time")) &&
+      Boolean(
+        (relatedTitle && relatedTitle === normalizedTitle) ||
+          (prompt && normalizedTitle && prompt.includes(normalizedTitle))
+      )
+    );
+  });
+}
+
+function createTransportDepartureTimeQuestions({
+  existingDetails,
+  transports,
+}: {
+  existingDetails: unknown[];
+  transports: DraftObject[];
+}): AssemblyMissingDetail[] {
+  return transports.flatMap((transport) => {
+    const type = normalizeText(getString(transport, "type"));
+    const title = getString(transport, "title") ?? "this transport";
+
+    if (
+      (type !== "flight" && type !== "train") ||
+      getStringFromKeys(transport, ["departureTime", "startTime", "time"]) ||
+      hasExistingTransportDepartureQuestion({ existingDetails, title })
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        answerType: "text" as const,
+        assemblySource: "trip_assembly" as const,
+        confidence: "medium" as const,
+        evidence: textFor(transport, [
+          "title",
+          "description",
+          "departure",
+          "arrival",
+          "provider",
+          "confirmation",
+        ]) || null,
+        guessedValue: null,
+        prompt: `What time does ${title} depart?`,
+        reason:
+          "Flight and train cards need a departure time for the Today timeline. You can leave it blank if this is not booked yet.",
+        relatedTitle: title,
+        subjectType: "transport" as const,
+        targetField: "departureTime" as const,
+      },
+    ];
+  });
 }
 
 function createWrongCityQuestions(
@@ -2051,12 +2433,18 @@ export function consolidateTripDraft(draft: unknown): {
   activities = suppressLodgingNotes({ activities, debug, stays });
   activities = suppressDayOverviewActivities({ activities, debug });
   activities = reconcileWrongCityAssignments({ activities, debug, places });
-  activities = mergeCityNotes({ activities, debug, places });
   activities = pruneParentChildActivities({ activities, debug });
+  activities = groupMuseumOptionActivities({ activities, debug });
+  activities = groupOpenDayLooseActivities({ activities, debug, places });
+  activities = mergeCityNotes({ activities, debug, places });
   activities = markOptionalActivities({ activities, debug });
   debug.overproductionRetry = timelinePlanCounts({ activities, transports });
   const assemblyCalls = createAssemblyCalls(debug);
   const wrongCityQuestions = createWrongCityQuestions(debug);
+  const transportDepartureTimeQuestions = createTransportDepartureTimeQuestions({
+    existingDetails: asArray(record.missingDetails),
+    transports,
+  });
 
   return {
     debug,
@@ -2071,6 +2459,7 @@ export function consolidateTripDraft(draft: unknown): {
         ...nonAssemblyMissingDetails(record.missingDetails),
         ...assemblyCalls,
         ...wrongCityQuestions,
+        ...transportDepartureTimeQuestions,
       ],
       places,
       stays,

@@ -799,22 +799,34 @@ test("extraction audit flags planned activity candidates buried in city notes", 
       title: "Central Europe",
     },
   };
-  const { debug, draft } = consolidateTripDraft(rawDraft);
+  const assembledDraft = {
+    ...rawDraft,
+    activities: [
+      {
+        category: "art_culture",
+        date: null,
+        description:
+          "Possible Sights: Schonbrunn Palace, including Gloriette, Orangeriegarten, Palm House, Apple Strudel Show, and Panorama Train pass; Ferris wheel; Mumok Museum.",
+        itemType: "note",
+        title: "Vienna Notes & Tips",
+      },
+    ],
+  };
   const records = createStructuredTripRecordsFromDraft({
-    draft,
+    draft: assembledDraft,
     fallbackTripName: "Fallback trip",
     tripId: "trip-audit-buried-planned-activity",
   });
   const report = createTripExtractionAuditReport({
-    draft,
+    draft: assembledDraft,
     records,
     usage: {
       openai: {
         audit: {
-          assembledDraft: createDraftAuditSnapshot(draft),
+          assembledDraft: createDraftAuditSnapshot(assembledDraft),
           preAssemblyDraft: createDraftAuditSnapshot(rawDraft),
         },
-        consolidation: debug,
+        consolidation: {},
         staged: true,
       },
     },
@@ -887,6 +899,15 @@ test("extraction audit flags missing and polluted critical transport rows", () =
     fallbackTripName: "Fallback trip",
     tripId: "trip-audit-critical-transport-details",
   });
+  const pollutedTransport = records.transport.find(
+    (item) => item.routeLabel === "Train to Budapest"
+  );
+
+  if (pollutedTransport) {
+    pollutedTransport.description =
+      "Train to Budapest. Check in to Vitae Hostel. From Keleti International train station take the metro and tram to Kiraly Utca. Buzzer number 25.";
+  }
+
   const report = createTripExtractionAuditReport({
     draft,
     records,
@@ -1590,6 +1611,7 @@ test("draft parser output compiles into structured records", () => {
         confirmation: "ABC123",
         date: "2026-09-01",
         departure: "New York",
+        departureTime: "18:30",
         provider: "Example Air",
         sourceFilename: "central-europe.pdf",
         title: "Fly to Prague",
@@ -2285,7 +2307,7 @@ test("summary flags critical trains when source-backed details are missing", () 
   assert.equal(summary.isReadyForPublishReview, false);
 });
 
-test("summary does not hard-block critical transport when source lacks the missing detail", () => {
+test("missing critical transport departure time becomes review even when source lacks it", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -2326,7 +2348,14 @@ test("summary does not hard-block critical transport when source lacks the missi
     ),
     false
   );
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isReadyForPublishReview, false);
+  assert.ok(
+    records.reviewQuestions.some(
+      (question) =>
+        question.status === "open" &&
+        /what time does train to vienna depart/i.test(question.prompt)
+    )
+  );
 });
 
 test("summary does not hard-warn when only train arrival time is missing", () => {
@@ -2377,6 +2406,7 @@ test("summary orders timed transport before invisible day-part activity sorting"
         {
           category: "nightlife_entertainment",
           date: "2019-01-15",
+          description: "Planned nightcap after dinner.",
           itemType: "activity",
           title: "Hemingway Bar",
         },
@@ -2820,7 +2850,7 @@ test("same-site activity clusters stay on one card with included stops", () => {
   assert.match(records.items[0]?.description ?? "", /Panorama Train Pass/);
 });
 
-test("weak dated sightseeing lists become city notes while same-site visits stay activities", () => {
+test("sparse dated sightseeing lists keep visible day options after same-site grouping", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -2891,15 +2921,25 @@ test("weak dated sightseeing lists become city notes while same-site visits stay
   const note = records.items.find((item) => item.itemType === "note");
   const summary = createGeneratedTripSummaryView(records);
 
-  assert.deepEqual(activityTitles, ["Schonbrunn Palace complex"]);
+  assert.deepEqual(activityTitles, [
+    "Schonbrunn Palace complex",
+    "Ferris wheel",
+    "Hundertwasser Haus",
+    "Museum visit: Mumok or Natural History",
+  ]);
   assert.match(records.items[0]?.description ?? "", /Schonbrunn gardens/);
-  assert.equal(note?.title, "Vienna Notes & Tips");
-  assert.match(note?.description ?? "", /Ferris wheel/);
-  assert.match(note?.description ?? "", /Hundertwasser Haus/);
-  assert.match(note?.description ?? "", /Mumok Museum/);
-  assert.match(note?.description ?? "", /Natural History Museum/);
-  assert.equal(summary.cityNotes.length, 1);
-  assert.match(summary.cityNotes[0]?.detail ?? "", /Ferris wheel/);
+  assert.equal(note, undefined);
+  assert.match(records.items[3]?.description ?? "", /Possible stops:/);
+  assert.match(records.items[3]?.description ?? "", /Mumok Museum - Open until 7:00 PM/);
+  assert.match(records.items[3]?.description ?? "", /Natural History Museum - Open until 8:30 PM/);
+  assert.equal(summary.cityNotes.length, 0);
+  assert.ok(
+    records.reviewQuestions.some((question) =>
+      /We grouped Mumok Museum, Natural History Museum into Museum visit/i.test(
+        question.prompt
+      )
+    )
+  );
 });
 
 test("same-site grouping folds child cards into the surviving visit card", () => {
@@ -2963,7 +3003,7 @@ test("same-site grouping folds child cards into the surviving visit card", () =>
   assert.match(call?.prompt ?? "", /gardens/);
 });
 
-test("nearby-sights parents do not swallow unrelated child activities", () => {
+test("open-day loose lists become one flexible explore card instead of city notes", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -3018,12 +3058,53 @@ test("nearby-sights parents do not swallow unrelated child activities", () => {
     /We grouped/i.test(question.prompt)
   );
 
-  assert.deepEqual(titles, ["Prague Notes & Tips"]);
+  assert.deepEqual(titles, ["Explore Prague"]);
   assert.equal(titles.includes("Prague Castle and nearby sights"), false);
-  assert.match(note?.description ?? "", /KGB Museum/);
-  assert.match(note?.description ?? "", /Kafka Statue/);
-  assert.match(note?.description ?? "", /Peklo/);
-  assert.equal(call, undefined);
+  assert.equal(note, undefined);
+  assert.match(records.items[0]?.description ?? "", /Possible stops:/);
+  assert.match(records.items[0]?.description ?? "", /KGB Museum/);
+  assert.match(records.items[0]?.description ?? "", /Kafka Statue/);
+  assert.match(records.items[0]?.description ?? "", /Peklo/);
+  assert.ok(call);
+});
+
+test("single bare venue on an open day keeps the venue plus free time", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          date: "2026-09-04",
+          itemType: "activity",
+          title: "City Museum",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-04",
+          city: "Paris",
+          country: "France",
+          leaveDate: "2026-09-06",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Paris",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-open-day-one-venue",
+  });
+
+  assert.deepEqual(
+    records.items.map((item) => item.title),
+    ["City Museum", "Free time in Paris"]
+  );
+  assert.equal(records.items[0]?.itemType, "activity");
+  assert.equal(records.items[1]?.categoryId, "admin_logistics");
 });
 
 test("planned area blocks group included untimed stops without subcards", () => {
@@ -4003,8 +4084,10 @@ test("optional train operator gaps with usable anchors stay out of review", () =
       transport: [
         {
           arrival: "Budapest Keleti",
+          arrivalTime: "13:19",
           date: "2019-01-21",
           departure: "Wien Hbf",
+          departureTime: "10:42",
           title: "Vienna to Budapest train",
           type: "train",
         },
@@ -4202,6 +4285,7 @@ test("structured review summary uses maker-facing counts", () => {
       {
         date: "2026-09-01",
         departure: "New York",
+        departureTime: "19:00",
         arrival: "Paris",
         title: "Fly to Paris",
         type: "flight",
@@ -4428,6 +4512,7 @@ test("high-confidence parser calls become notes instead of review questions", ()
       {
         date: "2019-01-12",
         departure: "Washington, DC",
+        departureTime: "17:00",
         arrival: "Rome",
         provider: "Delta",
         title: "Fly to Rome",
@@ -4528,6 +4613,7 @@ test("routine DCA JFK FCO transport label prompts are dismissed", () => {
           arrival: "JFK",
           date: "2019-01-12",
           departure: "DCA",
+          departureTime: "17:00",
           title: "DCA to JFK",
           type: "flight",
         },
@@ -4535,6 +4621,7 @@ test("routine DCA JFK FCO transport label prompts are dismissed", () => {
           arrival: "FCO",
           date: "2019-01-12",
           departure: "JFK",
+          departureTime: "19:46",
           title: "JFK to FCO",
           type: "flight",
         },
