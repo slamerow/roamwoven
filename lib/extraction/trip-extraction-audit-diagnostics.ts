@@ -70,6 +70,170 @@ function classifyActivityTitle(value: string) {
   return classes.length ? classes : ["other"];
 }
 
+function isActiveFinalRecord(record: AuditFinalRecordSummary) {
+  return record.status !== "ignored";
+}
+
+function isCriticalTransportRecord(record: AuditFinalRecordSummary) {
+  return (
+    record.recordType === "transport" &&
+    (record.type === "flight" || record.type === "train")
+  );
+}
+
+function isCriticalTransportCandidate(candidate: DraftLineageCandidate) {
+  const text = textForAudit(candidate);
+  const kind = transportKindForAuditText(text);
+
+  return kind === "flight" || kind === "train";
+}
+
+function isActivityCandidate(candidate: DraftLineageCandidate) {
+  return "itemType" in candidate && candidate.itemType === "activity";
+}
+
+function normalizedText(value: string | null | undefined) {
+  return normalizeAuditIdentity(value);
+}
+
+function words(value: string | null | undefined) {
+  return normalizedText(value)
+    .split(" ")
+    .filter((word) => word.length > 2);
+}
+
+function titleAppearsInText(title: string, text: string) {
+  const titleText = normalizedText(title);
+  const haystack = normalizedText(text);
+
+  if (!titleText || !haystack) {
+    return false;
+  }
+
+  if (haystack.includes(titleText)) {
+    return true;
+  }
+
+  const titleWords = words(titleText);
+  const matched = titleWords.filter((word) => haystack.includes(word));
+
+  return matched.length >= Math.min(2, titleWords.length);
+}
+
+function noteTextFor(records: StructuredTripRecords) {
+  return records.items
+    .filter((item) => item.status !== "ignored" && item.itemType === "note")
+    .map((item) => [item.title, item.description].filter(Boolean).join(" "))
+    .join("\n");
+}
+
+function hasWeakNoteMarker(candidate: DraftLineageCandidate) {
+  return /\b(optional|maybe|if time|could visit|ideas?|recommendations?|possible sights?|open until|open til|hours?|free\s*\d|free admission|would recommend|recommended)\b/.test(
+    textForAudit(candidate).toLowerCase()
+  );
+}
+
+function hasHighIntentActivitySignal(candidate: DraftLineageCandidate) {
+  const text = textForAudit(candidate).toLowerCase();
+  const title = candidate.title.toLowerCase();
+  const startTime = "startTime" in candidate ? candidate.startTime : null;
+  const endTime = "endTime" in candidate ? candidate.endTime : null;
+
+  if (
+    startTime ||
+    endTime ||
+    /\b(ticket|tickets|timed|reserved|reservation|booking|confirmation|provider|paid|paypal|guided tour|tour at|starts at)\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+
+  return /\b(palace|castle|church|cathedral|basilica|synagogue)\b/.test(title);
+}
+
+function looksLikeIncludedStopCluster(candidate: DraftLineageCandidate) {
+  const description = "description" in candidate ? candidate.description ?? "" : "";
+  const text = description.toLowerCase();
+  const separators = description
+    .split(/\bincluding\b|,|;|\band\b/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 3);
+
+  return (
+    separators.length >= 4 &&
+    /\b(including|palace|castle|grounds|garden|gardens|complex|campus|estate|route|walk|wander|explore)\b/.test(
+      text
+    )
+  );
+}
+
+function isLikelyPlannedActivityBuriedInNotes(
+  row: TripExtractionAuditLineageRow,
+  notesText: string
+) {
+  const candidate = row.raw;
+
+  if (
+    !candidate ||
+    row.status !== "removed_in_assembly" ||
+    row.finalRecords.length > 0 ||
+    !candidate.date ||
+    !isActivityCandidate(candidate) ||
+    isCriticalTransportCandidate(candidate) ||
+    hasWeakNoteMarker(candidate) ||
+    !titleAppearsInText(candidate.title, notesText)
+  ) {
+    return false;
+  }
+
+  return (
+    hasHighIntentActivitySignal(candidate) ||
+    looksLikeIncludedStopCluster(candidate)
+  );
+}
+
+function missingTransportDetails(record: AuditFinalRecordSummary) {
+  const missing: string[] = [];
+
+  if (!record.startTime) {
+    missing.push("departure time");
+  }
+
+  if (!record.departureLocation) {
+    missing.push("departure location");
+  }
+
+  if (!record.arrivalLocation) {
+    missing.push("arrival location");
+  }
+
+  return missing;
+}
+
+function transportDescriptionLooksContaminated(record: AuditFinalRecordSummary) {
+  const text = [record.title, record.description].filter(Boolean).join(" ").toLowerCase();
+
+  if (!text) {
+    return false;
+  }
+
+  return (
+    /\b(check in|check-in|hostel|hotel|airbnb|buzzer|room number|reception)\b/.test(
+      text
+    ) ||
+    /\b(from .*train station|metro line|take .*metro|take .*tram|tram towards|walk .*hostel)\b/.test(
+      text
+    )
+  );
+}
+
+function isDayOverviewTitle(value: string) {
+  return /\b(day\s+\d+|day overview|day summary|daily overview|daily plan|overview day|day plan)\b/i.test(
+    value
+  );
+}
+
 export function createAuditDiagnostics({
   lineage,
   records,
@@ -84,7 +248,7 @@ export function createAuditDiagnostics({
   const criticalCandidates = lineage
     .map((row) => row.raw ?? row.assembled)
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .filter((item) => transportKindForAuditText(textForAudit(item)));
+    .filter(isCriticalTransportCandidate);
   const unresolvedCritical = criticalCandidates.filter(
     (item) => !finalTransportMatchesCandidate(item, finalRecords)
   );
@@ -99,6 +263,49 @@ export function createAuditDiagnostics({
         .map((item) => `${item.date ?? "undated"} - ${item.title}`),
       severity: "p0",
       title: "Critical transport candidates are not travel rows",
+    });
+  }
+
+  const criticalTransportsMissingDetails = finalRecords
+    .filter(isActiveFinalRecord)
+    .filter(isCriticalTransportRecord)
+    .map((record) => ({
+      missing: missingTransportDetails(record),
+      record,
+    }))
+    .filter(({ missing }) => missing.length > 0);
+
+  if (criticalTransportsMissingDetails.length > 0) {
+    diagnostics.push({
+      code: "critical_transport_missing_details",
+      detail:
+        "Flight and train rows are missing traveler-critical departure time or station/airport fields.",
+      evidence: criticalTransportsMissingDetails
+        .slice(0, 10)
+        .map(
+          ({ missing, record }) =>
+            `${record.date ?? "undated"} - ${record.title}: missing ${missing.join(", ")}`
+        ),
+      severity: "p0",
+      title: "Critical transport rows are missing details",
+    });
+  }
+
+  const contaminatedTransports = finalRecords
+    .filter(isActiveFinalRecord)
+    .filter(isCriticalTransportRecord)
+    .filter(transportDescriptionLooksContaminated);
+
+  if (contaminatedTransports.length > 0) {
+    diagnostics.push({
+      code: "transport_description_contaminated",
+      detail:
+        "Flight or train rows include stay check-in, hostel directions, or local transfer text that should live elsewhere.",
+      evidence: contaminatedTransports
+        .slice(0, 10)
+        .map((record) => `${record.date ?? "undated"} - ${record.title}`),
+      severity: "p1",
+      title: "Transport cards include non-transport details",
     });
   }
 
@@ -163,7 +370,67 @@ export function createAuditDiagnostics({
     });
   }
 
+  const visibleDayOverviews = activeActivities.filter((item) =>
+    isDayOverviewTitle(item.title)
+  );
+
+  if (visibleDayOverviews.length > 0) {
+    diagnostics.push({
+      code: "day_overview_activity_survived",
+      detail:
+        "Generic day overview or day-plan cards are still visible as traveler activities.",
+      evidence: visibleDayOverviews
+        .slice(0, 10)
+        .map((item) => `${item.date ?? "undated"} - ${item.title}`),
+      severity: "p1",
+      title: "Day overview cards survived assembly",
+    });
+  }
+
+  const notesText = noteTextFor(records);
+  const buriedPlannedActivities = lineage.filter((row) =>
+    isLikelyPlannedActivityBuriedInNotes(row, notesText)
+  );
+
+  if (buriedPlannedActivities.length > 0) {
+    diagnostics.push({
+      code: "planned_activity_buried_in_city_notes",
+      detail:
+        "Dated planned activity candidates disappeared from the timeline and now appear only inside city notes.",
+      evidence: buriedPlannedActivities
+        .slice(0, 12)
+        .map((row) => `${row.date ?? "undated"} - ${row.title}`),
+      severity: "p1",
+      title: "Planned activities were buried in city notes",
+    });
+  }
+
   const consolidation = asRecord(findOpenAIUsage(usage).consolidation);
+  const wrongCityNoteMoves = asArray(consolidation.wrongCityPlacements)
+    .map(asRecord)
+    .filter((record) => getString(record, "action") === "moved_to_city_notes");
+
+  if (wrongCityNoteMoves.length > 0) {
+    diagnostics.push({
+      code: "wrong_city_note_contamination",
+      detail:
+        "Wrong-city items were moved into city notes instead of being re-anchored or held for review.",
+      evidence: wrongCityNoteMoves.slice(0, 10).map((record) =>
+        [
+          getString(record, "date") ?? "undated",
+          getString(record, "title") ?? "Untitled",
+          getString(record, "assignedCity") && getString(record, "explicitCity")
+            ? `${getString(record, "assignedCity")} -> ${getString(record, "explicitCity")}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" - ")
+      ),
+      severity: "p0",
+      title: "Wrong-city content entered city notes",
+    });
+  }
+
   const groupedChildrenByParent = new Map<string, string[]>();
 
   for (const item of asArray(consolidation.removedGroupedChildren)) {

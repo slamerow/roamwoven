@@ -77,7 +77,7 @@ export function transportKindForAuditText(value: string) {
   const text = value.toLowerCase();
 
   if (
-    /\b(ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
+    /\b(children'?s train|ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|chairlift|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
       text
     )
   ) {
@@ -88,7 +88,13 @@ export function transportKindForAuditText(value: string) {
     return "flight";
   }
 
-  if (/\b(train to|rail to|station|bahnhof|hbf|hl\.?\s?n\.?)\b/.test(text)) {
+  if (
+    /\b(train to|train from|rail to|rail from|train code|intercity train)\b/.test(
+      text
+    ) ||
+    /\bbooking code\b.*\b(train|rail)\b/.test(text) ||
+    /\b(wien hbf|praha hl\.?\s?n\.?)\b/.test(text)
+  ) {
     return "train";
   }
 
@@ -100,11 +106,15 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .filter((item) => item.status !== "ignored")
     .map((item) => ({
       address: item.address,
+      arrivalLocation: null,
+      confirmationLabel: null,
       category: item.categoryId,
       date: item.date,
+      departureLocation: null,
       description: truncate(item.description),
       endTime: item.endTime,
       id: item.id,
+      provider: null,
       recordType: "item" as const,
       startTime: item.startTime,
       status: item.status,
@@ -115,11 +125,15 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .filter((item) => item.status !== "ignored")
     .map((item) => ({
       address: null,
+      arrivalLocation: item.arrivalLocation,
+      confirmationLabel: item.confirmationLabel,
       category: "arrival_departure",
       date: item.date,
+      departureLocation: item.departureLocation,
       description: truncate(item.description),
       endTime: item.arrivalTime,
       id: item.id,
+      provider: item.provider,
       recordType: "transport" as const,
       startTime: item.departureTime,
       status: item.status,
@@ -130,11 +144,15 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .filter((stay) => stay.status !== "ignored")
     .map((stay) => ({
       address: stay.address,
+      arrivalLocation: null,
+      confirmationLabel: null,
       category: "stay",
       date: stay.checkInDate,
+      departureLocation: null,
       description: null,
       endTime: stay.checkOutTime,
       id: stay.id,
+      provider: null,
       recordType: "stay" as const,
       startTime: stay.checkInTime,
       status: stay.status,
@@ -238,7 +256,17 @@ function createAssemblyActionIndex(usage: unknown) {
 
     addAction(index, lineageKey({ date: getString(record, "date"), title }), {
       action: "wrong_city_guard",
-      detail: `${getString(record, "action") ?? "checked"} for ${getString(record, "explicitCity") ?? "explicit city"}.`,
+      detail: [
+        getString(record, "action") ?? "checked",
+        getString(record, "assignedCity")
+          ? `from ${getString(record, "assignedCity")}`
+          : null,
+        getString(record, "explicitCity")
+          ? `to ${getString(record, "explicitCity")}`
+          : "for explicit city",
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
   }
 

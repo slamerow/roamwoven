@@ -695,6 +695,22 @@ test("extraction audit does not require scenic rides or rental pickup as travel 
         itemType: "activity",
         title: "Panorama train and Ferris wheel",
       },
+      {
+        category: "nature_outdoors",
+        date: "2026-09-03",
+        description:
+          "Buda hills loop with the children's train to Janoshegy and chairlift down.",
+        itemType: "activity",
+        title: "Buda hills",
+      },
+      {
+        category: "arrival_departure",
+        date: "2026-09-04",
+        description:
+          "From the train station take the metro and tram to the hostel. Buzzer number 25.",
+        itemType: "activity",
+        title: "Hostel arrival directions",
+      },
     ],
     missingDetails: [],
     places: [
@@ -739,6 +755,292 @@ test("extraction audit does not require scenic rides or rental pickup as travel 
     ),
     false
   );
+});
+
+test("extraction audit flags planned activity candidates buried in city notes", () => {
+  const rawDraft = {
+    activities: [
+      {
+        category: "art_culture",
+        date: "2019-01-19",
+        description:
+          "Schonbrunn Palace, including Gloriette, Orangeriegarten, Palm House, Apple Strudel Show, and Panorama Train pass.",
+        itemType: "activity",
+        title: "Schonbrunn Palace",
+      },
+      {
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Open until 11:45 PM.",
+        itemType: "activity",
+        title: "Ferris wheel",
+      },
+      {
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Open until 7:00 PM.",
+        itemType: "activity",
+        title: "Mumok Museum",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-18",
+        city: "Vienna",
+        country: "Austria",
+        leaveDate: "2019-01-21",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const { debug, draft } = consolidateTripDraft(rawDraft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-buried-planned-activity",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: createDraftAuditSnapshot(draft),
+          preAssemblyDraft: createDraftAuditSnapshot(rawDraft),
+        },
+        consolidation: debug,
+        staged: true,
+      },
+    },
+  });
+  const buriedDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "planned_activity_buried_in_city_notes"
+  );
+
+  assert.ok(buriedDiagnostic);
+  assert.equal(buriedDiagnostic.severity, "p1");
+  assert.deepEqual(buriedDiagnostic.evidence, [
+    "2019-01-19 - Schonbrunn Palace",
+  ]);
+});
+
+test("extraction audit flags missing and polluted critical transport rows", () => {
+  const draft = {
+    activities: [],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-18",
+        city: "Vienna",
+        country: "Austria",
+        leaveDate: "2019-01-21",
+      },
+      {
+        arriveDate: "2019-01-21",
+        city: "Budapest",
+        country: "Hungary",
+        leaveDate: "2019-01-24",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [
+      {
+        arrival: "Vienna",
+        arrivalTime: null,
+        confirmation: "1beb5005",
+        date: "2019-01-18",
+        departure: "Prague",
+        departureTime: null,
+        description: "Train to Vienna.",
+        provider: null,
+        title: "Train to Vienna",
+        type: "train",
+      },
+      {
+        arrival: "Budapest",
+        arrivalTime: null,
+        confirmation: "VXFHXKCQEPHPUSNT",
+        date: "2019-01-21",
+        departure: "Wien HBF",
+        departureTime: "10:42",
+        description:
+          "Train to Budapest. Check in to Vitae Hostel. From Keleti International train station take the metro and tram to Kiraly Utca. Buzzer number 25.",
+        provider: null,
+        title: "Train to Budapest",
+        type: "train",
+      },
+    ],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const snapshot = createDraftAuditSnapshot(draft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-critical-transport-details",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: snapshot,
+          preAssemblyDraft: snapshot,
+        },
+        consolidation: {},
+        staged: true,
+      },
+    },
+  });
+  const missingDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "critical_transport_missing_details"
+  );
+  const pollutedDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "transport_description_contaminated"
+  );
+
+  assert.ok(missingDiagnostic);
+  assert.equal(missingDiagnostic.severity, "p0");
+  assert.deepEqual(missingDiagnostic.evidence, [
+    "2019-01-18 - Train to Vienna: missing departure time",
+  ]);
+  assert.ok(pollutedDiagnostic);
+  assert.deepEqual(pollutedDiagnostic.evidence, [
+    "2019-01-21 - Train to Budapest",
+  ]);
+});
+
+test("extraction audit flags visible day overview cards", () => {
+  const draft = {
+    activities: [
+      {
+        category: "art_culture",
+        date: "2019-01-20",
+        description:
+          "Breakfast at Cafe Central; Jewish Museum; St. Stephen's Cathedral; Library; Bank Austria Kunstforum; Laundry.",
+        itemType: "activity",
+        title: "Vienna day plan",
+      },
+    ],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-18",
+        city: "Vienna",
+        country: "Austria",
+        leaveDate: "2019-01-21",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const snapshot = createDraftAuditSnapshot(draft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-day-plan",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: snapshot,
+          preAssemblyDraft: snapshot,
+        },
+        consolidation: {},
+        staged: true,
+      },
+    },
+  });
+  const dayOverviewDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "day_overview_activity_survived"
+  );
+
+  assert.ok(dayOverviewDiagnostic);
+  assert.deepEqual(dayOverviewDiagnostic.evidence, [
+    "2019-01-20 - Vienna day plan",
+  ]);
+});
+
+test("extraction audit flags wrong-city items moved into city notes", () => {
+  const draft = {
+    activities: [],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-22",
+        city: "Budapest",
+        country: "Hungary",
+        leaveDate: "2019-01-24",
+      },
+      {
+        arriveDate: "2019-01-24",
+        city: "Rome",
+        country: "Italy",
+        leaveDate: "2019-01-25",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  };
+  const snapshot = createDraftAuditSnapshot(draft);
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-audit-wrong-city-note",
+  });
+  const report = createTripExtractionAuditReport({
+    draft,
+    records,
+    usage: {
+      openai: {
+        audit: {
+          assembledDraft: snapshot,
+          preAssemblyDraft: snapshot,
+        },
+        consolidation: {
+          wrongCityPlacements: [
+            {
+              action: "moved_to_city_notes",
+              assignedCity: "Rome",
+              date: "2019-01-22",
+              explicitCity: "Budapest",
+              title: "Shoes on the Danube",
+            },
+          ],
+        },
+        staged: true,
+      },
+    },
+  });
+  const wrongCityDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "wrong_city_note_contamination"
+  );
+
+  assert.ok(wrongCityDiagnostic);
+  assert.equal(wrongCityDiagnostic.severity, "p0");
+  assert.deepEqual(wrongCityDiagnostic.evidence, [
+    "2019-01-22 - Shoes on the Danube - Rome -> Budapest",
+  ]);
 });
 
 test("draft consolidation suppresses day overview cards before summary surfaces", () => {

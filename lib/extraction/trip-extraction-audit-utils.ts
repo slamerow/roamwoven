@@ -80,8 +80,12 @@ export function normalizeAuditIdentity(value: string | null | undefined) {
 export function textForAudit(value: {
   address?: string | null;
   arrival?: string | null;
+  arrivalLocation?: string | null;
   category?: string | null;
+  confirmation?: string | null;
+  confirmationLabel?: string | null;
   departure?: string | null;
+  departureLocation?: string | null;
   description?: string | null;
   evidence?: string | null;
   locationName?: string | null;
@@ -98,8 +102,12 @@ export function textForAudit(value: {
     value.locationName,
     value.address,
     value.departure,
+    value.departureLocation,
     value.arrival,
+    value.arrivalLocation,
     value.provider,
+    value.confirmation,
+    value.confirmationLabel,
   ]
     .filter(Boolean)
     .join(" ");

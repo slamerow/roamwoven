@@ -48,11 +48,15 @@ export type DraftLineageCandidate =
 
 export type AuditFinalRecordSummary = {
   address: string | null;
+  arrivalLocation: string | null;
+  confirmationLabel: string | null;
   category: string | null;
   date: string | null;
+  departureLocation: string | null;
   description: string | null;
   endTime: string | null;
   id: string;
+  provider: string | null;
   recordType: "item" | "stay" | "transport";
   startTime: string | null;
   status: string;
@@ -85,10 +89,15 @@ export type TripExtractionAuditLineageRow = {
 
 export type TripExtractionAuditDiagnostic = {
   code:
+    | "critical_transport_missing_details"
     | "critical_transport_not_travel_row"
+    | "day_overview_activity_survived"
     | "duplicate_same_venue_activity"
     | "loose_tip_promoted_to_activity"
-    | "over_grouping_risk";
+    | "over_grouping_risk"
+    | "planned_activity_buried_in_city_notes"
+    | "transport_description_contaminated"
+    | "wrong_city_note_contamination";
   detail: string;
   evidence: string[];
   severity: "p0" | "p1" | "p2";
