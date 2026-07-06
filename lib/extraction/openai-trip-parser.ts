@@ -2,6 +2,10 @@ import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
 import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
 import { optimizeTripExtractionMaterials } from "@/lib/extraction/material-budget";
+import {
+  extractSourceTransportAnchorsFromMaterials,
+  SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
+} from "@/lib/extraction/source-transport-anchors";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
@@ -1221,10 +1225,12 @@ function combineActivityStages(stages: unknown[]) {
 function combineDraftStages({
   activitiesStage,
   activityFailures,
+  sourceTransportAnchors,
   spineStage,
 }: {
   activitiesStage?: unknown;
   activityFailures?: Array<{ chunk?: ActivityExtractionChunk; error: unknown }>;
+  sourceTransportAnchors?: unknown[];
   spineStage: unknown;
 }) {
   const spine = asRecord(spineStage);
@@ -1254,6 +1260,9 @@ function combineDraftStages({
       destinationSummary: null,
       title: null,
     },
+    [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
+      transport: sourceTransportAnchors ?? [],
+    },
   };
 }
 
@@ -1275,6 +1284,8 @@ export async function extractTripDraftWithOpenAI({
     materials: usableMaterials,
     totalCharBudget: config.maxInputChars,
   });
+  const sourceTransportAnchors =
+    extractSourceTransportAnchorsFromMaterials(usableMaterials);
   const formattedMaterials = formatMaterials(spineMaterials.materials);
   const input = [`Trip name: ${tripName}`, formattedMaterials].join("\n\n");
   const spineResult = await createOpenAIStructuredResponse({
@@ -1324,6 +1335,7 @@ export async function extractTripDraftWithOpenAI({
   const combinedDraft = combineDraftStages({
     activitiesStage,
     activityFailures,
+    sourceTransportAnchors,
     spineStage: spineResult.json,
   });
   const preAssemblyDraft = createDraftAuditSnapshot(combinedDraft);
@@ -1364,6 +1376,9 @@ export async function extractTripDraftWithOpenAI({
         preAssemblyDraft,
       },
       consolidation,
+      sourceAnchors: {
+        transport: sourceTransportAnchors,
+      },
       spineMaterialBudget: spineMaterials.summary,
       spine: spineResult.usage,
       staged: true,

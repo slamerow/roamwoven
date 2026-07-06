@@ -1,5 +1,9 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import {
+  sourceTransportAnchorMatchesRecord,
+  type SourceTransportAnchor,
+} from "@/lib/extraction/source-transport-anchors";
+import {
   hasAuditTokenOverlap,
   summarizeFinalAuditRecords,
   textForAudit,
@@ -77,7 +81,11 @@ function isActiveFinalRecord(record: AuditFinalRecordSummary) {
 function isCriticalTransportRecord(record: AuditFinalRecordSummary) {
   return (
     record.recordType === "transport" &&
-    (record.type === "flight" || record.type === "train")
+    (record.type === "flight" ||
+      record.type === "train" ||
+      record.type === "bus" ||
+      record.type === "ferry" ||
+      record.type === "transfer")
   );
 }
 
@@ -204,10 +212,6 @@ function missingTransportDetails(record: AuditFinalRecordSummary) {
     missing.push("departure location");
   }
 
-  if (!record.arrivalLocation) {
-    missing.push("arrival location");
-  }
-
   return missing;
 }
 
@@ -228,6 +232,64 @@ function transportDescriptionLooksContaminated(record: AuditFinalRecordSummary) 
   );
 }
 
+function finalRecordForSourceAnchorMatch(record: AuditFinalRecordSummary) {
+  return {
+    arrivalLocation: record.arrivalLocation,
+    confirmationLabel: record.confirmationLabel,
+    date: record.date,
+    departureLocation: record.departureLocation,
+    provider: record.provider,
+    routeLabel: record.title,
+    transportType: record.type,
+  };
+}
+
+function finalRecordMatchesSourceAnchor(
+  anchor: SourceTransportAnchor,
+  record: AuditFinalRecordSummary
+) {
+  if (record.recordType !== "transport" || !record.type) {
+    return false;
+  }
+
+  return sourceTransportAnchorMatchesRecord(
+    anchor,
+    finalRecordForSourceAnchorMatch(record)
+  );
+}
+
+function sourceAnchorMissingFields({
+  anchor,
+  record,
+}: {
+  anchor: SourceTransportAnchor;
+  record: AuditFinalRecordSummary;
+}) {
+  const missing: string[] = [];
+
+  if (anchor.departureTime && !record.startTime) {
+    missing.push("departure time");
+  }
+
+  if (anchor.departureLocation && !record.departureLocation) {
+    missing.push("departure location");
+  }
+
+  if (anchor.arrivalLocation && !record.arrivalLocation) {
+    missing.push("arrival location");
+  }
+
+  return missing;
+}
+
+function getOcrFailedCount(usage: unknown) {
+  const usageRecord = asRecord(usage);
+  const ocr = asRecord(usageRecord.ocr);
+  const failed = ocr.failed;
+
+  return typeof failed === "number" ? failed : 0;
+}
+
 function isDayOverviewTitle(value: string) {
   return /\b(day\s+\d+|day overview|day summary|daily overview|daily plan|overview day|day plan)\b/i.test(
     value
@@ -237,14 +299,88 @@ function isDayOverviewTitle(value: string) {
 export function createAuditDiagnostics({
   lineage,
   records,
+  sourceTransportAnchors = [],
   usage,
 }: {
   lineage: TripExtractionAuditLineageRow[];
   records: StructuredTripRecords;
+  sourceTransportAnchors?: SourceTransportAnchor[];
   usage?: unknown;
 }): TripExtractionAuditDiagnostic[] {
   const diagnostics: TripExtractionAuditDiagnostic[] = [];
   const finalRecords = summarizeFinalAuditRecords(records);
+  const ocrFailedCount = getOcrFailedCount(usage);
+
+  if (ocrFailedCount > 0) {
+    diagnostics.push({
+      code: "ocr_backfill_failed",
+      detail:
+        "One or more visual/OCR extraction attempts failed before trip assembly. Source-backed screenshot details may be missing.",
+      evidence: [`${ocrFailedCount} OCR material${ocrFailedCount === 1 ? "" : "s"} failed.`],
+      severity: "p0",
+      title: "OCR backfill failed",
+    });
+  }
+
+  const missingSourceAnchors = sourceTransportAnchors.filter(
+    (anchor) =>
+      !finalRecords.some((record) => finalRecordMatchesSourceAnchor(anchor, record))
+  );
+
+  if (missingSourceAnchors.length > 0) {
+    diagnostics.push({
+      code: "critical_transport_source_anchor_missing",
+      detail:
+        "Source text or OCR exposed critical transport that did not survive into final travel rows.",
+      evidence: missingSourceAnchors
+        .slice(0, 10)
+        .map(
+          (anchor) =>
+            `${anchor.date ?? "undated"} - ${anchor.routeLabel}: ${[
+              anchor.departureTime,
+              anchor.departureLocation,
+              anchor.arrivalTime,
+              anchor.arrivalLocation,
+            ]
+              .filter(Boolean)
+              .join(" -> ")}`
+        ),
+      severity: "p0",
+      title: "Source-backed transport is missing from final app",
+    });
+  }
+
+  const sourceAnchorsMissingDetails = sourceTransportAnchors
+    .flatMap((anchor) => {
+      const matchedRecord = finalRecords.find((record) =>
+        finalRecordMatchesSourceAnchor(anchor, record)
+      );
+
+      if (!matchedRecord) {
+        return [];
+      }
+
+      const missing = sourceAnchorMissingFields({ anchor, record: matchedRecord });
+
+      return missing.length > 0 ? [{ anchor, missing, record: matchedRecord }] : [];
+    });
+
+  if (sourceAnchorsMissingDetails.length > 0) {
+    diagnostics.push({
+      code: "critical_transport_source_anchor_missing_details",
+      detail:
+        "Source text or OCR had critical transport fields that are absent from final travel rows.",
+      evidence: sourceAnchorsMissingDetails
+        .slice(0, 10)
+        .map(
+          ({ anchor, missing, record }) =>
+            `${record.date ?? anchor.date ?? "undated"} - ${record.title}: missing ${missing.join(", ")} from source anchor ${anchor.routeLabel}`
+        ),
+      severity: "p0",
+      title: "Source-backed transport details are missing",
+    });
+  }
+
   const criticalCandidates = lineage
     .map((row) => row.raw ?? row.assembled)
     .filter((item): item is NonNullable<typeof item> => Boolean(item))

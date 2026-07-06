@@ -26,6 +26,10 @@ import {
   normalizeText,
 } from "@/lib/extraction/traveler-text";
 import {
+  applySourceTransportAnchorsToRecords,
+  getSourceTransportAnchorsFromDraft,
+} from "@/lib/extraction/source-transport-anchors";
+import {
   canonicalizeTripCategoryId,
   getTripCategoryEmoji,
   getTripCategoryLabel,
@@ -1163,7 +1167,14 @@ export function createStructuredTripRecordsFromDraft({
   const trip = createTripRecord({ draft: consolidatedDraft, fallbackTripName, tripId });
   const legs = createLegRecords({ draft: consolidatedDraft, tripId });
   const stays = createStayRecords({ draft: consolidatedDraft, legs, tripId });
-  const transport = createTransportRecords({ draft: consolidatedDraft, legs, tripId });
+  const sourceTransportAnchors =
+    getSourceTransportAnchorsFromDraft(consolidatedDraft);
+  const transport = applySourceTransportAnchorsToRecords({
+    anchors: sourceTransportAnchors,
+    legs,
+    transport: createTransportRecords({ draft: consolidatedDraft, legs, tripId }),
+    tripId,
+  });
   const items = createItemRecords({ draft: consolidatedDraft, legs, tripId });
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({

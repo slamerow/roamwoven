@@ -324,6 +324,77 @@ function hasSpecificTitle(value: string | null, genericPatterns: RegExp[]) {
   return !genericPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function normalizedTitleMatches(a: string | null, b: string | null) {
+  const left = normalizeText(a);
+  const right = normalizeText(b);
+
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right || left.includes(right) || right.includes(left)) {
+    return true;
+  }
+
+  const leftTokens = left
+    .split(/\s+/)
+    .filter((token) => token.length > 2)
+    .filter(
+      (token) =>
+        ![
+          "activity",
+          "and",
+          "card",
+          "flight",
+          "from",
+          "guided",
+          "self",
+          "the",
+          "ticket",
+          "to",
+          "tour",
+          "train",
+          "travel",
+          "walking",
+        ].includes(token)
+    );
+  const rightTokens = new Set(
+    right
+      .split(/\s+/)
+      .filter((token) => token.length > 2)
+      .filter(
+        (token) =>
+          ![
+            "activity",
+            "and",
+            "card",
+            "flight",
+            "from",
+            "guided",
+            "self",
+            "the",
+            "ticket",
+            "to",
+            "tour",
+            "train",
+            "travel",
+            "walking",
+          ].includes(token)
+      )
+  );
+
+  return leftTokens.some((token) => rightTokens.has(token));
+}
+
+function normalizedTitleContains(a: string | null, b: string | null) {
+  const left = normalizeText(a);
+  const right = normalizeText(b);
+
+  return Boolean(
+    left && right && (left === right || left.includes(right) || right.includes(left))
+  );
+}
+
 function hasUsableTransportAnchor(record: TripTransportRecord | null) {
   if (!record) {
     return false;
@@ -607,6 +678,35 @@ export function createReviewQuestions({
     return false;
   }
 
+  function isAlreadyAnsweredByStructuredRecord({
+    subjectId,
+    subjectType,
+    targetField,
+  }: {
+    subjectId: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+    targetField: string | null;
+  }) {
+    if (!targetField || !subjectId) {
+      return false;
+    }
+
+    if (
+      subjectType !== "transport" ||
+      !isCorePlanningTarget({ subjectType, targetField })
+    ) {
+      return false;
+    }
+
+    return Boolean(
+      getTargetValue({
+        subjectId,
+        subjectType,
+        targetField,
+      })
+    );
+  }
+
   function isStatementStyleCall({
     answerType,
     guessedValue,
@@ -738,36 +838,58 @@ export function createReviewQuestions({
       return null;
     }
 
-    const normalized = relatedTitle.toLowerCase();
-
     if (subjectType === "item") {
       return (
-        items.find((item) => item.title.toLowerCase() === normalized)?.id ??
-        items.find((item) => item.title.toLowerCase().includes(normalized))?.id ??
+        items.find((item) => normalizedTitleContains(item.title, relatedTitle))?.id ??
+        items.find((item) => normalizedTitleMatches(item.title, relatedTitle))?.id ??
         null
       );
     }
 
     if (subjectType === "stay") {
       return (
-        stays.find((stay) => stay.name.toLowerCase() === normalized)?.id ??
-        stays.find((stay) => stay.name.toLowerCase().includes(normalized))?.id ??
+        stays.find((stay) => normalizedTitleContains(stay.name, relatedTitle))?.id ??
+        stays.find((stay) => normalizedTitleMatches(stay.name, relatedTitle))?.id ??
         null
       );
     }
 
     if (subjectType === "transport") {
       return (
-        transport.find((item) => item.routeLabel.toLowerCase() === normalized)?.id ??
-        transport.find((item) => item.routeLabel.toLowerCase().includes(normalized))?.id ??
+        transport.find((item) =>
+          normalizedTitleContains(
+            [
+              item.routeLabel,
+              item.departureLocation,
+              item.arrivalLocation,
+              item.provider,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            relatedTitle
+          )
+        )?.id ??
+        transport.find((item) =>
+          normalizedTitleMatches(
+            [
+              item.routeLabel,
+              item.departureLocation,
+              item.arrivalLocation,
+              item.provider,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            relatedTitle
+          )
+        )?.id ??
         null
       );
     }
 
     if (subjectType === "leg") {
       return (
-        legs.find((leg) => leg.displayName.toLowerCase() === normalized)?.id ??
-        legs.find((leg) => leg.displayName.toLowerCase().includes(normalized))?.id ??
+        legs.find((leg) => normalizedTitleContains(leg.displayName, relatedTitle))?.id ??
+        legs.find((leg) => normalizedTitleMatches(leg.displayName, relatedTitle))?.id ??
         null
       );
     }
@@ -814,7 +936,14 @@ export function createReviewQuestions({
       targetField,
     });
 
-    const status: TripReviewQuestionRecord["status"] = isObviousFactCall({
+    const status: TripReviewQuestionRecord["status"] =
+    isAlreadyAnsweredByStructuredRecord({
+      subjectId,
+      subjectType,
+      targetField,
+    })
+      ? "dismissed"
+      : isObviousFactCall({
       confidence,
       evidence,
       guessedValue,

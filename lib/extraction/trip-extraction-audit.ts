@@ -1,5 +1,9 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
+import {
+  getSourceTransportAnchorsFromDraft,
+  getSourceTransportAnchorsFromUsage,
+} from "@/lib/extraction/source-transport-anchors";
 import { createAuditDiagnostics } from "@/lib/extraction/trip-extraction-audit-diagnostics";
 import { createAuditLineageRows } from "@/lib/extraction/trip-extraction-audit-lineage";
 import {
@@ -8,6 +12,7 @@ import {
   createDraftAuditSnapshot,
   createExtractionSummary,
 } from "@/lib/extraction/trip-extraction-audit-snapshot";
+import { createTripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
 import type { TripExtractionAuditReport } from "@/lib/extraction/trip-extraction-audit-types";
 
 export { createDraftAuditSnapshot };
@@ -36,14 +41,31 @@ export function createTripExtractionAuditReport({
     title: warning.title,
   }));
   const lineage = createAuditLineageRows({ records, usage });
+  const sourceTransportAnchors = [
+    ...getSourceTransportAnchorsFromDraft(draft),
+    ...getSourceTransportAnchorsFromUsage(usage),
+  ].filter(
+    (anchor, index, anchors) =>
+      anchors.findIndex((candidate) => candidate.anchorId === anchor.anchorId) ===
+      index
+  );
 
   return {
     assembly: createAssemblySummary(usage),
-    diagnostics: createAuditDiagnostics({ lineage, records, usage }),
+    diagnostics: createAuditDiagnostics({
+      lineage,
+      records,
+      sourceTransportAnchors,
+      usage,
+    }),
     draft: createDraftAuditSnapshot(draft),
     extraction: createExtractionSummary(usage),
+    fingerprints: createTripExtractionFingerprints(records),
     lineage,
     sourceComparison: usage ? compareRawAndAssembledTitles(usage) : null,
+    sourceAnchors: {
+      transport: sourceTransportAnchors,
+    },
     structured: {
       activeActivities: activeItems.filter((item) => item.itemType === "activity")
         .length,

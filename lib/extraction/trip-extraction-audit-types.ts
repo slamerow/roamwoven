@@ -1,3 +1,6 @@
+import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
+import type { TripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
+
 export type DraftObject = Record<string, unknown>;
 
 export type DraftRecordSummary = {
@@ -91,9 +94,12 @@ export type TripExtractionAuditDiagnostic = {
   code:
     | "critical_transport_missing_details"
     | "critical_transport_not_travel_row"
+    | "critical_transport_source_anchor_missing"
+    | "critical_transport_source_anchor_missing_details"
     | "day_overview_activity_survived"
     | "duplicate_same_venue_activity"
     | "loose_tip_promoted_to_activity"
+    | "ocr_backfill_failed"
     | "over_grouping_risk"
     | "planned_activity_buried_in_city_notes"
     | "transport_description_contaminated"
@@ -145,12 +151,16 @@ export type TripExtractionAuditReport = {
     } | null;
     staged: boolean;
   };
+  fingerprints: TripExtractionFingerprints;
   lineage: TripExtractionAuditLineageRow[];
   sourceComparison: {
     assembledOnlyTitles: string[];
     rawOnlyTitles: string[];
     sharedTitles: string[];
   } | null;
+  sourceAnchors: {
+    transport: SourceTransportAnchor[];
+  };
   structured: {
     activeActivities: number;
     activeNotes: number;
