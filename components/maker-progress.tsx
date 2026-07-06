@@ -57,23 +57,25 @@ const MAKER_STEPS = [
 export const MAKER_STEP_COUNT = MAKER_STEPS.length;
 
 export function MakerProgress({
-  canAccessMaterials = false,
   completedSteps,
   currentStep,
   detail,
-  isPaid,
+  maxAccessibleStep,
   tripId,
 }: {
-  canAccessMaterials?: boolean;
   completedSteps: number;
   currentStep: number;
   detail?: string;
-  isPaid: boolean;
+  maxAccessibleStep: number;
   tripId: string;
 }) {
   const boundedCompletedSteps = Math.max(
     0,
     Math.min(completedSteps, MAKER_STEP_COUNT)
+  );
+  const boundedMaxAccessibleStep = Math.max(
+    1,
+    Math.min(maxAccessibleStep, MAKER_STEP_COUNT)
   );
   const progressPercent = Math.round(
     (boundedCompletedSteps / MAKER_STEP_COUNT) * 100
@@ -125,8 +127,7 @@ export function MakerProgress({
           const stepNumber = index + 1;
           const complete = stepNumber <= boundedCompletedSteps;
           const current = stepNumber === currentStep;
-          const available =
-            isPaid || stepNumber === 1 || (canAccessMaterials && stepNumber === 2);
+          const available = stepNumber <= boundedMaxAccessibleStep;
           const Icon = step.icon;
           const content = (
             <>

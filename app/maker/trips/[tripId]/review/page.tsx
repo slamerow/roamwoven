@@ -1,6 +1,7 @@
 import { MakerProgress } from "@/components/maker-progress";
 import { ReviewFlowPanel } from "@/components/review-flow-panel";
 import { getTripBuildSettings } from "@/lib/build-settings";
+import { hasConfirmedBuildSettings } from "@/lib/maker-flow";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
 
@@ -14,9 +15,9 @@ export default async function ReviewPage({
   const { tripId } = await params;
   const { saved, error } = await searchParams;
   const trip = await getMakerTrip(tripId);
-  const canReview = trip.isDemo || trip.paymentStatus === "paid";
-  const uploads = canReview ? await listTripUploads(tripId) : [];
+  const uploads = trip.isDemo ? [] : await listTripUploads(tripId);
   const settings = await getTripBuildSettings(tripId);
+  const hasBuildSettings = hasConfirmedBuildSettings(settings);
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -32,10 +33,10 @@ export default async function ReviewPage({
         </header>
 
         <MakerProgress
-          completedSteps={uploads.length > 0 ? 2 : 1}
+          completedSteps={hasBuildSettings ? 3 : uploads.length > 0 ? 2 : 1}
           currentStep={3}
           detail="Recommended sections start on. Turn off anything that does not belong in this traveler app."
-          isPaid={canReview}
+          maxAccessibleStep={hasBuildSettings ? 4 : uploads.length > 0 ? 3 : 2}
           tripId={tripId}
         />
 

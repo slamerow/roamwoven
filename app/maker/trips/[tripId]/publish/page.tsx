@@ -35,7 +35,7 @@ export default async function PublishPage({
           completedSteps={6}
           currentStep={7}
           detail="The app is ready to share. Future late documents should be handled as small updates to the existing trip spine."
-          isPaid
+          maxAccessibleStep={7}
           tripId={tripId}
         />
 

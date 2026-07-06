@@ -7,6 +7,8 @@ import {
   isHexColor,
   isThemeDirectionKey,
 } from "@/lib/style-settings-config";
+import { getTripBuildSettings } from "@/lib/build-settings";
+import { hasConfirmedBuildSettings } from "@/lib/maker-flow";
 import { saveTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
 
@@ -16,6 +18,7 @@ export async function POST(
 ) {
   const { tripId } = await params;
   const trip = await getMakerTrip(tripId);
+  const tripUrl = new URL(`/maker/trips/${tripId}`, request.url);
   const styleUrl = new URL(`/maker/trips/${tripId}/style`, request.url);
   const dataUrl = new URL(`/maker/trips/${tripId}/data`, request.url);
 
@@ -23,9 +26,13 @@ export async function POST(
     return NextResponse.redirect(dataUrl, 303);
   }
 
-  if (trip.paymentStatus !== "paid") {
-    styleUrl.searchParams.set("error", "checkout-required");
-    return NextResponse.redirect(styleUrl, 303);
+  const buildSettings = await getTripBuildSettings(tripId);
+
+  if (!hasConfirmedBuildSettings(buildSettings)) {
+    return NextResponse.redirect(
+      new URL(`/maker/trips/${tripId}/review`, request.url),
+      303
+    );
   }
 
   try {
@@ -68,8 +75,13 @@ export async function POST(
       tripId,
     });
 
-    dataUrl.searchParams.set("style", "saved");
-    return NextResponse.redirect(dataUrl, 303);
+    if (trip.paymentStatus === "paid") {
+      dataUrl.searchParams.set("style", "saved");
+      return NextResponse.redirect(dataUrl, 303);
+    }
+
+    tripUrl.searchParams.set("setup", "ready");
+    return NextResponse.redirect(tripUrl, 303);
   } catch {
     styleUrl.searchParams.set("error", "style-save-failed");
     return NextResponse.redirect(styleUrl, 303);

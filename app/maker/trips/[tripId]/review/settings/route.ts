@@ -8,6 +8,7 @@ import {
   type BuildConfirmationKey,
 } from "@/lib/build-settings";
 import { getMakerTrip } from "@/lib/trips";
+import { listTripUploads } from "@/lib/uploads";
 
 function parseBooleanMap<Key extends string>(
   value: unknown,
@@ -40,9 +41,13 @@ export async function POST(
     return NextResponse.redirect(styleUrl, 303);
   }
 
-  if (trip.paymentStatus !== "paid") {
-    reviewUrl.searchParams.set("error", "checkout-required");
-    return NextResponse.redirect(reviewUrl, 303);
+  const uploads = await listTripUploads(tripId);
+
+  if (uploads.length === 0) {
+    return NextResponse.redirect(
+      new URL(`/maker/trips/${tripId}/upload`, request.url),
+      303
+    );
   }
 
   try {

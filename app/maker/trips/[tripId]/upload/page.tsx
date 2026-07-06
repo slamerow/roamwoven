@@ -14,7 +14,7 @@ const firstBuildChecklist = [
 
 const errorMessages: Record<string, string> = {
   "auth-required": "Sign in again before uploading materials.",
-  "checkout-required": "Complete checkout before adding more trip materials.",
+  "checkout-required": "Complete checkout before processing the first draft.",
   "demo-upload": "The demo trip keeps uploads mocked for now.",
   "empty-upload": "Add at least one file or note before saving.",
   "file-too-large": "One file is over the 25 MB beta limit.",
@@ -67,9 +67,9 @@ export default async function UploadPage({
   const { tripId } = await params;
   const { created, deleted, error, saved } = await searchParams;
   const trip = await getMakerTrip(tripId);
-  const canAddMaterials = trip.isDemo || trip.paymentStatus === "paid";
   const canEditMaterials = canEditTripMaterials(trip);
   const uploads = trip.isDemo ? [] : await listTripUploads(tripId);
+  const canContinueSetup = uploads.length > 0;
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -79,47 +79,43 @@ export default async function UploadPage({
             Add trip materials
           </h1>
           <p className="mt-3 text-sm leading-6 text-ink/65">
-            {canAddMaterials
+            {canEditMaterials
               ? "Upload the confirmations, screenshots, documents, spreadsheets, and notes Roamwoven should use."
-              : "Your starter materials are saved here. Complete checkout before adding more or processing the first draft."}
+              : "Your starter materials are saved here. Materials are locked once processing starts."}
           </p>
         </header>
 
         <MakerProgress
-          canAccessMaterials={uploads.length > 0}
           completedSteps={uploads.length > 0 ? 2 : 1}
           currentStep={2}
           detail={
-            !canAddMaterials
-              ? "Starter materials are saved. Complete checkout before adding more or processing the first draft."
-              : canEditMaterials
+            canEditMaterials
               ? "Add everything important before the first build. After that, new materials should be small app updates."
               : "The first build materials are locked. Later uploads should be small corrections or additions."
           }
-          isPaid={canAddMaterials}
+          maxAccessibleStep={canContinueSetup ? 3 : 2}
           tripId={tripId}
         />
 
-        {!canAddMaterials ? (
+        {!canEditMaterials ? (
           <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
             <h2 className="text-xl font-semibold text-ink">
-              Checkout required
+              Materials locked
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/60">
-              Complete checkout once, then add more materials or process the
-              first draft. Anything saved during trip creation stays attached
-              below.
+              Processing has started, so the first-build source materials are
+              no longer editable here.
             </p>
             <Link
               href={`/maker/trips/${tripId}`}
               className="mt-5 inline-flex rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
             >
-              Return to checkout
+              Return to workspace
             </Link>
           </section>
         ) : null}
 
-        {canAddMaterials ? (
+        {canEditMaterials ? (
             <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
               <div>
                 {created ? (
@@ -193,14 +189,12 @@ export default async function UploadPage({
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-ink/60">
                     Files and notes saved for this trip will stay here after refresh.
-                    {!canAddMaterials
-                      ? " Complete checkout to add more, remove materials, or process the first draft."
-                      : canEditMaterials
+                    {canEditMaterials
                       ? " You can remove anything before generation starts."
                       : " Materials from the first build lock once generation starts."}
                   </p>
                 </div>
-                {uploads.length > 0 && canAddMaterials ? (
+                {uploads.length > 0 ? (
                   <Link
                     href={`/maker/trips/${tripId}/review`}
                     className="inline-flex justify-center rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
@@ -255,7 +249,7 @@ export default async function UploadPage({
               )}
             </section>
 
-        {canAddMaterials ? (
+        {canEditMaterials ? (
             <section className="mt-6 rounded-md border border-tide/20 bg-tide/10 p-5">
               <h2 className="text-xl font-semibold text-ink">
                 Add what you have now. Update the app later.

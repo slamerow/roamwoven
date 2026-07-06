@@ -270,7 +270,7 @@ export function StyleSettingsPanel({
           className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
           type="submit"
         >
-          Continue to process draft
+          Save design and continue
           <ArrowRight size={16} />
         </button>
       </form>

@@ -4,7 +4,15 @@ import {
   createTripCheckoutSession,
 } from "@/lib/billing/stripe";
 import { getCurrentUser } from "@/lib/auth";
+import { getTripBuildSettings } from "@/lib/build-settings";
+import {
+  getMakerNextAction,
+  hasConfirmedBuildSettings,
+  hasSavedStyleSettings,
+} from "@/lib/maker-flow";
+import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
+import { listTripUploads } from "@/lib/uploads";
 
 export async function POST(
   request: NextRequest,
@@ -26,9 +34,28 @@ export async function POST(
     return NextResponse.redirect(tripUrl, 303);
   }
 
+  const [uploads, buildSettings, styleSettings] = await Promise.all([
+    listTripUploads(tripId),
+    getTripBuildSettings(tripId),
+    getTripStyleSettings({ fallbackAppName: trip.name, tripId }),
+  ]);
+  const nextAction = getMakerNextAction({
+    hasBuildSettings: hasConfirmedBuildSettings(buildSettings),
+    hasStyleSettings: hasSavedStyleSettings(styleSettings),
+    isPaid: trip.paymentStatus === "paid",
+    uploadCount: uploads.length,
+  });
+
   if (trip.paymentStatus === "paid") {
     return NextResponse.redirect(
-      new URL(`/maker/trips/${tripId}/upload`, request.url),
+      new URL(`/maker/trips/${tripId}/${nextAction.href}`, request.url),
+      303
+    );
+  }
+
+  if (nextAction.kind === "link") {
+    return NextResponse.redirect(
+      new URL(`/maker/trips/${tripId}/${nextAction.href}`, request.url),
       303
     );
   }

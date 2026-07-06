@@ -1678,13 +1678,17 @@ export default async function StructuredDataPage({
 
         <MakerProgress
           completedSteps={latestDraft || makerTrip.isDemo ? 5 : 4}
-          currentStep={latestDraft || makerTrip.isDemo ? 6 : 5}
+          currentStep={
+            !canShowUploads ? 4 : latestDraft || makerTrip.isDemo ? 6 : 5
+          }
           detail={
             latestDraft || makerTrip.isDemo
               ? "Review the questions and flagged details before continuing."
               : "Create the first structured draft from the confirmed materials."
           }
-          isPaid={makerTrip.isDemo || makerTrip.paymentStatus === "paid"}
+          maxAccessibleStep={
+            !canShowUploads ? 4 : latestDraft || makerTrip.isDemo ? 6 : 5
+          }
           tripId={tripId}
         />
 

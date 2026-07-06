@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { MakerProgress } from "@/components/maker-progress";
 import { StyleSettingsPanel } from "@/components/style-settings-panel";
+import { getTripBuildSettings } from "@/lib/build-settings";
+import {
+  hasConfirmedBuildSettings,
+  hasSavedStyleSettings,
+} from "@/lib/maker-flow";
 import { getAsiaDemoTravelerAppViewModel } from "@/lib/traveler-view-model";
 import { getTripStyleSettings } from "@/lib/style-settings";
 import { getMakerTrip } from "@/lib/trips";
@@ -15,10 +20,16 @@ export default async function StylePage({
   const { tripId } = await params;
   const { error, scope } = await searchParams;
   const trip = await getMakerTrip(tripId);
-  const settings = await getTripStyleSettings({
-    fallbackAppName: trip.name,
-    tripId,
-  });
+  const [buildSettings, settings] = await Promise.all([
+    getTripBuildSettings(tripId),
+    getTripStyleSettings({
+      fallbackAppName: trip.name,
+      tripId,
+    }),
+  ]);
+  const hasBuildSettings = hasConfirmedBuildSettings(buildSettings);
+  const hasStyleSettings = hasSavedStyleSettings(settings);
+  const canProcess = trip.isDemo || trip.paymentStatus === "paid";
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -34,10 +45,10 @@ export default async function StylePage({
         </header>
 
         <MakerProgress
-          completedSteps={settings.updatedAt ? 4 : 3}
+          completedSteps={hasStyleSettings ? 4 : hasBuildSettings ? 3 : 2}
           currentStep={4}
           detail="Color choices should show up immediately in previews and carry into draft review before the final traveler app is published."
-          isPaid={trip.isDemo || trip.paymentStatus === "paid"}
+          maxAccessibleStep={hasStyleSettings && canProcess ? 5 : 4}
           tripId={tripId}
         />
 

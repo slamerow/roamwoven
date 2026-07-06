@@ -593,7 +593,7 @@ export default async function TripSummaryPage({
           completedSteps={5}
           currentStep={6}
           detail="Confirm the trip spine and final app shape before publishing. Later documents should update this spine, not restart it."
-          isPaid={trip.isDemo || trip.paymentStatus === "paid"}
+          maxAccessibleStep={6}
           tripId={tripId}
         />
 

@@ -13,11 +13,6 @@ export async function POST(
   const trip = await getMakerTrip(tripId);
   const uploadUrl = new URL(`/maker/trips/${tripId}/upload`, request.url);
 
-  if (!trip.isDemo && trip.paymentStatus !== "paid") {
-    uploadUrl.searchParams.set("error", "checkout-required");
-    return NextResponse.redirect(uploadUrl, 303);
-  }
-
   if (trip.isDemo) {
     uploadUrl.searchParams.set("error", "demo-upload");
     return NextResponse.redirect(uploadUrl, 303);
