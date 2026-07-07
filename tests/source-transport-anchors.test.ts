@@ -38,6 +38,20 @@ const embeddedTrainMaterial = {
   type: "pdf_text" as const,
 };
 
+const longMergedFlightMaterial = {
+  filename: "return-flights.pdf",
+  sourceUploadId: "upload-return",
+  text: [
+    "[PDF text layer]",
+    "Central Europe January 2019",
+    [
+      "Thursday, January 24th Fly back to Rome Wizz Air Flight W6 2339 Confirmation RDGHMT Seat C1 Budapest (Terminal 2b)-> Rome Fiumicino 12:20 PM -> 2:10 PM",
+      "Friday, January 25th Home Delta Flight 1043 (Operated by Alitalia) Confirmation #GHFHPG FCO -> JFK (10 hours) 14J 2:45 -> 6:45 Delta Flight 2934 (Operated by Alitalia) JFK-> DCA 13D 8:30 PM -> 9:50 PM",
+    ].join(" "),
+  ].join("\n"),
+  type: "pdf_text" as const,
+};
+
 function createBaseDraft(sourceAnchors: SourceTransportAnchor[]) {
   return {
     [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
@@ -94,6 +108,97 @@ function createBaseDraft(sourceAnchors: SourceTransportAnchor[]) {
     },
   };
 }
+
+test("source anchors split merged PDF text into separate flight legs", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    longMergedFlightMaterial,
+  ]);
+  const fcoToJfk = anchors.find(
+    (anchor) =>
+      anchor.kind === "flight" &&
+      anchor.number === "1043" &&
+      anchor.departureLocation === "FCO" &&
+      anchor.arrivalLocation === "JFK"
+  );
+  const jfkToDca = anchors.find(
+    (anchor) =>
+      anchor.kind === "flight" &&
+      anchor.number === "2934" &&
+      anchor.departureLocation === "JFK" &&
+      anchor.arrivalLocation === "DCA"
+  );
+
+  assert.ok(fcoToJfk, "expected Delta 1043 FCO to JFK anchor");
+  assert.equal(fcoToJfk.date, "2019-01-25");
+  assert.equal(fcoToJfk.confirmation, "GHFHPG");
+  assert.equal(fcoToJfk.departureTime, "14:45");
+  assert.equal(fcoToJfk.arrivalTime, "18:45");
+  assert.ok(jfkToDca, "expected Delta 2934 JFK to DCA anchor");
+  assert.equal(jfkToDca.date, "2019-01-25");
+  assert.equal(jfkToDca.departureTime, "20:30");
+  assert.equal(jfkToDca.arrivalTime, "21:50");
+});
+
+test("source anchors create a missing flight leg instead of merging into an adjacent leg", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    longMergedFlightMaterial,
+  ]);
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
+        transport: anchors,
+      },
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-24",
+          city: "Rome",
+          leaveDate: "2019-01-25",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "DCA",
+          arrivalTime: "21:50",
+          confirmation: "GHFHPG",
+          date: "2019-01-25",
+          departure: "JFK",
+          departureTime: "20:30",
+          provider: "Delta",
+          title: "JFK to DCA",
+          type: "flight",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "return-flight-anchor-repair",
+  });
+
+  assert.ok(
+    records.transport.some(
+      (item) =>
+        item.transportType === "flight" &&
+        item.departureLocation === "FCO" &&
+        item.arrivalLocation === "JFK"
+    ),
+    "expected missing FCO to JFK flight to be created"
+  );
+  assert.ok(
+    records.transport.some(
+      (item) =>
+        item.transportType === "flight" &&
+        item.departureLocation === "JFK" &&
+        item.arrivalLocation === "DCA"
+    ),
+    "expected existing JFK to DCA flight to remain separate"
+  );
+});
 
 test("source anchors extract embedded visual train times from mixed PDF text", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([

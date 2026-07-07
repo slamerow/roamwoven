@@ -691,9 +691,16 @@ export function createReviewQuestions({
       return false;
     }
 
+    if (!isCorePlanningTarget({ subjectType, targetField })) {
+      return false;
+    }
+
     if (
-      subjectType !== "transport" ||
-      !isCorePlanningTarget({ subjectType, targetField })
+      subjectType !== "transport" &&
+      !(
+        subjectType === "item" &&
+        targetField.toLowerCase().includes("time")
+      )
     ) {
       return false;
     }

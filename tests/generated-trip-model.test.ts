@@ -4147,6 +4147,51 @@ test("generic time-bound reservation without an anchor stays a question", () => 
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
+test("already-filled activity times suppress stale model time questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          date: "2019-01-16",
+          description: "Reservation detail for U Maliru.",
+          itemType: "activity",
+          startTime: "13:00",
+          title: "Lunch at U Maliru",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "time",
+          confidence: "medium",
+          evidence:
+            "Lunch: U Maliru 1:00 PM. Reservation detail lists Restaurant U Maliru 1543.",
+          guessedValue: null,
+          prompt:
+            "What time was the Restaurant U Maliru 1543 reservation on January 2019-01-16?",
+          reason:
+            "The parser produced a stale missing-detail question even though the activity already has a start time.",
+          relatedTitle: "Restaurant U Maliru 1543",
+          subjectType: "item",
+          targetField: "startTime",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-known-activity-time",
+  });
+
+  assert.equal(records.items[0]?.startTime, "13:00");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("anchored time-bound card missing optional address stays out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

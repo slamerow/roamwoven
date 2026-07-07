@@ -96,6 +96,64 @@ function cleanLine(value: string) {
     .trim();
 }
 
+const DATE_HEADING_PATTERN =
+  /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?[,]?\s*(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:[,]?\s+\d{4})?\b/gi;
+
+function shouldSplitAtDateHeading(value: string, index: number, matchText: string) {
+  if (index <= 0) {
+    return false;
+  }
+
+  if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(matchText.trim())) {
+    return true;
+  }
+
+  const prefix = value.slice(0, index).trim();
+
+  if (/^(arrival|depart(?:ure)?|inbound|outbound|return)\W*$/i.test(prefix)) {
+    return false;
+  }
+
+  return prefix.length > 80;
+}
+
+function splitAtPattern(value: string, pattern: RegExp) {
+  const indexes = [...value.matchAll(pattern)]
+    .filter((match) =>
+      shouldSplitAtDateHeading(value, match.index ?? -1, match[0] ?? "")
+    )
+    .map((match) => match.index ?? -1);
+
+  if (indexes.length === 0) {
+    return [value];
+  }
+
+  const parts: string[] = [];
+  let start = 0;
+
+  for (const index of indexes) {
+    const part = value.slice(start, index).trim();
+
+    if (part) {
+      parts.push(part);
+    }
+
+    start = index;
+  }
+
+  const tail = value.slice(start).trim();
+
+  if (tail) {
+    parts.push(tail);
+  }
+
+  return parts;
+}
+
+function splitSourceLineForAnchors(value: string) {
+  return splitAtPattern(cleanLine(value), DATE_HEADING_PATTERN);
+}
+
 function uniqueValues<T>(values: T[]) {
   return Array.from(new Set(values));
 }
@@ -220,12 +278,20 @@ function parseDateFromText(value: string, defaultYear: number | null) {
 
 function inferDefaultYear(materials: TripExtractionMaterial[]) {
   for (const material of materials) {
-    const match = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?[,]?\s+(\d{4})\b/i.exec(
+    const datedMatch = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?[,]?\s+(\d{4})\b/i.exec(
       material.text
     );
 
-    if (match) {
-      return Number(match[1]);
+    if (datedMatch) {
+      return Number(datedMatch[1]);
+    }
+
+    const monthYearMatch = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{4})\b/i.exec(
+      material.text
+    );
+
+    if (monthYearMatch) {
+      return Number(monthYearMatch[1]);
     }
   }
 
@@ -267,12 +333,14 @@ function createSourceLines(materials: TripExtractionMaterial[]) {
         continue;
       }
 
-      lines.push({
-        line,
-        provenance,
-        sourceFilename: material.filename,
-        sourceUploadId: material.sourceUploadId ?? null,
-      });
+      for (const sourceLine of splitSourceLineForAnchors(line)) {
+        lines.push({
+          line: sourceLine,
+          provenance,
+          sourceFilename: material.filename,
+          sourceUploadId: material.sourceUploadId ?? null,
+        });
+      }
     }
   }
 
@@ -330,7 +398,7 @@ function getSignalKind(value: string): SourceTransportAnchorKind | null {
   return null;
 }
 
-function getBlock(lines: SourceLine[], index: number) {
+function getBlock(lines: SourceLine[], index: number, defaultYear: number | null) {
   const block: SourceLine[] = [];
 
   for (let cursor = Math.max(0, index - 3); cursor < lines.length; cursor += 1) {
@@ -340,7 +408,7 @@ function getBlock(lines: SourceLine[], index: number) {
 
     if (
       cursor > index + 2 &&
-      parseDateFromText(lines[cursor].line, null) &&
+      parseDateFromText(lines[cursor].line, defaultYear) &&
       !getSignalKind(lines[cursor].line)
     ) {
       break;
@@ -350,6 +418,43 @@ function getBlock(lines: SourceLine[], index: number) {
   }
 
   return block;
+}
+
+function flightSegmentMatches(value: string) {
+  return [
+    ...value.matchAll(
+      /\b(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}\s+)?Flight\s+[A-Z0-9]{1,3}\s?\d{2,4}\b/g
+    ),
+  ].filter((match) => typeof match.index === "number");
+}
+
+function splitSignalEntry(entry: SourceLine, kind: SourceTransportAnchorKind) {
+  if (kind !== "flight") {
+    return [entry];
+  }
+
+  const matches = flightSegmentMatches(entry.line);
+
+  if (matches.length <= 1) {
+    return [entry];
+  }
+
+  const firstIndex = matches[0]?.index ?? 0;
+  const prefix = entry.line.slice(0, firstIndex).trim();
+
+  return matches
+    .map((match, index) => {
+      const start = match.index ?? 0;
+      const end = matches[index + 1]?.index ?? entry.line.length;
+      const segment = entry.line.slice(start, end).trim();
+      const line = index === 0 && prefix ? `${prefix} ${segment}` : segment;
+
+      return {
+        ...entry,
+        line: cleanLine(line),
+      };
+    })
+    .filter((segment) => segment.line);
 }
 
 function extractTimedLocations(block: SourceLine[]) {
@@ -379,9 +484,73 @@ function extractAllTimes(block: SourceLine[]) {
   return uniqueValues(block.flatMap((entry) => extractClockTimesFromLine(entry.line)));
 }
 
+function addTwelveHours(time: string) {
+  const [hourText, minuteText] = time.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 1 ||
+    hour > 11
+  ) {
+    return time;
+  }
+
+  return `${String(hour + 12).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function adjustAmbiguousFlightTimes({
+  arrivalTime,
+  blockText,
+  departureTime,
+  kind,
+}: {
+  arrivalTime: string | null;
+  blockText: string;
+  departureTime: string | null;
+  kind: SourceTransportAnchorKind;
+}) {
+  if (kind !== "flight" || !departureTime || !arrivalTime) {
+    return { arrivalTime, departureTime };
+  }
+
+  const duration = /\((\d+(?:\.\d+)?)\s*hours?\)/i.exec(blockText);
+  const range = /\b\d{1,2}:\d{2}\s*(?:->|\u2192|to|-)\s*\d{1,2}:\d{2}\b/i.exec(
+    blockText
+  );
+
+  if (
+    !duration ||
+    Number(duration[1]) < 6 ||
+    !range ||
+    /\b(am|pm)\b/i.test(range[0])
+  ) {
+    return { arrivalTime, departureTime };
+  }
+
+  const departureHour = Number(departureTime.slice(0, 2));
+  const arrivalHour = Number(arrivalTime.slice(0, 2));
+
+  if (
+    departureHour >= 1 &&
+    departureHour <= 7 &&
+    arrivalHour >= 1 &&
+    arrivalHour <= 7
+  ) {
+    return {
+      arrivalTime: addTwelveHours(arrivalTime),
+      departureTime: addTwelveHours(departureTime),
+    };
+  }
+
+  return { arrivalTime, departureTime };
+}
+
 function extractConfirmation(blockText: string) {
   const match =
-    /\b(?:booking|confirmation|train)\s+(?:code|number|reference|ref)[:#]?\s*([a-z0-9-]{4,})\b/i.exec(
+    /\b(?:booking|confirmation|train)\s+(?:(?:code|number|reference|ref)\s*)?[:#]?\s*#?([a-z0-9-]{4,})\b/i.exec(
       blockText
     ) ?? /\b(?:code|booking)[:#]?\s*([a-z0-9-]{4,})\b/i.exec(blockText);
 
@@ -525,8 +694,14 @@ function createAnchorFromBlock({
   const times = extractAllTimes(block);
   const route = extractRouteFromText(kind, blockText);
   const providerAndNumber = extractProviderAndNumber(kind, blockText);
-  const departureTime = timedLocations[0]?.time ?? times[0] ?? null;
-  const arrivalTime = timedLocations[1]?.time ?? times[1] ?? null;
+  const rawDepartureTime = timedLocations[0]?.time ?? times[0] ?? null;
+  const rawArrivalTime = timedLocations[1]?.time ?? times[1] ?? null;
+  const { arrivalTime, departureTime } = adjustAmbiguousFlightTimes({
+    arrivalTime: rawArrivalTime,
+    blockText,
+    departureTime: rawDepartureTime,
+    kind,
+  });
   const departureLocation =
     timedLocations[0]?.location ?? route.departure ?? null;
   const arrivalLocation =
@@ -609,23 +784,28 @@ export function extractSourceTransportAnchorsFromMaterials(
       return;
     }
 
-    const anchor = createAnchorFromBlock({
-      block: getBlock(lines, index),
-      currentDate,
-      defaultYear,
-      index,
-      kind,
-    });
+    for (const signalEntry of splitSignalEntry(entry, kind)) {
+      const anchor = createAnchorFromBlock({
+        block:
+          signalEntry === entry
+            ? getBlock(lines, index, defaultYear)
+            : [signalEntry],
+        currentDate,
+        defaultYear,
+        index,
+        kind,
+      });
 
-    if (!anchor) {
-      return;
-    }
+      if (!anchor) {
+        continue;
+      }
 
-    const key = anchorDedupeKey(anchor);
-    const existing = anchors.get(key);
+      const key = anchorDedupeKey(anchor);
+      const existing = anchors.get(key);
 
-    if (!existing || filledAnchorScore(anchor) > filledAnchorScore(existing)) {
-      anchors.set(key, anchor);
+      if (!existing || filledAnchorScore(anchor) > filledAnchorScore(existing)) {
+        anchors.set(key, anchor);
+      }
     }
   });
 
@@ -724,6 +904,20 @@ function overlapScore(a: string | null | undefined, b: string | null | undefined
   return left.filter((token) => right.has(token)).length;
 }
 
+function routeTextForMatch(value: {
+  arrivalLocation: string | null;
+  departureLocation: string | null;
+  routeLabel: string;
+}) {
+  return [
+    value.routeLabel,
+    value.departureLocation,
+    value.arrivalLocation,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function sourceTransportAnchorMatchesRecord(
   anchor: SourceTransportAnchor,
   record: {
@@ -753,6 +947,12 @@ export function sourceTransportAnchorMatchesRecord(
   ]
     .filter(Boolean)
     .join(" ");
+  const recordRouteText = routeTextForMatch(record);
+  const anchorRouteText = routeTextForMatch(anchor);
+  const routeOverlap = overlapScore(anchorRouteText, recordRouteText);
+  const hasSpecificAnchorRoute = textTokens(anchorRouteText).length >= 2;
+  const hasSpecificRecordRoute = textTokens(recordRouteText).length >= 2;
+  const bothHaveSpecificRoutes = hasSpecificAnchorRoute && hasSpecificRecordRoute;
   const anchorText = [
     anchor.routeLabel,
     anchor.departureLocation,
@@ -765,21 +965,25 @@ export function sourceTransportAnchorMatchesRecord(
     .join(" ");
 
   if (
-    anchor.confirmation &&
-    record.confirmationLabel &&
-    normalizeText(anchor.confirmation) === normalizeText(record.confirmationLabel)
-  ) {
-    return true;
-  }
-
-  if (
     anchor.number &&
     normalizeText(recordText).includes(normalizeText(anchor.number))
   ) {
     return true;
   }
 
-  return overlapScore(anchorText, recordText) >= 1;
+  if (
+    anchor.confirmation &&
+    record.confirmationLabel &&
+    normalizeText(anchor.confirmation) === normalizeText(record.confirmationLabel)
+  ) {
+    return !bothHaveSpecificRoutes || routeOverlap >= 2;
+  }
+
+  if (routeOverlap >= 2) {
+    return true;
+  }
+
+  return !bothHaveSpecificRoutes && overlapScore(anchorText, recordText) >= 2;
 }
 
 function matchScore(anchor: SourceTransportAnchor, record: TripTransportRecord) {
