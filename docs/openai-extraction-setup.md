@@ -31,7 +31,7 @@ OPENAI_EXTRACTION_MODEL=gpt-5.4-mini
 OPENAI_OCR_MODEL=gpt-5.4-mini
 OPENAI_EXTRACTION_MAX_INPUT_CHARS=60000
 OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS=4000
-OPENAI_OCR_MAX_FILES_PER_RUN=3
+OPENAI_OCR_MAX_FILES_PER_RUN=20
 ROAMWOVEN_ENABLE_AI_EXTRACTION=false
 ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS=e50f7e93-b2e9-4b8c-9097-92fce402d885
 ```
@@ -55,7 +55,7 @@ Also keep it `false` until the production database has the additive extraction t
 - Checkpoint each uploaded material before the model call as text-ready, OCR-needed, unsupported, or failed. The maker still sees one build action; this is internal durability. Material triage uses bounded concurrency so multi-file trips do not process purely serially or spike all uploads at once.
 - Normalize materials before the AI call by removing repeated document boilerplate and trimming each material plus the total bundle to `OPENAI_EXTRACTION_MAX_INPUT_CHARS`.
 - Store internal material-budget and material-checkpoint telemetry on `trip_processing_runs.openai_usage`, including raw characters, submitted characters, estimated per-pass input tokens, estimated staged-run input tokens, trimmed material count, and checkpoint status counts. This belongs in future admin/support tooling, not customer-facing maker or traveler UI.
-- Run a capped OCR pass for OCR-needed materials before the trip draft model call. OCR output is written back to the material checkpoint as `text_ready`; the model still receives normalized extracted text, not raw files.
+- Run OCR for all OCR-needed materials before the trip draft model call. `OPENAI_OCR_MAX_FILES_PER_RUN` controls batch size, not permission to silently skip the rest. OCR output is written back to the material checkpoint as `text_ready`; the model still receives normalized extracted text, not raw files.
 - Cap input characters/pages/files for the first beta.
 - Treat reprocessing as explicit and limited.
 - Prefer cheap first-pass extraction; allow higher-cost reruns only when needed for quality.

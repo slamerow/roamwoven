@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   completeMaterialExtractionOcr,
   failMaterialExtractionOcr,
+  getMaterialOcrReadinessIssue,
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
   type MaterialExtractionRecord,
@@ -258,7 +259,7 @@ export default async function run() {
     }
   });
 
-  await test("failed OCR keeps readable PDF text available for extraction", async () => {
+  await test("failed OCR preserves fallback text for debug but blocks extraction", async () => {
     const originalCreateSupabaseServerClient =
       require("@/lib/supabase/server").createSupabaseServerClient;
 
@@ -299,13 +300,71 @@ export default async function run() {
         }),
       });
 
-      assert.equal(record.status, "text_ready");
-      assert.equal(record.extractionMethod, "pdf_text");
+      assert.equal(record.status, "failed");
+      assert.equal(record.extractionMethod, "ocr");
       assert.equal(record.textContent, "Readable PDF text survives.");
-      assert.equal(record.metadata.ocrFailedButPdfTextReady, true);
+      assert.equal(record.metadata.ocrFailedTextFallbackAvailable, true);
+      assert.equal(
+        materialFromCheckpoint({
+          filename: "image-rich.pdf",
+          record,
+          type: "pdf_text",
+        }),
+        null
+      );
     } finally {
       require("@/lib/supabase/server").createSupabaseServerClient =
         originalCreateSupabaseServerClient;
     }
+  });
+
+  await test("pending OCR checkpoints block model extraction readiness", () => {
+    assert.equal(
+      getMaterialOcrReadinessIssue([
+        checkpoint({
+          failureClass: "ocr_backfill_needed",
+          status: "ocr_needed",
+          textContent: "Readable PDF text while OCR is pending.",
+        }),
+      ]),
+      "ocr-incomplete"
+    );
+
+    assert.equal(
+      getMaterialOcrReadinessIssue([
+        checkpoint({
+          status: "ocr_processing",
+          textContent: "Readable PDF text while OCR is processing.",
+        }),
+      ]),
+      "ocr-incomplete"
+    );
+  });
+
+  await test("OCR failures block model extraction readiness", () => {
+    assert.equal(
+      getMaterialOcrReadinessIssue([
+        checkpoint({
+          extractionMethod: "ocr",
+          failureClass: "ocr_no_embedded_image_text",
+          metadata: { ocrProvider: "test-ocr" },
+          status: "failed",
+          textContent: "Readable fallback text.",
+        }),
+      ]),
+      "ocr-failed"
+    );
+
+    assert.equal(
+      getMaterialOcrReadinessIssue([
+        checkpoint({
+          extractionMethod: "pdf_text",
+          failureClass: "pdf_text_extract_failed",
+          status: "failed",
+          textContent: null,
+        }),
+      ]),
+      null
+    );
   });
 }

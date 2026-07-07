@@ -52,7 +52,7 @@ export function getOpenAIConfig() {
       "gpt-5.4-mini",
     ocrMaxFilesPerRun: getOptionalPositiveInteger(
       "OPENAI_OCR_MAX_FILES_PER_RUN",
-      3
+      20
     ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",

@@ -14,6 +14,7 @@ const OCR_PROVIDER = "openai-responses";
 const MAX_OCR_FILE_BYTES = 10 * 1024 * 1024;
 
 export type TripOcrProcessingSummary = {
+  batches: number;
   completed: number;
   failed: number;
   skipped: number;
@@ -44,6 +45,38 @@ function getFailureClass(error: unknown) {
   }
 
   return "ocr_failed";
+}
+
+function normalizeForComparison(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function requiresEmbeddedImageBackfill(record: MaterialExtractionRecord) {
+  return (
+    record.failureClass === "ocr_backfill_needed" &&
+    Number(record.metadata.largeEmbeddedImageCount ?? 0) > 0
+  );
+}
+
+function hasMeaningfulBackfillText({
+  existingText,
+  ocrText,
+}: {
+  existingText: string | null;
+  ocrText: string;
+}) {
+  const existing = normalizeForComparison(existingText ?? "");
+  const ocr = normalizeForComparison(ocrText);
+
+  if (!existing) {
+    return Boolean(ocr);
+  }
+
+  if (!ocr || existing === ocr || existing.includes(ocr)) {
+    return false;
+  }
+
+  return true;
 }
 
 async function processOcrRecord({
@@ -120,6 +153,32 @@ async function processOcrRecord({
     });
     const durationMs = Date.now() - startedAt;
 
+    if (
+      requiresEmbeddedImageBackfill(claimedRecord) &&
+      !hasMeaningfulBackfillText({
+        existingText: claimedRecord.textContent,
+        ocrText: result.text,
+      })
+    ) {
+      await failMaterialExtractionOcr({
+        errorMessage:
+          "OCR did not return new text beyond the PDF text layer for a PDF with embedded images.",
+        failureClass: "ocr_no_embedded_image_text",
+        metadata: {
+          durationMs,
+          fileName: upload.originalFilename,
+          fileSizeBytes: upload.fileSizeBytes,
+          fileType: upload.fileType,
+          model: result.model,
+          usage: result.usage,
+        },
+        provider: OCR_PROVIDER,
+        record: claimedRecord,
+      });
+
+      return { status: "failed" as const, usage: null };
+    }
+
     await completeMaterialExtractionOcr({
       metadata: {
         durationMs,
@@ -168,46 +227,61 @@ export async function processTripOcrNeededMaterials({
   uploads: TripUpload[];
 }): Promise<TripOcrProcessingSummary> {
   const config = getOpenAIConfig();
-  const records = await listOcrNeededMaterialExtractions({
-    limit: config.ocrMaxFilesPerRun,
-    tripId,
-  });
   const uploadsById = getUploadById(uploads);
   const summary: TripOcrProcessingSummary = {
     attempted: 0,
+    batches: 0,
     completed: 0,
     failed: 0,
     skipped: 0,
     usage: [],
   };
+  const seenRecordIds = new Set<string>();
 
-  for (const record of records) {
-    const upload = uploadsById.get(record.uploadId);
+  while (true) {
+    const records = await listOcrNeededMaterialExtractions({
+      limit: config.ocrMaxFilesPerRun,
+      tripId,
+    });
+    const unprocessedRecords = records.filter(
+      (record) => !seenRecordIds.has(record.id)
+    );
 
-    if (!upload) {
-      await failMaterialExtractionOcr({
-        errorMessage: "Source upload is missing for OCR material.",
-        failureClass: "missing_upload",
-        provider: OCR_PROVIDER,
-        record,
-      });
-      summary.failed += 1;
-      continue;
+    if (unprocessedRecords.length === 0) {
+      break;
     }
 
-    summary.attempted += 1;
-    const result = await processOcrRecord({ record, upload });
+    summary.batches += 1;
 
-    if (result.status === "completed") {
-      summary.completed += 1;
-    } else if (result.status === "failed") {
-      summary.failed += 1;
-    } else {
-      summary.skipped += 1;
-    }
+    for (const record of unprocessedRecords) {
+      seenRecordIds.add(record.id);
+      const upload = uploadsById.get(record.uploadId);
 
-    if (result.usage) {
-      summary.usage.push(result.usage);
+      if (!upload) {
+        await failMaterialExtractionOcr({
+          errorMessage: "Source upload is missing for OCR material.",
+          failureClass: "missing_upload",
+          provider: OCR_PROVIDER,
+          record,
+        });
+        summary.failed += 1;
+        continue;
+      }
+
+      summary.attempted += 1;
+      const result = await processOcrRecord({ record, upload });
+
+      if (result.status === "completed") {
+        summary.completed += 1;
+      } else if (result.status === "failed") {
+        summary.failed += 1;
+      } else {
+        summary.skipped += 1;
+      }
+
+      if (result.usage) {
+        summary.usage.push(result.usage);
+      }
     }
   }
 

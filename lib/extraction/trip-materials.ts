@@ -13,6 +13,9 @@ const MAX_TEXT_FILE_BYTES = 250 * 1024;
 const MAX_PDF_FILE_BYTES = 10 * 1024 * 1024;
 const MIN_READABLE_PDF_TEXT_LENGTH = 50;
 const MATERIAL_EXTRACTION_CONCURRENCY = 3;
+const MIN_LARGE_PDF_IMAGE_AREA = 30000;
+const MIN_LARGE_PDF_IMAGE_HEIGHT = 80;
+const MIN_LARGE_PDF_IMAGE_WIDTH = 180;
 
 class MinimalDOMMatrix {
   a = 1;
@@ -168,7 +171,47 @@ export async function getTextFileExtractionMaterials(
   return materials;
 }
 
-async function extractPdfText(file: Blob) {
+type PdfExtractionResult = {
+  embeddedImageCount: number;
+  largeEmbeddedImageCount: number;
+  pageCount: number;
+  text: string;
+};
+
+function getPdfImageOperatorCodes(pdfjs: unknown) {
+  const ops =
+    pdfjs && typeof pdfjs === "object" && "OPS" in pdfjs
+      ? ((pdfjs as { OPS?: Record<string, number> }).OPS ?? {})
+      : {};
+
+  return new Set(
+    [
+      ops.paintImageXObject,
+      ops.paintImageMaskXObject,
+      ops.paintInlineImageXObject,
+      ops.paintInlineImageXObjectGroup,
+      ops.paintJpegXObject,
+      ops.paintXObject,
+    ].filter((code): code is number => typeof code === "number")
+  );
+}
+
+function isLargePdfImage(args: unknown[] | undefined) {
+  if (!Array.isArray(args)) {
+    return false;
+  }
+
+  const width = Number(args[1] ?? 0);
+  const height = Number(args[2] ?? 0);
+
+  return (
+    width >= MIN_LARGE_PDF_IMAGE_WIDTH &&
+    height >= MIN_LARGE_PDF_IMAGE_HEIGHT &&
+    width * height >= MIN_LARGE_PDF_IMAGE_AREA
+  );
+}
+
+async function extractPdfText(file: Blob): Promise<PdfExtractionResult> {
   ensurePdfParserGlobals();
 
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -182,6 +225,9 @@ async function extractPdfText(file: Blob) {
   const document = await task.promise;
 
   try {
+    const imageOperatorCodes = getPdfImageOperatorCodes(pdfjs);
+    let embeddedImageCount = 0;
+    let largeEmbeddedImageCount = 0;
     const pages: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
@@ -196,10 +242,30 @@ async function extractPdfText(file: Blob) {
         pages.push(text);
       }
 
+      if (imageOperatorCodes.size > 0) {
+        const operatorList = await page.getOperatorList();
+        operatorList.fnArray.forEach((code, index) => {
+          if (!imageOperatorCodes.has(Number(code))) {
+            return;
+          }
+
+          embeddedImageCount += 1;
+
+          if (isLargePdfImage(operatorList.argsArray[index])) {
+            largeEmbeddedImageCount += 1;
+          }
+        });
+      }
+
       page.cleanup();
     }
 
-    return pages.join("\n\n").trim();
+    return {
+      embeddedImageCount,
+      largeEmbeddedImageCount,
+      pageCount: document.numPages,
+      text: pages.join("\n\n").trim(),
+    };
   } finally {
     await document.destroy();
   }
@@ -229,14 +295,18 @@ export async function getPdfExtractionMaterials(
     }
 
     try {
-      const text = await extractPdfText(data);
+      const result = await extractPdfText(data);
+      const text = result.text;
 
       if (text.length >= MIN_READABLE_PDF_TEXT_LENGTH) {
         console.info("trip_material_pdf_text_extracted", {
-          charCount: text.length,
-          fileName: upload.originalFilename,
-          tripId: upload.tripId,
-        });
+              charCount: text.length,
+              embeddedImageCount: result.embeddedImageCount,
+              fileName: upload.originalFilename,
+              largeEmbeddedImageCount: result.largeEmbeddedImageCount,
+              pageCount: result.pageCount,
+              tripId: upload.tripId,
+            });
         materials.push({
           filename: upload.originalFilename,
           sourceUploadId: upload.id,
@@ -404,23 +474,36 @@ export async function getTripExtractionMaterials(uploads: TripUpload[]) {
         }
 
         try {
-          const text = await extractPdfText(data);
+          const result = await extractPdfText(data);
+          const text = result.text;
           const readable = text.length >= MIN_READABLE_PDF_TEXT_LENGTH;
+          const hasLargeEmbeddedImages = result.largeEmbeddedImageCount > 0;
+          const needsOcr = hasLargeEmbeddedImages || !readable;
           const record = await upsertMaterialExtractionCheckpoint({
             extractedCharCount: text.length,
             extractionMethod: "pdf_text",
-            failureClass: readable
-              ? "ocr_backfill_needed"
-              : "pdf_text_too_sparse",
+            failureClass: needsOcr
+              ? readable
+                ? "ocr_backfill_needed"
+                : "pdf_text_too_sparse"
+              : null,
             metadata: {
+              embeddedImageCount: result.embeddedImageCount,
               fileName: upload.originalFilename,
               fileSizeBytes: upload.fileSizeBytes,
               fileType: upload.fileType,
-              ocrBackfillRequested: readable,
+              largeEmbeddedImageCount: result.largeEmbeddedImageCount,
+              ocrBackfillRequested: needsOcr,
+              ocrRequiredReason: hasLargeEmbeddedImages
+                ? "large_embedded_images"
+                : readable
+                  ? null
+                  : "pdf_text_too_sparse",
+              pageCount: result.pageCount,
               minReadableTextLength: MIN_READABLE_PDF_TEXT_LENGTH,
               pdfTextCharCount: text.length,
             },
-            status: "ocr_needed",
+            status: needsOcr ? "ocr_needed" : "text_ready",
             textContent: readable ? text : null,
             tripId: upload.tripId,
             uploadId: upload.id,

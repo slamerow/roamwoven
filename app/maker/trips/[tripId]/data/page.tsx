@@ -1068,6 +1068,14 @@ function getExtractionErrorMessage(error?: string) {
     return "These saved materials look like scans or images, so Roamwoven needs the image-reading step before it can build the draft.";
   }
 
+  if (error === "ocr-incomplete") {
+    return "Roamwoven still has source screenshots or image-heavy PDFs to read before it can build this draft. Retry after the image-reading step finishes.";
+  }
+
+  if (error === "ocr-failed") {
+    return "Roamwoven could not read one or more screenshot/image sources. Retry the build; if it repeats, the source file or OCR setup needs attention before we create the draft.";
+  }
+
   if (error === "checkout-required") {
     return "Checkout must be complete before parsing.";
   }

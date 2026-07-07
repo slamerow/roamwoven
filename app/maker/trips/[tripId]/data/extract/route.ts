@@ -23,7 +23,10 @@ import {
   optimizeTripExtractionMaterials,
   type MaterialBudgetSummary,
 } from "@/lib/extraction/material-budget";
-import { listMaterialExtractionCheckpoints } from "@/lib/extraction/material-extractions";
+import {
+  getMaterialOcrReadinessIssue,
+  listMaterialExtractionCheckpoints,
+} from "@/lib/extraction/material-extractions";
 import { processTripOcrNeededMaterials } from "@/lib/extraction/ocr-processor";
 import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
@@ -173,6 +176,25 @@ export async function POST(
 
   if ((materialCheckpointSummary.byStatus.ocr_needed ?? 0) > 0) {
     ocrSummary = await processTripOcrNeededMaterials({ tripId, uploads });
+    materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
+    materialCheckpointSummary =
+      summarizeMaterialCheckpoints(materialCheckpoints);
+  }
+
+  const ocrReadinessIssue = getMaterialOcrReadinessIssue(materialCheckpoints);
+
+  if (ocrReadinessIssue) {
+    console.warn("trip_extraction_ocr_not_ready", {
+      ocrSummary,
+      statusCounts: materialCheckpointSummary.byStatus,
+      failureClasses: materialCheckpointSummary.failureClasses,
+      tripId,
+    });
+
+    return redirectToData(request, tripId, { error: ocrReadinessIssue });
+  }
+
+  if (ocrSummary) {
     materials = await getTripExtractionMaterials(uploads);
     materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
     materialCheckpointSummary =

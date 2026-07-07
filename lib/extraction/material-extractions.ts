@@ -46,6 +46,8 @@ export type MaterialExtractionCheckpointInput = {
   uploadId: string;
 };
 
+export type MaterialOcrReadinessIssue = "ocr-failed" | "ocr-incomplete" | null;
+
 type MaterialExtractionRow = {
   id: string;
   completed_at: string | null;
@@ -179,6 +181,36 @@ function combineExtractedText({
     "[OCR text from embedded images]",
     ocr,
   ].join("\n\n");
+}
+
+function isOcrRelatedFailure(record: MaterialExtractionRecord) {
+  if (record.status !== "failed") {
+    return false;
+  }
+
+  return Boolean(
+    record.extractionMethod === "ocr" ||
+      record.metadata.ocrProvider ||
+      record.metadata.ocrBackfillRequested ||
+      record.metadata.ocrFailedTextFallbackAvailable ||
+      record.failureClass?.includes("ocr") ||
+      record.failureClass?.startsWith("openai_")
+  );
+}
+
+export function getMaterialOcrReadinessIssue(
+  records: MaterialExtractionRecord[]
+): MaterialOcrReadinessIssue {
+  if (
+    records.some(
+      (record) =>
+        record.status === "ocr_needed" || record.status === "ocr_processing"
+    )
+  ) {
+    return "ocr-incomplete";
+  }
+
+  return records.some(isOcrRelatedFailure) ? "ocr-failed" : null;
 }
 
 export async function upsertMaterialExtractionCheckpoint(
@@ -375,16 +407,16 @@ export async function failMaterialExtractionOcr({
     return upsertMaterialExtractionCheckpoint({
       errorMessage,
       extractedCharCount: record.textContent.trim().length,
-      extractionMethod: "pdf_text",
-      failureClass: `${failureClass}_pdf_text_fallback`,
+      extractionMethod: "ocr",
+      failureClass,
       metadata: {
         ...record.metadata,
         ...metadata,
         ocrErrorMessage: errorMessage,
-        ocrFailedButPdfTextReady: true,
+        ocrFailedTextFallbackAvailable: true,
         ocrProvider: provider,
       },
-      status: "text_ready",
+      status: "failed",
       textContent: record.textContent,
       tripId: record.tripId,
       uploadId: record.uploadId,
