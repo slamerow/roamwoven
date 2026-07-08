@@ -827,9 +827,9 @@ function StructuredRecordReview({
                 These are reasonable itinerary calls Roamwoven used to keep the
                 draft moving. No action needed unless something looks wrong.
               </p>
-              <div className="mt-3 grid gap-2">
+              <div className="mt-3 grid max-h-[36rem] gap-2 overflow-y-auto pr-1">
                 {noteSections.flatMap((section) =>
-                  section.items.slice(0, 6).map((item) => (
+                  section.items.map((item) => (
                     <div
                       className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-ink/65"
                       key={item.id}
@@ -857,19 +857,6 @@ function StructuredRecordReview({
                     </div>
                   ))
                 )}
-                {noteSections.reduce(
-                  (count, section) => count + section.items.length,
-                  0
-                ) > 6 ? (
-                  <p className="px-3 text-xs font-semibold text-ink/40">
-                    +
-                    {noteSections.reduce(
-                      (count, section) => count + section.items.length,
-                      0
-                    ) - 6}{" "}
-                    more
-                  </p>
-                ) : null}
               </div>
             </div>
           </div>

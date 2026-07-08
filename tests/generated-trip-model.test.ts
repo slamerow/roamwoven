@@ -1150,6 +1150,55 @@ test("wrong-city loose mentions move to the explicitly named city note", () => {
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
+test("wrong-city notes honor explicit source city instead of the dated city", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          city: "Budapest",
+          date: "2019-01-24",
+          description:
+            "Loose local tip from the Budapest source section.",
+          itemType: "activity",
+          title: "Budapest local note",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-21",
+          city: "Budapest",
+          leaveDate: "2019-01-24",
+        },
+        {
+          arriveDate: "2019-01-24",
+          city: "Rome",
+          leaveDate: "2019-01-25",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-wrong-city-explicit-city-note",
+  });
+  const budapestNote = records.items.find(
+    (item) => item.title === "Budapest Notes & Tips"
+  );
+  const romeNote = records.items.find(
+    (item) => item.title === "Rome Notes & Tips"
+  );
+
+  assert.ok(budapestNote);
+  assert.match(budapestNote?.description ?? "", /Budapest source section/i);
+  assert.equal(Boolean(romeNote?.description?.includes("Budapest")), false);
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("wrong-city anchored activities become placement questions", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -4192,6 +4241,50 @@ test("already-filled activity times suppress stale model time questions", () => 
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
+test("usable walking tour cards suppress missing brand or title questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          date: "2019-01-15",
+          description: "Walking tour in the morning 9:00 AM ($20).",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Morning walking tour",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence:
+            "Walking tour in the morning 9:00 AM ($20). The source gives a time and price but no tour name or provider.",
+          guessedValue: null,
+          prompt: "What is the name of the morning walking tour on January 15th?",
+          reason:
+            "The source gives a time and price but no tour name or provider, so the activity is not fully identifiable.",
+          relatedTitle: "Walking tour in the morning",
+          subjectType: "item",
+          targetField: "title",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-walking-tour-optional-title",
+  });
+
+  assert.equal(records.items[0]?.title, "Morning walking tour");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("anchored time-bound card missing optional address stays out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -4586,6 +4679,74 @@ test("high-confidence parser calls become notes instead of review questions", ()
     notes?.items[0]?.title,
     "We treated the first trip day as starting with the overnight flight on January 12."
   );
+});
+
+test("routine assembly facts stay out of maker-facing calls", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "high",
+          evidence:
+            "The final transport on January 25th is the return flight home.",
+          guessedValue: "2019-01-25",
+          prompt: "We treated the return flight day as the trip end date.",
+          reason:
+            "The itinerary sequence ends with the home flight, so no maker decision is needed.",
+          relatedTitle: null,
+          subjectType: "trip",
+          targetField: "endDate",
+        },
+        {
+          answerType: "confirm",
+          confidence: "high",
+          evidence:
+            "Budget lines and the itinerary sequence place Budapest from January 21st through January 24th.",
+          guessedValue: "2019-01-21 to 2019-01-24",
+          prompt:
+            "We treated the Budapest stay as January 21st through January 24th based on the itinerary sequence and listed stay nights budget lines.",
+          reason:
+            "The stay dates are source-backed routine assembly, not a presentation choice.",
+          relatedTitle: "Budapest stay",
+          subjectType: "stay",
+          targetField: "dateRange",
+        },
+        {
+          answerType: "confirm",
+          confidence: "high",
+          evidence:
+            "The Rome landing and bag drop are the first Rome logistics on January 13th.",
+          guessedValue: "2019-01-13",
+          prompt:
+            "We treated the Rome landing and bag drop as the start of the Rome stay on January 13th.",
+          reason:
+            "The source sequence makes this routine stay context.",
+          relatedTitle: "Rome stay",
+          subjectType: "stay",
+          targetField: "checkInDate",
+        },
+      ],
+      places: [],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-routine-calls",
+  });
+  const sections = getStructuredReviewSections(records);
+
+  assert.deepEqual(
+    records.reviewQuestions.map((question) => question.status),
+    ["dismissed", "dismissed", "dismissed"]
+  );
+  assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("question-shaped stay prompts stay questions instead of calls", () => {

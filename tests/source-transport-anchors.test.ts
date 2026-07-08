@@ -52,7 +52,15 @@ const longMergedFlightMaterial = {
   type: "pdf_text" as const,
 };
 
-function createBaseDraft(sourceAnchors: SourceTransportAnchor[]) {
+function createBaseDraft(
+  sourceAnchors: SourceTransportAnchor[],
+  options: { confirmation?: string | null } = {}
+) {
+  const confirmation =
+    Object.prototype.hasOwnProperty.call(options, "confirmation")
+      ? options.confirmation
+      : "1beb5005";
+
   return {
     [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
       transport: sourceAnchors,
@@ -91,7 +99,7 @@ function createBaseDraft(sourceAnchors: SourceTransportAnchor[]) {
       {
         arrival: null,
         arrivalTime: null,
-        confirmation: "1beb5005",
+        confirmation,
         date: "2019-01-18",
         departure: null,
         departureTime: null,
@@ -249,6 +257,38 @@ test("source anchors repair transport and suppress already-answered time questio
   const fingerprints = createTripExtractionFingerprints(records);
   assert.deepEqual(fingerprints.openQuestions, []);
   assert.equal(fingerprints.transport.length, 1);
+});
+
+test("source anchors enrich generic transport rows instead of duplicating them", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    embeddedTrainMaterial,
+  ]);
+  const records = createStructuredTripRecordsFromDraft({
+    draft: createBaseDraft(anchors, { confirmation: null }),
+    fallbackTripName: "Central Europe",
+    tripId: "source-anchor-generic-repair",
+  });
+  const trains = records.transport.filter(
+    (item) => item.transportType === "train"
+  );
+  const train = trains[0];
+
+  assert.equal(trains.length, 1);
+  assert.ok(train, "expected generic train row to survive as the repaired row");
+  assert.equal(train.routeLabel, "Train to Vienna");
+  assert.equal(train.departureTime, "09:20");
+  assert.equal(train.arrivalTime, "13:23");
+  assert.equal(train.departureLocation, "Praha, Hlavni Nadrazi");
+  assert.equal(train.arrivalLocation, "Wien, Hauptbahnhof");
+  assert.equal(train.provider, "RegioJet");
+  assert.equal(
+    records.reviewQuestions.some(
+      (question) =>
+        question.status === "open" &&
+        question.prompt.includes("Train to Vienna")
+    ),
+    false
+  );
 });
 
 test("audit flags source-backed transport anchors missing from final records", () => {

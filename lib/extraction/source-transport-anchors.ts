@@ -918,6 +918,28 @@ function routeTextForMatch(value: {
     .join(" ");
 }
 
+function isGenericTransportRouteLabel(
+  value: string | null | undefined,
+  transportType: string | null | undefined
+) {
+  const normalized = normalizeText(value);
+  const type = normalizeText(transportType);
+
+  if (!normalized || !type) {
+    return false;
+  }
+
+  return (
+    normalized === type ||
+    normalized === `${type} to` ||
+    normalized.startsWith(`${type} to `) ||
+    normalized.startsWith(`${type} from `) ||
+    /^(?:flight|train|bus|ferry|transfer|drive|transport)(?:\s+(?:to|from)\s+[a-z0-9 ]+)?$/.test(
+      normalized
+    )
+  );
+}
+
 export function sourceTransportAnchorMatchesRecord(
   anchor: SourceTransportAnchor,
   record: {
@@ -983,6 +1005,14 @@ export function sourceTransportAnchorMatchesRecord(
     return true;
   }
 
+  if (
+    routeOverlap >= 1 &&
+    !bothHaveSpecificRoutes &&
+    isGenericTransportRouteLabel(record.routeLabel, record.transportType)
+  ) {
+    return true;
+  }
+
   return !bothHaveSpecificRoutes && overlapScore(anchorText, recordText) >= 2;
 }
 
@@ -1008,6 +1038,13 @@ function matchScore(anchor: SourceTransportAnchor, record: TripTransportRecord) 
   score += overlapScore(anchor.routeLabel, record.routeLabel);
   score += overlapScore(anchor.departureLocation, record.departureLocation);
   score += overlapScore(anchor.arrivalLocation, record.arrivalLocation);
+
+  if (
+    overlapScore(routeTextForMatch(anchor), routeTextForMatch(record)) >= 1 &&
+    isGenericTransportRouteLabel(record.routeLabel, record.transportType)
+  ) {
+    score += 2;
+  }
 
   return score;
 }

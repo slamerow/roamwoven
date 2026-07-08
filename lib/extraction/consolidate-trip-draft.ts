@@ -1581,6 +1581,24 @@ function cityForPlace(place: DraftObject) {
   return getString(place, "city") ?? getString(place, "displayName");
 }
 
+function findCityOverridePlace(activity: DraftObject, places: DraftObject[]) {
+  const overrideCity = normalizeText(
+    getString(activity, "_cityOverride") ??
+      getString(activity, "city") ??
+      getString(activity, "locationName")
+  );
+
+  if (!overrideCity) {
+    return null;
+  }
+
+  return (
+    places.find(
+      (place) => normalizeText(cityForPlace(place)) === overrideCity
+    ) ?? null
+  );
+}
+
 function findDatePlace(activity: DraftObject, places: DraftObject[]) {
   return places.find((place) => placeContainsDate(place, dateFor(activity))) ?? null;
 }
@@ -1589,6 +1607,7 @@ function findExplicitCityPlace(activity: DraftObject, places: DraftObject[]) {
   const text = normalizeText(textFor(activity));
 
   return (
+    findCityOverridePlace(activity, places) ??
     places.find((place) => {
       const city = normalizeText(cityForPlace(place));
       return Boolean(city && text.includes(city));
@@ -1598,6 +1617,12 @@ function findExplicitCityPlace(activity: DraftObject, places: DraftObject[]) {
 
 function findCityForActivity(activity: DraftObject, places: DraftObject[]) {
   const text = normalizeText(textFor(activity));
+  const overridePlace = findCityOverridePlace(activity, places);
+
+  if (overridePlace) {
+    return cityForPlace(overridePlace);
+  }
+
   const directPlace = places.find((place) => {
     const city = normalizeText(cityForPlace(place));
     return Boolean(city && text.includes(city));
@@ -1895,6 +1920,7 @@ function reconcileWrongCityAssignments({
     if (shouldMoveToCityNotes) {
       return {
         ...activity,
+        _cityOverride: explicitCity,
         date: null,
         description: appendUniqueSentence(getString(activity, "description"), title),
         itemType: "note",

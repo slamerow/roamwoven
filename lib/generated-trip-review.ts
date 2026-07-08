@@ -937,8 +937,15 @@ export function getStructuredReviewSections(
             records,
           }),
           detail:
-            item.description ??
-            "This card needs a date or enough detail to place it in the traveler app.",
+            item.date
+              ? item.description ??
+                "This card needs enough detail to place it in the traveler app."
+              : [
+                item.description,
+                "Missing date: choose the day this should appear in the traveler app.",
+              ]
+                .filter(Boolean)
+                .join("\n"),
           editFields: [
             field({ label: "Title", name: "title", value: item.title }),
             field({

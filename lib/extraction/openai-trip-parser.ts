@@ -86,6 +86,7 @@ const tripDraftSchema = {
           category: {
             enum: TRIP_CATEGORY_IDS,
           },
+          city: { type: ["string", "null"] },
           date: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           endTime: { type: ["string", "null"] },
@@ -106,6 +107,7 @@ const tripDraftSchema = {
         required: [
           "address",
           "category",
+          "city",
           "date",
           "description",
           "endTime",
@@ -299,6 +301,7 @@ const systemPrompt = [
   "Do not invent details. Use null when a date, time, address, provider, or confirmation is missing.",
   "Preserve the traveler's mental model, but do not create activity cards that merely summarize a whole day. Full-day overview, theme, and day-title lines belong outside activities; extract the concrete traveler cards instead.",
   "For every traveler card in activities, set itemType to activity, note, admin, rest_day, social, or placeholder. Dining reservations, restaurants, cafes, bars, winery visits, and meal plans should usually be itemType activity with category food_dining.",
+  "For every traveler card in activities, set city to the specific trip city/leg named by the source chunk or surrounding source header when clear; set city to null when the source does not clearly indicate one. Do not guess city from public landmark knowledge.",
   `For every traveler card, also set category to the traveler-browse bucket, not the record type. Allowed category values are: ${TRIP_CATEGORY_IDS.join(", ")}.`,
   "Never use activity, note, or transport as a category. Those can be item types or separate transport records, but card categories should answer where a traveler would browse the plan.",
   "Use arrival_departure for flights, train transfers, airport/station arrivals, rental car pickup/dropoff, lodging check-ins, and explicit drop-bags cards that need to appear in the daily traveler timeline.",

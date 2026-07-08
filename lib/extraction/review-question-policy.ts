@@ -58,6 +58,26 @@ function isNonObviousCallEvidence(...values: Array<string | null>) {
   );
 }
 
+function isRoutineAssemblyFactCall(text: string) {
+  if (
+    /\b(grouped|merged|suppressed|hid|hidden|kept .* own date|chunk header|wrong[-\s]?city|conflict|conflicting|ticket choice|ticket decision|which ticket|needs review)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(return flight day|trip end date|trip end|final [a-z0-9 ]*night|last [a-z0-9 ]*night|stay nights budget|landing and bag drop)\b/.test(
+      text
+    ) ||
+    /\btreated\b.*\bstay\b.*\b(?:through|to|start|beginning)\b/.test(text) ||
+    /\bstay\b.*\b(?:through|to)\b.*\bbased on\b.*\b(?:itinerary sequence|stay nights)\b/.test(
+      text
+    )
+  );
+}
+
 function isObviousFactCall({
   confidence,
   evidence,
@@ -99,6 +119,10 @@ function isObviousFactCall({
       ))
   ) {
     return false;
+  }
+
+  if (isRoutineAssemblyFactCall(text)) {
+    return true;
   }
 
   if (isNonObviousCallEvidence(prompt, reason, evidence)) {
@@ -192,6 +216,7 @@ function isPrivacyPolicyQuestion({
 }
 
 function isDismissibleOptionalMissingDetail({
+  evidence,
   hasUsableAnchor,
   prompt,
   reason,
@@ -199,6 +224,7 @@ function isDismissibleOptionalMissingDetail({
   subjectType,
   targetField,
 }: {
+  evidence: string | null;
   hasUsableAnchor: boolean;
   prompt: string | null;
   reason: string | null;
@@ -207,10 +233,21 @@ function isDismissibleOptionalMissingDetail({
   targetField: string | null;
 }) {
   const target = targetField?.toLowerCase().split("/").pop() ?? "";
-  const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
+  const text = [prompt, reason, evidence, targetField]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
   const hasTextualTransportAnchor =
     subjectType === "transport" &&
     /\b(address|airport|confirmation|location|pickup|pick up|reservation|route|station|\d{1,2}\s*(am|pm))\b/.test(
+      text
+    );
+  const hasTextualItemAnchor =
+    subjectType === "item" &&
+    /\b(walking tour|guided tour|tour|museum|gallery|castle|cathedral|palace|restaurant|lunch|dinner|breakfast|meal|reservation|ticket|entry)\b/.test(
+      text
+    ) &&
+    /\b(\d{1,2}(?::\d{2})?\s*(am|pm)|\$\d+|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2})\b/.test(
       text
     );
 
@@ -218,12 +255,18 @@ function isDismissibleOptionalMissingDetail({
     /\b(address|company|location|name|operator|provider|title|url|website)\b/;
   const materialGapPattern =
     /\b(cannot|can't|critical|essential|material|required|unusable|where)\b|not identifiable|hard to identify|can't identify|cannot identify/;
+  const dismissibleItemLabelGap =
+    hasTextualItemAnchor &&
+    subjectType === "item" &&
+    (target.includes("name") ||
+      target.includes("title") ||
+      /\b(name|title|provider|company|operator)\b/.test(text));
 
   if (
-    (!subjectId && !hasTextualTransportAnchor) ||
-    (!hasUsableAnchor && !hasTextualTransportAnchor) ||
+    (!subjectId && !hasTextualTransportAnchor && !hasTextualItemAnchor) ||
+    (!hasUsableAnchor && !hasTextualTransportAnchor && !hasTextualItemAnchor) ||
     !optionalLabelPattern.test(`${target} ${text}`) ||
-    materialGapPattern.test(text)
+    (materialGapPattern.test(text) && !dismissibleItemLabelGap)
   ) {
     return false;
   }
@@ -927,6 +970,7 @@ export function createReviewQuestions({
     );
 
     const dismissOptionalDetail = isDismissibleOptionalMissingDetail({
+      evidence,
       hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
       prompt,
       reason,
