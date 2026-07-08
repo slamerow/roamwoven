@@ -365,6 +365,7 @@ function createAuditSummary({
         title: diagnostic.title,
       })) ?? [],
     extraction: report?.extraction ?? null,
+    fingerprints: report?.fingerprints ?? null,
     lineage: {
       includedRows: lineageRows.length,
       rows: lineageRows.map((row) => ({

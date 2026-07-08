@@ -457,6 +457,35 @@ export default async function TripExtractionAuditPage({
               </div>
             </Section>
 
+            <Section title="Assembly fingerprint">
+              <div className="grid gap-3 md:grid-cols-4">
+                <SmallMetric
+                  label="Overall hash"
+                  value={report.fingerprints.hash.slice(0, 12)}
+                />
+                <SmallMetric
+                  label="Transport hash"
+                  value={report.fingerprints.sectionHashes.transport.slice(0, 12)}
+                />
+                <SmallMetric
+                  label="Cards hash"
+                  value={report.fingerprints.sectionHashes.activeActivities.slice(0, 12)}
+                />
+                <SmallMetric
+                  label="Review hash"
+                  value={report.fingerprints.sectionHashes.openQuestions.slice(0, 12)}
+                />
+              </div>
+              <details className="mt-4 rounded-md bg-ink p-4 text-paper">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Fingerprint payload
+                </summary>
+                <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5">
+                  {JSON.stringify(report.fingerprints, null, 2)}
+                </pre>
+              </details>
+            </Section>
+
             <Section title="Summary warnings">
               {report.warnings.length ? (
                 <div className="overflow-hidden rounded-md border border-ink/10">

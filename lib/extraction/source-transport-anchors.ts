@@ -400,16 +400,35 @@ function getSignalKind(value: string): SourceTransportAnchorKind | null {
 
 function getBlock(lines: SourceLine[], index: number, defaultYear: number | null) {
   const block: SourceLine[] = [];
+  let startIndex = index;
 
-  for (let cursor = Math.max(0, index - 3); cursor < lines.length; cursor += 1) {
+  const isTicketSectionDateLine = (value: string) =>
+    /^(arrival|depart(?:ure)?|inbound|outbound|return)\W+/i.test(value.trim());
+
+  for (
+    let cursor = index - 1;
+    cursor >= Math.max(0, index - 3);
+    cursor -= 1
+  ) {
+    if (
+      parseDateFromText(lines[cursor].line, defaultYear) &&
+      !isTicketSectionDateLine(lines[cursor].line)
+    ) {
+      break;
+    }
+
+    startIndex = cursor;
+  }
+
+  for (let cursor = startIndex; cursor < lines.length; cursor += 1) {
     if (cursor > index + 14) {
       break;
     }
 
     if (
-      cursor > index + 2 &&
+      cursor > index &&
       parseDateFromText(lines[cursor].line, defaultYear) &&
-      !getSignalKind(lines[cursor].line)
+      !isTicketSectionDateLine(lines[cursor].line)
     ) {
       break;
     }
@@ -898,10 +917,10 @@ function textTokens(value: string | null | undefined) {
 }
 
 function overlapScore(a: string | null | undefined, b: string | null | undefined) {
-  const left = textTokens(a);
+  const left = new Set(textTokens(a));
   const right = new Set(textTokens(b));
 
-  return left.filter((token) => right.has(token)).length;
+  return [...left].filter((token) => right.has(token)).length;
 }
 
 function routeTextForMatch(value: {

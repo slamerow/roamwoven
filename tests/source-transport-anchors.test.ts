@@ -206,6 +206,19 @@ test("source anchors create a missing flight leg instead of merging into an adja
     ),
     "expected existing JFK to DCA flight to remain separate"
   );
+  const jan25ReturnRoutes = records.transport.filter(
+    (item) =>
+      item.date === "2019-01-25" &&
+      item.transportType === "flight" &&
+      ((item.departureLocation === "FCO" && item.arrivalLocation === "JFK") ||
+        (item.departureLocation === "JFK" && item.arrivalLocation === "DCA"))
+  );
+
+  assert.equal(
+    jan25ReturnRoutes.length,
+    2,
+    "expected exactly the two return-flight route legs on January 25"
+  );
 });
 
 test("source anchors extract embedded visual train times from mixed PDF text", () => {
