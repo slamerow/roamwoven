@@ -20,6 +20,7 @@ import {
 } from "./audit-lineage-table";
 
 type AuditReport = NonNullable<TripExtractionAuditPayload["report"]>;
+type ProcessingEvent = TripExtractionAuditPayload["processingEvents"][number];
 
 const assemblyLabels: Array<[keyof AuditReport["assembly"], string]> = [
   ["foldedLodgingNotes", "Stay-flow folds"],
@@ -50,6 +51,29 @@ function formatDateTime(value: string | null | undefined) {
 
 function formatRunId(value: string | null | undefined) {
   return value ? value.slice(0, 8) : "None";
+}
+
+function formatStage(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getEventStatusClass(status: string) {
+  if (status === "failed" || status === "blocked") {
+    return "bg-clay/10 text-clay";
+  }
+
+  if (status === "completed") {
+    return "bg-moss/10 text-moss";
+  }
+
+  if (status === "started") {
+    return "bg-ink/10 text-ink";
+  }
+
+  return "bg-paper text-ink/60";
 }
 
 function StatCard({
@@ -159,6 +183,62 @@ function Notices({ notices }: { notices: string[] }) {
   );
 }
 
+function ProcessingTimeline({ events }: { events: ProcessingEvent[] }) {
+  return (
+    <Section icon={<ListChecks size={18} />} title="Processing timeline">
+      {events.length ? (
+        <ol className="max-h-[32rem] space-y-3 overflow-auto pr-1">
+          {events.map((event) => (
+            <li
+              key={event.id}
+              className="rounded-md border border-ink/10 bg-paper p-4"
+            >
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-ink">
+                      {formatStage(event.stage)}
+                    </p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${getEventStatusClass(
+                        event.status
+                      )}`}
+                    >
+                      {event.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-ink/45">
+                    {formatDateTime(event.createdAt)} - Run{" "}
+                    {formatRunId(event.processingRunId)} - Event{" "}
+                    {formatRunId(event.id)}
+                  </p>
+                  {event.errorMessage ? (
+                    <p className="mt-3 text-sm font-semibold leading-5 text-clay">
+                      {event.errorMessage}
+                    </p>
+                  ) : null}
+                </div>
+                <details className="w-full rounded-md bg-white px-3 py-2 text-xs text-ink/65 ring-1 ring-ink/10 md:max-w-xl">
+                  <summary className="cursor-pointer font-semibold text-ink/60">
+                    Details
+                  </summary>
+                  <pre className="mt-3 max-h-60 overflow-auto whitespace-pre-wrap leading-5">
+                    {JSON.stringify(event.details, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-sm font-semibold text-ink/45">
+          No processing events have been recorded for this trip.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 export default async function TripExtractionAuditPage({
   params,
   searchParams,
@@ -223,6 +303,8 @@ export default async function TripExtractionAuditPage({
             value={payload.trip.processingStatus}
           />
         </div>
+
+        <ProcessingTimeline events={payload.processingEvents} />
 
         {report ? (
           <>

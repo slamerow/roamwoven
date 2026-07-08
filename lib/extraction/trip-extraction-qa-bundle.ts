@@ -4,6 +4,7 @@ import {
   listMaterialExtractionCheckpoints,
   type MaterialExtractionRecord,
 } from "@/lib/extraction/material-extractions";
+import { createRedactedTripProcessingEvent } from "@/lib/extraction/processing-events";
 import {
   getTripExtractionAuditPayload,
   type TripExtractionAuditPayload,
@@ -391,6 +392,9 @@ function createAuditSummary({
       truncated: (report?.lineage.length ?? 0) > MAX_LINEAGE_ROWS,
     },
     notices: auditPayload.notices,
+    processingEvents: auditPayload.processingEvents.map((event) =>
+      createRedactedTripProcessingEvent(event, { includePrivate })
+    ),
     sourceAnchors: {
       transport:
         report?.sourceAnchors.transport.map((anchor) => ({

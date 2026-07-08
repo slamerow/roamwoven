@@ -18,6 +18,27 @@ function test(name: string, fn: () => void) {
 const auditPayload: TripExtractionAuditPayload = {
   latestRun: null,
   notices: ["Fresh extractions should include audit snapshots."],
+  processingEvents: [
+    {
+      createdAt: "2026-07-08T00:02:00.000Z",
+      details: {
+        materialCount: 1,
+        nested: {
+          confirmationLabel: "ABC123",
+        },
+        rawText: "door code 2468",
+        statusCounts: {
+          text_ready: 1,
+        },
+      },
+      errorMessage: "Call +1 555 123 4567 if OCR fails.",
+      id: "event-1",
+      processingRunId: "run-1",
+      stage: "ocr",
+      status: "completed",
+      tripId: "trip-qa",
+    },
+  ],
   report: null,
   reportRun: null,
   snapshot: null,
@@ -251,6 +272,16 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(bundle.records?.transport[0]?.departureTime, "09:20");
   assert.equal(bundle.records?.review.openQuestions.length, 1);
   assert.equal(bundle.records?.review.calls.length, 1);
+  assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "[redacted value]");
+  assert.equal(
+    (bundle.audit.processingEvents[0]?.details.nested as Record<string, unknown>)
+      .confirmationLabel,
+    "[redacted value]"
+  );
+  assert.equal(
+    bundle.audit.processingEvents[0]?.errorMessage,
+    "Call [redacted phone] if OCR fails."
+  );
 });
 
 test("QA bundle can include private debug previews when explicitly requested", () => {
@@ -270,4 +301,5 @@ test("QA bundle can include private debug previews when explicitly requested", (
   assert.equal(bundle.records?.privateDetails[0]?.value, "2468");
   assert.equal(bundle.records?.stays[0]?.address, "Private apartment address");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "ABC123");
+  assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "door code 2468");
 });

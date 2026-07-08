@@ -1,5 +1,9 @@
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
 import {
+  listTripProcessingEvents,
+  type TripProcessingEvent,
+} from "@/lib/extraction/processing-events";
+import {
   getLatestTripProcessingRun,
   getTripProcessingRun,
 } from "@/lib/extraction/processing-runs";
@@ -31,6 +35,7 @@ type AuditSnapshotSummary = {
 export type TripExtractionAuditPayload = {
   latestRun: AuditRunSummary | null;
   notices: string[];
+  processingEvents: TripProcessingEvent[];
   report: TripExtractionAuditReport | null;
   reportRun: AuditRunSummary | null;
   snapshot: AuditSnapshotSummary | null;
@@ -121,13 +126,14 @@ export async function getTripExtractionAuditPayload(
   tripId: string
 ): Promise<TripExtractionAuditPayload> {
   const trip = await getMakerTrip(tripId);
-  const [latestRun, appliedRecords] = await Promise.all([
+  const [latestRun, appliedRecords, processingEvents] = await Promise.all([
     trip.isDemo ? Promise.resolve(null) : getLatestTripProcessingRun(tripId),
     getAppliedTripRecords({
       fallbackTripName: trip.name,
       isDemo: trip.isDemo,
       tripId,
     }),
+    trip.isDemo ? Promise.resolve([]) : listTripProcessingEvents(tripId),
   ]);
   const snapshot = appliedRecords.latestDraft
     ? {
@@ -161,6 +167,7 @@ export async function getTripExtractionAuditPayload(
       reportRun: reportRunSummary,
       snapshot,
     }),
+    processingEvents,
     report,
     reportRun: reportRunSummary,
     snapshot,
