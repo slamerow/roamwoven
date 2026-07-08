@@ -411,6 +411,20 @@ export default async function TripExtractionAuditPage({
             </Section>
 
             <Section icon={<FileJson size={18} />} title="JSON payload">
+              <div className="mb-3 flex flex-wrap gap-3 text-sm">
+                <Link
+                  className="font-semibold text-moss hover:text-ink"
+                  href={`/maker/trips/${tripId}/data/audit/qa-bundle`}
+                >
+                  Open redacted QA bundle
+                </Link>
+                <Link
+                  className="font-semibold text-ink/45 hover:text-ink"
+                  href={`/maker/trips/${tripId}/data/audit/qa-bundle?includePrivate=1`}
+                >
+                  Include private details
+                </Link>
+              </div>
               <details className="rounded-md bg-ink p-4 text-paper">
                 <summary className="cursor-pointer text-sm font-semibold">
                   Audit payload
