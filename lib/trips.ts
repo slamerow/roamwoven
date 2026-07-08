@@ -300,7 +300,7 @@ export async function softDeleteMakerTrip({
 
   const supabase = await createSupabaseServerClient();
   const deletedAt = new Date().toISOString();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("trips")
     .update({
       deleted_at: deletedAt,
@@ -311,10 +311,16 @@ export async function softDeleteMakerTrip({
       updated_at: deletedAt,
     })
     .eq("id", tripId)
-    .eq("owner_user_id", user.id);
+    .eq("owner_user_id", user.id)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     throw new Error(`Unable to delete trip: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("Unable to delete trip: trip is missing or not owned by the signed-in maker.");
   }
 }
 

@@ -209,6 +209,18 @@ export function createPublicSnapshotRecords(
   };
 }
 
+function createPublishedPrivateDetailPayload(records: StructuredTripRecords) {
+  return createPublishedPrivateDetails(records).map((detail) => ({
+    id: detail.id,
+    label: detail.label,
+    reason: detail.reason,
+    subjectId: detail.subjectId,
+    subjectType: detail.subjectType,
+    value: detail.value,
+    visibility: detail.visibility,
+  }));
+}
+
 export function createPublishedTripSnapshotPayload(
   records: StructuredTripRecords
 ): PublishedTripSnapshotPayload {
@@ -254,89 +266,29 @@ export async function publishTripSnapshot({
     throw new Error("You must be signed in to publish this trip.");
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data: latestVersionRow, error: latestVersionError } = await supabase
-    .from("published_trip_snapshots")
-    .select("version")
-    .eq("trip_id", tripId)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestVersionError) {
-    throw new Error(
-      `Unable to load latest published version: ${latestVersionError.message}`
-    );
-  }
-
-  const latestVersion =
-    typeof latestVersionRow?.version === "number" ? latestVersionRow.version : 0;
-  const version = latestVersion + 1;
   const payload = createPublishedTripSnapshotPayload(records);
   const shareToken = createShareToken();
+  const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
-    .from("published_trip_snapshots")
-    .insert({
-      created_by_user_id: user.id,
-      share_token: shareToken,
-      snapshot_json: payload,
-      trip_id: tripId,
-      version,
+    .rpc("publish_trip_snapshot", {
+      p_created_by_user_id: user.id,
+      p_private_details: createPublishedPrivateDetailPayload(records),
+      p_share_token: shareToken,
+      p_snapshot_json: payload,
+      p_trip_id: tripId,
     })
     .select("id,trip_id,version,share_token,snapshot_json,created_at")
     .single();
 
   if (error || !data) {
     throw new Error(
-      `Unable to publish trip snapshot: ${error?.message ?? "No row"}`
+      `Unable to transactionally publish trip snapshot: ${
+        error?.message ?? "No row"
+      }`
     );
   }
 
-  const snapshot = normalizeSnapshot(data as unknown as PublishedTripSnapshotRow);
-  const privateDetails = createPublishedPrivateDetails(records);
-
-  if (privateDetails.length > 0) {
-    const { error: privateDetailError } = await supabase
-      .from("published_trip_private_details")
-      .insert(
-        privateDetails.map((detail) => ({
-          detail_id: detail.id,
-          label: detail.label,
-          reason: detail.reason,
-          snapshot_id: snapshot.id,
-          subject_id: detail.subjectId,
-          subject_type: detail.subjectType,
-          trip_id: tripId,
-          value: detail.value,
-          visibility: detail.visibility,
-        }))
-      );
-
-    if (privateDetailError) {
-      throw new Error(
-        `Unable to save published private details: ${privateDetailError.message}`
-      );
-    }
-  }
-
-  const { error: tripError } = await supabase
-    .from("trips")
-    .update({
-      processing_status: "published",
-      published_app_token: snapshot.shareToken,
-      published_at: snapshot.createdAt ?? new Date().toISOString(),
-      published_snapshot_id: snapshot.id,
-      status: "published",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", tripId)
-    .neq("status", "deleted");
-
-  if (tripError) {
-    throw new Error(`Unable to mark trip published: ${tripError.message}`);
-  }
-
-  return snapshot;
+  return normalizeSnapshot(data as unknown as PublishedTripSnapshotRow);
 }
 
 export async function getPublishedTripSnapshotByToken(token: string) {

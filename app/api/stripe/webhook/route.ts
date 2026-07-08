@@ -27,7 +27,20 @@ export async function POST(request: NextRequest) {
 
   const body = await request.text();
   const stripe = createStripeClient();
-  const event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+  } catch (error) {
+    console.warn("stripe_webhook_signature_verification_failed", {
+      message: error instanceof Error ? error.message : "Unknown Stripe webhook error.",
+    });
+
+    return NextResponse.json(
+      { error: "Invalid Stripe signature." },
+      { status: 400 }
+    );
+  }
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;

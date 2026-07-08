@@ -177,15 +177,38 @@ export async function createTripProcessingRun({
     throw new Error(`Unable to create processing run: ${error?.message ?? "No row"}`);
   }
 
-  await supabase
+  const createdRun = normalizeRun(data as unknown as TripProcessingRunRow);
+  const processingStartedAt = new Date().toISOString();
+  const { data: updatedTrip, error: tripError } = await supabase
     .from("trips")
     .update({
       processing_status: "processing",
-      updated_at: new Date().toISOString(),
+      updated_at: processingStartedAt,
     })
-    .eq("id", tripId);
+    .eq("id", tripId)
+    .neq("status", "deleted")
+    .select("id")
+    .maybeSingle();
 
-  return normalizeRun(data as unknown as TripProcessingRunRow);
+  if (tripError || !updatedTrip) {
+    await supabase
+      .from("trip_processing_runs")
+      .update({
+        completed_at: processingStartedAt,
+        error_message:
+          "Unable to mark trip processing after creating the processing run.",
+        status: "failed",
+      })
+      .eq("id", createdRun.id);
+
+    throw new Error(
+      `Unable to mark trip processing: ${
+        tripError?.message ?? "trip is missing or deleted"
+      }`
+    );
+  }
+
+  return createdRun;
 }
 
 export async function completeTripProcessingRun({
@@ -202,46 +225,23 @@ export async function completeTripProcessingRun({
   usage: unknown;
 }) {
   const supabase = await createSupabaseServerClient();
-  const completedAt = new Date().toISOString();
-
-  const { error: runError } = await supabase
-    .from("trip_processing_runs")
-    .update({
-      completed_at: completedAt,
-      model,
-      openai_usage: usage,
-      status: "completed",
+  const { data, error } = await supabase
+    .rpc("complete_trip_processing_run", {
+      p_draft_json: draftJson,
+      p_model: model,
+      p_run_id: runId,
+      p_trip_id: tripId,
+      p_usage: usage,
     })
-    .eq("id", runId);
-
-  if (runError) {
-    throw new Error(`Unable to complete processing run: ${runError.message}`);
-  }
-
-  const { data, error: snapshotError } = await supabase
-    .from("trip_draft_snapshots")
-    .insert({
-      draft_json: draftJson,
-      processing_run_id: runId,
-      source: "openai_initial_parse",
-      trip_id: tripId,
-    })
-    .select("id,created_at,draft_json,processing_run_id,source,trip_id")
     .single();
 
-  if (snapshotError || !data) {
+  if (error || !data) {
     throw new Error(
-      `Unable to save draft snapshot: ${snapshotError?.message ?? "No row"}`
+      `Unable to transactionally complete processing run: ${
+        error?.message ?? "No row"
+      }`
     );
   }
-
-  await supabase
-    .from("trips")
-    .update({
-      processing_status: "parsed",
-      updated_at: completedAt,
-    })
-    .eq("id", tripId);
 
   return normalizeSnapshot(data as unknown as TripDraftSnapshotRow);
 }
@@ -258,25 +258,18 @@ export async function failTripProcessingRun({
   tripId: string;
 }) {
   const supabase = await createSupabaseServerClient();
-  const completedAt = new Date().toISOString();
+  const { error } = await supabase.rpc("fail_trip_processing_run", {
+    p_error_message: errorMessage,
+    p_failure_details: failureDetails ?? null,
+    p_run_id: runId,
+    p_trip_id: tripId,
+  });
 
-  await supabase
-    .from("trip_processing_runs")
-    .update({
-      completed_at: completedAt,
-      error_message: errorMessage.slice(0, 1000),
-      openai_usage: failureDetails ?? null,
-      status: "failed",
-    })
-    .eq("id", runId);
-
-  await supabase
-    .from("trips")
-    .update({
-      processing_status: "failed",
-      updated_at: completedAt,
-    })
-    .eq("id", tripId);
+  if (error) {
+    throw new Error(
+      `Unable to transactionally fail processing run: ${error.message}`
+    );
+  }
 }
 
 export async function getLatestTripProcessingRun(tripId: string) {

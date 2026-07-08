@@ -14,6 +14,7 @@ import {
   getLatestTripDraftSnapshot,
   getLatestTripProcessingRun,
 } from "@/lib/extraction/processing-runs";
+import { recordTripProcessingEvent } from "@/lib/extraction/processing-events";
 import {
   assertTripSpineBasics,
   MissingTripSpineBasicsError,
@@ -190,6 +191,17 @@ export async function POST(
       failureClasses: materialCheckpointSummary.failureClasses,
       tripId,
     });
+    await recordTripProcessingEvent({
+      details: {
+        failureClasses: materialCheckpointSummary.failureClasses,
+        ocrSummary,
+        statusCounts: materialCheckpointSummary.byStatus,
+      },
+      errorMessage: ocrReadinessIssue,
+      stage: "ocr",
+      status: ocrReadinessIssue === "ocr-failed" ? "failed" : "blocked",
+      tripId,
+    });
 
     return redirectToData(request, tripId, { error: ocrReadinessIssue });
   }
@@ -202,6 +214,17 @@ export async function POST(
   }
 
   if (materials.length === 0) {
+    await recordTripProcessingEvent({
+      details: {
+        failureClasses: materialCheckpointSummary.failureClasses,
+        statusCounts: materialCheckpointSummary.byStatus,
+      },
+      errorMessage: getNoMaterialErrorCode(materialCheckpointSummary),
+      stage: "material_checkpoint",
+      status: "blocked",
+      tripId,
+    });
+
     return redirectToData(request, tripId, {
       error: getNoMaterialErrorCode(materialCheckpointSummary),
     });
@@ -214,6 +237,18 @@ export async function POST(
   const inputCharCount = optimizedMaterials.summary.rawCharCount;
 
   if (materials.length === 0 || inputCharCount === 0) {
+    await recordTripProcessingEvent({
+      details: {
+        materialCount: materials.length,
+        rawCharCount: inputCharCount,
+        statusCounts: materialCheckpointSummary.byStatus,
+      },
+      errorMessage: getNoMaterialErrorCode(materialCheckpointSummary),
+      stage: "material_budget",
+      status: "blocked",
+      tripId,
+    });
+
     return redirectToData(request, tripId, {
       error: getNoMaterialErrorCode(materialCheckpointSummary),
     });
@@ -230,6 +265,19 @@ export async function POST(
     truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
     tripId,
   });
+  await recordTripProcessingEvent({
+    details: {
+      estimatedInputTokens: optimizedMaterials.summary.estimatedInputTokens,
+      materialCount: optimizedMaterials.summary.materialCount,
+      materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
+      rawCharCount: optimizedMaterials.summary.rawCharCount,
+      statusCounts: materialCheckpointSummary.byStatus,
+      truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
+    },
+    stage: "material_checkpoint",
+    status: "completed",
+    tripId,
+  });
   let run: Awaited<ReturnType<typeof createTripProcessingRun>> | null = null;
   let extractionUsage: unknown = null;
 
@@ -243,11 +291,40 @@ export async function POST(
       sourceUploadIds: uploads.map((upload) => upload.id),
       tripId,
     });
+    await recordTripProcessingEvent({
+      details: {
+        inputCharCount,
+        sourceUploadCount: uploads.length,
+      },
+      processingRunId: run.id,
+      stage: "run",
+      status: "started",
+      tripId,
+    });
+    await recordTripProcessingEvent({
+      details: {
+        materialCount: materials.length,
+        tripName: trip.name,
+      },
+      processingRunId: run.id,
+      stage: "model_extraction",
+      status: "started",
+      tripId,
+    });
     const result = await extractTripDraftWithOpenAI({
       materials,
       tripName: trip.name,
     });
     extractionUsage = result.usage;
+    await recordTripProcessingEvent({
+      details: {
+        model: result.model,
+      },
+      processingRunId: run.id,
+      stage: "model_extraction",
+      status: "completed",
+      tripId,
+    });
 
     assertTripSpineBasics(result.draft);
 
@@ -296,30 +373,55 @@ export async function POST(
         : "extraction-failed";
 
     if (run) {
-      await failTripProcessingRun({
+      const failureDetails =
+        error && typeof error === "object" && "details" in error
+          ? {
+              materialBudget: withRunInputEstimate(
+                optimizedMaterials.summary,
+                extractionUsage
+              ),
+              materialCheckpoints: materialCheckpointSummary,
+              ocr: ocrSummary,
+              openaiError: (error as { details?: unknown }).details,
+            }
+          : {
+              materialBudget: withRunInputEstimate(
+                optimizedMaterials.summary,
+                extractionUsage
+              ),
+              materialCheckpoints: materialCheckpointSummary,
+              ocr: ocrSummary,
+            };
+
+      await recordTripProcessingEvent({
+        details: failureDetails,
         errorMessage: message,
-        failureDetails:
-          error && typeof error === "object" && "details" in error
-            ? {
-                materialBudget: withRunInputEstimate(
-                  optimizedMaterials.summary,
-                  extractionUsage
-                ),
-                materialCheckpoints: materialCheckpointSummary,
-                ocr: ocrSummary,
-                openaiError: (error as { details?: unknown }).details,
-              }
-            : {
-                materialBudget: withRunInputEstimate(
-                  optimizedMaterials.summary,
-                  extractionUsage
-                ),
-                materialCheckpoints: materialCheckpointSummary,
-                ocr: ocrSummary,
-              },
-        runId: run.id,
+        processingRunId: run.id,
+        stage:
+          error instanceof MissingTripSpineBasicsError
+            ? "spine_validation"
+            : "extraction",
+        status: "failed",
         tripId,
       });
+
+      try {
+        await failTripProcessingRun({
+          errorMessage: message,
+          failureDetails,
+          runId: run.id,
+          tripId,
+        });
+      } catch (failError) {
+        console.error("trip_extraction_fail_mark_failed", {
+          message:
+            failError instanceof Error
+              ? failError.message
+              : "Unknown failure-state error.",
+          runId: run.id,
+          tripId,
+        });
+      }
     }
 
     return redirectToData(request, tripId, { error: errorCode });
