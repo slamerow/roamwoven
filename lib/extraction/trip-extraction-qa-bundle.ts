@@ -10,6 +10,10 @@ import {
   type TripExtractionAuditPayload,
 } from "@/lib/extraction/trip-extraction-audit-view";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
+import {
+  getStructuredReviewCount,
+  getStructuredReviewSections,
+} from "@/lib/generated-trip-review";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
 const DEFAULT_TEXT_LIMIT = 700;
@@ -207,6 +211,13 @@ function createRecordSummaries({
   const calls = records.reviewQuestions.filter(
     (question) => question.status === "noted"
   );
+  const actionRequiredReviewItems = getStructuredReviewCount(records);
+  const rawReviewRequiredRecords = [
+    ...records.legs,
+    ...records.stays,
+    ...records.transport,
+    ...records.items,
+  ].filter((record) => record.reviewRequired && isActiveStatus(record)).length;
 
   return {
     counts: {
@@ -218,15 +229,10 @@ function createRecordSummaries({
         (question) => question.status === "dismissed"
       ).length,
       legs: records.legs.filter(isActiveStatus).length,
+      actionRequiredReviewItems,
       openQuestions: openQuestions.length,
       privateDetails: records.privateDetails.length,
-      reviewRequiredRecords: [
-        ...records.legs,
-        ...records.stays,
-        ...records.transport,
-        ...records.items,
-      ].filter((record) => record.reviewRequired && isActiveStatus(record))
-        .length,
+      reviewRequiredRecords: rawReviewRequiredRecords,
       stays: activeStays.length,
       transport: activeTransport.length,
     },
@@ -269,9 +275,22 @@ function createRecordSummaries({
     })),
     review: {
       calls: calls.map((question) => summarizeReviewQuestion(question, includePrivate)),
+      internalSignals: {
+        privateDetailsNeedingReview: records.privateDetails.filter(
+          (detail) => detail.reviewRequired
+        ).length,
+        rawReviewRequiredRecords,
+      },
       openQuestions: openQuestions.map((question) =>
         summarizeReviewQuestion(question, includePrivate)
       ),
+      reviewPageActionCount: actionRequiredReviewItems,
+      reviewPageSections: getStructuredReviewSections(records).map((section) => ({
+        foundItems: section.count,
+        id: section.id,
+        title: section.title,
+        visibleItems: section.items.length,
+      })),
     },
     stays: activeStays.map((stay) => ({
       address: redactVisibilityValue({

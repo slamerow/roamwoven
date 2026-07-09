@@ -5,6 +5,7 @@ import type {
 import type { ReviewDecisionSubjectType } from "@/lib/generated-trip-decisions";
 import {
   getStructuredReviewCount,
+  getStructuredReviewSections,
   type StructuredReviewEditField,
 } from "@/lib/generated-trip-review";
 import { normalizeText } from "@/lib/extraction/traveler-text";
@@ -87,15 +88,60 @@ function isActiveStatus(status: TripRecordStatus) {
   return status !== "ignored";
 }
 
-function needsRecordReview(record: {
-  reviewRequired: boolean;
-  status: TripRecordStatus;
-}) {
-  return record.reviewRequired && isActiveStatus(record.status);
-}
-
 function isProtectedVisibility(value: string) {
   return value === "traveler_password" || value === "maker_only";
+}
+
+function reviewSubjectKey(subjectType: string, subjectId: string | null) {
+  return subjectId ? `${subjectType}:${subjectId}` : null;
+}
+
+function createActionReviewSubjectKeys(records: StructuredTripRecords) {
+  const keys = new Set<string>();
+
+  for (const section of getStructuredReviewSections(records)) {
+    if (section.id === "notes") {
+      continue;
+    }
+
+    for (const item of section.items) {
+      if (item.subjectType === "review_question") {
+        continue;
+      }
+
+      const key = reviewSubjectKey(item.subjectType, item.subjectId);
+
+      if (key) {
+        keys.add(key);
+      }
+    }
+  }
+
+  for (const question of records.reviewQuestions) {
+    if (question.status !== "open") {
+      continue;
+    }
+
+    const key = reviewSubjectKey(question.subjectType, question.subjectId);
+
+    if (key) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function subjectNeedsReview({
+  reviewSubjectKeys,
+  subjectId,
+  subjectType,
+}: {
+  reviewSubjectKeys: Set<string>;
+  subjectId: string;
+  subjectType: string;
+}) {
+  return reviewSubjectKeys.has(`${subjectType}:${subjectId}`);
 }
 
 function parseDate(value: string | null) {
@@ -551,8 +597,15 @@ function titleForDay(records: StructuredTripRecords, day: StructuredTripRecords[
 }
 
 function createTransportEntry(
-  item: StructuredTripRecords["transport"][number]
+  item: StructuredTripRecords["transport"][number],
+  reviewSubjectKeys: Set<string>
 ): GeneratedTripSummaryDayEntry {
+  const needsReview = subjectNeedsReview({
+    reviewSubjectKeys,
+    subjectId: item.id,
+    subjectType: "transport",
+  });
+
   return {
     canMoveToCityTip: false,
     detail: [
@@ -568,7 +621,7 @@ function createTransportEntry(
     id: item.id,
     kind: "transport",
     meta: item.transportType.replaceAll("_", " "),
-    needsReview: item.reviewRequired,
+    needsReview,
     editFields: editFieldsForTransport(item),
     subjectId: item.id,
     subjectType: "transport",
@@ -578,9 +631,15 @@ function createTransportEntry(
 
 function createStayEntriesForDay(
   stay: StructuredTripRecords["stays"][number],
-  date: string
+  date: string,
+  reviewSubjectKeys: Set<string>
 ): GeneratedTripSummaryDayEntry[] {
   const entries: GeneratedTripSummaryDayEntry[] = [];
+  const needsReview = subjectNeedsReview({
+    reviewSubjectKeys,
+    subjectId: stay.id,
+    subjectType: "stay",
+  });
   const addressDetail = stay.address
     ? stay.addressVisibility === "public"
       ? stay.address
@@ -603,7 +662,7 @@ function createStayEntriesForDay(
         stay.checkInDate === date
           ? [stay.checkInTime, "Check-in"].filter(Boolean).join(" · ")
           : "Stay",
-      needsReview: stay.reviewRequired,
+      needsReview,
       subjectId: stay.id,
       subjectType: "stay",
       title: `Staying: ${stay.name}`,
@@ -615,18 +674,24 @@ function createStayEntriesForDay(
 
 function createActivityEntry(
   item: StructuredTripRecords["items"][number],
-  categoryById: Map<string, StructuredTripRecords["categories"][number]>
+  categoryById: Map<string, StructuredTripRecords["categories"][number]>,
+  reviewSubjectKeys: Set<string>
 ): GeneratedTripSummaryDayEntry {
   const category = categoryById.get(item.categoryId);
+  const needsReview = subjectNeedsReview({
+    reviewSubjectKeys,
+    subjectId: item.id,
+    subjectType: "item",
+  });
 
   return {
     canMoveToCityTip: item.itemType === "activity",
     detail: item.description ?? item.locationName ?? item.address ?? undefined,
     editFields: editFieldsForItem(item),
     id: item.id,
-    kind: item.reviewRequired ? "review" : "activity",
+    kind: needsReview ? "review" : "activity",
     meta: [formatTime(item.startTime), category?.label].filter(Boolean).join(" · "),
-    needsReview: item.reviewRequired,
+    needsReview,
     subjectId: item.id,
     subjectType: "item",
     targetLegId: item.legId,
@@ -747,6 +812,7 @@ function createSummaryDays(
   const categoryById = new Map(
     records.categories.map((category) => [category.id, category])
   );
+  const reviewSubjectKeys = createActionReviewSubjectKeys(records);
   const datedItems = activeItems.filter((item) => item.date);
   const undatedItems = activeItems.filter(
     (item) => !item.date && !isLegLevelTip(item)
@@ -759,23 +825,25 @@ function createSummaryDays(
         ...activeTransport
           .filter((item) => item.date === day.date)
           .map((item) => ({
-            entry: createTransportEntry(item),
+            entry: createTransportEntry(item, reviewSubjectKeys),
             sortMinutes: timeToMinutes(item.departureTime),
           })),
         ...activeStays
           .flatMap((stay) =>
-            createStayEntriesForDay(stay, day.date).map((entry) => ({
-              entry,
-              sortMinutes:
-                stay.checkInDate === day.date
-                  ? timeToMinutes(stay.checkInTime) ?? 16 * 60
-                  : 0,
-            }))
+            createStayEntriesForDay(stay, day.date, reviewSubjectKeys).map(
+              (entry) => ({
+                entry,
+                sortMinutes:
+                  stay.checkInDate === day.date
+                    ? timeToMinutes(stay.checkInTime) ?? 16 * 60
+                    : 0,
+              })
+            )
           ),
         ...datedItems
           .filter((item) => item.date === day.date)
           .map((item) => ({
-            entry: createActivityEntry(item, categoryById),
+            entry: createActivityEntry(item, categoryById, reviewSubjectKeys),
             sortMinutes: inferredActivityMinutes(item),
           })),
       ]);
@@ -785,7 +853,7 @@ function createSummaryDays(
         entries,
         id: day.id,
         label: formatDayLabel(day.date, day.dayNumber),
-        needsReview: day.reviewRequired || entries.some((entry) => entry.needsReview),
+        needsReview: entries.some((entry) => entry.needsReview),
         title: titleForDay(records, day),
       };
     })
@@ -794,10 +862,18 @@ function createSummaryDays(
   if (undatedItems.length > 0) {
     days.push({
       date: "needs-placement",
-      entries: undatedItems.map((item) => createActivityEntry(item, categoryById)),
+      entries: undatedItems.map((item) =>
+        createActivityEntry(item, categoryById, reviewSubjectKeys)
+      ),
       id: `${records.trip.id}-needs-placement`,
       label: "Needs placement",
-      needsReview: true,
+      needsReview: undatedItems.some((item) =>
+        subjectNeedsReview({
+          reviewSubjectKeys,
+          subjectId: item.id,
+          subjectType: "item",
+        })
+      ),
       title: "Cards without a date",
     });
   }
@@ -960,59 +1036,15 @@ function createSummaryWarnings({
 function createReviewItems(
   records: StructuredTripRecords
 ): GeneratedTripSummaryItem[] {
-  const items: GeneratedTripSummaryItem[] = [];
-  const openQuestions = records.reviewQuestions.filter(
-    (question) => question.status === "open"
-  );
-  const privacyReviewCount = records.privateDetails.filter(
-    (detail) => detail.reviewRequired
-  ).length;
-  const recordReviewBuckets = [
-    {
-      count: records.legs.filter(needsRecordReview).length,
-      title: "Trip spine records need review",
-    },
-    {
-      count: records.stays.filter(needsRecordReview).length,
-      title: "Stay records need review",
-    },
-    {
-      count: records.transport.filter(needsRecordReview).length,
-      title: "Transport records need review",
-    },
-    {
-      count: records.items.filter(needsRecordReview).length,
-      title: "Activity records need review",
-    },
-  ].filter((bucket) => bucket.count > 0);
-
-  if (privacyReviewCount > 0) {
-    items.push({
-      detail:
-        privacyReviewCount === 1
-          ? "1 sensitive detail needs a publish/privacy decision."
-          : `${privacyReviewCount} sensitive details roll up into one privacy recommendation.`,
-      meta: "Privacy",
-      title: "Privacy recommendation needs review",
-    });
-  }
-
-  for (const bucket of recordReviewBuckets) {
-    items.push({
-      detail: "Open the review queue to confirm, edit, ignore, or protect these records.",
-      meta: `${bucket.count} ${bucket.count === 1 ? "record" : "records"}`,
-      title: bucket.title,
-    });
-  }
-
-  return [
-    ...items,
-    ...openQuestions.map((question) => ({
-      detail: question.reason,
-      meta: question.targetField ?? question.subjectType,
-      title: question.prompt,
-    })),
-  ];
+  return getStructuredReviewSections(records)
+    .filter((section) => section.id !== "notes")
+    .flatMap((section) =>
+      section.items.map((item) => ({
+        detail: item.detail,
+        meta: item.meta || section.title,
+        title: item.title,
+      }))
+    );
 }
 
 function createSummarySections(

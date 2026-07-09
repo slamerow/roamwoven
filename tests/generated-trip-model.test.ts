@@ -4021,6 +4021,110 @@ test("privacy policy prompts are handled by the privacy recommendation", () => {
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
+test("complete cards ignore stale record-level review flags", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-15",
+          description: "Guided Klementinum tour at 2:30 PM.",
+          itemType: "activity",
+          startTime: "14:30",
+          title: "Klementinum Tour",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-14",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-stale-review-flag",
+  });
+  const item = records.items[0];
+
+  assert.ok(item);
+  item.reviewRequired = true;
+  item.status = "needs_review";
+
+  const sections = getStructuredReviewSections(records);
+  const summary = createGeneratedTripSummaryView(records);
+  const summaryReviewSection = summary.sections.find(
+    (section) => section.id === "review"
+  );
+  const itemDay = summary.days.find((day) =>
+    day.entries.some((entry) => entry.subjectId === item.id)
+  );
+  const itemEntry = itemDay?.entries.find((entry) => entry.subjectId === item.id);
+
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(sections.find((section) => section.id === "activities")?.items.length, 0);
+  assert.equal(sections.find((section) => section.id === "questions")?.items.length, 0);
+  assert.equal(summary.counts.review, 0);
+  assert.equal(summaryReviewSection?.items.length, 0);
+  assert.equal(itemDay?.needsReview, false);
+  assert.equal(itemEntry?.kind, "activity");
+  assert.equal(itemEntry?.needsReview, false);
+});
+
+test("critical transport departure gaps are owned by one open question", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2019-01-19",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna",
+          date: "2019-01-18",
+          departure: "Prague",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-critical-transport-review",
+  });
+  const train = records.transport[0];
+
+  assert.ok(train);
+  train.reviewRequired = true;
+  train.status = "needs_review";
+
+  const sections = getStructuredReviewSections(records);
+  const questions = sections.find((section) => section.id === "questions");
+
+  assert.equal(getStructuredReviewCount(records), 1);
+  assert.equal(sections.find((section) => section.id === "transport")?.items.length, 0);
+  assert.equal(questions?.items.length, 1);
+  assert.match(questions?.items[0]?.title ?? "", /Train to Vienna depart/i);
+});
+
 test("optional transport provider gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

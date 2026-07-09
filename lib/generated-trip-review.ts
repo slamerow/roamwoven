@@ -61,8 +61,122 @@ function isActiveStatus(status: TripRecordStatus) {
   return status !== "ignored";
 }
 
-function needsRecordReview(record: { reviewRequired: boolean; status: TripRecordStatus }) {
-  return record.reviewRequired && isActiveStatus(record.status);
+function hasReviewSignal(record: {
+  reviewRequired: boolean;
+  status: TripRecordStatus;
+}) {
+  return (
+    isActiveStatus(record.status) &&
+    (record.reviewRequired || record.status === "needs_review")
+  );
+}
+
+function getLegReviewFields(leg: StructuredTripRecords["legs"][number]) {
+  if (!hasReviewSignal(leg)) {
+    return [];
+  }
+
+  return [
+    !leg.city ? "city" : null,
+    !leg.arriveDate ? "arriveDate" : null,
+  ].filter((field): field is string => Boolean(field));
+}
+
+function getStayReviewFields(stay: StructuredTripRecords["stays"][number]) {
+  if (!hasReviewSignal(stay)) {
+    return [];
+  }
+
+  return [!stay.checkInDate ? "checkInDate" : null].filter(
+    (field): field is string => Boolean(field)
+  );
+}
+
+function getTransportReviewFields(
+  transport: StructuredTripRecords["transport"][number]
+) {
+  if (!hasReviewSignal(transport)) {
+    return [];
+  }
+
+  return [
+    !transport.date ? "date" : null,
+    (transport.transportType === "flight" ||
+      transport.transportType === "train") &&
+    !transport.departureTime
+      ? "departureTime"
+      : null,
+  ].filter((field): field is string => Boolean(field));
+}
+
+function getItemReviewFields(item: StructuredTripRecords["items"][number]) {
+  if (!hasReviewSignal(item) || item.itemType === "note") {
+    return [];
+  }
+
+  return [!item.date ? "date" : null].filter((field): field is string =>
+    Boolean(field)
+  );
+}
+
+type ReviewQuestionSubjectType =
+  StructuredTripRecords["reviewQuestions"][number]["subjectType"];
+
+function needsRecordReview({
+  fields,
+  records,
+  subjectId,
+  subjectType,
+}: {
+  fields: string[];
+  records: StructuredTripRecords;
+  subjectId: string;
+  subjectType: ReviewQuestionSubjectType;
+}) {
+  if (fields.length === 0) {
+    return false;
+  }
+
+  const coveredFields = new Set<string>();
+
+  records.reviewQuestions.forEach((question) => {
+    if (
+      !isOpenQuestion(question) ||
+      question.subjectType !== subjectType ||
+      question.subjectId !== subjectId
+    ) {
+      return;
+    }
+
+    const targetField = normalizeQuestionTargetField(
+      question.subjectType,
+      question.targetField
+    );
+
+    if (targetField) {
+      coveredFields.add(targetField);
+    }
+  });
+
+  return fields.some((field) => !coveredFields.has(field));
+}
+
+function createRecordReviewFilter<T extends { id: string }>({
+  getFields,
+  records,
+  subjectType,
+}: {
+  getFields: (record: T) => string[];
+  records: StructuredTripRecords;
+  subjectType: ReviewQuestionSubjectType;
+}) {
+  return (record: T) =>
+    needsRecordReview({
+      fields: getFields(record),
+      records,
+      subjectId: record.id,
+      subjectType,
+    });
 }
 
 function isCityTipItem(item: StructuredTripRecords["items"][number]) {
@@ -550,14 +664,34 @@ export function getStructuredReviewCount(records: StructuredTripRecords | null) 
   )
     ? 1
     : 0;
+  const needsLegReview = createRecordReviewFilter({
+    getFields: getLegReviewFields,
+    records,
+    subjectType: "leg",
+  });
+  const needsStayReview = createRecordReviewFilter({
+    getFields: getStayReviewFields,
+    records,
+    subjectType: "stay",
+  });
+  const needsTransportReview = createRecordReviewFilter({
+    getFields: getTransportReviewFields,
+    records,
+    subjectType: "transport",
+  });
+  const needsItemReview = createRecordReviewFilter({
+    getFields: getItemReviewFields,
+    records,
+    subjectType: "item",
+  });
 
   return (
     records.reviewQuestions.filter(isOpenQuestion).length +
     privacyReviewCount +
-    records.legs.filter(needsRecordReview).length +
-    records.stays.filter(needsRecordReview).length +
-    records.transport.filter(needsRecordReview).length +
-    records.items.filter(needsRecordReview).length
+    records.legs.filter(needsLegReview).length +
+    records.stays.filter(needsStayReview).length +
+    records.transport.filter(needsTransportReview).length +
+    records.items.filter(needsItemReview).length
   );
 }
 
@@ -731,6 +865,26 @@ export function getStructuredReviewSections(
     records.categories.map((category) => [category.id, category])
   );
   const cityTipItems = getCityTipItems(records);
+  const needsLegReview = createRecordReviewFilter({
+    getFields: getLegReviewFields,
+    records,
+    subjectType: "leg",
+  });
+  const needsStayReview = createRecordReviewFilter({
+    getFields: getStayReviewFields,
+    records,
+    subjectType: "stay",
+  });
+  const needsTransportReview = createRecordReviewFilter({
+    getFields: getTransportReviewFields,
+    records,
+    subjectType: "transport",
+  });
+  const needsItemReview = createRecordReviewFilter({
+    getFields: getItemReviewFields,
+    records,
+    subjectType: "item",
+  });
 
   return [
     {
@@ -739,7 +893,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No place decisions needed.",
       id: "legs",
       items: records.legs
-        .filter(needsRecordReview)
+        .filter(needsLegReview)
         .map((leg) => ({
           combineOptions: [],
           detail:
@@ -791,7 +945,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No stay decisions needed.",
       id: "stays",
       items: records.stays
-        .filter(needsRecordReview)
+        .filter(needsStayReview)
         .map((stay) => ({
           combineOptions: [],
           detail:
@@ -863,7 +1017,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No transport decisions needed.",
       id: "transport",
       items: records.transport
-        .filter(needsRecordReview)
+        .filter(needsTransportReview)
         .map((item) => ({
           combineOptions: [],
           detail:
@@ -930,7 +1084,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No activity decisions needed.",
       id: "activities",
       items: records.items
-        .filter((item) => needsRecordReview(item) && !isCityTipItem(item))
+        .filter((item) => needsItemReview(item) && !isCityTipItem(item))
         .map((item) => ({
           combineOptions: itemCombineOptions({
             currentItemId: item.id,
@@ -1017,7 +1171,7 @@ export function getStructuredReviewSections(
       emptyDetail: "No city notes or tips found.",
       id: "city-tips",
       items: cityTipItems
-        .filter(needsRecordReview)
+        .filter(needsItemReview)
         .map((item) => {
           const leg = item.legId ? legById.get(item.legId) : null;
           const category = categoryById.get(item.categoryId);

@@ -105,7 +105,7 @@ const records: StructuredTripRecords = {
       locationName: "Schonnbrunn",
       longitude: null,
       parentItemId: null,
-      reviewRequired: false,
+      reviewRequired: true,
       sortOrder: 1,
       sourceConfidence: "high",
       startTime: "15:00",
@@ -270,6 +270,27 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(bundle.records?.stays[0]?.address, "[redacted stay address]");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "[redacted confirmation]");
   assert.equal(bundle.records?.transport[0]?.departureTime, "09:20");
+  assert.equal(bundle.records?.counts.actionRequiredReviewItems, 2);
+  assert.equal(bundle.records?.counts.reviewRequiredRecords, 1);
+  assert.equal(
+    bundle.records?.review.internalSignals.rawReviewRequiredRecords,
+    1
+  );
+  assert.equal(
+    bundle.records?.review.internalSignals.privateDetailsNeedingReview,
+    1
+  );
+  assert.equal(bundle.records?.review.reviewPageActionCount, 2);
+  const reviewPageSections = Object.fromEntries(
+    bundle.records?.review.reviewPageSections.map((section) => [
+      section.id,
+      section.visibleItems,
+    ]) ?? []
+  );
+  assert.equal(reviewPageSections.activities, 0);
+  assert.equal(reviewPageSections.notes, 1);
+  assert.equal(reviewPageSections.questions, 1);
+  assert.equal(reviewPageSections["private-details"], 1);
   assert.equal(bundle.records?.review.openQuestions.length, 1);
   assert.equal(bundle.records?.review.calls.length, 1);
   assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "[redacted value]");
