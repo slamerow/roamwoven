@@ -7,7 +7,7 @@ import {
 } from "@/lib/extraction/trip-draft-consolidation-debug";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 import {
-  isDayOverviewActivityTitle,
+  classifyDraftActivityCard,
   isMakerVisibleGroupingKind,
   type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
@@ -128,6 +128,24 @@ function dateFor(record: DraftObject) {
 
 function timeFor(record: DraftObject) {
   return getStringFromKeys(record, ["startTime", "time", "departureTime"]);
+}
+
+function classifyDraftActivity(activity: DraftObject) {
+  return classifyDraftActivityCard({
+    category: getString(activity, "category"),
+    date: dateFor(activity),
+    description: getString(activity, "description"),
+    endTime: getString(activity, "endTime"),
+    hasStandaloneAnchor: hasStandaloneAnchor(activity),
+    isPlannedAreaGroup: isPlannedAreaGroup(activity),
+    isRentalCarAction: isRentalCarText(textFor(activity)),
+    isSameSiteGroup: isSameSiteGroup(activity),
+    isTourGroup: isTourGroup(activity),
+    isTransportAction: isTransportActionText(textFor(activity)),
+    itemType: getString(activity, "itemType"),
+    startTime: timeFor(activity),
+    title: getString(activity, "title"),
+  });
 }
 
 function normalizeClockTime(value: string | null | undefined) {
@@ -1208,24 +1226,7 @@ function suppressStayFlowActivities({
 }
 
 function isDayOverviewActivity(activity: DraftObject) {
-  const title = normalizeText(getString(activity, "title"));
-  const text = normalizeText(textFor(activity));
-
-  if (!title || isNoteLikeRecord(activity)) {
-    return false;
-  }
-
-  if (
-    /\b(ticket|tickets|reservation|booking|confirmation|provider|paid|paypal)\b/.test(
-      text
-    )
-  ) {
-    return false;
-  }
-
-  return (
-    isDayOverviewActivityTitle(title)
-  );
+  return classifyDraftActivity(activity).isOverviewActivity;
 }
 
 function groupingKindForParent(parent: DraftObject): GroupingKind {
@@ -1394,59 +1395,8 @@ function isLodgingNoteActivity(activity: DraftObject, stays: DraftObject[]) {
   }) || /\b(private room|shared bathroom|amount due|payment due|pay at arrival|lodging note|hotel budget|lodging budget|total cost|price|paid)\b/.test(text);
 }
 
-function hasStrongPlannedActivityLanguage(activity: DraftObject) {
-  const text = normalizeText(textFor(activity));
-
-  if (dateFor(activity) && /\b(breakfast|brunch|lunch|dinner|supper)\b/.test(text)) {
-    return true;
-  }
-
-  return /\b(we will|we'll|we are|we're|going to|plan to|planned|booked|reserved|reservation|take a tour|guided tour|visit|stop|doing this|continue your walk|walk along|route|same .* visit|inside|within|explore|wander|stroll)\b/.test(
-    text
-  );
-}
-
-function isSightOrLoosePlaceText(value: string | null | undefined) {
-  return /\b(aquarium|basilica|cathedral|church|gallery|garden|hall|haus|house|landmark|market|monument|museum|park|palace|square|statue|synagogue|temple|tower|wheel)\b/.test(
-    normalizeText(value)
-  );
-}
-
-function hasWeakRecommendationMarker(activity: DraftObject) {
-  const text = normalizeText(textFor(activity));
-
-  return /\b(optional|maybe|if time|could visit|things to check out|ideas?|recommendations?|possible sights?|open until|open til|hours?|free\s*\d|free admission|not sure|would recommend|recommended)\b/.test(
-    text
-  );
-}
-
 function isWeakDatedCityNoteCandidate(activity: DraftObject) {
-  if (
-    !dateFor(activity) ||
-    timeFor(activity) ||
-    getString(activity, "endTime") ||
-    hasStandaloneAnchor(activity) ||
-    isPlannedAreaGroup(activity) ||
-    isSameSiteGroup(activity) ||
-    isTourGroup(activity) ||
-    hasStrongPlannedActivityLanguage(activity) ||
-    isRentalCarText(textFor(activity)) ||
-    isTransportActionText(textFor(activity))
-  ) {
-    return false;
-  }
-
-  const textWithCategory = [textFor(activity), getString(activity, "category")]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    hasWeakRecommendationMarker(activity) ||
-    isSightOrLoosePlaceText(textFor(activity)) ||
-    /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/.test(
-      normalizeText(textWithCategory)
-    )
-  );
+  return classifyDraftActivity(activity).isWeakDatedCityNoteCandidate;
 }
 
 function isFirmDayActivity(activity: DraftObject) {
@@ -1481,6 +1431,40 @@ function firmActivitiesForDate(activities: DraftObject[], date: string | null) {
 
   return activities.filter(
     (candidate) => dateFor(candidate) === date && isFirmDayActivity(candidate)
+  );
+}
+
+function isOpenDayOptionCandidate(activity: DraftObject) {
+  const classification = classifyDraftActivity(activity);
+
+  if (
+    !dateFor(activity) ||
+    timeFor(activity) ||
+    getString(activity, "endTime") ||
+    hasStandaloneAnchor(activity) ||
+    isPlannedAreaGroup(activity) ||
+    isSameSiteGroup(activity) ||
+    isTourGroup(activity) ||
+    classification.isLooseTipActivity ||
+    classification.hasStrongPlannedActivityLanguage ||
+    isRentalCarText(textFor(activity)) ||
+    isTransportActionText(textFor(activity))
+  ) {
+    return false;
+  }
+
+  return (
+    classification.isWeakDatedCityNoteCandidate ||
+    classification.isSightOrLoosePlace
+  );
+}
+
+function firmActivitiesForOpenDayGrouping(
+  activities: DraftObject[],
+  date: string | null
+) {
+  return firmActivitiesForDate(activities, date).filter(
+    (activity) => !isOpenDayOptionCandidate(activity)
   );
 }
 
@@ -1541,30 +1525,7 @@ function shouldMoveToCityNotes(
 }
 
 function isLooseTipActivity(activity: DraftObject) {
-  const title = getString(activity, "title");
-  const description = getString(activity, "description");
-  const text = normalizeText([title, description].filter(Boolean).join(" "));
-
-  if (!text || timeFor(activity) || getString(activity, "endTime")) {
-    return false;
-  }
-
-  const bookingGuardText = text.replace(/\bticket machines?\b/g, " ");
-
-  if (
-    /\b(reservation|reserved|booked|booking|ticket|tickets|timed|confirmation|provider|paid|paypal)\b/.test(
-      bookingGuardText
-    )
-  ) {
-    return false;
-  }
-
-  return (
-    getString(activity, "itemType") === "note" ||
-    /\b(also noted|notes?\s*(?:and|&)?\s*tips?|ideas?|recommendations?|eat|where to eat|food|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|shopping notes?|transport notes?|transit tips?|local tips?|could visit|maybe visit|if time|possible sights?|things to check out)\b/.test(
-      text
-    )
-  );
+  return classifyDraftActivity(activity).isLooseTipActivity;
 }
 
 function parseDate(value: string | null) {
@@ -1695,10 +1656,15 @@ function isMuseumOptionCandidate(activity: DraftObject) {
   const text = normalizeText(
     [getString(activity, "title"), getString(activity, "category")].filter(Boolean).join(" ")
   );
+  const classification = classifyDraftActivity(activity);
 
   return (
-    isWeakDatedCityNoteCandidate(activity) &&
+    !timeFor(activity) &&
+    !getString(activity, "endTime") &&
     !hasStandaloneAnchor(activity) &&
+    !classification.hasStrongPlannedActivityLanguage &&
+    (classification.hasAvailabilityMarker ||
+      classification.hasWeakRecommendationMarker) &&
     /\b(museum|gallery)\b/.test(text)
   );
 }
@@ -1794,7 +1760,6 @@ function groupMuseumOptionActivities({
       .filter(
         ({ activity }) =>
           dateFor(activity) === date &&
-          shouldRetainWeakDatedCandidate(activity, nextActivities) &&
           isMuseumOptionCandidate(activity)
       );
 
@@ -1858,14 +1823,16 @@ function groupOpenDayLooseActivities({
   );
 
   for (const date of dates) {
-    const firmCount = firmActivitiesForDate(nextActivities, date).length;
+    const firmCount = firmActivitiesForOpenDayGrouping(
+      nextActivities,
+      date
+    ).length;
     const children = nextActivities
       .map((activity, index) => ({ activity, index }))
       .filter(
         ({ activity }) =>
           dateFor(activity) === date &&
-          shouldRetainWeakDatedCandidate(activity, nextActivities) &&
-          isWeakDatedCityNoteCandidate(activity)
+          isOpenDayOptionCandidate(activity)
       );
 
     if (firmCount > 0 || children.length === 0) {

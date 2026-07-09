@@ -263,8 +263,6 @@ const itemExpectations = [
     categoryId: "nightlife_entertainment",
     date: "2019-01-19",
     description: "Vienna Ferris Wheel.",
-    expectedCategoryId: "admin_logistics",
-    expectedDate: null,
     id: "jan19-ferris-wheel",
     label: "Ferris Wheel",
     requiredKeywords: ["ferris"],
@@ -282,8 +280,6 @@ const itemExpectations = [
     categoryId: "art_culture",
     date: "2019-01-19",
     description: "Hundertwasser Haus.",
-    expectedCategoryId: "admin_logistics",
-    expectedDate: null,
     id: "jan19-hundertwasser",
     label: "Hundertwasser Haus",
     requiredKeywords: ["hundertwasser"],
@@ -465,8 +461,16 @@ export const centralEuropeFirstHalfExpectations: ExpectedTimelineRecord[] = [
   })),
   ...itemExpectations.map((item) => ({
     categoryId:
-      "expectedCategoryId" in item ? item.expectedCategoryId : item.categoryId,
-    date: "expectedDate" in item ? item.expectedDate : item.date,
+      "expectedCategoryId" in item &&
+      typeof item.expectedCategoryId === "string"
+        ? item.expectedCategoryId
+        : item.categoryId,
+    date:
+      "expectedDate" in item
+        ? typeof item.expectedDate === "string"
+          ? item.expectedDate
+          : null
+        : item.date,
     id: item.id,
     label: item.label,
     recordTypes: ["item" as const],

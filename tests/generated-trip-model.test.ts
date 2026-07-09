@@ -38,6 +38,7 @@ import {
   getAsiaDemoStructuredTripRecords,
   getAsiaDemoTravelerAppViewModel,
 } from "@/lib/traveler-view-model";
+import { classifyDraftActivityCard } from "@/lib/trip-card-taxonomy";
 import { canEditTripMaterials } from "@/lib/trips";
 import {
   getUnpaidStarterMaterialCleanupCutoff,
@@ -53,6 +54,46 @@ function test(name: string, fn: () => void) {
     throw error;
   }
 }
+
+test("draft activity classifier keeps dated untimed named places as planned activities", () => {
+  const classification = classifyDraftActivityCard({
+    category: "art_culture",
+    date: "2026-09-04",
+    itemType: "activity",
+    title: "Jewish Museum",
+  });
+
+  assert.equal(classification.suggestedKind, "untimed_planned_activity");
+  assert.equal(classification.isWeakDatedCityNoteCandidate, false);
+  assert.equal(classification.isLooseTipActivity, false);
+});
+
+test("draft activity classifier treats loose dated recommendations as city note candidates", () => {
+  const classification = classifyDraftActivityCard({
+    category: "food_dining",
+    date: "2026-09-04",
+    description: "Restaurants to consider if time: Spot A, Spot B, Spot C.",
+    itemType: "activity",
+    title: "Dinner ideas",
+  });
+
+  assert.equal(classification.suggestedKind, "city_note");
+  assert.equal(classification.isLooseTipActivity, true);
+  assert.equal(classification.hasWeakRecommendationMarker, true);
+});
+
+test("draft activity classifier protects booked details from loose-tip demotion", () => {
+  const classification = classifyDraftActivityCard({
+    date: "2026-09-04",
+    description: "Booked ticket confirmation for 2:00 PM entry.",
+    itemType: "activity",
+    title: "Museum ticket",
+  });
+
+  assert.equal(classification.suggestedKind, "untimed_planned_activity");
+  assert.equal(classification.isLooseTipActivity, false);
+  assert.equal(classification.isWeakDatedCityNoteCandidate, false);
+});
 
 test("activity extraction chunks preserve dated sections from the middle of long materials", () => {
   const sourceText = [
