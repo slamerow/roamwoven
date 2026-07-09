@@ -20,6 +20,7 @@ import {
   getTripCategoryEmoji,
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
+import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
 
 type SeedLeg = {
   arriveDate?: string;
@@ -614,15 +615,7 @@ function isActiveItem(item: TripItemRecord) {
 }
 
 function isLegLevelTip(item: TripItemRecord) {
-  const text = [item.title, item.description].filter(Boolean).join(" ");
-
-  return (
-    item.itemType === "note" &&
-    Boolean(item.legId) &&
-    /\b(tips?|ideas?|recommendations?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
-      text
-    )
-  );
+  return isLegCityTipRecord(item);
 }
 
 export function createTravelerAppViewModel(

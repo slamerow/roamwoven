@@ -3129,7 +3129,12 @@ test("open-day loose lists become one flexible explore card instead of city note
   assert.match(records.items[0]?.description ?? "", /KGB Museum/);
   assert.match(records.items[0]?.description ?? "", /Kafka Statue/);
   assert.match(records.items[0]?.description ?? "", /Peklo/);
-  assert.equal(call, undefined);
+  assert.ok(call);
+  assert.equal(call?.status, "noted");
+  assert.match(call?.prompt ?? "", /KGB Museum/);
+  assert.match(call?.prompt ?? "", /Kafka Statue/);
+  assert.match(call?.prompt ?? "", /Peklo/);
+  assert.match(call?.prompt ?? "", /Explore Prague/);
   assert.equal(getStructuredReviewCount(records), 0);
 });
 

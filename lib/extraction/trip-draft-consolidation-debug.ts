@@ -2,13 +2,7 @@ import {
   asDraftObject,
   type DraftObject,
 } from "@/lib/extraction/draft-value";
-
-export type GroupingKind =
-  | "open_day_options"
-  | "option_set"
-  | "planned_area"
-  | "route_or_tour"
-  | "same_site";
+import { type GroupingKind } from "@/lib/trip-card-taxonomy";
 
 export type TripDraftConsolidationDebug = {
   foldedLodgingNotes: Array<{

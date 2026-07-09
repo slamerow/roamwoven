@@ -8,6 +8,7 @@ import {
   getStructuredReviewSections,
   type StructuredReviewEditField,
 } from "@/lib/generated-trip-review";
+import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
 export type GeneratedTripSummaryItem = {
@@ -790,15 +791,7 @@ function sortEntriesForDay(
 }
 
 function isLegLevelTip(item: StructuredTripRecords["items"][number]) {
-  const text = [item.title, item.description].filter(Boolean).join(" ");
-
-  return (
-    item.itemType === "note" &&
-    Boolean(item.legId) &&
-    /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?|also noted|possible sights?|local notes?|where to eat|food list|restaurants?|cafes?|bars?)\b/i.test(
-      text
-    )
-  );
+  return isLegCityTipRecord(item);
 }
 
 function createSummaryDays(

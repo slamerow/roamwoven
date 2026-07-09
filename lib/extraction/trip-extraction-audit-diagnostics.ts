@@ -22,6 +22,7 @@ import {
   getString,
   normalizeAuditIdentity,
 } from "@/lib/extraction/trip-extraction-audit-utils";
+import { isDayOverviewActivityTitle } from "@/lib/trip-card-taxonomy";
 
 function finalTransportMatchesCandidate(
   candidate: DraftLineageCandidate,
@@ -290,12 +291,6 @@ function getOcrFailedCount(usage: unknown) {
   return typeof failed === "number" ? failed : 0;
 }
 
-function isDayOverviewTitle(value: string) {
-  return /\b(day\s+\d+|day overview|day summary|daily overview|daily plan|overview day|day plan)\b/i.test(
-    value
-  );
-}
-
 export function createAuditDiagnostics({
   lineage,
   records,
@@ -507,7 +502,7 @@ export function createAuditDiagnostics({
   }
 
   const visibleDayOverviews = activeActivities.filter((item) =>
-    isDayOverviewTitle(item.title)
+    isDayOverviewActivityTitle(item.title)
   );
 
   if (visibleDayOverviews.length > 0) {

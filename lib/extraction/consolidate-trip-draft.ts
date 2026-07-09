@@ -3,10 +3,14 @@ import {
   ASSEMBLY_VERSION,
   createEmptyConsolidationDebug,
   getExistingAssemblyDebug,
-  type GroupingKind,
   type TripDraftConsolidationDebug,
 } from "@/lib/extraction/trip-draft-consolidation-debug";
 import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  isDayOverviewActivityTitle,
+  isMakerVisibleGroupingKind,
+  type GroupingKind,
+} from "@/lib/trip-card-taxonomy";
 
 type NoteSectionName =
   | "Food"
@@ -1220,10 +1224,7 @@ function isDayOverviewActivity(activity: DraftObject) {
   }
 
   return (
-    /\bday\s+\d+\b/.test(title) ||
-    /\b(day overview|day summary|daily overview|daily plan|overview day|day plan)\b/.test(
-      title
-    )
+    isDayOverviewActivityTitle(title)
   );
 }
 
@@ -2309,21 +2310,6 @@ function nonAssemblyMissingDetails(value: unknown) {
   });
 }
 
-const MAKER_VISIBLE_GROUPING_KINDS = new Set<GroupingKind>([
-  "option_set",
-  "planned_area",
-  "route_or_tour",
-  "same_site",
-]);
-
-function shouldSurfaceGroupingCall(
-  groupingKind: GroupingKind | null | undefined
-) {
-  return Boolean(
-    groupingKind && MAKER_VISIBLE_GROUPING_KINDS.has(groupingKind)
-  );
-}
-
 function createAssemblyCalls(
   debug: TripDraftConsolidationDebug
 ): AssemblyMissingDetail[] {
@@ -2360,7 +2346,7 @@ function createAssemblyCalls(
   }
 
   const groupedChildCalls = Array.from(groupedChildren.values())
-    .filter((item) => shouldSurfaceGroupingCall(item.groupingKind))
+    .filter((item) => isMakerVisibleGroupingKind(item.groupingKind))
     .map((item) => ({
       answerType: "confirm" as const,
       assemblySource: "trip_assembly" as const,
