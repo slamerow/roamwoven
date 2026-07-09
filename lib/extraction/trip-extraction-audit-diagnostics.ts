@@ -518,7 +518,7 @@ export function createAuditDiagnostics({
       evidence: visibleDayOverviews
         .slice(0, 10)
         .map((item) => `${item.date ?? "undated"} - ${item.title}`),
-      severity: "p1",
+      severity: "p0",
       title: "Day overview cards survived assembly",
     });
   }

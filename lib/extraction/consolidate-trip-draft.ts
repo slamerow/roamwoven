@@ -3,6 +3,7 @@ import {
   ASSEMBLY_VERSION,
   createEmptyConsolidationDebug,
   getExistingAssemblyDebug,
+  type GroupingKind,
   type TripDraftConsolidationDebug,
 } from "@/lib/extraction/trip-draft-consolidation-debug";
 import { normalizeText } from "@/lib/extraction/traveler-text";
@@ -1220,10 +1221,22 @@ function isDayOverviewActivity(activity: DraftObject) {
 
   return (
     /\bday\s+\d+\b/.test(title) ||
-    /\b(day overview|day summary|daily overview|daily plan|overview day)\b/.test(
+    /\b(day overview|day summary|daily overview|daily plan|overview day|day plan)\b/.test(
       title
     )
   );
+}
+
+function groupingKindForParent(parent: DraftObject): GroupingKind {
+  if (isSameSiteGroup(parent)) {
+    return "same_site";
+  }
+
+  if (isPlannedAreaGroup(parent)) {
+    return "planned_area";
+  }
+
+  return "route_or_tour";
 }
 
 function suppressDayOverviewActivities({
@@ -1345,6 +1358,7 @@ function pruneParentChildActivities({
       removedIndexes.add(childIndex);
       debug.removedGroupedChildren.push({
         date: dateFor(child),
+        groupingKind: groupingKindForParent(parent),
         groupedUnder: getString(parent, "title") ?? "Grouped activity",
         removedTitle: getString(child, "title") ?? "Untitled activity",
       });
@@ -1728,11 +1742,13 @@ function replaceChildrenWithGroupedActivity({
   children,
   debug,
   group,
+  groupingKind,
 }: {
   activities: DraftObject[];
   children: Array<{ activity: DraftObject; index: number }>;
   debug: TripDraftConsolidationDebug;
   group: DraftObject;
+  groupingKind: GroupingKind;
 }) {
   const childIndexes = new Set(children.map((child) => child.index));
   const firstIndex = Math.min(...children.map((child) => child.index));
@@ -1740,6 +1756,7 @@ function replaceChildrenWithGroupedActivity({
   for (const { activity } of children) {
     debug.removedGroupedChildren.push({
       date: dateFor(activity),
+      groupingKind,
       groupedUnder: getString(group, "title") ?? "Grouped activity",
       removedTitle: getString(activity, "title") ?? "Untitled activity",
     });
@@ -1798,6 +1815,7 @@ function groupMuseumOptionActivities({
       children,
       debug,
       group,
+      groupingKind: "option_set",
     });
   }
 
@@ -1876,6 +1894,7 @@ function groupOpenDayLooseActivities({
       children,
       debug,
       group,
+      groupingKind: "open_day_options",
     });
   }
 
@@ -2290,6 +2309,21 @@ function nonAssemblyMissingDetails(value: unknown) {
   });
 }
 
+const MAKER_VISIBLE_GROUPING_KINDS = new Set<GroupingKind>([
+  "option_set",
+  "planned_area",
+  "route_or_tour",
+  "same_site",
+]);
+
+function shouldSurfaceGroupingCall(
+  groupingKind: GroupingKind | null | undefined
+) {
+  return Boolean(
+    groupingKind && MAKER_VISIBLE_GROUPING_KINDS.has(groupingKind)
+  );
+}
+
 function createAssemblyCalls(
   debug: TripDraftConsolidationDebug
 ): AssemblyMissingDetail[] {
@@ -2297,6 +2331,7 @@ function createAssemblyCalls(
     string,
     {
       date: string | null;
+      groupingKind: GroupingKind | null;
       groupedUnder: string;
       removedTitles: string[];
     }
@@ -2308,9 +2343,14 @@ function createAssemblyCalls(
       groupedChildren.get(key) ??
       {
         date: item.date,
+        groupingKind: item.groupingKind ?? null,
         groupedUnder: item.groupedUnder,
         removedTitles: [],
       };
+
+    if (item.groupingKind && !group.groupingKind) {
+      group.groupingKind = item.groupingKind;
+    }
 
     if (!group.removedTitles.includes(item.removedTitle)) {
       group.removedTitles.push(item.removedTitle);
@@ -2319,21 +2359,23 @@ function createAssemblyCalls(
     groupedChildren.set(key, group);
   }
 
-  const groupedChildCalls = Array.from(groupedChildren.values()).map((item) => ({
-    answerType: "confirm" as const,
-    assemblySource: "trip_assembly" as const,
-    confidence: "high" as const,
-    evidence: `${item.removedTitles.join(", ")} ${
-      item.removedTitles.length === 1 ? "was" : "were"
-    } included under ${item.groupedUnder}.`,
-    guessedValue: item.groupedUnder,
-    prompt: `We grouped ${item.removedTitles.join(", ")} into ${item.groupedUnder}.`,
-    reason:
-      "The source treated these as one route, walk, option set, or same-site visit, so the traveler app keeps one card with included stops.",
-    relatedTitle: item.groupedUnder,
-    subjectType: "item" as const,
-    targetField: "presentation" as const,
-  }));
+  const groupedChildCalls = Array.from(groupedChildren.values())
+    .filter((item) => shouldSurfaceGroupingCall(item.groupingKind))
+    .map((item) => ({
+      answerType: "confirm" as const,
+      assemblySource: "trip_assembly" as const,
+      confidence: "high" as const,
+      evidence: `${item.removedTitles.join(", ")} ${
+        item.removedTitles.length === 1 ? "was" : "were"
+      } included under ${item.groupedUnder}.`,
+      guessedValue: item.groupedUnder,
+      prompt: `We grouped ${item.removedTitles.join(", ")} into ${item.groupedUnder}.`,
+      reason:
+        "The source treated these as one route, walk, option set, or same-site visit, so the traveler app keeps one card with included stops.",
+      relatedTitle: item.groupedUnder,
+      subjectType: "item" as const,
+      targetField: "presentation" as const,
+    }));
 
   return groupedChildCalls;
 }

@@ -3,6 +3,13 @@ import {
   type DraftObject,
 } from "@/lib/extraction/draft-value";
 
+export type GroupingKind =
+  | "open_day_options"
+  | "option_set"
+  | "planned_area"
+  | "route_or_tour"
+  | "same_site";
+
 export type TripDraftConsolidationDebug = {
   foldedLodgingNotes: Array<{
     title: string;
@@ -34,6 +41,7 @@ export type TripDraftConsolidationDebug = {
   }>;
   removedGroupedChildren: Array<{
     date: string | null;
+    groupingKind?: GroupingKind;
     groupedUnder: string;
     removedTitle: string;
   }>;
@@ -55,7 +63,7 @@ export type TripDraftConsolidationDebug = {
   }>;
 };
 
-export const ASSEMBLY_VERSION = 1;
+export const ASSEMBLY_VERSION = 2;
 
 export function createEmptyConsolidationDebug(): TripDraftConsolidationDebug {
   return {

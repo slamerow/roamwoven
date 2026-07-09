@@ -946,10 +946,9 @@ test("extraction audit flags visible day overview cards", () => {
       {
         category: "art_culture",
         date: "2019-01-20",
-        description:
-          "Breakfast at Cafe Central; Jewish Museum; St. Stephen's Cathedral; Library; Bank Austria Kunstforum; Laundry.",
+        description: "Timed palace visit.",
         itemType: "activity",
-        title: "Vienna day plan",
+        title: "Belvedere Palace",
       },
     ],
     missingDetails: [],
@@ -974,6 +973,12 @@ test("extraction audit flags visible day overview cards", () => {
     fallbackTripName: "Fallback trip",
     tripId: "trip-audit-day-plan",
   });
+  const visibleActivity = records.items.find(
+    (item) => item.title === "Belvedere Palace"
+  );
+
+  assert.ok(visibleActivity);
+  visibleActivity.title = "Vienna day plan";
   const report = createTripExtractionAuditReport({
     draft,
     records,
@@ -993,6 +998,7 @@ test("extraction audit flags visible day overview cards", () => {
   );
 
   assert.ok(dayOverviewDiagnostic);
+  assert.equal(dayOverviewDiagnostic.severity, "p0");
   assert.deepEqual(dayOverviewDiagnostic.evidence, [
     "2019-01-20 - Vienna day plan",
   ]);
@@ -1083,6 +1089,14 @@ test("draft consolidation suppresses day overview cards before summary surfaces"
           startTime: "10:00",
           title: "Belvedere Palace",
         },
+        {
+          category: "art_culture",
+          date: "2019-01-19",
+          description:
+            "Breakfast at Cafe Central; Jewish Museum; St. Stephen's Cathedral; Library.",
+          itemType: "activity",
+          title: "Vienna day plan",
+        },
       ],
       missingDetails: [],
       places: [
@@ -1104,6 +1118,7 @@ test("draft consolidation suppresses day overview cards before summary surfaces"
   const titles = records.items.map((item) => item.title);
 
   assert.equal(titles.includes("Vienna Day 3"), false);
+  assert.equal(titles.includes("Vienna day plan"), false);
   assert.equal(titles.includes("Belvedere Palace"), true);
 });
 
@@ -3114,7 +3129,8 @@ test("open-day loose lists become one flexible explore card instead of city note
   assert.match(records.items[0]?.description ?? "", /KGB Museum/);
   assert.match(records.items[0]?.description ?? "", /Kafka Statue/);
   assert.match(records.items[0]?.description ?? "", /Peklo/);
-  assert.ok(call);
+  assert.equal(call, undefined);
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("single bare venue on an open day keeps the venue plus free time", () => {
