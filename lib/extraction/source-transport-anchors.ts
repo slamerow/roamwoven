@@ -906,8 +906,16 @@ function textTokens(value: string | null | undefined) {
       (token) =>
         ![
           "and",
+          "connection",
+          "connecting",
+          "final",
           "flight",
           "from",
+          "home",
+          "inbound",
+          "leg",
+          "outbound",
+          "return",
           "the",
           "to",
           "train",
@@ -949,14 +957,42 @@ function isGenericTransportRouteLabel(
   }
 
   return (
-    normalized === type ||
+    isVagueTransportRouteLabel(normalized, type) ||
     normalized === `${type} to` ||
     normalized.startsWith(`${type} to `) ||
     normalized.startsWith(`${type} from `) ||
+    normalized.startsWith(`return ${type} `) ||
+    normalized.startsWith(`home ${type} `) ||
+    normalized.startsWith(`final ${type} `) ||
     /^(?:flight|train|bus|ferry|transfer|drive|transport)(?:\s+(?:to|from)\s+[a-z0-9 ]+)?$/.test(
       normalized
     )
   );
+}
+
+function isVagueTransportRouteLabel(normalized: string, type: string) {
+  return (
+    normalized === type ||
+    normalized === `${type} home` ||
+    normalized === `return ${type}` ||
+    normalized === `return ${type} home` ||
+    normalized === `${type} return` ||
+    normalized === `home ${type}` ||
+    normalized === `final ${type}` ||
+    normalized.startsWith(`return ${type} `) ||
+    normalized.startsWith(`home ${type} `) ||
+    normalized.startsWith(`final ${type} `)
+  );
+}
+
+function shouldReplaceRouteLabelFromAnchor(
+  value: string | null | undefined,
+  transportType: string | null | undefined
+) {
+  const normalized = normalizeText(value);
+  const type = normalizeText(transportType);
+
+  return Boolean(normalized && type && isVagueTransportRouteLabel(normalized, type));
 }
 
 export function sourceTransportAnchorMatchesRecord(
@@ -1112,10 +1148,17 @@ function repairedTransport(
     provider: record.provider ?? anchor.provider,
     reviewRequired: record.reviewRequired && !anchor.departureTime,
     routeLabel:
-      normalizeText(record.routeLabel) === normalizeText(record.transportType)
+      shouldReplaceRouteLabelFromAnchor(record.routeLabel, record.transportType)
         ? anchor.routeLabel
         : record.routeLabel,
   };
+}
+
+function recordAlreadyRepresentsAnchor(
+  records: TripTransportRecord[],
+  anchor: SourceTransportAnchor
+) {
+  return records.some((record) => sourceTransportAnchorMatchesRecord(anchor, record));
 }
 
 function createTransportFromAnchor({
@@ -1169,13 +1212,21 @@ export function applySourceTransportAnchorsToRecords({
   tripId: string;
 }) {
   const records = transport.map((record) => ({ ...record }));
+  const matchedRecordIndexes = new Set<number>();
 
   anchors.forEach((anchor, index) => {
     const scored = records
-      .map((record, recordIndex) => ({
-        recordIndex,
-        score: matchScore(anchor, record),
-      }))
+      .map((record, recordIndex) =>
+        matchedRecordIndexes.has(recordIndex)
+          ? null
+          : {
+              recordIndex,
+              score: matchScore(anchor, record),
+            }
+      )
+      .filter((entry): entry is { recordIndex: number; score: number } =>
+        Boolean(entry)
+      )
       .sort((a, b) => b.score - a.score);
     const match = scored[0];
 
@@ -1184,6 +1235,11 @@ export function applySourceTransportAnchorsToRecords({
         records[match.recordIndex],
         anchor
       );
+      matchedRecordIndexes.add(match.recordIndex);
+      return;
+    }
+
+    if (recordAlreadyRepresentsAnchor(records, anchor)) {
       return;
     }
 

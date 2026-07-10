@@ -221,6 +221,75 @@ test("source anchors create a missing flight leg instead of merging into an adja
   );
 });
 
+test("source anchors split a generic same-day return flight into connecting legs", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    longMergedFlightMaterial,
+  ]);
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
+        transport: anchors,
+      },
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-24",
+          city: "Rome",
+          leaveDate: "2019-01-25",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: null,
+          arrivalTime: null,
+          confirmation: "GHFHPG",
+          date: "2019-01-25",
+          departure: null,
+          departureTime: null,
+          provider: "Delta",
+          title: "Return flight home",
+          type: "flight",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "return-flight-generic-anchor-repair",
+  });
+  const jan25ReturnFlights = records.transport.filter(
+    (item) => item.date === "2019-01-25" && item.transportType === "flight"
+  );
+
+  assert.equal(
+    jan25ReturnFlights.length,
+    2,
+    "expected the generic return row to repair into one leg, plus the missing connection"
+  );
+  assert.ok(
+    jan25ReturnFlights.some(
+      (item) =>
+        item.departureLocation === "FCO" &&
+        item.arrivalLocation === "JFK" &&
+        item.departureTime === "14:45"
+    ),
+    "expected FCO to JFK to remain visible"
+  );
+  assert.ok(
+    jan25ReturnFlights.some(
+      (item) =>
+        item.departureLocation === "JFK" &&
+        item.arrivalLocation === "DCA" &&
+        item.departureTime === "20:30"
+    ),
+    "expected JFK to DCA to remain visible"
+  );
+});
+
 test("source anchors extract embedded visual train times from mixed PDF text", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     embeddedTrainMaterial,
