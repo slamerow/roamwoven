@@ -954,6 +954,50 @@ function routeTextForMatch(value: {
     .join(" ");
 }
 
+function locationMatches(
+  left: string | null | undefined,
+  right: string | null | undefined
+) {
+  const normalizedLeft = normalizeText(left);
+  const normalizedRight = normalizeText(right);
+
+  return Boolean(
+    normalizedLeft &&
+      normalizedRight &&
+      (normalizedLeft === normalizedRight ||
+        normalizedLeft.includes(normalizedRight) ||
+        normalizedRight.includes(normalizedLeft))
+  );
+}
+
+function bothHaveEndpointRoutes(
+  anchor: SourceTransportAnchor,
+  record: {
+    arrivalLocation: string | null;
+    departureLocation: string | null;
+  }
+) {
+  return Boolean(
+    anchor.departureLocation &&
+      anchor.arrivalLocation &&
+      record.departureLocation &&
+      record.arrivalLocation
+  );
+}
+
+function routeEndpointsMatch(
+  anchor: SourceTransportAnchor,
+  record: {
+    arrivalLocation: string | null;
+    departureLocation: string | null;
+  }
+) {
+  return (
+    locationMatches(anchor.departureLocation, record.departureLocation) &&
+    locationMatches(anchor.arrivalLocation, record.arrivalLocation)
+  );
+}
+
 function isGenericTransportRouteLabel(
   value: string | null | undefined,
   transportType: string | null | undefined
@@ -1062,6 +1106,10 @@ export function sourceTransportAnchorMatchesRecord(
     record.confirmationLabel &&
     normalizeText(anchor.confirmation) === normalizeText(record.confirmationLabel)
   ) {
+    if (bothHaveEndpointRoutes(anchor, record)) {
+      return routeEndpointsMatch(anchor, record);
+    }
+
     return !bothHaveSpecificRoutes || routeOverlap >= 2;
   }
 

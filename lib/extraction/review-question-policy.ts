@@ -1004,6 +1004,7 @@ export function createReviewQuestions({
               item.routeLabel,
               item.departureLocation,
               item.arrivalLocation,
+              item.description,
               item.provider,
             ]
               .filter(Boolean)
@@ -1017,6 +1018,7 @@ export function createReviewQuestions({
               item.routeLabel,
               item.departureLocation,
               item.arrivalLocation,
+              item.description,
               item.provider,
             ]
               .filter(Boolean)
