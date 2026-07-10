@@ -915,7 +915,7 @@ test("extraction audit flags missing and polluted critical transport rows", () =
         date: "2019-01-18",
         departure: "Prague",
         departureTime: null,
-        description: "Train to Vienna.",
+        description: "Train to Vienna departs 09:20 and arrives 13:23.",
         provider: null,
         title: "Train to Vienna",
         type: "train",
@@ -947,10 +947,17 @@ test("extraction audit flags missing and polluted critical transport rows", () =
   const pollutedTransport = records.transport.find(
     (item) => item.routeLabel === "Train to Budapest"
   );
+  const incompleteTransport = records.transport.find(
+    (item) => item.routeLabel === "Train to Vienna"
+  );
 
   if (pollutedTransport) {
     pollutedTransport.description =
       "Train to Budapest. Check in to Vitae Hostel. From Keleti International train station take the metro and tram to Kiraly Utca. Buzzer number 25.";
+  }
+  if (incompleteTransport) {
+    incompleteTransport.departureTime = null;
+    incompleteTransport.arrivalTime = null;
   }
 
   const report = createTripExtractionAuditReport({
@@ -973,11 +980,19 @@ test("extraction audit flags missing and polluted critical transport rows", () =
   const pollutedDiagnostic = report.diagnostics.find(
     (diagnostic) => diagnostic.code === "transport_description_contaminated"
   );
+  const softDiagnostic = report.diagnostics.find(
+    (diagnostic) => diagnostic.code === "critical_transport_missing_soft_details"
+  );
 
   assert.ok(missingDiagnostic);
   assert.equal(missingDiagnostic.severity, "p0");
   assert.deepEqual(missingDiagnostic.evidence, [
     "2019-01-18 - Train to Vienna: missing departure time",
+  ]);
+  assert.ok(softDiagnostic);
+  assert.equal(softDiagnostic.severity, "p2");
+  assert.deepEqual(softDiagnostic.evidence, [
+    "2019-01-18 - Train to Vienna: missing arrival time",
   ]);
   assert.ok(pollutedDiagnostic);
   assert.deepEqual(pollutedDiagnostic.evidence, [
@@ -2494,6 +2509,53 @@ test("summary does not hard-warn when only train arrival time is missing", () =>
     summary.warnings.some((warning) => /Train to Vienna/.test(warning.title)),
     false
   );
+  assert.equal(summary.isReadyForPublishReview, true);
+});
+
+test("summary quietly flags source-backed missing arrival time", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna Hbf",
+          date: "2019-01-18",
+          departure: "Praha hl.n.",
+          departureTime: "09:20",
+          description: "Train to Vienna departs 09:20 and arrives 13:23.",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-soft-arrival-time",
+  });
+  const train = records.transport[0];
+  assert.ok(train);
+  train.arrivalTime = null;
+  const summary = createGeneratedTripSummaryView(records);
+  const warning = summary.warnings.find(
+    (item) => item.id === `${train.id}-soft-transport-details`
+  );
+
+  assert.ok(warning);
+  assert.equal(warning.severity, "quiet");
+  assert.match(warning.detail, /arrival time/i);
   assert.equal(summary.isReadyForPublishReview, true);
 });
 

@@ -9,6 +9,10 @@ import {
   type StructuredReviewEditField,
 } from "@/lib/generated-trip-review";
 import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
+import {
+  getSoftTransportCompletenessIssues,
+  getSourceBackedRequiredTransportIssues,
+} from "@/lib/trip-transport-policy";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
 export type GeneratedTripSummaryItem = {
@@ -324,33 +328,6 @@ function healthTextForTransport(item: StructuredTripRecords["transport"][number]
     ]
       .filter(Boolean)
       .join(" ")
-  );
-}
-
-function rawTransportEvidenceText(item: StructuredTripRecords["transport"][number]) {
-  return [
-    item.routeLabel,
-    item.departureLocation,
-    item.arrivalLocation,
-    item.provider,
-    item.confirmationLabel,
-    item.description,
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function hasTransportTimeEvidence(item: StructuredTripRecords["transport"][number]) {
-  return /\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(am|pm)\b/i.test(
-    rawTransportEvidenceText(item)
-  );
-}
-
-function hasSpecificTransportLocationEvidence(
-  item: StructuredTripRecords["transport"][number]
-) {
-  return /\b(airport|bahnhof|gare|gate|hbf|hl\.?\s?n\.?|main station|platform|station|terminal)\b/i.test(
-    rawTransportEvidenceText(item)
   );
 }
 
@@ -912,25 +889,43 @@ function createSummaryWarnings({
   const criticalTransportWarnings = records.transport
     .filter((item) => isActiveStatus(item.status))
     .filter((item) => item.status !== "confirmed")
-    .filter((item) => item.transportType === "flight" || item.transportType === "train")
-    .filter((item) => {
-      const missingDepartureTime = !item.departureTime;
-      const missingLocation = !item.departureLocation || !item.arrivalLocation;
+    .flatMap((item) => {
+      const issues = getSourceBackedRequiredTransportIssues(item);
 
-      return (
-        (missingDepartureTime && hasTransportTimeEvidence(item)) ||
-        (missingLocation && hasSpecificTransportLocationEvidence(item))
-      );
-    })
-    .map((item) => ({
-      detail:
-        "Flights and trains should carry source-backed departure time and station or airport details whenever the source provides them. Missing arrival time alone is not a blocker.",
-      id: `${item.id}-critical-transport-details`,
-      severity: "hard" as const,
-      subjectId: item.id,
-      subjectType: "transport" as const,
-      title: `${item.routeLabel} is missing critical travel details`,
-    }));
+      if (issues.length === 0) {
+        return [];
+      }
+
+      return [{
+        detail:
+          `Source evidence includes ${issues.map((issue) => issue.label).join(", ")} that did not make it onto the travel row. Fix the Travel card before publishing.`,
+        id: `${item.id}-critical-transport-details`,
+        severity: "hard" as const,
+        subjectId: item.id,
+        subjectType: "transport" as const,
+        title: `${item.routeLabel} is missing critical travel details`,
+      }];
+    });
+  const softTransportCompletenessWarnings = records.transport
+    .filter((item) => isActiveStatus(item.status))
+    .filter((item) => item.status !== "confirmed")
+    .flatMap((item) => {
+      const issues = getSoftTransportCompletenessIssues(item);
+
+      if (issues.length === 0) {
+        return [];
+      }
+
+      return [{
+        detail:
+          `Source evidence appears to include ${issues.map((issue) => issue.label).join(", ")}. This is useful to add, but it should not block publishing.`,
+        id: `${item.id}-soft-transport-details`,
+        severity: "quiet" as const,
+        subjectId: item.id,
+        subjectType: "transport" as const,
+        title: `${item.routeLabel} could use one more travel detail`,
+      }];
+    });
   const duplicateTitleWarnings = Array.from(
     unresolvedActiveItems.reduce((groups, item) => {
       const key = [
@@ -1019,6 +1014,7 @@ function createSummaryWarnings({
 
   return [
     ...criticalTransportWarnings,
+    ...softTransportCompletenessWarnings,
     ...duplicateTitleWarnings,
     ...stayCollisionWarnings,
     ...transportCollisionWarnings,

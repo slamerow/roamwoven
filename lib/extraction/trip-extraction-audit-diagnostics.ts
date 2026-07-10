@@ -22,6 +22,13 @@ import {
   getString,
   normalizeAuditIdentity,
 } from "@/lib/extraction/trip-extraction-audit-utils";
+import {
+  getSourceBackedRequiredTransportIssues,
+  getSourceBackedTransportFieldGaps,
+  getSoftTransportCompletenessIssues,
+  isCriticalTransportRecord as isPolicyCriticalTransportRecord,
+  type TransportCompletenessRecord,
+} from "@/lib/trip-transport-policy";
 import { isDayOverviewActivityTitle } from "@/lib/trip-card-taxonomy";
 
 function finalTransportMatchesCandidate(
@@ -80,13 +87,8 @@ function isActiveFinalRecord(record: AuditFinalRecordSummary) {
 }
 
 function isCriticalTransportRecord(record: AuditFinalRecordSummary) {
-  return (
-    record.recordType === "transport" &&
-    (record.type === "flight" ||
-      record.type === "train" ||
-      record.type === "bus" ||
-      record.type === "ferry" ||
-      record.type === "transfer")
+  return record.recordType === "transport" && isPolicyCriticalTransportRecord(
+    transportPolicyRecordForFinalRecord(record)
   );
 }
 
@@ -202,18 +204,20 @@ function isLikelyPlannedActivityBuriedInNotes(
   );
 }
 
-function missingTransportDetails(record: AuditFinalRecordSummary) {
-  const missing: string[] = [];
-
-  if (!record.startTime) {
-    missing.push("departure time");
-  }
-
-  if (!record.departureLocation) {
-    missing.push("departure location");
-  }
-
-  return missing;
+function transportPolicyRecordForFinalRecord(
+  record: AuditFinalRecordSummary
+): TransportCompletenessRecord {
+  return {
+    arrivalLocation: record.arrivalLocation,
+    arrivalTime: record.endTime,
+    confirmationLabel: record.confirmationLabel,
+    departureLocation: record.departureLocation,
+    departureTime: record.startTime,
+    description: record.description,
+    provider: record.provider,
+    routeLabel: record.title,
+    transportType: record.type,
+  };
 }
 
 function transportDescriptionLooksContaminated(record: AuditFinalRecordSummary) {
@@ -266,21 +270,10 @@ function sourceAnchorMissingFields({
   anchor: SourceTransportAnchor;
   record: AuditFinalRecordSummary;
 }) {
-  const missing: string[] = [];
-
-  if (anchor.departureTime && !record.startTime) {
-    missing.push("departure time");
-  }
-
-  if (anchor.departureLocation && !record.departureLocation) {
-    missing.push("departure location");
-  }
-
-  if (anchor.arrivalLocation && !record.arrivalLocation) {
-    missing.push("arrival location");
-  }
-
-  return missing;
+  return getSourceBackedTransportFieldGaps({
+    record: transportPolicyRecordForFinalRecord(record),
+    source: anchor,
+  });
 }
 
 function getOcrFailedCount(usage: unknown) {
@@ -359,20 +352,50 @@ export function createAuditDiagnostics({
 
       return missing.length > 0 ? [{ anchor, missing, record: matchedRecord }] : [];
     });
+  const hardSourceAnchorsMissingDetails = sourceAnchorsMissingDetails
+    .map(({ anchor, missing, record }) => ({
+      anchor,
+      missing: missing.filter((issue) => issue.severity === "requiredForReview"),
+      record,
+    }))
+    .filter(({ missing }) => missing.length > 0);
+  const softSourceAnchorsMissingDetails = sourceAnchorsMissingDetails
+    .map(({ anchor, missing, record }) => ({
+      anchor,
+      missing: missing.filter((issue) => issue.severity === "softCompleteness"),
+      record,
+    }))
+    .filter(({ missing }) => missing.length > 0);
 
-  if (sourceAnchorsMissingDetails.length > 0) {
+  if (hardSourceAnchorsMissingDetails.length > 0) {
     diagnostics.push({
       code: "critical_transport_source_anchor_missing_details",
       detail:
         "Source text or OCR had critical transport fields that are absent from final travel rows.",
-      evidence: sourceAnchorsMissingDetails
+      evidence: hardSourceAnchorsMissingDetails
         .slice(0, 10)
         .map(
           ({ anchor, missing, record }) =>
-            `${record.date ?? anchor.date ?? "undated"} - ${record.title}: missing ${missing.join(", ")} from source anchor ${anchor.routeLabel}`
+            `${record.date ?? anchor.date ?? "undated"} - ${record.title}: missing ${missing.map((issue) => issue.label).join(", ")} from source anchor ${anchor.routeLabel}`
         ),
       severity: "p0",
       title: "Source-backed transport details are missing",
+    });
+  }
+
+  if (softSourceAnchorsMissingDetails.length > 0) {
+    diagnostics.push({
+      code: "critical_transport_source_anchor_missing_soft_details",
+      detail:
+        "Source text or OCR had useful non-blocking transport details that are absent from final travel rows.",
+      evidence: softSourceAnchorsMissingDetails
+        .slice(0, 10)
+        .map(
+          ({ anchor, missing, record }) =>
+            `${record.date ?? anchor.date ?? "undated"} - ${record.title}: missing ${missing.map((issue) => issue.label).join(", ")} from source anchor ${anchor.routeLabel}`
+        ),
+      severity: "p2",
+      title: "Source-backed transport details could be richer",
     });
   }
 
@@ -401,7 +424,9 @@ export function createAuditDiagnostics({
     .filter(isActiveFinalRecord)
     .filter(isCriticalTransportRecord)
     .map((record) => ({
-      missing: missingTransportDetails(record),
+      missing: getSourceBackedRequiredTransportIssues(
+        transportPolicyRecordForFinalRecord(record)
+      ),
       record,
     }))
     .filter(({ missing }) => missing.length > 0);
@@ -415,10 +440,37 @@ export function createAuditDiagnostics({
         .slice(0, 10)
         .map(
           ({ missing, record }) =>
-            `${record.date ?? "undated"} - ${record.title}: missing ${missing.join(", ")}`
+            `${record.date ?? "undated"} - ${record.title}: missing ${missing.map((issue) => issue.label).join(", ")}`
         ),
       severity: "p0",
       title: "Critical transport rows are missing details",
+    });
+  }
+
+  const criticalTransportsMissingSoftDetails = finalRecords
+    .filter(isActiveFinalRecord)
+    .filter(isCriticalTransportRecord)
+    .map((record) => ({
+      missing: getSoftTransportCompletenessIssues(
+        transportPolicyRecordForFinalRecord(record)
+      ),
+      record,
+    }))
+    .filter(({ missing }) => missing.length > 0);
+
+  if (criticalTransportsMissingSoftDetails.length > 0) {
+    diagnostics.push({
+      code: "critical_transport_missing_soft_details",
+      detail:
+        "Travel rows are missing useful non-blocking arrival details that source evidence appears to contain.",
+      evidence: criticalTransportsMissingSoftDetails
+        .slice(0, 10)
+        .map(
+          ({ missing, record }) =>
+            `${record.date ?? "undated"} - ${record.title}: missing ${missing.map((issue) => issue.label).join(", ")}`
+        ),
+      severity: "p2",
+      title: "Critical transport rows could be richer",
     });
   }
 
