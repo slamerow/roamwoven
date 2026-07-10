@@ -1300,7 +1300,7 @@ test("wrong-city anchored activities become placement questions", () => {
   assert.equal(item?.status, "needs_review");
   assert.ok(question);
   assert.equal(question?.status, "open");
-  assert.equal(getStructuredReviewCount(records), 2);
+  assert.equal(getStructuredReviewCount(records), 1);
 });
 
 test("city note merging removes places that already became scheduled activities", () => {
@@ -2117,27 +2117,16 @@ test("loose food ideas without a clear leg do not become city notes or tips", ()
   });
   const sections = getStructuredReviewSections(records);
   const activities = sections.find((section) => section.id === "activities");
+  const questions = sections.find((section) => section.id === "questions");
 
   assert.equal(records.items[0]?.itemType, "activity");
   assert.equal(records.items[0]?.status, "needs_review");
   assert.equal(getStructuredReviewCount(records), 1);
   assert.equal(sections.find((section) => section.id === "city-tips")?.count, 0);
   assert.equal(activities?.count, 1);
-  assert.equal(activities?.items[0]?.title, "Food ideas");
-  assert.deepEqual(
-    activities?.items[0]?.editFields.map((field) => field.name),
-    [
-      "title",
-      "itemType",
-      "date",
-      "startTime",
-      "endTime",
-      "locationName",
-      "address",
-      "url",
-      "description",
-    ]
-  );
+  assert.equal(activities?.items.length, 0);
+  assert.equal(questions?.items.length, 1);
+  assert.equal(questions?.items[0]?.title, "Which day should Food ideas appear on?");
 });
 
 test("full-day overview cards are suppressed while specific activities remain", () => {
@@ -3992,7 +3981,7 @@ test("logistics-only sensitive details do not become private notes", () => {
   assert.equal(records.privateDetails[0]?.detailType, "host_phone");
 });
 
-test("privacy policy prompts are handled by the privacy recommendation", () => {
+test("privacy policy prompts are handled by default privacy policy", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -4066,19 +4055,17 @@ test("privacy policy prompts are handled by the privacy recommendation", () => {
   const sections = getStructuredReviewSections(records);
   const questions = sections.find((section) => section.id === "questions");
   const privacy = sections.find((section) => section.id === "private-details");
-  const privacyItem = privacy?.items[0];
 
   assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(records.reviewQuestions[1]?.status, "dismissed");
   assert.equal(questions?.items.length, 0);
-  assert.equal(privacy?.items.length, 1);
-  assert.equal(privacyItem?.title, "Confirm recommended privacy");
-  assert.equal(privacyItem?.childItems?.length, 1);
-  assert.equal(
-    privacyItem?.childItems?.[0]?.meta,
-    "Access codes and arrival instructions"
+  assert.equal(privacy?.items.length, 0);
+  assert.ok(
+    records.privateDetails.every(
+      (detail) => detail.visibility === "traveler_password"
+    )
   );
-  assert.equal(getStructuredReviewCount(records), 1);
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("complete cards ignore stale record-level review flags", () => {
@@ -4609,9 +4596,9 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 2 things before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 1 thing before this becomes the traveler app."
   );
-  assert.equal(reviewCount, 2);
+  assert.equal(reviewCount, 1);
   assert.equal(summaryView.counts.plans, 2);
   assert.equal(sections.length, 8);
   assert.deepEqual(

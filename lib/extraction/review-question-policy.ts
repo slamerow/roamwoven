@@ -963,8 +963,30 @@ export function createReviewQuestions({
       ? (item as DraftObject)
       : {};
     const relatedTitle = getString(detail, "relatedTitle");
-    const subjectType = getReviewSubjectType(getString(detail, "subjectType"));
-    const subjectId = findSubjectId(subjectType, relatedTitle);
+    const rawSubjectType = getString(detail, "subjectType");
+    let subjectType = getReviewSubjectType(rawSubjectType);
+    let subjectId = findSubjectId(subjectType, relatedTitle);
+
+    if (!rawSubjectType && relatedTitle && !subjectId) {
+      for (const candidateSubjectType of [
+        "item",
+        "stay",
+        "transport",
+        "leg",
+      ] satisfies Array<TripReviewQuestionRecord["subjectType"]>) {
+        const candidateSubjectId = findSubjectId(
+          candidateSubjectType,
+          relatedTitle
+        );
+
+        if (candidateSubjectId) {
+          subjectType = candidateSubjectType;
+          subjectId = candidateSubjectId;
+          break;
+        }
+      }
+    }
+
     const answerType = getAnswerType(getString(detail, "answerType"));
     const confidence = getConfidence(getString(detail, "confidence"));
     const evidence = getString(detail, "evidence");
@@ -1071,6 +1093,34 @@ export function createReviewQuestions({
       (question) => `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`
     )
   );
+  const hasRelatedOpenPlacementQuestion = (item: TripItemRecord) => {
+    const title = normalizeText(item.title);
+
+    if (!title) {
+      return false;
+    }
+
+    return draftQuestions.some((question) => {
+      if (question.status !== "open") {
+        return false;
+      }
+
+      if (question.subjectId === item.id) {
+        return true;
+      }
+
+      const questionText = normalizeText(
+        [question.prompt, question.reason, question.evidence, question.guessedValue]
+          .filter(Boolean)
+          .join(" ")
+      );
+
+      return (
+        questionText.includes(title) &&
+        /\b(day|date|where|belong|place|placement|appear)\b/.test(questionText)
+      );
+    });
+  };
   const rawStays = getArray(draft, "stays");
   const inferredStayCheckOutQuestions = stays.flatMap((stay, index) => {
     const rawStay = rawStays[index];
@@ -1145,8 +1195,44 @@ export function createReviewQuestions({
 
       return questionKeys.has(key) ? [] : [question];
     });
+  const missingItemDateQuestions = items
+    .filter(
+      (item) =>
+        item.status !== "ignored" &&
+        item.itemType !== "note" &&
+        !item.date &&
+        !hasRelatedOpenPlacementQuestion(item)
+    )
+    .flatMap((item, index): TripReviewQuestionRecord[] => {
+      const question: TripReviewQuestionRecord = {
+        answerType: "date",
+        answerValue: null,
+        createdAt: null,
+        evidence: item.description,
+        guessedValue: null,
+        id: `${tripId}-item-placement-question-${index + 1}`,
+        prompt: `Which day should ${item.title} appear on?`,
+        reason:
+          "This card is source-backed but does not have a clear date, so Roamwoven needs one placement decision.",
+        resolvedAt: null,
+        sourceConfidence: "medium",
+        status: "open",
+        subjectId: item.id,
+        subjectType: "item",
+        targetField: "date",
+        tripId,
+      };
+      const key = `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`;
 
-  return [...draftQuestions, ...inferredStayCheckOutQuestions, ...explicitTodoQuestions].filter((question, index, questions) => {
+      return questionKeys.has(key) ? [] : [question];
+    });
+
+  return [
+    ...draftQuestions,
+    ...inferredStayCheckOutQuestions,
+    ...explicitTodoQuestions,
+    ...missingItemDateQuestions,
+  ].filter((question, index, questions) => {
     if (question.status !== "open" && question.status !== "noted") {
       return true;
     }

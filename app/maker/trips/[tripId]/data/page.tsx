@@ -316,19 +316,7 @@ function getStructuredReviewItems(
       tone: "question" as const,
     }));
 
-  const sensitive = records.privateDetails
-    .filter((detail) => detail.reviewRequired)
-    .map((detail) => ({
-      detail:
-        detail.reason ??
-        "This may need privacy protection before sharing.",
-      id: detail.id,
-      meta: detail.detailType,
-      title: detail.label,
-      tone: "sensitive" as const,
-    }));
-
-  return [...questions, ...sensitive];
+  return questions;
 }
 
 const sectionIcons: Record<string, typeof Sparkles> = {
