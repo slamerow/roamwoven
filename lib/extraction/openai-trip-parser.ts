@@ -10,6 +10,7 @@ import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
 export type TripExtractionMaterial = {
+  dedupedSourceUploadIds?: string[];
   filename: string;
   sourceProvenance?: "manual_note" | "ocr" | "text_layer" | "unknown";
   sourceUploadId?: string;

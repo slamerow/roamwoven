@@ -47,6 +47,10 @@ export type MaterialExtractionCheckpointInput = {
 };
 
 export type MaterialOcrReadinessIssue = "ocr-failed" | "ocr-incomplete" | null;
+export type MaterialExtractionReadinessIssue =
+  | Exclude<MaterialOcrReadinessIssue, null>
+  | "material-incomplete"
+  | null;
 
 type MaterialExtractionRow = {
   id: string;
@@ -211,6 +215,16 @@ export function getMaterialOcrReadinessIssue(
   }
 
   return records.some(isOcrRelatedFailure) ? "ocr-failed" : null;
+}
+
+export function getMaterialExtractionReadinessIssue(
+  records: MaterialExtractionRecord[]
+): MaterialExtractionReadinessIssue {
+  if (records.some((record) => record.status === "pending")) {
+    return "material-incomplete";
+  }
+
+  return getMaterialOcrReadinessIssue(records);
 }
 
 export async function upsertMaterialExtractionCheckpoint(

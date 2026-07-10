@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   getOpenAIConfig,
@@ -19,42 +18,25 @@ import {
   assertTripSpineBasics,
   MissingTripSpineBasicsError,
 } from "@/lib/extraction/trip-spine-validation";
-import { getTripExtractionMaterials } from "@/lib/extraction/trip-materials";
+import {
+  createTripExtractionMaterialsIdempotencyKey,
+  getTripExtractionMaterialsWithSummary,
+  getTripExtractionMaterialSourceUploadIds,
+} from "@/lib/extraction/trip-materials";
 import {
   optimizeTripExtractionMaterials,
   type MaterialBudgetSummary,
 } from "@/lib/extraction/material-budget";
 import {
-  getMaterialOcrReadinessIssue,
+  getMaterialExtractionReadinessIssue,
   listMaterialExtractionCheckpoints,
 } from "@/lib/extraction/material-extractions";
 import { processTripOcrNeededMaterials } from "@/lib/extraction/ocr-processor";
 import { getMakerTrip } from "@/lib/trips";
-import { listTripUploads, type TripUpload } from "@/lib/uploads";
+import { listTripUploads } from "@/lib/uploads";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-function getInitialParseIdempotencyKey({
-  failedRunId,
-  uploads,
-}: {
-  failedRunId?: string;
-  uploads: TripUpload[];
-}) {
-  const identity = uploads
-    .map((upload) => ({
-      hash: upload.contentSha256,
-      id: upload.id,
-      name: upload.originalFilename,
-      size: upload.fileSizeBytes,
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
-
-  return createHash("sha256")
-    .update(JSON.stringify({ failedRunId: failedRunId ?? null, identity }))
-    .digest("hex");
-}
 
 function redirectToData(
   request: NextRequest,
@@ -191,9 +173,15 @@ function summarizeAssemblyUsage(usage: unknown) {
 function getNoMaterialErrorCode(
   summary: ReturnType<typeof summarizeMaterialCheckpoints>
 ) {
-  return (summary.byStatus.ocr_needed ?? 0) > 0
-    ? "ocr-needed"
-    : "no-text-materials";
+  if ((summary.byStatus.ocr_needed ?? 0) > 0) {
+    return "ocr-needed";
+  }
+
+  if ((summary.byStatus.pending ?? 0) > 0) {
+    return "material-incomplete";
+  }
+
+  return "no-text-materials";
 }
 
 export async function POST(
@@ -233,7 +221,8 @@ export async function POST(
     return redirectToData(request, tripId, { error: "spine-exists" });
   }
 
-  let materials = await getTripExtractionMaterials(uploads);
+  let preparedMaterials = await getTripExtractionMaterialsWithSummary(uploads);
+  let materials = preparedMaterials.materials;
   let materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
   let materialCheckpointSummary =
     summarizeMaterialCheckpoints(materialCheckpoints);
@@ -246,10 +235,12 @@ export async function POST(
       summarizeMaterialCheckpoints(materialCheckpoints);
   }
 
-  const ocrReadinessIssue = getMaterialOcrReadinessIssue(materialCheckpoints);
+  const readinessIssue =
+    getMaterialExtractionReadinessIssue(materialCheckpoints);
 
-  if (ocrReadinessIssue) {
-    console.warn("trip_extraction_ocr_not_ready", {
+  if (readinessIssue) {
+    console.warn("trip_extraction_materials_not_ready", {
+      materialDedupe: preparedMaterials.dedupeSummary,
       ocrSummary,
       statusCounts: materialCheckpointSummary.byStatus,
       failureClasses: materialCheckpointSummary.failureClasses,
@@ -258,20 +249,22 @@ export async function POST(
     await recordTripProcessingEvent({
       details: {
         failureClasses: materialCheckpointSummary.failureClasses,
+        materialDedupe: preparedMaterials.dedupeSummary,
         ocrSummary,
         statusCounts: materialCheckpointSummary.byStatus,
       },
-      errorMessage: ocrReadinessIssue,
-      stage: "ocr",
-      status: ocrReadinessIssue === "ocr-failed" ? "failed" : "blocked",
+      errorMessage: readinessIssue,
+      stage: readinessIssue.startsWith("ocr-") ? "ocr" : "material_checkpoint",
+      status: readinessIssue === "ocr-failed" ? "failed" : "blocked",
       tripId,
     });
 
-    return redirectToData(request, tripId, { error: ocrReadinessIssue });
+    return redirectToData(request, tripId, { error: readinessIssue });
   }
 
   if (ocrSummary) {
-    materials = await getTripExtractionMaterials(uploads);
+    preparedMaterials = await getTripExtractionMaterialsWithSummary(uploads);
+    materials = preparedMaterials.materials;
     materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
     materialCheckpointSummary =
       summarizeMaterialCheckpoints(materialCheckpoints);
@@ -281,6 +274,7 @@ export async function POST(
     await recordTripProcessingEvent({
       details: {
         failureClasses: materialCheckpointSummary.failureClasses,
+        materialDedupe: preparedMaterials.dedupeSummary,
         statusCounts: materialCheckpointSummary.byStatus,
       },
       errorMessage: getNoMaterialErrorCode(materialCheckpointSummary),
@@ -303,6 +297,7 @@ export async function POST(
   if (materials.length === 0 || inputCharCount === 0) {
     await recordTripProcessingEvent({
       details: {
+        materialDedupe: preparedMaterials.dedupeSummary,
         materialCount: materials.length,
         rawCharCount: inputCharCount,
         statusCounts: materialCheckpointSummary.byStatus,
@@ -320,6 +315,7 @@ export async function POST(
 
   console.info("trip_extraction_materials_ready", {
     estimatedInputTokens: optimizedMaterials.summary.estimatedInputTokens,
+    materialDedupe: preparedMaterials.dedupeSummary,
     materialCount: optimizedMaterials.summary.materialCount,
     materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
     rawCharCount: optimizedMaterials.summary.rawCharCount,
@@ -332,6 +328,7 @@ export async function POST(
   await recordTripProcessingEvent({
     details: {
       estimatedInputTokens: optimizedMaterials.summary.estimatedInputTokens,
+      materialDedupe: preparedMaterials.dedupeSummary,
       materialCount: optimizedMaterials.summary.materialCount,
       materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
       rawCharCount: optimizedMaterials.summary.rawCharCount,
@@ -344,21 +341,25 @@ export async function POST(
   });
   let run: Awaited<ReturnType<typeof createTripProcessingRun>> | null = null;
   let extractionUsage: unknown = null;
+  const representedSourceUploadIds =
+    getTripExtractionMaterialSourceUploadIds(materials);
 
   try {
     run = await createTripProcessingRun({
-      idempotencyKey: getInitialParseIdempotencyKey({
+      idempotencyKey: createTripExtractionMaterialsIdempotencyKey({
         failedRunId: latestRun?.status === "failed" ? latestRun.id : undefined,
-        uploads,
+        materials,
       }),
       inputCharCount,
-      sourceUploadIds: uploads.map((upload) => upload.id),
+      sourceUploadIds: representedSourceUploadIds,
       tripId,
     });
     await recordTripProcessingEvent({
       details: {
         inputCharCount,
-        sourceUploadCount: uploads.length,
+        materialDedupe: preparedMaterials.dedupeSummary,
+        representedSourceUploadCount: representedSourceUploadIds.length,
+        uploadedSourceCount: uploads.length,
       },
       processingRunId: run.id,
       stage: "run",
@@ -367,6 +368,7 @@ export async function POST(
     });
     await recordTripProcessingEvent({
       details: {
+        materialDedupe: preparedMaterials.dedupeSummary,
         materialCount: materials.length,
         tripName: trip.name,
       },
@@ -413,6 +415,7 @@ export async function POST(
           result.usage
         ),
         materialCheckpoints: materialCheckpointSummary,
+        materialDedupe: preparedMaterials.dedupeSummary,
         ocr: ocrSummary,
         openai: result.usage,
       },
@@ -455,6 +458,7 @@ export async function POST(
                 extractionUsage
               ),
               materialCheckpoints: materialCheckpointSummary,
+              materialDedupe: preparedMaterials.dedupeSummary,
               ocr: ocrSummary,
               openaiError: (error as { details?: unknown }).details,
             }
@@ -464,6 +468,7 @@ export async function POST(
                 extractionUsage
               ),
               materialCheckpoints: materialCheckpointSummary,
+              materialDedupe: preparedMaterials.dedupeSummary,
               ocr: ocrSummary,
             };
 

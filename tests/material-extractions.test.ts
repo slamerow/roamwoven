@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   completeMaterialExtractionOcr,
   failMaterialExtractionOcr,
+  getMaterialExtractionReadinessIssue,
   getMaterialOcrReadinessIssue,
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
@@ -334,6 +335,18 @@ export default async function run() {
         }),
       ]),
       "ocr-incomplete"
+    );
+  });
+
+  await test("pending material checkpoints block extraction start", () => {
+    assert.equal(
+      getMaterialExtractionReadinessIssue([
+        checkpoint({
+          status: "pending",
+          textContent: null,
+        }),
+      ]),
+      "material-incomplete"
     );
   });
 

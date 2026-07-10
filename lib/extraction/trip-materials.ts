@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { TripUpload } from "@/lib/uploads";
@@ -16,6 +17,19 @@ const MATERIAL_EXTRACTION_CONCURRENCY = 3;
 const MIN_LARGE_PDF_IMAGE_AREA = 30000;
 const MIN_LARGE_PDF_IMAGE_HEIGHT = 80;
 const MIN_LARGE_PDF_IMAGE_WIDTH = 180;
+const MIN_TEXT_DEDUPE_CHARS = 80;
+
+export type TripExtractionMaterialDedupeSummary = {
+  duplicateMaterialCount: number;
+  originalMaterialCount: number;
+  representedSourceUploadIds: string[];
+  submittedMaterialCount: number;
+};
+
+export type TripExtractionMaterialPreparation = {
+  dedupeSummary: TripExtractionMaterialDedupeSummary;
+  materials: TripExtractionMaterial[];
+};
 
 class MinimalDOMMatrix {
   a = 1;
@@ -75,6 +89,156 @@ function getMaterialTypeForRecord(
   }
 
   return upload.fileType === "application/pdf" ? "pdf_text" : "file_text";
+}
+
+function sha256Hex(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function normalizeTextIdentity(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function uniqueSorted(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(values.filter((value): value is string => Boolean(value)))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function getMaterialSourceUploadIds(material: TripExtractionMaterial) {
+  return uniqueSorted([
+    material.sourceUploadId,
+    ...(material.dedupedSourceUploadIds ?? []),
+  ]);
+}
+
+export function getTripExtractionMaterialSourceUploadIds(
+  materials: TripExtractionMaterial[]
+) {
+  return uniqueSorted(materials.flatMap(getMaterialSourceUploadIds));
+}
+
+function createUploadLookup(uploads: TripUpload[]) {
+  return new Map(uploads.map((upload) => [upload.id, upload]));
+}
+
+function getMaterialDedupeKey({
+  material,
+  upload,
+}: {
+  material: TripExtractionMaterial;
+  upload: TripUpload | undefined;
+}) {
+  const contentHash = upload?.contentSha256?.trim();
+
+  if (contentHash) {
+    return `content:${contentHash}`;
+  }
+
+  const normalizedText = normalizeTextIdentity(material.text);
+
+  if (normalizedText.length >= MIN_TEXT_DEDUPE_CHARS) {
+    return `text:${sha256Hex(normalizedText)}`;
+  }
+
+  return null;
+}
+
+function mergeMaterialSourceIds(
+  target: TripExtractionMaterial,
+  duplicate: TripExtractionMaterial
+) {
+  return {
+    ...target,
+    dedupedSourceUploadIds: uniqueSorted([
+      ...getMaterialSourceUploadIds(target),
+      ...getMaterialSourceUploadIds(duplicate),
+    ]),
+  };
+}
+
+export function dedupeTripExtractionMaterials({
+  materials,
+  uploads,
+}: {
+  materials: TripExtractionMaterial[];
+  uploads: TripUpload[];
+}): TripExtractionMaterialPreparation {
+  const uploadById = createUploadLookup(uploads);
+  const byKey = new Map<string, TripExtractionMaterial>();
+  const deduped: TripExtractionMaterial[] = [];
+
+  for (const material of materials) {
+    const key = getMaterialDedupeKey({
+      material,
+      upload: material.sourceUploadId
+        ? uploadById.get(material.sourceUploadId)
+        : undefined,
+    });
+
+    if (!key) {
+      deduped.push(material);
+      continue;
+    }
+
+    const existing = byKey.get(key);
+
+    if (existing) {
+      byKey.set(key, mergeMaterialSourceIds(existing, material));
+      continue;
+    }
+
+    byKey.set(key, material);
+    deduped.push(material);
+  }
+
+  const preparedMaterials = deduped.map((material) => {
+    const key = getMaterialDedupeKey({
+      material,
+      upload: material.sourceUploadId
+        ? uploadById.get(material.sourceUploadId)
+        : undefined,
+    });
+
+    return key && byKey.has(key) ? (byKey.get(key) ?? material) : material;
+  });
+
+  return {
+    dedupeSummary: {
+      duplicateMaterialCount: materials.length - preparedMaterials.length,
+      originalMaterialCount: materials.length,
+      representedSourceUploadIds:
+        getTripExtractionMaterialSourceUploadIds(preparedMaterials),
+      submittedMaterialCount: preparedMaterials.length,
+    },
+    materials: preparedMaterials,
+  };
+}
+
+export function createTripExtractionMaterialsIdempotencyKey({
+  failedRunId,
+  materials,
+}: {
+  failedRunId?: string;
+  materials: TripExtractionMaterial[];
+}) {
+  const identity = materials
+    .map((material) => ({
+      provenance: material.sourceProvenance ?? "unknown",
+      textHash: sha256Hex(normalizeTextIdentity(material.text)),
+      type: material.type,
+    }))
+    .sort((a, b) =>
+      [
+        a.type.localeCompare(b.type),
+        a.textHash.localeCompare(b.textHash),
+        a.provenance.localeCompare(b.provenance),
+      ].find((value) => value !== 0) ?? 0
+    );
+
+  return createHash("sha256")
+    .update(JSON.stringify({ failedRunId: failedRunId ?? null, identity }))
+    .digest("hex");
 }
 
 async function mapWithConcurrency<T, R>(
@@ -327,7 +491,9 @@ export async function getPdfExtractionMaterials(
   return materials;
 }
 
-export async function getTripExtractionMaterials(uploads: TripUpload[]) {
+export async function getTripExtractionMaterialsWithSummary(
+  uploads: TripUpload[]
+): Promise<TripExtractionMaterialPreparation> {
   const tripId = uploads.find((upload) => upload.tripId)?.tripId;
   const existingCheckpoints = tripId
     ? await listMaterialExtractionCheckpoints(tripId)
@@ -581,5 +747,12 @@ export async function getTripExtractionMaterials(uploads: TripUpload[]) {
     }
   );
 
-  return materialLists.flat().filter((material) => material.text.trim());
+  return dedupeTripExtractionMaterials({
+    materials: materialLists.flat().filter((material) => material.text.trim()),
+    uploads,
+  });
+}
+
+export async function getTripExtractionMaterials(uploads: TripUpload[]) {
+  return (await getTripExtractionMaterialsWithSummary(uploads)).materials;
 }
