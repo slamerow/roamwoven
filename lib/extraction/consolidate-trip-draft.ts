@@ -8,7 +8,12 @@ import {
 import { normalizeText } from "@/lib/extraction/traveler-text";
 import {
   classifyDraftActivityCard,
+  getDraftActivityGroupingKind,
+  hasStandaloneActivityAnchor,
   isMakerVisibleGroupingKind,
+  isPlannedAreaActivityGroup,
+  isSameSiteActivityGroup,
+  isTourActivityGroup,
   type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
 
@@ -130,22 +135,22 @@ function timeFor(record: DraftObject) {
   return getStringFromKeys(record, ["startTime", "time", "departureTime"]);
 }
 
-function classifyDraftActivity(activity: DraftObject) {
-  return classifyDraftActivityCard({
+function toDraftActivityInput(activity: DraftObject) {
+  return {
     category: getString(activity, "category"),
     date: dateFor(activity),
     description: getString(activity, "description"),
     endTime: getString(activity, "endTime"),
-    hasStandaloneAnchor: hasStandaloneAnchor(activity),
-    isPlannedAreaGroup: isPlannedAreaGroup(activity),
     isRentalCarAction: isRentalCarText(textFor(activity)),
-    isSameSiteGroup: isSameSiteGroup(activity),
-    isTourGroup: isTourGroup(activity),
     isTransportAction: isTransportActionText(textFor(activity)),
     itemType: getString(activity, "itemType"),
     startTime: timeFor(activity),
     title: getString(activity, "title"),
-  });
+  };
+}
+
+function classifyDraftActivity(activity: DraftObject) {
+  return classifyDraftActivityCard(toDraftActivityInput(activity));
 }
 
 function normalizeClockTime(value: string | null | undefined) {
@@ -706,15 +711,7 @@ function normalizeRentalCarPickups({
 }
 
 function hasStandaloneAnchor(record: DraftObject) {
-  const text = normalizeText(textFor(record));
-
-  return Boolean(
-    timeFor(record) ||
-      getString(record, "endTime") ||
-      /\b(ticket|tickets|timed|reserved|reservation|booking|confirmation|provider|paid|paypal|voucher|entry at|starts at)\b/.test(
-        text
-      )
-  );
+  return hasStandaloneActivityAnchor(toDraftActivityInput(record));
 }
 
 function isBroadParent(record: DraftObject) {
@@ -755,58 +752,15 @@ function isCompositeParent(record: DraftObject) {
 }
 
 function isSameSiteGroup(record: DraftObject) {
-  const text = normalizeText(textFor(record));
-  const nearbyOnly = /\b(nearby sights?|nearby sites?|nearby stops?|area sights?|area sites?)\b/.test(
-    text
-  );
-  const siteCluster =
-    /\bcluster including\b/.test(text) &&
-    /\b(palace|castle|complex|grounds|gardens)\b/.test(text);
-  const explicitSameVisit =
-    /\b(same site|same-site|same .* visit|same .* complex|inside|within|grounds|campus|estate|complex)\b/.test(
-      text
-    );
-
-  if (nearbyOnly && !explicitSameVisit) {
-    return false;
-  }
-
-  return (
-    siteCluster ||
-    explicitSameVisit ||
-    (/\b(palace|castle)\b/.test(text) &&
-      /\b(gardens?|grounds|complex|inside|within|same .* visit)\b/.test(text))
-  );
+  return isSameSiteActivityGroup(toDraftActivityInput(record));
 }
 
 function isTourGroup(record: DraftObject) {
-  return /\b(tour|walking tour|walk)\b/.test(normalizeText(getString(record, "title")));
+  return isTourActivityGroup(toDraftActivityInput(record));
 }
 
 function isPlannedAreaGroup(record: DraftObject) {
-  const title = normalizeText(getString(record, "title"));
-  const text = normalizeText(textFor(record));
-
-  if (!title || isSameSiteGroup(record)) {
-    return false;
-  }
-
-  if (
-    /\b(notes?|tips?|ideas?|recommendations?|where to eat|food list|restaurant list|shopping ideas?)\b/.test(
-      title
-    )
-  ) {
-    return false;
-  }
-
-  return (
-    /\b(explore|wander|stroll|walk|neighborhood|neighbourhood|quarter|district|area|morning|afternoon|evening)\b/.test(
-      title
-    ) &&
-    /\b(explore|wander|stroll|walk|continue|route|stops?|with|including|morning|afternoon|evening)\b/.test(
-      text
-    )
-  );
+  return isPlannedAreaActivityGroup(toDraftActivityInput(record));
 }
 
 function isGenericTourTitle(record: DraftObject) {
@@ -1230,15 +1184,7 @@ function isDayOverviewActivity(activity: DraftObject) {
 }
 
 function groupingKindForParent(parent: DraftObject): GroupingKind {
-  if (isSameSiteGroup(parent)) {
-    return "same_site";
-  }
-
-  if (isPlannedAreaGroup(parent)) {
-    return "planned_area";
-  }
-
-  return "route_or_tour";
+  return getDraftActivityGroupingKind(toDraftActivityInput(parent));
 }
 
 function suppressDayOverviewActivities({

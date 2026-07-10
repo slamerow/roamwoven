@@ -103,6 +103,86 @@ function hasTime(input: DraftActivityCardInput) {
   return Boolean(input.startTime || input.endTime);
 }
 
+export function hasStandaloneActivityAnchor(input: DraftActivityCardInput) {
+  const text = normalizeText(textForDraftActivity(input));
+
+  return Boolean(
+    hasTime(input) ||
+      /\b(ticket|tickets|timed|reserved|reservation|booking|confirmation|provider|paid|paypal|voucher|entry at|starts at)\b/.test(
+        text
+      )
+  );
+}
+
+export function isSameSiteActivityGroup(input: DraftActivityCardInput) {
+  const text = normalizeText(textForDraftActivity(input));
+  const nearbyOnly = /\b(nearby sights?|nearby sites?|nearby stops?|area sights?|area sites?)\b/.test(
+    text
+  );
+  const siteCluster =
+    /\bcluster including\b/.test(text) &&
+    /\b(palace|castle|complex|grounds|gardens)\b/.test(text);
+  const explicitSameVisit =
+    /\b(same site|same-site|same .* visit|same .* complex|inside|within|grounds|campus|estate|complex)\b/.test(
+      text
+    );
+
+  if (nearbyOnly && !explicitSameVisit) {
+    return false;
+  }
+
+  return (
+    siteCluster ||
+    explicitSameVisit ||
+    (/\b(palace|castle)\b/.test(text) &&
+      /\b(gardens?|grounds|complex|inside|within|same .* visit)\b/.test(text))
+  );
+}
+
+export function isTourActivityGroup(input: DraftActivityCardInput) {
+  return /\b(tour|walking tour|walk)\b/.test(normalizeText(input.title));
+}
+
+export function isPlannedAreaActivityGroup(input: DraftActivityCardInput) {
+  const title = normalizeText(input.title);
+  const text = normalizeText(textForDraftActivity(input));
+
+  if (!title || isSameSiteActivityGroup(input)) {
+    return false;
+  }
+
+  if (
+    /\b(notes?|tips?|ideas?|recommendations?|where to eat|food list|restaurant list|shopping ideas?)\b/.test(
+      title
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(explore|wander|stroll|walk|neighborhood|neighbourhood|quarter|district|area|morning|afternoon|evening)\b/.test(
+      title
+    ) &&
+    /\b(explore|wander|stroll|walk|continue|route|stops?|with|including|morning|afternoon|evening)\b/.test(
+      text
+    )
+  );
+}
+
+export function getDraftActivityGroupingKind(
+  input: DraftActivityCardInput
+): GroupingKind {
+  if (isSameSiteActivityGroup(input)) {
+    return "same_site";
+  }
+
+  if (isPlannedAreaActivityGroup(input)) {
+    return "planned_area";
+  }
+
+  return "route_or_tour";
+}
+
 export function hasCityTipSignal(value: string | null | undefined) {
   return CITY_TIP_SIGNAL_PATTERN.test(value ?? "");
 }
@@ -171,13 +251,20 @@ export function isLooseTipActivity(input: DraftActivityCardInput) {
 export function isWeakDatedCityNoteCandidate(
   input: DraftActivityCardInput
 ) {
+  const hasStandaloneAnchor =
+    input.hasStandaloneAnchor ?? hasStandaloneActivityAnchor(input);
+  const isPlannedAreaGroup =
+    input.isPlannedAreaGroup ?? isPlannedAreaActivityGroup(input);
+  const isSameSiteGroup = input.isSameSiteGroup ?? isSameSiteActivityGroup(input);
+  const isTourGroup = input.isTourGroup ?? isTourActivityGroup(input);
+
   if (
     !input.date ||
     hasTime(input) ||
-    input.hasStandaloneAnchor ||
-    input.isPlannedAreaGroup ||
-    input.isSameSiteGroup ||
-    input.isTourGroup ||
+    hasStandaloneAnchor ||
+    isPlannedAreaGroup ||
+    isSameSiteGroup ||
+    isTourGroup ||
     input.isRentalCarAction ||
     input.isTransportAction ||
     hasStrongPlannedActivityLanguage(input)
