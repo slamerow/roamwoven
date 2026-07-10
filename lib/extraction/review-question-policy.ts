@@ -82,6 +82,48 @@ function isRoutineAssemblyFactCall(text: string) {
   );
 }
 
+function isInternalDiagnosticOrRepairTrace({
+  evidence,
+  guessedValue,
+  prompt,
+  reason,
+  targetField,
+}: {
+  evidence: string | null;
+  guessedValue: string | null;
+  prompt: string | null;
+  reason: string | null;
+  targetField: string | null;
+}) {
+  const text = normalizeText(
+    [prompt, reason, evidence, guessedValue, targetField].filter(Boolean).join(" ")
+  );
+
+  if (!text) {
+    return false;
+  }
+
+  if (
+    /\b(conflict|conflicting|which .*correct|which .*use|where should|belong|placement|needs? placement)\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(source anchor|source anchors|source-anchor|source-backed repair|repaired from source|repaired using source|enriched from source|created from source)\b/.test(
+      text
+    ) ||
+    /\b(audit diagnostic|diagnostic|lineage|material checkpoint|material pipeline|idempotenc|ocr|qa bundle)\b/.test(
+      text
+    ) ||
+    /\b(critical_transport|source_anchor_missing|missing_from_final|missing final records|duplicate suppression|suppressed duplicate|routine assembly)\b/.test(
+      text
+    )
+  );
+}
+
 function isObviousFactCall({
   confidence,
   evidence,
@@ -1065,6 +1107,13 @@ export function createReviewQuestions({
     });
     const ignoredStructuredSubject =
       getSubjectStatus({ subjectId, subjectType }) === "ignored";
+    const internalDiagnosticOrRepairTrace = isInternalDiagnosticOrRepairTrace({
+      evidence,
+      guessedValue,
+      prompt,
+      reason,
+      targetField,
+    });
     const obviousFactCall = isObviousFactCall({
       confidence,
       evidence,
@@ -1094,6 +1143,7 @@ export function createReviewQuestions({
     if (
       alreadyAnsweredByRecord ||
       ignoredStructuredSubject ||
+      internalDiagnosticOrRepairTrace ||
       obviousFactCall ||
       privacyPolicyQuestion ||
       sourceObviousAnswer ||

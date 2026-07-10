@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
+  getStructuredReviewCount,
+  getStructuredReviewSections,
+} from "@/lib/generated-trip-review";
+import {
   extractSourceTransportAnchorsFromMaterials,
   SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
   type SourceTransportAnchor,
@@ -341,6 +345,42 @@ test("source anchors repair transport and suppress already-answered time questio
   assert.equal(fingerprints.transport.length, 1);
 });
 
+test("source anchor repair traces stay internal instead of becoming calls", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    embeddedTrainMaterial,
+  ]);
+  const draft = {
+    ...createBaseDraft(anchors),
+    missingDetails: [
+      {
+        answerType: "confirm",
+        confidence: "high",
+        evidence:
+          "Source anchors repaired Train to Vienna with the OCR-backed 09:20 departure and 13:23 arrival.",
+        guessedValue: "Train to Vienna",
+        prompt:
+          "We repaired Train to Vienna from source anchors and kept the traveler travel row.",
+        reason:
+          "Source-anchor repair is an internal audit trace, not a maker-facing presentation decision.",
+        relatedTitle: "Train to Vienna",
+        subjectType: "transport",
+        targetField: "sourceAnchorRepair",
+      },
+    ],
+  };
+  const records = createStructuredTripRecordsFromDraft({
+    draft,
+    fallbackTripName: "Central Europe",
+    tripId: "source-anchor-repair-internal",
+  });
+  const sections = getStructuredReviewSections(records);
+
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
+  assert.equal(sections.find((section) => section.id === "questions")?.count, 0);
+});
+
 test("source anchors enrich generic transport rows instead of duplicating them", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     embeddedTrainMaterial,
@@ -402,5 +442,11 @@ test("audit flags source-backed transport anchors missing from final records", (
         diagnostic.code === "critical_transport_source_anchor_missing" &&
         diagnostic.severity === "p0"
     )
+  );
+  assert.equal(getStructuredReviewCount(records), 0);
+  assert.equal(
+    getStructuredReviewSections(records).find((section) => section.id === "questions")
+      ?.count,
+    0
   );
 });
