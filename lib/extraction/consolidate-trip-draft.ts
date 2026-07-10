@@ -16,6 +16,11 @@ import {
   isTourActivityGroup,
   type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
+import {
+  hasTransportTimeEvidence,
+  isCriticalTransportRecord,
+  type TransportCompletenessRecord,
+} from "@/lib/trip-transport-policy";
 
 type NoteSectionName =
   | "Food"
@@ -2306,6 +2311,67 @@ function hasExistingTransportDepartureQuestion({
   });
 }
 
+function transportPolicyType(value: string | null) {
+  const normalized = normalizeText(value);
+
+  if (normalized === "car" || normalized === "rental car") {
+    return "rental_car";
+  }
+
+  return normalized || null;
+}
+
+function transportCompletenessRecordForDraft(
+  transport: DraftObject
+): TransportCompletenessRecord {
+  const title = getString(transport, "title") ?? "this transport";
+
+  return {
+    arrivalLocation: getStringFromKeys(transport, [
+      "arrival",
+      "arrivalLocation",
+    ]),
+    arrivalTime: getStringFromKeys(transport, ["arrivalTime", "endTime"]),
+    confirmationLabel: getStringFromKeys(transport, [
+      "confirmation",
+      "reservation",
+      "bookingNumber",
+      "orderNumber",
+    ]),
+    departureLocation: getStringFromKeys(transport, [
+      "departure",
+      "departureLocation",
+      "address",
+    ]),
+    departureTime: getStringFromKeys(transport, [
+      "departureTime",
+      "startTime",
+      "time",
+    ]),
+    description: getString(transport, "description"),
+    provider: getString(transport, "provider"),
+    routeLabel: title,
+    transportType: transportPolicyType(getString(transport, "type")),
+  };
+}
+
+function transportTimeQuestionPrompt({
+  policyRecord,
+  title,
+}: {
+  policyRecord: TransportCompletenessRecord;
+  title: string;
+}) {
+  if (
+    policyRecord.transportType === "rental_car" ||
+    policyRecord.transportType === "transfer"
+  ) {
+    return `What time is ${title}?`;
+  }
+
+  return `What time does ${title} depart?`;
+}
+
 function createTransportDepartureTimeQuestions({
   existingDetails,
   transports,
@@ -2314,12 +2380,13 @@ function createTransportDepartureTimeQuestions({
   transports: DraftObject[];
 }): AssemblyMissingDetail[] {
   return transports.flatMap((transport) => {
-    const type = normalizeText(getString(transport, "type"));
     const title = getString(transport, "title") ?? "this transport";
+    const policyRecord = transportCompletenessRecordForDraft(transport);
 
     if (
-      (type !== "flight" && type !== "train") ||
-      getStringFromKeys(transport, ["departureTime", "startTime", "time"]) ||
+      !isCriticalTransportRecord(policyRecord) ||
+      policyRecord.departureTime ||
+      hasTransportTimeEvidence(policyRecord) ||
       hasExistingTransportDepartureQuestion({ existingDetails, title })
     ) {
       return [];
@@ -2339,9 +2406,9 @@ function createTransportDepartureTimeQuestions({
           "confirmation",
         ]) || null,
         guessedValue: null,
-        prompt: `What time does ${title} depart?`,
+        prompt: transportTimeQuestionPrompt({ policyRecord, title }),
         reason:
-          "Flight and train cards need a departure time for the Today timeline. You can leave it blank if this is not booked yet.",
+          "Critical travel cards need a departure or pickup time for the Today timeline. You can leave it blank if this is not booked yet.",
         relatedTitle: title,
         subjectType: "transport" as const,
         targetField: "departureTime" as const,

@@ -4266,6 +4266,48 @@ test("critical transport departure gaps are owned by one open question", () => {
   assert.match(questions?.items[0]?.title ?? "", /Train to Vienna depart/i);
 });
 
+test("booked transfers missing pickup time are owned by one open question", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-19",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Fiumicino Airport",
+          confirmation: "ABC123",
+          date: "2019-01-18",
+          departure: "The RomeHello Hostel",
+          provider: "Private airport transfer",
+          title: "Private airport transfer",
+          type: "transfer",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-critical-transfer-review",
+  });
+  const sections = getStructuredReviewSections(records);
+  const questions = sections.find((section) => section.id === "questions");
+
+  assert.equal(getStructuredReviewCount(records), 1);
+  assert.equal(sections.find((section) => section.id === "transport")?.items.length, 0);
+  assert.equal(questions?.items.length, 1);
+  assert.match(questions?.items[0]?.title ?? "", /Private airport transfer/i);
+});
+
 test("optional transport provider gaps with usable anchors stay out of review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
