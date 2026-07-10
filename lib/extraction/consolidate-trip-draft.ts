@@ -212,12 +212,12 @@ function extractClockTimes(value: string | null | undefined) {
     return [];
   }
 
-  const matches = value.matchAll(/\b(?:at\s*)?(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/gi);
+  const matches = value.matchAll(/\b(?:at\s*)?(\d{1,2})(?::(\d{2})|\s*(am|pm))\b/gi);
   const times: string[] = [];
 
   for (const match of matches) {
     const time = normalizeClockTime(
-      `${match[1]}:${match[2]}${match[3] ? ` ${match[3]}` : ""}`
+      `${match[1]}:${match[2] ?? "00"}${match[3] ? ` ${match[3]}` : ""}`
     );
 
     if (time && !times.includes(time)) {

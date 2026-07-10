@@ -117,6 +117,7 @@ function cleanTransportDescription(
 
 function isRedundantLocalAirportTransfer({
   arrival,
+  confirmation,
   departure,
   description,
   provider,
@@ -124,6 +125,7 @@ function isRedundantLocalAirportTransfer({
   transportType,
 }: {
   arrival: string | null;
+  confirmation: string | null;
   departure: string | null;
   description: string | null;
   provider: string | null;
@@ -131,7 +133,9 @@ function isRedundantLocalAirportTransfer({
   transportType: TripTransportType;
 }) {
   const text = normalizeText(
-    [title, description, departure, arrival, provider].filter(Boolean).join(" ")
+    [title, description, departure, arrival, provider, confirmation]
+      .filter(Boolean)
+      .join(" ")
   );
 
   if (!text.includes("airport")) {
@@ -139,7 +143,7 @@ function isRedundantLocalAirportTransfer({
   }
 
   if (
-    /\b(confirmation|driver|private transfer|reservation|reserved|shuttle|ticket|voucher)\b/.test(
+    /\b(confirmation|driver|private\b.*\btransfer|reservation|reserved|shuttle|ticket|voucher)\b/.test(
       text
     )
   ) {
@@ -711,6 +715,7 @@ function createTransportRecords({
     const provider = getString(transport, "provider");
     const redundantLocalAirportTransfer = isRedundantLocalAirportTransfer({
       arrival,
+      confirmation: getString(transport, "confirmation"),
       departure,
       description,
       provider,

@@ -2471,6 +2471,59 @@ test("missing critical transport departure time becomes review even when source 
   );
 });
 
+test("source-obvious transport times suppress stale model questions", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "time",
+          confidence: "medium",
+          evidence:
+            "Train to Vienna departs 09:20 from Praha Hlavni Nadrazi and arrives 13:23 at Wien Hauptbahnhof.",
+          guessedValue: null,
+          prompt: "What time does Train to Vienna depart?",
+          reason:
+            "The model asked for the departure time even though the source evidence already includes it.",
+          relatedTitle: "Train to Vienna",
+          subjectType: "transport",
+          targetField: "departureTime",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-18",
+          city: "Vienna",
+          country: "Austria",
+          leaveDate: "2019-01-21",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "Vienna",
+          confirmation: "1beb5005",
+          date: "2019-01-18",
+          departure: "Prague",
+          description: "Train to Vienna. Train code: 1beb5005.",
+          title: "Train to Vienna",
+          type: "train",
+        },
+      ],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-source-obvious-transport-time",
+  });
+
+  assert.equal(records.transport[0]?.departureTime, null);
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(getStructuredReviewCount(records), 0);
+});
+
 test("summary does not hard-warn when only train arrival time is missing", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

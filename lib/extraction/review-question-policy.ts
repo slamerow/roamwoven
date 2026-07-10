@@ -181,12 +181,160 @@ function isCorePlanningTarget({
   return false;
 }
 
+function compactTargetField(targetField: string | null) {
+  return normalizeText(targetField).replace(/\s+/g, "");
+}
+
+function targetIncludes(targetField: string | null, terms: string[]) {
+  const target = normalizeText(targetField);
+
+  return terms.some((term) => target.includes(term));
+}
+
+function getStructuredTargetField({
+  subjectType,
+  targetField,
+}: {
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  const target = normalizeText(targetField);
+  const compactTarget = compactTargetField(targetField);
+
+  if (!target) {
+    return null;
+  }
+
+  if (subjectType !== "transport") {
+    return targetField;
+  }
+
+  if (
+    compactTarget.match(/^(time|starttime)$/) ||
+    compactTarget.includes("departuretime") ||
+    compactTarget.includes("pickuptime")
+  ) {
+    return "departureTime";
+  }
+
+  if (compactTarget === "endtime" || compactTarget.includes("arrivaltime")) {
+    return "arrivalTime";
+  }
+
+  if (
+    compactTarget === "departure" ||
+    compactTarget === "from" ||
+    target.includes("departure location") ||
+    target.includes("origin")
+  ) {
+    return "departureLocation";
+  }
+
+  if (
+    compactTarget === "arrival" ||
+    compactTarget === "to" ||
+    target.includes("arrival location") ||
+    target.includes("destination")
+  ) {
+    return "arrivalLocation";
+  }
+
+  if (targetIncludes(targetField, ["confirmation", "booking", "reservation"])) {
+    return "confirmationLabel";
+  }
+
+  if (targetIncludes(targetField, ["provider", "operator", "company"])) {
+    return "provider";
+  }
+
+  if (targetIncludes(targetField, ["route", "title", "name"])) {
+    return "routeLabel";
+  }
+
+  return targetField;
+}
+
+function isOptionalDetailTarget({
+  subjectType,
+  targetField,
+}: {
+  subjectType: TripReviewQuestionRecord["subjectType"];
+  targetField: string | null;
+}) {
+  const compactTarget = compactTargetField(targetField);
+
+  if (!normalizeText(targetField)) {
+    return false;
+  }
+
+  if (subjectType === "transport") {
+    return targetIncludes(targetField, [
+      "booking url",
+      "company",
+      "operator",
+      "provider",
+      "url",
+      "website",
+    ]);
+  }
+
+  if (subjectType === "item") {
+    return targetIncludes(targetField, [
+      "address",
+      "company",
+      "contact",
+      "location",
+      "name",
+      "operator",
+      "phone",
+      "provider",
+      "title",
+      "url",
+      "website",
+    ]);
+  }
+
+  if (subjectType === "stay") {
+    return (
+      compactTarget === "nights" ||
+      targetIncludes(targetField, ["address", "name", "title"])
+    );
+  }
+
+  return false;
+}
+
+function hasSourceObviousAnswer({
+  evidence,
+  reason,
+  targetField,
+}: {
+  evidence: string | null;
+  reason: string | null;
+  targetField: string | null;
+}) {
+  const compactTarget = compactTargetField(targetField);
+  const sourceText = [evidence, reason].filter(Boolean).join(" ");
+
+  if (!sourceText) {
+    return false;
+  }
+
+  if (
+    compactTarget.includes("time") &&
+    /\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(am|pm)\b/i.test(sourceText)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function isDismissibleOptionalMissingDetail({
   evidence,
   hasUsableAnchor,
   prompt,
   reason,
-  subjectId,
   subjectType,
   targetField,
 }: {
@@ -194,11 +342,9 @@ function isDismissibleOptionalMissingDetail({
   hasUsableAnchor: boolean;
   prompt: string | null;
   reason: string | null;
-  subjectId: string | null;
   subjectType: TripReviewQuestionRecord["subjectType"];
   targetField: string | null;
 }) {
-  const target = targetField?.toLowerCase().split("/").pop() ?? "";
   const text = [prompt, reason, evidence, targetField]
     .filter(Boolean)
     .join(" ")
@@ -216,50 +362,24 @@ function isDismissibleOptionalMissingDetail({
     /\b(\d{1,2}(?::\d{2})?\s*(am|pm)|\$\d+|january|february|march|april|may|june|july|august|september|october|november|december|\d{4}-\d{2}-\d{2})\b/.test(
       text
     );
-
-  const optionalLabelPattern =
-    /\b(address|company|location|name|operator|provider|title|url|website)\b/;
   const materialGapPattern =
     /\b(cannot|can't|critical|essential|material|required|unusable|where)\b|not identifiable|hard to identify|can't identify|cannot identify/;
   const dismissibleItemLabelGap =
     hasTextualItemAnchor &&
     subjectType === "item" &&
-    (target.includes("name") ||
-      target.includes("title") ||
+    (normalizeText(targetField).includes("name") ||
+      normalizeText(targetField).includes("title") ||
       /\b(name|title|provider|company|operator)\b/.test(text));
 
   if (
-    (!subjectId && !hasTextualTransportAnchor && !hasTextualItemAnchor) ||
     (!hasUsableAnchor && !hasTextualTransportAnchor && !hasTextualItemAnchor) ||
-    !optionalLabelPattern.test(`${target} ${text}`) ||
+    !isOptionalDetailTarget({ subjectType, targetField }) ||
     (materialGapPattern.test(text) && !dismissibleItemLabelGap)
   ) {
     return false;
   }
 
-  if (
-    subjectType === "item" &&
-    (target.includes("url") || target.includes("website"))
-  ) {
-    return true;
-  }
-
-  if (
-    subjectType === "item" &&
-    (target.includes("address") ||
-      target.includes("location") ||
-      target.includes("name") ||
-      target.includes("title"))
-  ) {
-    return true;
-  }
-
-  return (
-    subjectType === "transport" &&
-    (target.includes("provider") ||
-      target.includes("company") ||
-      /\b(company|provider|operator)\b/.test(text))
-  );
+  return true;
 }
 
 function getQuestionClusterKey(question: TripReviewQuestionRecord) {
@@ -568,6 +688,15 @@ export function createReviewQuestions({
       return null;
     }
 
+    const structuredTargetField = getStructuredTargetField({
+      subjectType,
+      targetField,
+    });
+
+    if (!structuredTargetField) {
+      return null;
+    }
+
     const record =
       subjectType === "item"
         ? items.find((item) => item.id === subjectId)
@@ -579,12 +708,37 @@ export function createReviewQuestions({
               ? legs.find((leg) => leg.id === subjectId)
               : null;
 
-    if (!record || !(targetField in record)) {
+    if (!record || !(structuredTargetField in record)) {
       return null;
     }
 
-    const value = record[targetField as keyof typeof record];
+    const value = record[structuredTargetField as keyof typeof record];
     return typeof value === "string" && value.trim() ? value.trim() : null;
+  }
+
+  function getSubjectStatus({
+    subjectId,
+    subjectType,
+  }: {
+    subjectId: string | null;
+    subjectType: TripReviewQuestionRecord["subjectType"];
+  }) {
+    if (!subjectId) {
+      return null;
+    }
+
+    const record =
+      subjectType === "item"
+        ? items.find((item) => item.id === subjectId)
+        : subjectType === "stay"
+          ? stays.find((stay) => stay.id === subjectId)
+          : subjectType === "transport"
+            ? transport.find((item) => item.id === subjectId)
+            : subjectType === "leg"
+              ? legs.find((leg) => leg.id === subjectId)
+              : null;
+
+    return record?.status ?? null;
   }
 
   function hasUsableSubjectAnchor({
@@ -607,84 +761,6 @@ export function createReviewQuestions({
     }
 
     return Boolean(subjectId);
-  }
-
-  function isRoutineTransportExtractionDetail({
-    evidence,
-    hasUsableAnchor,
-    prompt,
-    reason,
-    subjectType,
-    targetField,
-  }: {
-    evidence: string | null;
-    hasUsableAnchor: boolean;
-    prompt: string | null;
-    reason: string | null;
-    subjectType: TripReviewQuestionRecord["subjectType"];
-    targetField: string | null;
-  }) {
-    if (subjectType !== "transport") {
-      return false;
-    }
-
-    const target = targetField?.toLowerCase() ?? "";
-    const text = [prompt, reason, evidence, targetField]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    const hasTextualTransportAnchor =
-      /\b(airport|bus|confirmation|connection|connects?|drive|ferry|flight|pickup|pick up|reservation|route|station|train|transfer|dca|jfk|fco)\b/.test(
-        text
-      );
-
-    if (!hasUsableAnchor && !hasTextualTransportAnchor) {
-      return false;
-    }
-
-    if (/\b(no hotel|first night|first trip night|sleep on|overnight)\b/.test(text)) {
-      return false;
-    }
-
-    if (
-      (target.includes("departure") || target.includes("arrival")) &&
-      /\b(airport\/city|broader airport|city label|airport naming|beyond the code|airport code)\b/.test(
-        text
-      )
-    ) {
-      return true;
-    }
-
-    if (
-      /\b(two flight cards|two flight legs|split|connection|connects? through|kept .* legs?)\b/.test(
-        text
-      ) && /\b(airport|flight|dca|jfk|fco)\b/.test(text)
-    ) {
-      return true;
-    }
-
-    if (
-      target.includes("description") &&
-      /\b(airport transfer|public transport|move to airport|go to airport|leave for airport)\b/.test(
-        text
-      ) &&
-      /\b(flight|fly|ryanair|delta|departure|before)\b/.test(text)
-    ) {
-      return true;
-    }
-
-    if (
-      (target.includes("departure") || target.includes("arrival")) &&
-      /\b(train|rail)\b/.test(text) &&
-      /\b(route transition|city transition|next stay|previous stay|current city|current leg|next leg|train to)\b/.test(
-        text
-      ) &&
-      /\b(guessed|suggested|answer|source|evidence|route)\b/.test(text)
-    ) {
-      return true;
-    }
-
-    return false;
   }
 
   function isAlreadyAnsweredByStructuredRecord({
@@ -970,15 +1046,6 @@ export function createReviewQuestions({
       hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
       prompt,
       reason,
-      subjectId,
-      subjectType,
-      targetField,
-    });
-    const dismissRoutineTransportDetail = isRoutineTransportExtractionDetail({
-      evidence,
-      hasUsableAnchor: hasUsableSubjectAnchor({ subjectId, subjectType }),
-      prompt,
-      reason,
       subjectType,
       targetField,
     });
@@ -991,6 +1058,13 @@ export function createReviewQuestions({
       subjectType,
       targetField,
     });
+    const sourceObviousAnswer = hasSourceObviousAnswer({
+      evidence,
+      reason,
+      targetField,
+    });
+    const ignoredStructuredSubject =
+      getSubjectStatus({ subjectId, subjectType }) === "ignored";
     const obviousFactCall = isObviousFactCall({
       confidence,
       evidence,
@@ -1019,9 +1093,10 @@ export function createReviewQuestions({
 
     if (
       alreadyAnsweredByRecord ||
+      ignoredStructuredSubject ||
       obviousFactCall ||
       privacyPolicyQuestion ||
-      dismissRoutineTransportDetail ||
+      sourceObviousAnswer ||
       (dismissOptionalDetail && !isExplicitSourceTodo)
     ) {
       status = "dismissed";
