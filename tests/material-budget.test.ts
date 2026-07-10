@@ -62,3 +62,46 @@ test("material budget caps large material bundles before model submission", () =
   assert.ok(result.summary.submittedCharCount <= 2600);
   assert.equal(result.summary.truncatedMaterialCount, 2);
 });
+
+test("material budget preserves source-backed transport evidence when trimming", () => {
+  const filler = Array.from(
+    { length: 120 },
+    (_, index) =>
+      `Low-priority screenshot line ${index}: traveler notes, site copy, and duplicate page chrome.`
+  );
+  const trainEvidence = [
+    "Thursday, January 24, 2019",
+    "Train to Vienna",
+    "Train Code: 1beb5005",
+    "09:20 Praha, Hlavni Nadrazi",
+    "RegioJet | RJ 1033",
+    "13:23 Wien, Hauptbahnhof",
+  ].join("\n");
+  const result = optimizeTripExtractionMaterials({
+    materials: [
+      {
+        filename: "prague-vienna-train.png",
+        sourceProvenance: "ocr",
+        sourceUploadId: "upload-train",
+        text: [...filler, trainEvidence, ...filler].join("\n"),
+        type: "file_text",
+      },
+    ],
+    perMaterialCharBudget: 1400,
+    totalCharBudget: 1400,
+  });
+  const submittedText = result.materials[0]?.text ?? "";
+
+  assert.match(
+    submittedText,
+    /extraction-critical source travel evidence preserved/
+  );
+  assert.match(submittedText, /Train to Vienna/);
+  assert.match(submittedText, /09:20 Praha, Hlavni Nadrazi/);
+  assert.match(submittedText, /RegioJet \| RJ 1033/);
+  assert.match(submittedText, /13:23 Wien, Hauptbahnhof/);
+  assert.ok(
+    submittedText.length <= 1500,
+    "expected preserved evidence to stay inside the model budget"
+  );
+});

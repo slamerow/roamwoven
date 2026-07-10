@@ -1,9 +1,15 @@
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
+import {
+  extractSourceTransportAnchorsFromMaterials,
+  type SourceTransportAnchor,
+} from "@/lib/extraction/source-transport-anchors";
 
 const DEFAULT_TOTAL_CHAR_BUDGET = 60000;
 const DEFAULT_PER_MATERIAL_CHAR_BUDGET = 18000;
 const MIN_MEANINGFUL_LINE_LENGTH = 4;
 const MAX_REPEATED_LINE_OCCURRENCES = 2;
+const MAX_PRESERVED_TRANSPORT_ANCHORS_PER_MATERIAL = 20;
+const MAX_PRESERVED_TRANSPORT_EVIDENCE_CHARS = 5000;
 
 export type MaterialBudgetSummary = {
   estimatedInputTokens: number;
@@ -76,6 +82,81 @@ function estimateInputTokens(charCount: number) {
   return Math.ceil(charCount / 4);
 }
 
+function materialMatchesAnchor(
+  material: TripExtractionMaterial,
+  anchor: SourceTransportAnchor
+) {
+  if (anchor.sourceUploadId && material.sourceUploadId) {
+    return anchor.sourceUploadId === material.sourceUploadId;
+  }
+
+  return anchor.sourceFilename === material.filename;
+}
+
+function createPreservedTransportEvidenceBlock({
+  anchors,
+  material,
+}: {
+  anchors: SourceTransportAnchor[];
+  material: TripExtractionMaterial;
+}) {
+  const matchingEvidence = anchors
+    .filter((anchor) => materialMatchesAnchor(material, anchor))
+    .map((anchor) => anchor.evidence.trim())
+    .filter(Boolean);
+  const uniqueEvidence = Array.from(new Set(matchingEvidence)).slice(
+    0,
+    MAX_PRESERVED_TRANSPORT_ANCHORS_PER_MATERIAL
+  );
+  const kept: string[] = [];
+  let charCount = 0;
+
+  for (const evidence of uniqueEvidence) {
+    const nextCharCount = charCount + evidence.length;
+
+    if (
+      kept.length > 0 &&
+      nextCharCount > MAX_PRESERVED_TRANSPORT_EVIDENCE_CHARS
+    ) {
+      break;
+    }
+
+    kept.push(evidence);
+    charCount = nextCharCount;
+  }
+
+  if (kept.length === 0) {
+    return null;
+  }
+
+  return [
+    "Roamwoven extraction-critical source travel evidence preserved from this material:",
+    ...kept.map((evidence, index) => `Travel evidence ${index + 1}:\n${evidence}`),
+  ].join("\n\n");
+}
+
+function prependPreservedTransportEvidence({
+  anchors,
+  material,
+}: {
+  anchors: SourceTransportAnchor[];
+  material: TripExtractionMaterial;
+}) {
+  const preservedBlock = createPreservedTransportEvidenceBlock({
+    anchors,
+    material,
+  });
+
+  if (!preservedBlock) {
+    return material;
+  }
+
+  return {
+    ...material,
+    text: [preservedBlock, "Original material text:", material.text].join("\n\n"),
+  };
+}
+
 export function optimizeTripExtractionMaterials({
   materials,
   perMaterialCharBudget = DEFAULT_PER_MATERIAL_CHAR_BUDGET,
@@ -95,7 +176,25 @@ export function optimizeTripExtractionMaterials({
       text: removeRepeatedBoilerplate(material.text),
     }))
     .filter((material) => material.text.trim());
-  const perMaterialTrimmed = cleaned.map((material) => ({
+  const estimatedAfterPerMaterialTrim = cleaned.reduce(
+    (sum, material) => sum + Math.min(material.text.length, perMaterialCharBudget),
+    0
+  );
+  const willTrim =
+    cleaned.some((material) => material.text.length > perMaterialCharBudget) ||
+    estimatedAfterPerMaterialTrim > totalCharBudget;
+  const sourceTransportAnchors = willTrim
+    ? extractSourceTransportAnchorsFromMaterials(cleaned)
+    : [];
+  const preservationReady = willTrim
+    ? cleaned.map((material) =>
+        prependPreservedTransportEvidence({
+          anchors: sourceTransportAnchors,
+          material,
+        })
+      )
+    : cleaned;
+  const perMaterialTrimmed = preservationReady.map((material) => ({
     ...material,
     text: trimToBudget(material.text, perMaterialCharBudget),
   }));

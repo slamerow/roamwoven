@@ -297,6 +297,23 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(jfkToDcaAnchor.departureTime, "20:30");
   assert.equal(jfkToDcaAnchor.arrivalTime, "21:50");
   assert.match(jfkToDcaAnchor.evidence ?? "", /JFK/);
+  assert.equal(
+    bundle.materialPipeline.sourceAnchors.coverage.materialTransportAnchors,
+    3
+  );
+  assert.equal(
+    bundle.materialPipeline.sourceAnchors.coverage.finalMatchedTransportAnchors,
+    1
+  );
+  assert.equal(
+    bundle.materialPipeline.sourceAnchors.coverage.missingFromFinalRecords.length,
+    2
+  );
+  assert.equal(
+    bundle.materialPipeline.diagnostics[0]?.code,
+    "material_transport_anchor_missing_final"
+  );
+  assert.equal(bundle.materialPipeline.diagnostics[0]?.severity, "p0");
   assert.equal(bundle.records?.privateDetails[0]?.value, "[redacted private detail]");
   assert.equal(bundle.records?.stays[0]?.address, "[redacted stay address]");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "[redacted confirmation]");

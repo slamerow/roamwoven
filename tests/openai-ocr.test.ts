@@ -11,14 +11,27 @@ async function test(name: string, fn: () => void | Promise<void>) {
   }
 }
 
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}
+
 export default async function run() {
   await test("OpenAI OCR sends image inputs through Responses API without storage", async () => {
     const originalFetch = globalThis.fetch;
     const originalApiKey = process.env.OPENAI_API_KEY;
     const originalEnabled = process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION;
+    const originalDetail = process.env.OPENAI_OCR_IMAGE_DETAIL;
+    const originalMaxOutputTokens = process.env.OPENAI_OCR_MAX_OUTPUT_TOKENS;
     let requestBody: Record<string, unknown> | null = null;
 
     process.env.OPENAI_API_KEY = "test-key";
+    process.env.OPENAI_OCR_IMAGE_DETAIL = "high";
+    process.env.OPENAI_OCR_MAX_OUTPUT_TOKENS = "14000";
     process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = "true";
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
@@ -53,11 +66,65 @@ export default async function run() {
         String(content[0]?.image_url).startsWith("data:image/png;base64,"),
         true
       );
+      assert.equal(content[0]?.detail, "high");
       assert.equal(content[1]?.type, "input_text");
+      assert.equal(capturedRequest?.max_output_tokens, 14000);
     } finally {
       globalThis.fetch = originalFetch;
-      process.env.OPENAI_API_KEY = originalApiKey;
-      process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = originalEnabled;
+      restoreEnv("OPENAI_API_KEY", originalApiKey);
+      restoreEnv("OPENAI_OCR_IMAGE_DETAIL", originalDetail);
+      restoreEnv("OPENAI_OCR_MAX_OUTPUT_TOKENS", originalMaxOutputTokens);
+      restoreEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION", originalEnabled);
+    }
+  });
+
+  await test("OpenAI OCR retries transient provider failures", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWarn = console.warn;
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalEnabled = process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION;
+    let requestCount = 0;
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = "true";
+    console.warn = () => {};
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+
+      if (requestCount === 1) {
+        return {
+          json: async () => ({
+            error: { message: "Temporary provider overload." },
+          }),
+          ok: false,
+          status: 503,
+        } as Response;
+      }
+
+      return {
+        json: async () => ({
+          output_text: "Train to Vienna departs 09:20.",
+          usage: { input_tokens: 456, output_tokens: 18 },
+        }),
+        ok: true,
+        status: 200,
+      } as Response;
+    }) as typeof fetch;
+
+    try {
+      const result = await createOpenAIOcrText({
+        base64: Buffer.from("fake image").toString("base64"),
+        filename: "ticket.png",
+        mimeType: "image/png",
+      });
+
+      assert.equal(result.text, "Train to Vienna departs 09:20.");
+      assert.equal(requestCount, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
+      restoreEnv("OPENAI_API_KEY", originalApiKey);
+      restoreEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION", originalEnabled);
     }
   });
 }

@@ -6,7 +6,11 @@ import {
   type MaterialExtractionRecord,
 } from "@/lib/extraction/material-extractions";
 import { createRedactedTripProcessingEvent } from "@/lib/extraction/processing-events";
-import { extractSourceTransportAnchorsFromMaterials } from "@/lib/extraction/source-transport-anchors";
+import {
+  extractSourceTransportAnchorsFromMaterials,
+  sourceTransportAnchorMatchesRecord,
+  type SourceTransportAnchor,
+} from "@/lib/extraction/source-transport-anchors";
 import {
   getTripExtractionAuditPayload,
   type TripExtractionAuditPayload,
@@ -151,13 +155,140 @@ function materialTypeForUpload(upload: TripUpload | undefined) {
     : "file_text" as const;
 }
 
+function transportTypeForAnchor(anchor: SourceTransportAnchor) {
+  return anchor.kind === "transfer" ? "transfer" : anchor.kind;
+}
+
+function recordLikeAnchor(anchor: SourceTransportAnchor) {
+  return {
+    arrivalLocation: anchor.arrivalLocation,
+    confirmationLabel: anchor.confirmation,
+    date: anchor.date,
+    departureLocation: anchor.departureLocation,
+    provider: anchor.provider,
+    routeLabel: anchor.routeLabel,
+    transportType: transportTypeForAnchor(anchor),
+  };
+}
+
+function anchorsMatch(left: SourceTransportAnchor, right: SourceTransportAnchor) {
+  return sourceTransportAnchorMatchesRecord(left, recordLikeAnchor(right));
+}
+
+function summarizeTransportAnchor(
+  anchor: SourceTransportAnchor,
+  includePrivate: boolean
+) {
+  return {
+    arrivalLocation: anchor.arrivalLocation,
+    arrivalTime: anchor.arrivalTime,
+    confidence: anchor.confidence,
+    confirmation: redactPrivateValue(
+      anchor.confirmation,
+      includePrivate,
+      "confirmation"
+    ),
+    date: anchor.date,
+    departureLocation: anchor.departureLocation,
+    departureTime: anchor.departureTime,
+    evidence: redactSensitiveText(anchor.evidence, includePrivate),
+    kind: anchor.kind,
+    number: anchor.number,
+    provider: anchor.provider,
+    provenance: anchor.provenance,
+    routeLabel: anchor.routeLabel,
+    sourceFilename: anchor.sourceFilename,
+    sourceUploadId: anchor.sourceUploadId,
+  };
+}
+
+function createMaterialAnchorCoverage({
+  auditPayload,
+  includePrivate,
+  records,
+  sourceTransportAnchors,
+}: {
+  auditPayload: TripExtractionAuditPayload;
+  includePrivate: boolean;
+  records: StructuredTripRecords | null;
+  sourceTransportAnchors: SourceTransportAnchor[];
+}) {
+  const activeTransport = records?.transport.filter((record) => record.status !== "ignored") ?? [];
+  const reportTransportAnchors = auditPayload.report?.sourceAnchors.transport ?? null;
+  const missingFromFinalRecords = sourceTransportAnchors.filter(
+    (anchor) =>
+      !activeTransport.some((record) =>
+        sourceTransportAnchorMatchesRecord(anchor, record)
+      )
+  );
+  const missingFromRunAudit = reportTransportAnchors
+    ? sourceTransportAnchors.filter(
+        (anchor) =>
+          !reportTransportAnchors.some((candidate) => anchorsMatch(anchor, candidate))
+      )
+    : null;
+  const diagnostics = [
+    ...(missingFromFinalRecords.length > 0
+      ? [
+          {
+            code: "material_transport_anchor_missing_final",
+            detail:
+              "Material checkpoint text includes critical travel anchors that are not present in final Travel records.",
+            evidence: missingFromFinalRecords
+              .slice(0, 10)
+              .map((anchor) => summarizeTransportAnchor(anchor, includePrivate)),
+            severity: "p0" as const,
+            title: "Material transport anchors missing from final records",
+          },
+        ]
+      : []),
+    ...(missingFromRunAudit && missingFromRunAudit.length > 0
+      ? [
+          {
+            code: "material_transport_anchor_missing_run_audit",
+            detail:
+              "Material checkpoint text includes travel anchors that are absent from the extraction run audit anchors.",
+            evidence: missingFromRunAudit
+              .slice(0, 10)
+              .map((anchor) => summarizeTransportAnchor(anchor, includePrivate)),
+            severity: "p0" as const,
+            title: "Material transport anchors missing from run audit",
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    diagnostics,
+    finalMatchedTransportAnchors:
+      sourceTransportAnchors.length - missingFromFinalRecords.length,
+    materialTransportAnchors: sourceTransportAnchors.length,
+    missingFromFinalRecords: missingFromFinalRecords.map((anchor) =>
+      summarizeTransportAnchor(anchor, includePrivate)
+    ),
+    missingFromRunAudit: missingFromRunAudit
+      ? missingFromRunAudit.map((anchor) =>
+          summarizeTransportAnchor(anchor, includePrivate)
+        )
+      : null,
+    runAuditAvailable: Boolean(reportTransportAnchors),
+    runAuditMatchedTransportAnchors: reportTransportAnchors
+      ? sourceTransportAnchors.length - (missingFromRunAudit?.length ?? 0)
+      : null,
+  };
+}
+
 function summarizeMaterialCheckpoints({
+  auditPayload,
   checkpoints,
   includePrivate,
+  records,
   uploads,
 }: {
+  auditPayload: TripExtractionAuditPayload;
   checkpoints: MaterialExtractionRecord[];
   includePrivate: boolean;
+  records: StructuredTripRecords | null;
   uploads: TripUpload[];
 }) {
   const uploadById = new Map(uploads.map((upload) => [upload.id, upload]));
@@ -177,6 +308,12 @@ function summarizeMaterialCheckpoints({
   });
   const sourceTransportAnchors =
     extractSourceTransportAnchorsFromMaterials(materials);
+  const coverage = createMaterialAnchorCoverage({
+    auditPayload,
+    includePrivate,
+    records,
+    sourceTransportAnchors,
+  });
 
   return {
     byMethod,
@@ -203,29 +340,13 @@ function summarizeMaterialCheckpoints({
         uploadId: record.uploadId,
       };
     }),
+    diagnostics: coverage.diagnostics,
     ocrReadinessIssue: getMaterialOcrReadinessIssue(checkpoints),
     sourceAnchors: {
-      transport: sourceTransportAnchors.map((anchor) => ({
-        arrivalLocation: anchor.arrivalLocation,
-        arrivalTime: anchor.arrivalTime,
-        confidence: anchor.confidence,
-        confirmation: redactPrivateValue(
-          anchor.confirmation,
-          includePrivate,
-          "confirmation"
-        ),
-        date: anchor.date,
-        departureLocation: anchor.departureLocation,
-        departureTime: anchor.departureTime,
-        evidence: redactSensitiveText(anchor.evidence, includePrivate),
-        kind: anchor.kind,
-        number: anchor.number,
-        provider: anchor.provider,
-        provenance: anchor.provenance,
-        routeLabel: anchor.routeLabel,
-        sourceFilename: anchor.sourceFilename,
-        sourceUploadId: anchor.sourceUploadId,
-      })),
+      coverage,
+      transport: sourceTransportAnchors.map((anchor) =>
+        summarizeTransportAnchor(anchor, includePrivate)
+      ),
     },
     totalExtractedChars: checkpoints.reduce(
       (sum, record) => sum + record.extractedCharCount,
@@ -497,8 +618,10 @@ export function createTripExtractionQaBundlePayload({
     audit: createAuditSummary({ auditPayload, includePrivate }),
     generatedAt: new Date().toISOString(),
     materialPipeline: summarizeMaterialCheckpoints({
+      auditPayload,
       checkpoints,
       includePrivate,
+      records,
       uploads,
     }),
     records: createRecordSummaries({ includePrivate, records }),

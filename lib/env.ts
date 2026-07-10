@@ -29,6 +29,17 @@ function getOptionalPositiveInteger(name: string, fallback: number) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+function getOptionalImageDetail(name: string) {
+  const value = getOptionalEnv(name);
+
+  return value === "auto" ||
+    value === "high" ||
+    value === "low" ||
+    value === "original"
+    ? value
+    : null;
+}
+
 export function parseOptionalEnvList(value: string | null) {
   return (
     value
@@ -53,6 +64,11 @@ export function getOpenAIConfig() {
     ocrMaxFilesPerRun: getOptionalPositiveInteger(
       "OPENAI_OCR_MAX_FILES_PER_RUN",
       20
+    ),
+    ocrImageDetail: getOptionalImageDetail("OPENAI_OCR_IMAGE_DETAIL"),
+    ocrMaxOutputTokens: getOptionalPositiveInteger(
+      "OPENAI_OCR_MAX_OUTPUT_TOKENS",
+      getOptionalPositiveInteger("OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS", 12000)
     ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",

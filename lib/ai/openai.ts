@@ -2,7 +2,19 @@ import { getOpenAIConfig } from "@/lib/env";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_STRUCTURED_OUTPUT_TOKENS = 12000;
+const OCR_MAX_ATTEMPTS = 2;
 const RETRY_STRUCTURED_OUTPUT_TOKENS = 20000;
+const TRANSIENT_OPENAI_STATUS_CODES = new Set([
+  408,
+  409,
+  429,
+  500,
+  502,
+  503,
+  504,
+]);
+
+type OpenAIConfig = ReturnType<typeof getOpenAIConfig>;
 
 export class OpenAIExtractionConfigError extends Error {
   constructor(message: string) {
@@ -310,7 +322,10 @@ function isSupportedOcrMimeType(mimeType: string) {
   );
 }
 
-function getOcrContent(input: OpenAIOcrInput) {
+function getOcrContent(
+  input: OpenAIOcrInput,
+  detail: OpenAIConfig["ocrImageDetail"]
+) {
   const dataUrl = `data:${input.mimeType};base64,${input.base64}`;
 
   if (input.mimeType === "application/pdf") {
@@ -321,33 +336,21 @@ function getOcrContent(input: OpenAIOcrInput) {
     };
   }
 
-  return {
+  const content = {
     image_url: dataUrl,
     type: "input_image",
   };
+
+  return detail ? { ...content, detail } : content;
 }
 
-export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAIOcrResult> {
-  const config = getOpenAIConfig();
-
-  if (!config.extractionEnabled) {
-    throw new OpenAIExtractionConfigError(
-      "AI extraction is disabled. Set ROAMWOVEN_ENABLE_AI_EXTRACTION=true to allow OCR calls."
-    );
-  }
-
-  if (!config.apiKey) {
-    throw new OpenAIExtractionConfigError(
-      "OPENAI_API_KEY is missing. Add a server-side OpenAI API key before running OCR."
-    );
-  }
-
-  if (!isSupportedOcrMimeType(input.mimeType)) {
-    throw new OpenAIExtractionRequestError(
-      `OCR does not support ${input.mimeType || "unknown file type"} yet.`
-    );
-  }
-
+async function requestOcrText({
+  config,
+  input,
+}: {
+  config: OpenAIConfig;
+  input: OpenAIOcrInput;
+}) {
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
@@ -358,7 +361,7 @@ export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAI
       input: [
         {
           content: [
-            getOcrContent(input),
+            getOcrContent(input, config.ocrImageDetail),
             {
               text: [
                 "Extract all readable travel-planning text from this uploaded material.",
@@ -372,7 +375,7 @@ export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAI
           role: "user",
         },
       ],
-      max_output_tokens: Math.min(config.maxOutputTokens, 6000),
+      max_output_tokens: config.ocrMaxOutputTokens,
       model: config.ocrModel,
       service_tier: "default",
       store: false,
@@ -405,8 +408,69 @@ export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAI
   }
 
   return {
-    model: config.ocrModel,
+    body,
     text,
-    usage: body.usage ?? null,
   };
+}
+
+function shouldRetryOcrRequest(error: unknown) {
+  if (error instanceof OpenAIExtractionRequestError) {
+    return (
+      typeof error.status === "number" &&
+      TRANSIENT_OPENAI_STATUS_CODES.has(error.status)
+    );
+  }
+
+  return error instanceof TypeError;
+}
+
+export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAIOcrResult> {
+  const config = getOpenAIConfig();
+
+  if (!config.extractionEnabled) {
+    throw new OpenAIExtractionConfigError(
+      "AI extraction is disabled. Set ROAMWOVEN_ENABLE_AI_EXTRACTION=true to allow OCR calls."
+    );
+  }
+
+  if (!config.apiKey) {
+    throw new OpenAIExtractionConfigError(
+      "OPENAI_API_KEY is missing. Add a server-side OpenAI API key before running OCR."
+    );
+  }
+
+  if (!isSupportedOcrMimeType(input.mimeType)) {
+    throw new OpenAIExtractionRequestError(
+      `OCR does not support ${input.mimeType || "unknown file type"} yet.`
+    );
+  }
+
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= OCR_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await requestOcrText({ config, input });
+
+      return {
+        model: config.ocrModel,
+        text: result.text,
+        usage: result.body.usage ?? null,
+      };
+    } catch (error) {
+      lastError = error;
+
+      if (attempt >= OCR_MAX_ATTEMPTS || !shouldRetryOcrRequest(error)) {
+        throw error;
+      }
+
+      console.warn("openai_ocr_retrying_transient_failure", {
+        attempt,
+        maxAttempts: OCR_MAX_ATTEMPTS,
+        status:
+          error instanceof OpenAIExtractionRequestError ? error.status : null,
+      });
+    }
+  }
+
+  throw lastError;
 }
