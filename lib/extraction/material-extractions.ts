@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
 
-const MAX_STORED_TEXT_CONTENT_CHARS = 80000;
+export const MAX_MATERIAL_CHECKPOINT_TEXT_CHARS = 2_000_000;
 
 export type MaterialExtractionStatus =
   | "failed"
@@ -129,28 +129,14 @@ function shouldMarkComplete(status: MaterialExtractionStatus) {
   return status !== "pending";
 }
 
-function trimStoredTextContent(value: string | null) {
-  if (!value || value.length <= MAX_STORED_TEXT_CONTENT_CHARS) {
-    return {
-      text: value,
-      truncated: false,
-    };
+function assertCompleteStoredTextContent(value: string | null) {
+  if (value && value.length > MAX_MATERIAL_CHECKPOINT_TEXT_CHARS) {
+    throw new Error(
+      `Extracted material text is ${value.length} characters, above the ${MAX_MATERIAL_CHECKPOINT_TEXT_CHARS}-character checkpoint safety limit. Roamwoven will not save or process a truncated checkpoint.`
+    );
   }
 
-  const headLength = Math.floor(MAX_STORED_TEXT_CONTENT_CHARS * 0.82);
-  const tailLength = MAX_STORED_TEXT_CONTENT_CHARS - headLength - 140;
-  const text = [
-    value.slice(0, headLength).trim(),
-    "[Roamwoven trimmed extracted material text here to keep checkpoint storage bounded.]",
-    value.slice(Math.max(0, value.length - tailLength)).trim(),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  return {
-    text,
-    truncated: true,
-  };
+  return value;
 }
 
 function combineExtractedText({
@@ -234,19 +220,10 @@ export async function upsertMaterialExtractionCheckpoint(
   const now = new Date().toISOString();
   const completedAt = shouldMarkComplete(input.status) ? now : null;
   const rawTextContent = input.textContent?.trim() || null;
-  const storedTextContent = trimStoredTextContent(rawTextContent);
-  const textContent = storedTextContent.text;
+  const textContent = assertCompleteStoredTextContent(rawTextContent);
   const extractedCharCount =
     input.extractedCharCount ?? (rawTextContent ? rawTextContent.length : 0);
-  const metadata = {
-    ...(input.metadata ?? {}),
-    ...(storedTextContent.truncated
-      ? {
-          storedTextContentCharCount: textContent?.length ?? 0,
-          storedTextContentTruncated: true,
-        }
-      : {}),
-  };
+  const metadata = input.metadata ?? {};
 
   const { data, error } = await supabase
     .from("trip_material_extractions")
@@ -333,6 +310,41 @@ export async function listOcrNeededMaterialExtractions({
   return ((data ?? []) as unknown as MaterialExtractionRow[]).map(
     normalizeMaterialExtraction
   );
+}
+
+export async function requeueStaleOcrProcessingCheckpoints({
+  staleAfterMs = 15 * 60 * 1000,
+  tripId,
+}: {
+  staleAfterMs?: number;
+  tripId: string;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - staleAfterMs).toISOString();
+  const { data, error } = await supabase
+    .from("trip_material_extractions")
+    .update({
+      completed_at: null,
+      error_message: null,
+      failure_class: "ocr_processing_stale_requeued",
+      status: "ocr_needed",
+      updated_at: now.toISOString(),
+    })
+    .eq("trip_id", tripId)
+    .eq("status", "ocr_processing")
+    .lt("updated_at", staleBefore)
+    .select("id");
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return 0;
+    }
+
+    throw new Error(`Unable to requeue stale OCR materials: ${error.message}`);
+  }
+
+  return data?.length ?? 0;
 }
 
 export async function markMaterialExtractionOcrProcessing({

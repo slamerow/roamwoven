@@ -5,6 +5,7 @@ import {
   isTripAllowedForOpenAIExtraction,
 } from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
+import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
@@ -388,6 +389,20 @@ export async function POST(
       },
       processingRunId: run.id,
       stage: "model_extraction",
+      status: "completed",
+      tripId,
+    });
+
+    const evidenceSummary = await persistEvidenceArtifacts({
+      observations: result.evidenceArtifacts.observations,
+      pieces: result.evidenceArtifacts.pieces,
+      processingRunId: run.id,
+      tripId,
+    });
+    await recordTripProcessingEvent({
+      details: evidenceSummary,
+      processingRunId: run.id,
+      stage: "evidence_cluster",
       status: "completed",
       tripId,
     });

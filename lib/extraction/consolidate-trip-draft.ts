@@ -796,6 +796,15 @@ function mergeTransportActivityDetails(
   ]);
   const activityDescription = textFor(activity, ["description"]);
   const transportType = normalizeText(getString(transport, "type"));
+  const strictTravelDescription = /\b(flight|train)\b/.test(transportType);
+  const unrelatedTravelDetail =
+    /\b(hostel|hotel|airbnb|apartment|buzzer|door code|lockbox|restaurant|dinner|lunch|museum|palace|shopping|sightseeing|walk to the stay|directions? to (?:the )?(?:hostel|hotel|apartment|airbnb))\b/.test(
+      normalizeText(activityDescription)
+    );
+  const safeActivityDescription =
+    strictTravelDescription && unrelatedTravelDetail
+      ? null
+      : activityDescription;
 
   if (!getString(transport, "departureTime") && activityTime) {
     transport.departureTime = activityTime;
@@ -814,15 +823,19 @@ function mergeTransportActivityDetails(
   }
 
   const detailParts = [
-    activityDescription,
-    getString(activity, "address") ? `Address: ${getString(activity, "address")}.` : null,
-    getStringFromKeys(activity, ["phone", "contactPhone", "providerPhone"])
+    safeActivityDescription,
+    !strictTravelDescription && getString(activity, "address")
+      ? `Address: ${getString(activity, "address")}.`
+      : null,
+    !strictTravelDescription && getStringFromKeys(activity, ["phone", "contactPhone", "providerPhone"])
       ? `Phone: ${getStringFromKeys(activity, ["phone", "contactPhone", "providerPhone"])}.`
       : null,
     getStringFromKeys(activity, ["reservation", "bookingNumber", "orderNumber", "confirmation"])
       ? `Confirmation: ${getStringFromKeys(activity, ["reservation", "bookingNumber", "orderNumber", "confirmation"])}.`
       : null,
-    getString(activity, "openingHours") ? `Hours: ${getString(activity, "openingHours")}.` : null,
+    !strictTravelDescription && getString(activity, "openingHours")
+      ? `Hours: ${getString(activity, "openingHours")}.`
+      : null,
   ]
     .filter(Boolean);
   let description = getString(transport, "description");

@@ -85,7 +85,7 @@ export default async function run() {
     assert.equal(material, null);
   });
 
-  await test("checkpoint writes cap stored text while preserving extracted character count", async () => {
+  await test("checkpoint writes preserve complete extracted text", async () => {
     const originalCreateSupabaseServerClient =
       require("@/lib/supabase/server").createSupabaseServerClient;
     const longText = "A".repeat(90000);
@@ -132,9 +132,8 @@ export default async function run() {
       });
 
       assert.equal(record.extractedCharCount, longText.length);
-      assert.ok(record.textContent);
-      assert.ok(record.textContent.length < longText.length);
-      assert.equal(record.metadata.storedTextContentTruncated, true);
+      assert.equal(record.textContent, longText);
+      assert.equal(record.metadata.storedTextContentTruncated, undefined);
       assert.equal(
         (savedPayload as Record<string, unknown> | null)?.extracted_char_count,
         longText.length

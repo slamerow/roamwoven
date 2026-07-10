@@ -12,6 +12,7 @@ import type {
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
 import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
+import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
 import {
   type DraftObject,
   getArray,
@@ -1059,14 +1060,22 @@ export function createStructuredTripRecordsFromDraft({
   const trip = createTripRecord({ draft: consolidatedDraft, fallbackTripName, tripId });
   const legs = createLegRecords({ draft: consolidatedDraft, tripId });
   const stays = createStayRecords({ draft: consolidatedDraft, legs, tripId });
-  const sourceTransportAnchors =
-    getSourceTransportAnchorsFromDraft(consolidatedDraft);
-  const transport = applySourceTransportAnchorsToRecords({
-    anchors: sourceTransportAnchors,
+  const extractedTransport = createTransportRecords({
+    draft: consolidatedDraft,
     legs,
-    transport: createTransportRecords({ draft: consolidatedDraft, legs, tripId }),
     tripId,
   });
+  const evidenceMetadata = getObject(consolidatedDraft, "_evidence");
+  const hasCanonicalEvidenceBoundary =
+    getNumber(evidenceMetadata, "version") === EVIDENCE_CLUSTER_VERSION;
+  const transport = hasCanonicalEvidenceBoundary
+    ? extractedTransport
+    : applySourceTransportAnchorsToRecords({
+        anchors: getSourceTransportAnchorsFromDraft(consolidatedDraft),
+        legs,
+        transport: extractedTransport,
+        tripId,
+      });
   const items = createItemRecords({ draft: consolidatedDraft, legs, tripId });
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({

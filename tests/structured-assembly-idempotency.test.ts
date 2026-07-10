@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
   type SourceTransportAnchor,
@@ -63,7 +64,7 @@ function createJan25ReturnFlightAnchorDraft() {
     },
   ];
 
-  return {
+  const draft = {
     [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
       transport: anchors,
     },
@@ -107,6 +108,18 @@ function createJan25ReturnFlightAnchorDraft() {
       title: "Central Europe",
     },
   };
+
+  return clusterExtractedEvidence({
+    sourceTransportAnchors: anchors,
+    stages: [
+      {
+        label: "return flight model evidence",
+        source: "model_spine",
+        stage: draft,
+      },
+    ],
+    tripOverview: draft.tripOverview,
+  }).draft;
 }
 
 export default function run() {

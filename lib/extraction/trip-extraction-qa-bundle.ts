@@ -7,6 +7,11 @@ import {
 } from "@/lib/extraction/material-extractions";
 import { createRedactedTripProcessingEvent } from "@/lib/extraction/processing-events";
 import {
+  listTripOcrBatchCheckpoints,
+  type OcrBatchCheckpoint,
+} from "@/lib/extraction/ocr-batches";
+import { getEvidenceArtifactSummary } from "@/lib/extraction/evidence-artifacts";
+import {
   extractSourceTransportAnchorsFromMaterials,
   sourceTransportAnchorMatchesRecord,
   type SourceTransportAnchor,
@@ -143,6 +148,45 @@ function summarizeUploads(uploads: TripUpload[]) {
     processingStatus: upload.processingStatus,
     sourceKind: upload.sourceKind,
   }));
+}
+
+function summarizeOcrBatches(
+  batches: OcrBatchCheckpoint[],
+  includePrivate: boolean
+) {
+  return {
+    byStatus: countBy(batches.map((batch) => batch.status)),
+    completedPageCount: new Set(
+      batches
+        .filter((batch) => batch.status === "completed")
+        .flatMap((batch) =>
+          Array.from(
+            { length: batch.pageEnd - batch.pageStart + 1 },
+            (_, index) => `${batch.uploadId}:${batch.pageStart + index}`
+          )
+        )
+    ).size,
+    rows: batches.map((batch) => ({
+      attemptCount: batch.attemptCount,
+      completedAt: batch.completedAt,
+      errorMessage: redactSensitiveText(batch.errorMessage, includePrivate),
+      id: batch.id,
+      incompleteReason: batch.incompleteReason,
+      maxOutputTokens: batch.maxOutputTokens,
+      model: batch.model,
+      outputCharCount: batch.outputCharCount,
+      pageEnd: batch.pageEnd,
+      pageStart: batch.pageStart,
+      promptVersion: batch.promptVersion,
+      status: batch.status,
+      textPreview: includePrivate
+        ? truncateText(batch.textContent, PRIVATE_TEXT_LIMIT)
+        : null,
+      textPreviewRedacted: !includePrivate && Boolean(batch.textContent),
+      uploadId: batch.uploadId,
+    })),
+    total: batches.length,
+  };
 }
 
 function materialTypeForUpload(upload: TripUpload | undefined) {
@@ -604,19 +648,24 @@ function createAuditSummary({
 export function createTripExtractionQaBundlePayload({
   auditPayload,
   checkpoints,
+  evidenceArtifacts = null,
   includePrivate = false,
+  ocrBatches = [],
   records,
   uploads,
 }: {
   auditPayload: TripExtractionAuditPayload;
   checkpoints: MaterialExtractionRecord[];
+  evidenceArtifacts?: Awaited<ReturnType<typeof getEvidenceArtifactSummary>>;
   includePrivate?: boolean;
+  ocrBatches?: OcrBatchCheckpoint[];
   records: StructuredTripRecords | null;
   uploads: TripUpload[];
 }) {
   return {
     audit: createAuditSummary({ auditPayload, includePrivate }),
     generatedAt: new Date().toISOString(),
+    evidenceArtifacts,
     materialPipeline: summarizeMaterialCheckpoints({
       auditPayload,
       checkpoints,
@@ -624,13 +673,14 @@ export function createTripExtractionQaBundlePayload({
       records,
       uploads,
     }),
+    ocrBatches: summarizeOcrBatches(ocrBatches, includePrivate),
     records: createRecordSummaries({ includePrivate, records }),
     redaction: {
       includePrivate,
       privateDetailValues: includePrivate ? "included" : "redacted",
       sourceTextPreviews: includePrivate ? "included" : "redacted",
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     trip: auditPayload.trip,
     uploads: summarizeUploads(uploads),
   };
@@ -642,19 +692,28 @@ export async function getTripExtractionQaBundle(
 ) {
   const includePrivate = options.includePrivate === true;
   const auditPayload = await getTripExtractionAuditPayload(tripId);
-  const [appliedRecords, uploads, checkpoints] = await Promise.all([
+  const [appliedRecords, uploads, checkpoints, ocrBatches] = await Promise.all([
     getAppliedTripRecords({
       fallbackTripName: auditPayload.trip.name,
       tripId,
     }),
     listTripUploads(tripId),
     listMaterialExtractionCheckpoints(tripId),
+    listTripOcrBatchCheckpoints(tripId),
   ]);
+  const evidenceArtifacts = auditPayload.reportRun?.id
+    ? await getEvidenceArtifactSummary({
+        processingRunId: auditPayload.reportRun.id,
+        tripId,
+      })
+    : null;
 
   return createTripExtractionQaBundlePayload({
     auditPayload,
     checkpoints,
+    evidenceArtifacts,
     includePrivate,
+    ocrBatches,
     records: appliedRecords.records,
     uploads,
   });

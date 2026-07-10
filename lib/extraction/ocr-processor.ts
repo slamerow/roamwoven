@@ -1,17 +1,31 @@
 import { getOpenAIConfig } from "@/lib/env";
 import { createOpenAIOcrText, OpenAIExtractionRequestError } from "@/lib/ai/openai";
 import {
+  listReusableCompletedOcrBatches,
+  saveOcrBatchCheckpoint,
+  type OcrBatchCheckpoint,
+} from "@/lib/extraction/ocr-batches";
+import {
   completeMaterialExtractionOcr,
   failMaterialExtractionOcr,
   listOcrNeededMaterialExtractions,
   markMaterialExtractionOcrProcessing,
+  requeueStaleOcrProcessingCheckpoints,
   type MaterialExtractionRecord,
 } from "@/lib/extraction/material-extractions";
 import { downloadMaterialFile } from "@/lib/extraction/trip-materials";
+import {
+  createPageNumberBatches,
+  createPdfPageBatcher,
+  type PdfPageBatcher,
+} from "@/lib/extraction/pdf-page-batches";
 import type { TripUpload } from "@/lib/uploads";
 
 const OCR_PROVIDER = "openai-responses";
-const MAX_OCR_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_OCR_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_OCR_PDF_SOURCE_BYTES = 50 * 1024 * 1024;
+const MAX_SINGLE_PAGE_INCOMPLETE_ATTEMPTS = 2;
+const OCR_PAGE_BATCH_CONCURRENCY = 3;
 
 export type TripOcrProcessingSummary = {
   batches: number;
@@ -19,7 +33,26 @@ export type TripOcrProcessingSummary = {
   failed: number;
   skipped: number;
   attempted: number;
+  pageBatches: number;
+  pagesCompleted: number;
+  retriedPageBatches: number;
+  reusedPageBatches: number;
+  staleMaterialsRequeued: number;
   usage: unknown[];
+};
+
+type CompletedOcrBatch = {
+  model: string;
+  pageNumbers: number[];
+  reused: boolean;
+  text: string;
+  usage: unknown;
+};
+
+type PdfOcrResult = {
+  batches: CompletedOcrBatch[];
+  pageCount: number;
+  retries: number;
 };
 
 function getSupportedMimeType(upload: TripUpload) {
@@ -41,6 +74,12 @@ function getUploadById(uploads: TripUpload[]) {
 
 function getFailureClass(error: unknown) {
   if (error instanceof OpenAIExtractionRequestError) {
+    const failureClass = asRecord(error.details)?.failureClass;
+
+    if (typeof failureClass === "string" && failureClass.startsWith("ocr_")) {
+      return failureClass;
+    }
+
     return error.status ? `openai_${error.status}` : "openai_ocr_failed";
   }
 
@@ -48,7 +87,313 @@ function getFailureClass(error: unknown) {
 }
 
 function normalizeForComparison(value: string) {
-  return value.replace(/\s+/g, " ").trim().toLowerCase();
+  return value
+    .replace(/===\s*page\s+\d+\s*===/gi, " ")
+    .replace(/\[(?:no readable text|illegible)\]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getIncompleteReason(error: unknown) {
+  if (!(error instanceof OpenAIExtractionRequestError)) {
+    return null;
+  }
+
+  const details = asRecord(error.details);
+  const failureClass = details?.failureClass;
+
+  if (
+    failureClass !== "ocr_incomplete_response" &&
+    failureClass !== "ocr_page_coverage_incomplete"
+  ) {
+    return null;
+  }
+
+  return typeof details?.incompleteReason === "string"
+    ? details.incompleteReason
+    : String(failureClass);
+}
+
+export function getMissingOcrPageNumbers(text: string, pageNumbers: number[]) {
+  const reportedPages = new Set(
+    [...text.matchAll(/===\s*page\s+(\d+)\s*===/gi)]
+      .map((match) => Number(match[1]))
+      .filter(Number.isInteger)
+  );
+
+  return pageNumbers.filter((pageNumber) => !reportedPages.has(pageNumber));
+}
+
+function batchKey(pageNumbers: number[]) {
+  return `${pageNumbers[0]}-${pageNumbers.at(-1)}`;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>
+) {
+  const results: R[] = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, values.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(values[index]);
+      }
+    })
+  );
+
+  return results;
+}
+
+function pageNumbersForCheckpoint(checkpoint: OcrBatchCheckpoint) {
+  return Array.from(
+    { length: checkpoint.pageEnd - checkpoint.pageStart + 1 },
+    (_, index) => checkpoint.pageStart + index
+  );
+}
+
+function findReusableCoverage({
+  pageNumbers,
+  reusable,
+}: {
+  pageNumbers: number[];
+  reusable: Map<string, OcrBatchCheckpoint>;
+}) {
+  const covered: OcrBatchCheckpoint[] = [];
+  let currentPage = pageNumbers[0];
+  const finalPage = pageNumbers.at(-1);
+
+  if (!currentPage || !finalPage) {
+    return null;
+  }
+
+  while (currentPage <= finalPage) {
+    const candidate = [...reusable.values()]
+      .filter(
+        (batch) =>
+          batch.pageStart === currentPage &&
+          batch.pageEnd <= finalPage &&
+          Boolean(batch.textContent?.trim())
+      )
+      .sort((left, right) => right.pageEnd - left.pageEnd)[0];
+
+    if (!candidate) {
+      return null;
+    }
+
+    covered.push(candidate);
+    currentPage = candidate.pageEnd + 1;
+  }
+
+  return covered;
+}
+
+async function processPdfOcr({
+  batcher,
+  config,
+  record,
+  sourceSha256,
+  upload,
+}: {
+  batcher: PdfPageBatcher;
+  config: ReturnType<typeof getOpenAIConfig>;
+  record: MaterialExtractionRecord;
+  sourceSha256: string;
+  upload: TripUpload;
+}): Promise<PdfOcrResult> {
+  const reusableRows = await listReusableCompletedOcrBatches({
+    materialExtractionId: record.id,
+    sourceSha256,
+  });
+  const reusable = new Map(
+    reusableRows.map((batch) => [
+      `${batch.pageStart}-${batch.pageEnd}`,
+      batch,
+    ])
+  );
+  let retries = 0;
+
+  const processBatch = async (
+    pageNumbers: number[],
+    attempt = 1
+  ): Promise<CompletedOcrBatch[]> => {
+    const reusableCoverage = findReusableCoverage({ pageNumbers, reusable });
+
+    if (reusableCoverage) {
+      return reusableCoverage.map((batch) => ({
+        model: batch.model ?? config.ocrModel,
+        pageNumbers: pageNumbersForCheckpoint(batch),
+        reused: true,
+        text: batch.textContent ?? "",
+        usage: batch.usage,
+      }));
+    }
+
+    const maxOutputTokens =
+      pageNumbers.length === 1 && attempt > 1
+        ? Math.max(config.ocrMaxOutputTokens * 2, 20000)
+        : config.ocrMaxOutputTokens;
+    await saveOcrBatchCheckpoint({
+      attemptCount: attempt,
+      materialExtractionId: record.id,
+      maxOutputTokens,
+      model: config.ocrModel,
+      pageNumbers,
+      sourceSha256,
+      status: "processing",
+      tripId: record.tripId,
+      uploadId: upload.id,
+    });
+
+    try {
+      const batch = await batcher.createBatch(pageNumbers);
+      const result = await createOpenAIOcrText(
+        {
+          base64: batch.base64,
+          filename: `${upload.originalFilename} pages ${pageNumbers[0]}-${pageNumbers.at(-1)}`,
+          mimeType: "application/pdf",
+        },
+        {
+          maxOutputTokens,
+          originalPageNumbers: pageNumbers,
+        }
+      );
+      const missingPages = getMissingOcrPageNumbers(result.text, pageNumbers);
+
+      if (missingPages.length > 0) {
+        throw new OpenAIExtractionRequestError(
+          `OCR page coverage was incomplete for pages ${missingPages.join(", ")}.`,
+          null,
+          {
+            failureClass: "ocr_page_coverage_incomplete",
+            incompleteReason: "missing_page_markers",
+            missingPages,
+          }
+        );
+      }
+
+      const saved = await saveOcrBatchCheckpoint({
+        attemptCount: attempt,
+        materialExtractionId: record.id,
+        maxOutputTokens,
+        model: result.model,
+        pageNumbers,
+        sourceSha256,
+        status: "completed",
+        textContent: result.text,
+        tripId: record.tripId,
+        uploadId: upload.id,
+        usage: result.usage,
+      });
+      reusable.set(batchKey(pageNumbers), saved);
+
+      return [
+        {
+          model: result.model,
+          pageNumbers,
+          reused: false,
+          text: result.text,
+          usage: result.usage,
+        },
+      ];
+    } catch (error) {
+      const incompleteReason = getIncompleteReason(error);
+      await saveOcrBatchCheckpoint({
+        attemptCount: attempt,
+        errorMessage: error instanceof Error ? error.message : "Unknown OCR error.",
+        incompleteReason,
+        materialExtractionId: record.id,
+        maxOutputTokens,
+        model: config.ocrModel,
+        pageNumbers,
+        sourceSha256,
+        status: incompleteReason ? "incomplete" : "failed",
+        tripId: record.tripId,
+        uploadId: upload.id,
+      });
+
+      if (!incompleteReason) {
+        throw error;
+      }
+
+      retries += 1;
+
+      if (pageNumbers.length > 1) {
+        const midpoint = Math.ceil(pageNumbers.length / 2);
+        const left = pageNumbers.slice(0, midpoint);
+        const right = pageNumbers.slice(midpoint);
+        const [leftResults, rightResults] = await Promise.all([
+          processBatch(left),
+          processBatch(right),
+        ]);
+
+        return [...leftResults, ...rightResults];
+      }
+
+      if (attempt < MAX_SINGLE_PAGE_INCOMPLETE_ATTEMPTS) {
+        return processBatch(pageNumbers, attempt + 1);
+      }
+
+      throw error;
+    }
+  };
+
+  const plannedBatches = createPageNumberBatches({
+    batchSize: config.ocrPdfBatchPages,
+    pageCount: batcher.pageCount,
+  });
+  const completed = (
+    await mapWithConcurrency(
+      plannedBatches,
+      OCR_PAGE_BATCH_CONCURRENCY,
+      (pageNumbers) => processBatch(pageNumbers)
+    )
+  )
+    .flat()
+    .sort((left, right) => left.pageNumbers[0] - right.pageNumbers[0]);
+
+  return {
+    batches: completed,
+    pageCount: batcher.pageCount,
+    retries,
+  };
+}
+
+async function processSingleImageOcr({
+  base64,
+  config,
+  filename,
+  mimeType,
+}: {
+  base64: string;
+  config: ReturnType<typeof getOpenAIConfig>;
+  filename: string;
+  mimeType: string;
+}) {
+  try {
+    return await createOpenAIOcrText({ base64, filename, mimeType });
+  } catch (error) {
+    if (!getIncompleteReason(error)) {
+      throw error;
+    }
+
+    return createOpenAIOcrText(
+      { base64, filename, mimeType },
+      { maxOutputTokens: Math.max(config.ocrMaxOutputTokens * 2, 20000) }
+    );
+  }
 }
 
 function requiresEmbeddedImageBackfill(record: MaterialExtractionRecord) {
@@ -108,13 +453,18 @@ async function processOcrRecord({
     return { status: "failed" as const, usage: null };
   }
 
-  if (Number(upload.fileSizeBytes ?? 0) > MAX_OCR_FILE_BYTES) {
+  const maxSourceBytes =
+    mimeType === "application/pdf"
+      ? MAX_OCR_PDF_SOURCE_BYTES
+      : MAX_OCR_IMAGE_BYTES;
+
+  if (Number(upload.fileSizeBytes ?? 0) > maxSourceBytes) {
     await failMaterialExtractionOcr({
       errorMessage: "OCR material is over the beta OCR size limit.",
       failureClass: "ocr_file_too_large",
       metadata: {
         fileSizeBytes: upload.fileSizeBytes,
-        maxOcrFileBytes: MAX_OCR_FILE_BYTES,
+        maxOcrFileBytes: maxSourceBytes,
       },
       provider: OCR_PROVIDER,
       record,
@@ -146,18 +496,42 @@ async function processOcrRecord({
     }
 
     const startedAt = Date.now();
-    const result = await createOpenAIOcrText({
-      base64: Buffer.from(await file.arrayBuffer()).toString("base64"),
-      filename: upload.originalFilename,
-      mimeType,
-    });
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const config = getOpenAIConfig();
+    const sourceSha256 = upload.contentSha256 ?? `${upload.id}:${bytes.length}`;
+    const pdfResult =
+      mimeType === "application/pdf"
+        ? await processPdfOcr({
+            batcher: await createPdfPageBatcher(bytes),
+            config,
+            record: claimedRecord,
+            sourceSha256,
+            upload,
+          })
+        : null;
+    const imageResult = pdfResult
+      ? null
+      : await processSingleImageOcr({
+          base64: Buffer.from(bytes).toString("base64"),
+          config,
+          filename: upload.originalFilename,
+          mimeType,
+        });
+    const ocrText = pdfResult
+      ? pdfResult.batches.map((batch) => batch.text).join("\n\n")
+      : imageResult?.text ?? "";
+    const model =
+      pdfResult?.batches.at(-1)?.model ?? imageResult?.model ?? config.ocrModel;
+    const usage = pdfResult
+      ? pdfResult.batches.map((batch) => batch.usage)
+      : imageResult?.usage ?? null;
     const durationMs = Date.now() - startedAt;
 
     if (
       requiresEmbeddedImageBackfill(claimedRecord) &&
       !hasMeaningfulBackfillText({
         existingText: claimedRecord.textContent,
-        ocrText: result.text,
+        ocrText,
       })
     ) {
       await failMaterialExtractionOcr({
@@ -169,8 +543,11 @@ async function processOcrRecord({
           fileName: upload.originalFilename,
           fileSizeBytes: upload.fileSizeBytes,
           fileType: upload.fileType,
-          model: result.model,
-          usage: result.usage,
+          model,
+          pageBatchCount: pdfResult?.batches.length ?? 0,
+          pageCount: pdfResult?.pageCount ?? null,
+          retriedPageBatchCount: pdfResult?.retries ?? 0,
+          usage,
         },
         provider: OCR_PROVIDER,
         record: claimedRecord,
@@ -185,21 +562,31 @@ async function processOcrRecord({
         fileName: upload.originalFilename,
         fileSizeBytes: upload.fileSizeBytes,
         fileType: upload.fileType,
-        model: result.model,
-        usage: result.usage,
+        model,
+        pageBatchCount: pdfResult?.batches.length ?? 0,
+        pageCount: pdfResult?.pageCount ?? null,
+        retriedPageBatchCount: pdfResult?.retries ?? 0,
+        reusedPageBatchCount:
+          pdfResult?.batches.filter((batch) => batch.reused).length ?? 0,
+        usage,
       },
       provider: OCR_PROVIDER,
       record: claimedRecord,
-      text: result.text,
+      text: ocrText,
     });
 
     return {
       status: "completed" as const,
       usage: {
         durationMs,
-        model: result.model,
+        model,
+        pageBatches: pdfResult?.batches.length ?? 0,
+        pagesCompleted: pdfResult?.pageCount ?? 0,
+        retriedPageBatches: pdfResult?.retries ?? 0,
+        reusedPageBatches:
+          pdfResult?.batches.filter((batch) => batch.reused).length ?? 0,
         uploadId: upload.id,
-        usage: result.usage,
+        usage,
       },
     };
   } catch (error) {
@@ -234,9 +621,17 @@ export async function processTripOcrNeededMaterials({
     completed: 0,
     failed: 0,
     skipped: 0,
+    pageBatches: 0,
+    pagesCompleted: 0,
+    retriedPageBatches: 0,
+    reusedPageBatches: 0,
+    staleMaterialsRequeued: 0,
     usage: [],
   };
   const seenRecordIds = new Set<string>();
+
+  summary.staleMaterialsRequeued =
+    await requeueStaleOcrProcessingCheckpoints({ tripId });
 
   while (true) {
     const records = await listOcrNeededMaterialExtractions({
@@ -281,6 +676,16 @@ export async function processTripOcrNeededMaterials({
 
       if (result.usage) {
         summary.usage.push(result.usage);
+        const usage = result.usage as {
+          pageBatches?: number;
+          pagesCompleted?: number;
+          retriedPageBatches?: number;
+          reusedPageBatches?: number;
+        };
+        summary.pageBatches += usage.pageBatches ?? 0;
+        summary.pagesCompleted += usage.pagesCompleted ?? 0;
+        summary.retriedPageBatches += usage.retriedPageBatches ?? 0;
+        summary.reusedPageBatches += usage.reusedPageBatches ?? 0;
       }
     }
   }

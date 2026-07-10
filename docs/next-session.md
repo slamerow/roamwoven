@@ -2,6 +2,22 @@
 
 ## Current State
 
+### 2026-07-10 Central Europe P0 foundation
+
+- Production run `6cd3ed95-09c7-49de-97dd-0089ba97dc1e` for trip `65d45385-806d-4ba9-b4eb-b5ea4146eb77` proved two upstream truncations plus a missing evidence-identity boundary.
+- OCR now treats `status: incomplete` as failure, uses `gpt-5.6-luna` by default with a minimum 12k output budget, and processes PDFs in ordered four-page batches. Incomplete batches split down to single pages; a repeatedly incomplete page blocks the whole material.
+- Durable OCR attempts live in `trip_material_ocr_batches`. Completed child batches can be reused after retries/restarts, and the upload-level checkpoint becomes `text_ready` only after complete page coverage.
+- Material checkpoints no longer head/tail-truncate complete extracted text. The two-million-character safety limit fails closed instead of saving partial source content.
+- Every source section now extracts all evidence types, not activities alone. Any unrecovered evidence chunk blocks assembly rather than becoming a maker question.
+- `lib/extraction/evidence-clustering.ts` creates auditable observations and canonical Lego pieces before assembly. Three sightings of one reservation/activity become one piece; distinct same-site stops remain distinct pieces for assembly to group.
+- Source transport anchors now enter as evidence observations. Strong unmatched route evidence can form a canonical transport piece, weak budget-like anchors cannot manufacture rows, and no anchor mutates traveler records after assembly.
+- Legacy saved drafts without `_evidence.version = 1` keep the old anchor adapter so existing paid drafts do not silently lose repaired records. The new boundary applies to fresh extractions; this Central Europe trip must be freshly extracted after deployment.
+- Broad source containers whose descriptions are covered by concrete children become context observations, not traveler cards. Review questions already answered by canonical facts are removed before assembly/review policy.
+- Flight/train enrichment no longer absorbs lodging directions, addresses, food, or sightseeing text.
+- Product sketch contract: a trip contains legs and days; concrete activities may be timed or clearly planned but untimed; travel has its own traveler-row treatment; loose city information becomes City Notes. “System grouped” is an assembly decision over multiple distinct pieces, not evidence deduplication.
+- Additive production SQL: `db/production-sql-2026-07-10-ocr-evidence-foundations.sql`. Run it before deploying the matching application code, then set `OPENAI_OCR_MODEL=gpt-5.6-luna`, `OPENAI_OCR_MAX_OUTPUT_TOKENS=16000`, and `OPENAI_OCR_PDF_BATCH_PAGES=4` in Vercel.
+- Do not test production until the SQL and environment changes are applied. The code intentionally fails closed if the durable tables are missing.
+
 Roamwoven has a static beta flow plus the first backend-ready trip lifecycle:
 
 `/maker` -> `/maker/trips/demo-trip` -> upload -> review -> style -> draft review -> summary -> publish -> `/t/demo`

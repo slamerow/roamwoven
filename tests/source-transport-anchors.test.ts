@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   getStructuredReviewCount,
   getStructuredReviewSections,
@@ -121,6 +122,23 @@ function createBaseDraft(
   };
 }
 
+function canonicalizeWithAnchors(
+  draft: Record<string, unknown>,
+  anchors: SourceTransportAnchor[]
+) {
+  return clusterExtractedEvidence({
+    sourceTransportAnchors: anchors,
+    stages: [
+      {
+        label: "test model evidence",
+        source: "model_spine",
+        stage: draft,
+      },
+    ],
+    tripOverview: draft.tripOverview ?? {},
+  }).draft;
+}
+
 test("source anchors split merged PDF text into separate flight legs", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
@@ -156,7 +174,7 @@ test("source anchors create a missing flight leg instead of merging into an adja
     longMergedFlightMaterial,
   ]);
   const records = createStructuredTripRecordsFromDraft({
-    draft: {
+    draft: canonicalizeWithAnchors({
       [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
         transport: anchors,
       },
@@ -187,7 +205,7 @@ test("source anchors create a missing flight leg instead of merging into an adja
       tripOverview: {
         title: "Central Europe",
       },
-    },
+    }, anchors),
     fallbackTripName: "Central Europe",
     tripId: "return-flight-anchor-repair",
   });
@@ -230,7 +248,7 @@ test("source anchors split a generic same-day return flight into connecting legs
     longMergedFlightMaterial,
   ]);
   const records = createStructuredTripRecordsFromDraft({
-    draft: {
+    draft: canonicalizeWithAnchors({
       [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
         transport: anchors,
       },
@@ -261,7 +279,7 @@ test("source anchors split a generic same-day return flight into connecting legs
       tripOverview: {
         title: "Central Europe",
       },
-    },
+    }, anchors),
     fallbackTripName: "Central Europe",
     tripId: "return-flight-generic-anchor-repair",
   });
@@ -317,7 +335,7 @@ test("source anchors repair transport and suppress already-answered time questio
     embeddedTrainMaterial,
   ]);
   const records = createStructuredTripRecordsFromDraft({
-    draft: createBaseDraft(anchors),
+    draft: canonicalizeWithAnchors(createBaseDraft(anchors), anchors),
     fallbackTripName: "Central Europe",
     tripId: "source-anchor-repair",
   });
@@ -369,7 +387,7 @@ test("source anchor repair traces stay internal instead of becoming calls", () =
     ],
   };
   const records = createStructuredTripRecordsFromDraft({
-    draft,
+    draft: canonicalizeWithAnchors(draft, anchors),
     fallbackTripName: "Central Europe",
     tripId: "source-anchor-repair-internal",
   });
@@ -385,8 +403,12 @@ test("source anchors enrich generic transport rows instead of duplicating them",
   const anchors = extractSourceTransportAnchorsFromMaterials([
     embeddedTrainMaterial,
   ]);
+  const canonicalDraft = canonicalizeWithAnchors(
+    createBaseDraft(anchors, { confirmation: null }),
+    anchors
+  );
   const records = createStructuredTripRecordsFromDraft({
-    draft: createBaseDraft(anchors, { confirmation: null }),
+    draft: canonicalDraft,
     fallbackTripName: "Central Europe",
     tripId: "source-anchor-generic-repair",
   });

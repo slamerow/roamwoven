@@ -1,10 +1,15 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
 import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
+import {
+  clusterExtractedEvidence,
+  type CanonicalEvidencePiece,
+  type EvidenceObservation,
+  type EvidenceStageInput,
+} from "@/lib/extraction/evidence-clustering";
 import { optimizeTripExtractionMaterials } from "@/lib/extraction/material-budget";
 import {
   extractSourceTransportAnchorsFromMaterials,
-  SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
 } from "@/lib/extraction/source-transport-anchors";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
@@ -20,6 +25,10 @@ export type TripExtractionMaterial = {
 
 export type TripExtractionResult = {
   draft: unknown;
+  evidenceArtifacts: {
+    observations: EvidenceObservation[];
+    pieces: CanonicalEvidencePiece[];
+  };
   model: string;
   usage: unknown;
 };
@@ -292,9 +301,19 @@ const tripActivitiesSchema = {
   properties: {
     activities: tripDraftSchema.properties.activities,
     missingDetails: tripDraftSchema.properties.missingDetails,
+    places: tripDraftSchema.properties.places,
     sensitiveDetails: tripDraftSchema.properties.sensitiveDetails,
+    stays: tripDraftSchema.properties.stays,
+    transport: tripDraftSchema.properties.transport,
   },
-  required: ["activities", "missingDetails", "sensitiveDetails"],
+  required: [
+    "activities",
+    "missingDetails",
+    "places",
+    "sensitiveDetails",
+    "stays",
+    "transport",
+  ],
   type: "object",
 };
 
@@ -360,14 +379,15 @@ const spineSystemPrompt = [
 
 const activitiesSystemPrompt = [
   systemPrompt,
-  "This stage extracts only traveler cards and related review details: activities, missingDetails, and sensitiveDetails. Do not repeat places, stays, transport, or tripOverview.",
+  "This is a complete source-evidence pass for one bounded source chunk. Extract activities, places, stays, transport, missingDetails, and sensitiveDetails visible in this chunk. Do not output tripOverview.",
+  "Multiple chunks and OCR/prose sources may describe the same real trip object. Preserve every source-backed sighting here; a later canonical evidence stage will decide which sightings belong to the same object before assembly.",
   "Include restaurants and dining reservations as activities with category food_dining. Do not keep broad day arcs as activity cards; keep timed, ticketed, booked, chosen, or concrete experience cards separate.",
 ].join(" ");
 
 const activityRescueSystemPrompt = [
   activitiesSystemPrompt,
   "This is an automatic second pass after a previous chunk extraction returned no traveler cards despite source text that appears to contain activities, notes/tips, or unresolved activity decisions.",
-  "Re-read the chunk carefully and extract every concrete named, timed, ticketed, food, local-tip, loose travel-note, or optional-plan item. If the chunk truly contains only transport/stay/privacy data and no traveler activity or note, return empty arrays.",
+  "Re-read the chunk carefully and extract every concrete activity, note, place, stay, transport segment, private detail, and genuine unresolved decision. Return empty arrays only when the chunk truly contains no structured trip evidence.",
 ].join(" ");
 
 function formatMaterials(materials: TripExtractionMaterial[]) {
@@ -449,8 +469,14 @@ function splitLongText(text: string, maxChars: number) {
     const nextStart = Math.max(0, breakAt - overlap);
     remaining = remaining.slice(nextStart).trim();
 
-    if (!remaining || chunks.length > 80) {
+    if (!remaining) {
       break;
+    }
+
+    if (chunks.length > 80) {
+      throw new Error(
+        "A source section requires more than 80 extraction chunks. Roamwoven will not silently discard the remaining source text."
+      );
     }
   }
 
@@ -640,8 +666,8 @@ function formatActivityChunkInput({
     `Trip name: ${tripName}`,
     formatSpineContext(spineStage),
     [
-      `Activity source chunk ${chunkIndex + 1} of ${chunkTotal}: ${chunk.label}`,
-      "Extract every source-backed traveler card, city note/tip, material question, and non-obvious call from this chunk.",
+      `Evidence source chunk ${chunkIndex + 1} of ${chunkTotal}: ${chunk.label}`,
+      "Extract every source-backed activity, city note/tip, place, stay, transport segment, sensitive detail, and genuine unresolved material question from this chunk.",
       "If this chunk contains multiple named dated venues, preserve them as separate cards unless the source clearly makes them one tour, route, complex, or pick-one cluster.",
       rescueInstructions,
     ].join("\n"),
@@ -1128,149 +1154,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function createActivityExtractionFailureQuestion(
-  error: unknown,
-  chunk?: ActivityExtractionChunk
-) {
-  const suspiciousEmpty = error instanceof EmptyActivityChunkOutputError;
-
-  return {
-    answerType: "text",
-    confidence: "low",
-    evidence: chunk?.label ?? null,
-    guessedValue: null,
-    prompt:
-      suspiciousEmpty && chunk
-        ? `Roamwoven could not confidently extract activities from ${chunk.label}. Review this source section and add any missing activities before publishing.`
-        : chunk
-        ? `Roamwoven built the trip spine, but could not finish extracting activities from ${chunk.label}. Add any important activities from that source section manually or contact support to recover it.`
-        : "Roamwoven built the trip spine, but could not finish extracting activities. Add any important activities manually or contact support to recover this section.",
-    reason:
-      suspiciousEmpty
-        ? "Automatic extraction and a second pass returned no traveler cards even though this source section appears to contain activity or notes/tips details."
-        : error instanceof Error
-        ? `Activity extraction failed after the trip spine was captured${
-            chunk ? ` for ${chunk.label}` : ""
-          }: ${error.message}`
-        : "Activity extraction failed after the trip spine was captured.",
-    relatedTitle: null,
-    subjectType: "trip",
-    targetField: null,
-  };
-}
-
-function dedupeDraftObjects(items: unknown[]) {
-  const byKey = new Map<string, unknown>();
-  const order: string[] = [];
-
-  const objectScore = (item: unknown) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return 0;
-    }
-
-    const record = item as Record<string, unknown>;
-    const description = contextString(record.description);
-    const filledFields = Object.values(record).filter((value) =>
-      typeof value === "string" ? value.trim() : value !== null && value !== undefined
-    ).length;
-
-    return filledFields + Math.min(description?.length ?? 0, 500) / 100;
-  };
-
-  for (const item of items) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      continue;
-    }
-
-    const record = item as Record<string, unknown>;
-    const key = [
-      contextString(record.title) ?? contextString(record.prompt) ?? "",
-      contextString(record.date) ?? "",
-      contextString(record.startTime) ?? "",
-      contextString(record.itemType) ?? "",
-      contextString(record.subjectType) ?? "",
-      contextString(record.targetField) ?? "",
-    ]
-      .map((part) => normalizeWhitespace(part).toLowerCase())
-      .join("|");
-
-    const existing = byKey.get(key);
-
-    if (existing) {
-      if (objectScore(item) > objectScore(existing)) {
-        byKey.set(key, item);
-      }
-
-      continue;
-    }
-
-    order.push(key);
-    byKey.set(key, item);
-  }
-
-  return order.map((key) => byKey.get(key)).filter(Boolean);
-}
-
-function combineActivityStages(stages: unknown[]) {
-  const records = stages.map(asRecord);
-
-  return {
-    activities: dedupeDraftObjects(
-      records.flatMap((record) => asArray(record.activities))
-    ),
-    missingDetails: dedupeDraftObjects(
-      records.flatMap((record) => asArray(record.missingDetails))
-    ),
-    sensitiveDetails: dedupeDraftObjects(
-      records.flatMap((record) => asArray(record.sensitiveDetails))
-    ),
-  };
-}
-
-function combineDraftStages({
-  activitiesStage,
-  activityFailures,
-  sourceTransportAnchors,
-  spineStage,
-}: {
-  activitiesStage?: unknown;
-  activityFailures?: Array<{ chunk?: ActivityExtractionChunk; error: unknown }>;
-  sourceTransportAnchors?: unknown[];
-  spineStage: unknown;
-}) {
-  const spine = asRecord(spineStage);
-  const activities = asRecord(activitiesStage);
-  const activityFailureDetails =
-    activityFailures?.map((failure) =>
-      createActivityExtractionFailureQuestion(failure.error, failure.chunk)
-    ) ?? [];
-
-  return {
-    activities: asArray(activities.activities),
-    missingDetails: [
-      ...asArray(spine.missingDetails),
-      ...asArray(activities.missingDetails),
-      ...activityFailureDetails,
-    ],
-    places: asArray(spine.places),
-    sensitiveDetails: [
-      ...asArray(spine.sensitiveDetails),
-      ...asArray(activities.sensitiveDetails),
-    ],
-    stays: asArray(spine.stays),
-    transport: asArray(spine.transport),
-    tripOverview: spine.tripOverview ?? {
-      confidence: "low",
-      dateRange: null,
-      destinationSummary: null,
-      title: null,
-    },
-    [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
-      transport: sourceTransportAnchors ?? [],
-    },
-  };
-}
-
 export async function extractTripDraftWithOpenAI({
   materials,
   tripName,
@@ -1333,22 +1216,55 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
-  const activitiesStage = combineActivityStages(
-    activityResults.map((activityResult) => activityResult.result.json)
-  );
+  if (activityFailures.length > 0) {
+    throw new Error(
+      `Evidence extraction did not cover ${activityFailures.length} source chunk${
+        activityFailures.length === 1 ? "" : "s"
+      }. Roamwoven will not assemble a partial trip.`
+    );
+  }
 
-  const combinedDraft = combineDraftStages({
-    activitiesStage,
-    activityFailures,
+  const spineRecord = asRecord(spineResult.json);
+  const evidenceStages: EvidenceStageInput[] = [
+    {
+      label: "trip spine",
+      source: "model_spine",
+      stage: spineResult.json,
+    },
+    ...activityResults.map(({ chunk, result }) => {
+      const material = chunk.materials[0];
+
+      return {
+        label: chunk.label,
+        source: "model_chunk" as const,
+        sourceFilename: material?.filename ?? null,
+        sourceProvenance: material?.sourceProvenance ?? null,
+        sourceUploadId: material?.sourceUploadId ?? null,
+        stage: result.json,
+      };
+    }),
+  ];
+  const evidence = clusterExtractedEvidence({
     sourceTransportAnchors,
-    spineStage: spineResult.json,
+    stages: evidenceStages,
+    tripOverview: spineRecord.tripOverview ?? {
+      confidence: "low",
+      dateRange: null,
+      destinationSummary: null,
+      title: null,
+    },
   });
+  const combinedDraft = evidence.draft;
   const preAssemblyDraft = createDraftAuditSnapshot(combinedDraft);
   const { debug: consolidation, draft } = consolidateTripDraft(combinedDraft);
   const assembledDraft = createDraftAuditSnapshot(draft);
 
   return {
     draft,
+    evidenceArtifacts: {
+      observations: evidence.observations,
+      pieces: evidence.pieces,
+    },
     model: activityResults.at(-1)?.result.model ?? spineResult.model,
     usage: {
       activityChunks: {
@@ -1381,6 +1297,7 @@ export async function extractTripDraftWithOpenAI({
         preAssemblyDraft,
       },
       consolidation,
+      evidence: evidence.summary,
       sourceAnchors: {
         transport: sourceTransportAnchors,
       },

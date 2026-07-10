@@ -127,4 +127,47 @@ export default async function run() {
       restoreEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION", originalEnabled);
     }
   });
+
+  await test("OpenAI OCR rejects token-capped partial text", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalEnabled = process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION;
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = "true";
+    globalThis.fetch = (async () =>
+      ({
+        json: async () => ({
+          incomplete_details: { reason: "max_output_tokens" },
+          output_text: "=== Page 1 ===\nPartial train details",
+          status: "incomplete",
+          usage: { output_tokens: 12000 },
+        }),
+        ok: true,
+        status: 200,
+      }) as Response) as typeof fetch;
+
+    try {
+      await assert.rejects(
+        () =>
+          createOpenAIOcrText(
+            {
+              base64: Buffer.from("fake pdf").toString("base64"),
+              filename: "itinerary-pages-1-4.pdf",
+              mimeType: "application/pdf",
+            },
+            { originalPageNumbers: [1, 2, 3, 4] }
+          ),
+        (error: unknown) => {
+          assert.equal(error instanceof Error, true);
+          assert.match((error as Error).message, /incomplete response/i);
+          return true;
+        }
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnv("OPENAI_API_KEY", originalApiKey);
+      restoreEnv("ROAMWOVEN_ENABLE_AI_EXTRACTION", originalEnabled);
+    }
+  });
 }

@@ -50,6 +50,11 @@ export function parseOptionalEnvList(value: string | null) {
 }
 
 export function getOpenAIConfig() {
+  const configuredOcrMaxOutputTokens = getOptionalPositiveInteger(
+    "OPENAI_OCR_MAX_OUTPUT_TOKENS",
+    16000
+  );
+
   return {
     apiKey: getOptionalEnv("OPENAI_API_KEY"),
     extractionModel: getOptionalEnv("OPENAI_EXTRACTION_MODEL") ?? "gpt-5.4-mini",
@@ -59,16 +64,16 @@ export function getOpenAIConfig() {
     ),
     ocrModel:
       getOptionalEnv("OPENAI_OCR_MODEL") ??
-      getOptionalEnv("OPENAI_EXTRACTION_MODEL") ??
-      "gpt-5.4-mini",
+      "gpt-5.6-luna",
     ocrMaxFilesPerRun: getOptionalPositiveInteger(
       "OPENAI_OCR_MAX_FILES_PER_RUN",
       20
     ),
     ocrImageDetail: getOptionalImageDetail("OPENAI_OCR_IMAGE_DETAIL"),
-    ocrMaxOutputTokens: getOptionalPositiveInteger(
-      "OPENAI_OCR_MAX_OUTPUT_TOKENS",
-      getOptionalPositiveInteger("OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS", 12000)
+    ocrMaxOutputTokens: Math.max(12000, configuredOcrMaxOutputTokens),
+    ocrPdfBatchPages: getOptionalPositiveInteger(
+      "OPENAI_OCR_PDF_BATCH_PAGES",
+      4
     ),
     maxInputChars: getOptionalPositiveInteger(
       "OPENAI_EXTRACTION_MAX_INPUT_CHARS",

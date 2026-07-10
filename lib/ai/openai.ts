@@ -71,8 +71,14 @@ export type OpenAIOcrInput = {
 
 export type OpenAIOcrResult = {
   model: string;
+  pageNumbers: number[];
   text: string;
   usage: unknown;
+};
+
+export type OpenAIOcrOptions = {
+  maxOutputTokens?: number;
+  originalPageNumbers?: number[];
 };
 
 function getResponseText(body: OpenAIResponseBody) {
@@ -347,10 +353,20 @@ function getOcrContent(
 async function requestOcrText({
   config,
   input,
+  options,
 }: {
   config: OpenAIConfig;
   input: OpenAIOcrInput;
+  options: OpenAIOcrOptions;
 }) {
+  const pageNumbers = options.originalPageNumbers ?? [];
+  const pageCoverageInstruction = pageNumbers.length
+    ? [
+        `This PDF batch contains original document pages ${pageNumbers.join(", ")}.`,
+        "Return one section for every supplied page, in source order, using exactly this header format: === Page N ===.",
+        "Use the original page number for N. If a page has no readable text, still include its header followed by [no readable text].",
+      ].join(" ")
+    : "";
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
@@ -367,15 +383,17 @@ async function requestOcrText({
                 "Extract all readable travel-planning text from this uploaded material.",
                 "Preserve confirmation codes, dates, times, airport/station names, hotel names, addresses, passenger/traveler names, reservation numbers, and cancellation/check-in instructions when visible.",
                 "Pay special attention to transport timeline cards and screenshot blocks: preserve route direction, departure and arrival stations or airports, train/flight numbers, operators, dates, durations, and departure/arrival times.",
+                pageCoverageInstruction,
                 "Return plain text only. If a section is illegible, write [illegible] briefly rather than guessing.",
-              ].join(" "),
+              ].filter(Boolean).join(" "),
               type: "input_text",
             },
           ],
           role: "user",
         },
       ],
-      max_output_tokens: config.ocrMaxOutputTokens,
+      max_output_tokens:
+        options.maxOutputTokens ?? config.ocrMaxOutputTokens,
       model: config.ocrModel,
       service_tier: "default",
       store: false,
@@ -396,6 +414,22 @@ async function requestOcrText({
   if (!body) {
     throw new OpenAIExtractionRequestError(
       "OpenAI OCR returned an empty or unreadable response."
+    );
+  }
+
+  if (body.status === "incomplete") {
+    throw new OpenAIExtractionRequestError(
+      `OpenAI OCR returned an incomplete response${
+        body.incomplete_details?.reason
+          ? `: ${body.incomplete_details.reason}`
+          : ""
+      }.`,
+      null,
+      {
+        failureClass: "ocr_incomplete_response",
+        incompleteReason: body.incomplete_details?.reason ?? null,
+        ...getPartialOutputDetails(getResponseText(body)),
+      }
     );
   }
 
@@ -424,7 +458,10 @@ function shouldRetryOcrRequest(error: unknown) {
   return error instanceof TypeError;
 }
 
-export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAIOcrResult> {
+export async function createOpenAIOcrText(
+  input: OpenAIOcrInput,
+  options: OpenAIOcrOptions = {}
+): Promise<OpenAIOcrResult> {
   const config = getOpenAIConfig();
 
   if (!config.extractionEnabled) {
@@ -449,10 +486,11 @@ export async function createOpenAIOcrText(input: OpenAIOcrInput): Promise<OpenAI
 
   for (let attempt = 1; attempt <= OCR_MAX_ATTEMPTS; attempt += 1) {
     try {
-      const result = await requestOcrText({ config, input });
+      const result = await requestOcrText({ config, input, options });
 
       return {
         model: config.ocrModel,
+        pageNumbers: options.originalPageNumbers ?? [],
         text: result.text,
         usage: result.body.usage ?? null,
       };
