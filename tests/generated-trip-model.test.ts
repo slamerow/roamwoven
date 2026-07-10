@@ -3102,10 +3102,8 @@ test("same-site grouping folds child cards into the surviving visit card", () =>
   assert.equal(records.items[0]?.startTime, "11:00");
   assert.match(records.items[0]?.description ?? "", /Apple Strudel Show/);
   assert.match(records.items[0]?.description ?? "", /gardens/);
-  assert.ok(call);
-  assert.equal(call?.status, "noted");
-  assert.match(call?.prompt ?? "", /Apple Strudel Show/);
-  assert.match(call?.prompt ?? "", /gardens/);
+  assert.equal(call, undefined);
+  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("open-day loose lists become one flexible explore card instead of city notes", () => {
@@ -3770,7 +3768,7 @@ test("medium-confidence core date guesses stay questions without explicit eviden
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
-test("strong contextual date calls become notes instead of questions", () => {
+test("strong contextual date calls stay out of maker-facing review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -3807,7 +3805,7 @@ test("strong contextual date calls become notes instead of questions", () => {
     tripId: "trip-strong-contextual-date",
   });
 
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(getStructuredReviewCount(records), 0);
 });
 
@@ -4783,7 +4781,7 @@ test("stay summaries can use guessed check-in and inferred checkout with confirm
   assert.match(questions[1]?.prompt ?? "", /checks out on September 4th, 2026/i);
 });
 
-test("high-confidence parser calls become notes instead of review questions", () => {
+test("high-confidence routine parser calls stay out of maker-facing review", () => {
   const draft = {
     activities: [],
     missingDetails: [
@@ -4837,14 +4835,9 @@ test("high-confidence parser calls become notes instead of review questions", ()
   const questions = sections.find((section) => section.id === "questions");
 
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "noted");
-  assert.equal(notes?.count, 1);
+  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(notes?.count, 0);
   assert.equal(questions?.count, 0);
-  assert.match(notes?.summaryItems[0] ?? "", /overnight flight/i);
-  assert.equal(
-    notes?.items[0]?.title,
-    "We treated the first trip day as starting with the overnight flight on January 12."
-  );
 });
 
 test("routine assembly facts stay out of maker-facing calls", () => {

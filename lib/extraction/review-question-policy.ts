@@ -71,6 +71,9 @@ function isRoutineAssemblyFactCall(text: string) {
     /\b(return flight day|trip end date|trip end|final [a-z0-9 ]*night|last [a-z0-9 ]*night|stay nights budget|landing and bag drop)\b/.test(
       text
     ) ||
+    /\b(first trip day|trip start|trip starts|overnight flight|no hotel that night|no separate hotel night)\b/.test(
+      text
+    ) ||
     /\btreated\b.*\bstay\b.*\b(?:through|to|start|beginning)\b/.test(text) ||
     /\bstay\b.*\b(?:through|to)\b.*\bbased on\b.*\b(?:itinerary sequence|stay nights)\b/.test(
       text
@@ -722,10 +725,18 @@ export function createReviewQuestions({
   }
 
   function isAlreadyAnsweredByStructuredRecord({
+    confidence,
+    evidence,
+    prompt,
+    reason,
     subjectId,
     subjectType,
     targetField,
   }: {
+    confidence: TripSourceConfidence;
+    evidence: string | null;
+    prompt: string | null;
+    reason: string | null;
     subjectId: string | null;
     subjectType: TripReviewQuestionRecord["subjectType"];
     targetField: string | null;
@@ -738,45 +749,88 @@ export function createReviewQuestions({
       return false;
     }
 
-    if (
-      subjectType !== "transport" &&
-      !(
-        subjectType === "item" &&
-        targetField.toLowerCase().includes("time")
-      )
-    ) {
-      return false;
-    }
-
-    return Boolean(
+    const hasTargetValue = Boolean(
       getTargetValue({
         subjectId,
         subjectType,
         targetField,
       })
     );
+
+    if (!hasTargetValue) {
+      return false;
+    }
+
+    if (subjectType === "transport") {
+      return true;
+    }
+
+    if (subjectType === "item") {
+      const target = targetField.toLowerCase();
+
+      if (target.includes("time")) {
+        return true;
+      }
+
+      if (target.includes("date")) {
+        return (
+          !isQuestionShapedPrompt(prompt) &&
+          (confidence === "high" || hasHumanConfidentEvidence(prompt, reason, evidence))
+        );
+      }
+    }
+
+    return false;
   }
 
-  function isStatementStyleCall({
+  function isMakerUsefulPresentationCall({
     answerType,
+    evidence,
     guessedValue,
     prompt,
+    reason,
+    targetField,
   }: {
     answerType: TripReviewQuestionRecord["answerType"];
+    evidence: string | null;
     guessedValue: string | null;
     prompt: string | null;
+    reason: string | null;
+    targetField: string | null;
   }) {
     if (!guessedValue || !prompt || /\?\s*$/.test(prompt.trim())) {
       return false;
     }
 
-    const normalizedPrompt = normalizeText(prompt);
+    const text = normalizeText(
+      [prompt, reason, evidence, targetField].filter(Boolean).join(" ")
+    );
+    const target = normalizeText(targetField);
+
+    if (
+      /\b(duplicate|moved|return flight|source backed|source obvious|stale|suppressed|trip end|used the listed|wrong city)\b/.test(
+        text
+      )
+    ) {
+      return false;
+    }
+
+    if (!target.includes("presentation")) {
+      return false;
+    }
+
+    if (
+      !/\b(grouped|combined|turned|bundled)\b/.test(text) ||
+      !/\b(bar crawl|crawl|dinner options?|explore|flexible|museum visit|option|options|outing|route|walk)\b/.test(
+        text
+      )
+    ) {
+      return false;
+    }
 
     return (
       answerType === "confirm" ||
-      /\b(appears|assumed|classified|kept|mapped|placed|set|split|treated|used)\b/.test(
-        normalizedPrompt
-      )
+      /\b(call|presentation)\b/.test(text)
     );
   }
 
@@ -810,8 +864,6 @@ export function createReviewQuestions({
     guessedValue,
     prompt,
     reason,
-    subjectId,
-    subjectType,
     targetField,
   }: {
     answerType: TripReviewQuestionRecord["answerType"];
@@ -820,12 +872,8 @@ export function createReviewQuestions({
     guessedValue: string | null;
     prompt: string | null;
     reason: string | null;
-    subjectId: string | null;
-    subjectType: TripReviewQuestionRecord["subjectType"];
     targetField: string | null;
   }) {
-    const normalizedTarget = targetField?.toLowerCase() ?? "";
-
     if (
       isQuestionShapedPrompt(prompt) &&
       !(confidence === "high" && isLegacyConfirmableCallPrompt(prompt))
@@ -833,51 +881,14 @@ export function createReviewQuestions({
       return false;
     }
 
-    if (
-      normalizedTarget.includes("visibility") ||
-      normalizedTarget.includes("confirmation")
-    ) {
-      return true;
-    }
-
-    if (subjectType === "trip" && guessedValue) {
-      return true;
-    }
-
-    if (isStatementStyleCall({ answerType, guessedValue, prompt })) {
-      return true;
-    }
-
-    if (
-      subjectType === "stay" &&
-      guessedValue &&
-      (normalizedTarget.includes("title") ||
-        normalizedTarget.includes("name") ||
-        normalizedTarget.includes("date"))
-    ) {
-      return true;
-    }
-
-    if (answerType === "confirm" && guessedValue && confidence === "high") {
-      return true;
-    }
-
-    if (
-      guessedValue &&
-      getTargetValue({ subjectId, subjectType, targetField })
-    ) {
-      if (
-        isCorePlanningTarget({ subjectType, targetField }) &&
-        confidence !== "high" &&
-        !hasHumanConfidentEvidence(prompt, reason, evidence)
-      ) {
-        return false;
-      }
-
-      return true;
-    }
-
-    return false;
+    return isMakerUsefulPresentationCall({
+      answerType,
+      evidence,
+      guessedValue,
+      prompt,
+      reason,
+      targetField,
+    });
   }
 
   const findSubjectId = (
@@ -986,15 +997,16 @@ export function createReviewQuestions({
       subjectType,
       targetField,
     });
-
-    const status: TripReviewQuestionRecord["status"] =
-    isAlreadyAnsweredByStructuredRecord({
+    const alreadyAnsweredByRecord = isAlreadyAnsweredByStructuredRecord({
+      confidence,
+      evidence,
+      prompt,
+      reason,
       subjectId,
       subjectType,
       targetField,
-    })
-      ? "dismissed"
-      : isObviousFactCall({
+    });
+    const obviousFactCall = isObviousFactCall({
       confidence,
       evidence,
       guessedValue,
@@ -1002,34 +1014,37 @@ export function createReviewQuestions({
       reason,
       subjectId,
       targetField,
-    })
-      ? "dismissed"
-      : isPrivacyPolicyQuestion({
-        prompt,
-        reason,
-        subjectType,
-        targetField,
-      })
-        ? "dismissed"
-        : dismissRoutineTransportDetail
-          ? "dismissed"
-          : dismissOptionalDetail && !isExplicitSourceTodo
-            ? "dismissed"
-            : isExplicitSourceTodo
-              ? "open"
-              : shouldTreatAsNote({
-          answerType,
-          confidence,
-          evidence,
-          guessedValue,
-          prompt,
-          reason,
-          subjectId,
-          subjectType,
-          targetField,
-        })
-        ? "noted"
-        : "open";
+    });
+    const privacyPolicyQuestion = isPrivacyPolicyQuestion({
+      prompt,
+      reason,
+      subjectType,
+      targetField,
+    });
+    const makerUsefulCall = shouldTreatAsNote({
+      answerType,
+      confidence,
+      evidence,
+      guessedValue,
+      prompt,
+      reason,
+      targetField,
+    });
+    let status: TripReviewQuestionRecord["status"] = "open";
+
+    if (
+      alreadyAnsweredByRecord ||
+      obviousFactCall ||
+      privacyPolicyQuestion ||
+      dismissRoutineTransportDetail ||
+      (dismissOptionalDetail && !isExplicitSourceTodo)
+    ) {
+      status = "dismissed";
+    } else if (isExplicitSourceTodo) {
+      status = "open";
+    } else if (makerUsefulCall) {
+      status = "noted";
+    }
 
     return [{
       answerType,
