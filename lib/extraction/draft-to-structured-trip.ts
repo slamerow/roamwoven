@@ -30,81 +30,14 @@ import {
   getSourceTransportAnchorsFromDraft,
 } from "@/lib/extraction/source-transport-anchors";
 import {
+  getStayAddressVisibility,
+  shouldCreatePrivateDetailFromDraftSensitiveDetail,
+} from "@/lib/trip-privacy-policy";
+import {
   canonicalizeTripCategoryId,
   getTripCategoryEmoji,
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
-
-function isPublicVenueAddressDetail({
-  detailType,
-  title,
-}: {
-  detailType: string;
-  title: string;
-}) {
-  const normalizedType = detailType.toLowerCase();
-
-  if (
-    !normalizedType.includes("address") &&
-    !normalizedType.includes("location")
-  ) {
-    return false;
-  }
-
-  const normalizedTitle = title.toLowerCase();
-  const publicVenuePattern =
-    /\b(bar|bistro|boutique|cafe|café|church|gallery|jewelry|jewellery|landmark|market|museum|restaurant|retail|shop|shopping|showroom|station|store|venue)\b/;
-  const commercialStayPattern = /\b(hotel|hostel|inn|motel|resort|lodge)\b/;
-  const privateControlPattern =
-    /\b(access|booking|code|confirmation|door|gate|lock|password|room)\b/;
-  const privatePlacePattern =
-    /\b(airbnb|apartment|flat|home|host|lodging|rental|residence|stay)\b/;
-
-  return (
-    (publicVenuePattern.test(normalizedTitle) ||
-      commercialStayPattern.test(normalizedTitle)) &&
-    !privateControlPattern.test(normalizedTitle) &&
-    !privatePlacePattern.test(normalizedTitle)
-  );
-}
-
-function isGenericNonPrivateLogisticsDetail({
-  detailType,
-  reason,
-  title,
-}: {
-  detailType: string;
-  reason: string | null;
-  title: string;
-}) {
-  const text = [detailType, title, reason].filter(Boolean).join(" ").toLowerCase();
-  const sensitivePattern =
-    /\b(access|booking|child|code|confirmation|contact|door|email|emergency|family|gate|guest|host|id|identity|lock|medical|passport|password|payment|phone|private|reference|reservation|room|safety|ticket|wifi|wi-fi)\b/;
-  const logisticsPattern =
-    /\b(arrival|bus|car|drive|drop[-\s]?off|ferry|flight|parking|pickup|pick[-\s]?up|rental|station|taxi|train|transfer|transport)\b/;
-
-  return logisticsPattern.test(text) && !sensitivePattern.test(text);
-}
-
-function isActionableSensitiveDetail({
-  detailType,
-  reason,
-  title,
-}: {
-  detailType: string;
-  reason: string | null;
-  title: string;
-}) {
-  const text = [detailType, title, reason].filter(Boolean).join(" ").toLowerCase();
-
-  if (isGenericNonPrivateLogisticsDetail({ detailType, reason, title })) {
-    return false;
-  }
-
-  return /\b(access|address|booking|child|code|confirmation|contact|door|email|emergency|family|gate|guest|host|id|identity|lock|medical|note|passport|password|payment|phone|private|reference|reservation|room|safety|ticket|wifi|wi-fi)\b/.test(
-    text
-  );
-}
 
 function slugify(value: string) {
   const slug = value
@@ -393,20 +326,6 @@ function isGenericStayName(value: string) {
     normalized.includes("hostel stay") ||
     normalized.includes("lodging")
   );
-}
-
-function isCommercialStayName(value: string | null) {
-  const normalized = normalizeText(value);
-
-  return /\b(hotel|hostel|inn|motel|resort|lodge)\b/.test(normalized);
-}
-
-function shouldProtectStayAddress(stay: { address: string | null; name: string }) {
-  if (!stay.address) {
-    return false;
-  }
-
-  return !isCommercialStayName(stay.name);
 }
 
 function getStayNameGuess({
@@ -730,13 +649,18 @@ function createStayRecords({
       (checkIn && nights && nights > 0 ? addDays(checkIn, nights) : null) ??
       guessedCheckOut ??
       inferredCheckOut;
+    const address = getString(stay, "address");
+    const stayType = getString(stay, "stayType");
 
     return {
       accessDetailsVisibility: "traveler_password",
-      address: getString(stay, "address"),
-      addressVisibility: shouldProtectStayAddress({ address: getString(stay, "address"), name })
-        ? "traveler_password"
-        : "public",
+      address,
+      addressVisibility: getStayAddressVisibility({
+        address,
+        name,
+        publicLocationLabel: leg?.displayName ?? null,
+        stayType,
+      }),
       bookingUrl: null,
       checkInDate: checkIn,
       checkInTime: getString(stay, "checkInTime"),
@@ -754,7 +678,7 @@ function createStayRecords({
       reviewRequired: !checkIn,
       sourceConfidence: "medium",
       status: "draft",
-      stayType: null,
+      stayType,
       tripId,
     };
   });
@@ -1010,7 +934,7 @@ function createPrivateDetailRecords({
   tripId: string;
 }): TripPrivateDetailRecord[] {
   const stayDetails = stays
-    .filter((stay) => shouldProtectStayAddress(stay))
+    .filter((stay) => stay.address && stay.addressVisibility !== "public")
     .map((stay) => ({
       detailType: "private_address",
       id: `${stay.id}-address`,
@@ -1050,8 +974,11 @@ function createPrivateDetailRecords({
     const reason = getString(detail, "reason");
 
     if (
-      isPublicVenueAddressDetail({ detailType, title }) ||
-      !isActionableSensitiveDetail({ detailType, reason, title })
+      !shouldCreatePrivateDetailFromDraftSensitiveDetail({
+        detailType,
+        reason,
+        title,
+      })
     ) {
       return [];
     }

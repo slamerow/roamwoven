@@ -17,6 +17,7 @@ import {
   formatReadableIsoDate,
   normalizeText,
 } from "@/lib/extraction/traveler-text";
+import { isDefaultPrivacyPolicyQuestion } from "@/lib/trip-privacy-policy";
 
 function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
@@ -178,44 +179,6 @@ function isCorePlanningTarget({
   }
 
   return false;
-}
-
-function isPrivacyPolicyQuestion({
-  prompt,
-  reason,
-  subjectType,
-  targetField,
-}: {
-  prompt: string | null;
-  reason: string | null;
-  subjectType: TripReviewQuestionRecord["subjectType"];
-  targetField: string | null;
-}) {
-  const target = targetField?.toLowerCase() ?? "";
-  const text = [prompt, reason, targetField].filter(Boolean).join(" ").toLowerCase();
-
-  if (
-    /\b(ambiguous|can't tell|cannot tell|unclear|not sure|private versus public|public or private|hotel or private|rental or hotel)\b/.test(
-      text
-    )
-  ) {
-    return false;
-  }
-
-  return (
-    target.includes("sensitive") ||
-    target.includes("visibility") ||
-    target.includes("privacy") ||
-    target.includes("addressvisibility") ||
-    ((target.includes("address") ||
-      target.includes("booking") ||
-      target.includes("confirmation")) &&
-      /\b(private|privacy|sensitive|visibility)\b/.test(text)) ||
-    (subjectType === "trip" &&
-      /\b(access code|booking reference|confirmation|password|privacy|private|sensitive|visibility|wifi|wi-fi)\b/.test(
-        text
-      ))
-  );
 }
 
 function isDismissibleOptionalMissingDetail({
@@ -1037,7 +1000,7 @@ export function createReviewQuestions({
       subjectId,
       targetField,
     });
-    const privacyPolicyQuestion = isPrivacyPolicyQuestion({
+    const privacyPolicyQuestion = isDefaultPrivacyPolicyQuestion({
       prompt,
       reason,
       subjectType,

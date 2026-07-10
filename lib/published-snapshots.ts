@@ -4,7 +4,7 @@ import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   classifyAddressSensitivity,
   classifySensitiveText,
-} from "@/lib/traveler-privacy";
+} from "@/lib/trip-privacy-policy";
 import type {
   StructuredTripRecords,
   TripPrivateDetailRecord,

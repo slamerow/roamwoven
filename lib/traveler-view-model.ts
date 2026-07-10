@@ -14,7 +14,8 @@ import type {
 import {
   classifyAddressSensitivity,
   classifySensitiveText,
-} from "@/lib/traveler-privacy";
+  getStayAddressVisibility,
+} from "@/lib/trip-privacy-policy";
 import {
   canonicalizeTripCategoryId,
   getTripCategoryEmoji,
@@ -334,12 +335,11 @@ function createStayRecords({
     .map((leg) => ({
       accessDetailsVisibility: "traveler_password",
       address: leg.stayAddress ?? null,
-      addressVisibility: classifyAddressSensitivity({
+      addressVisibility: getStayAddressVisibility({
         address: leg.stayAddress,
-        context: leg.stayName ?? leg.city ?? "",
-      })
-        ? "traveler_password"
-        : "public",
+        name: leg.stayName ?? `${leg.city ?? "Trip"} stay`,
+        publicLocationLabel: leg.city ?? null,
+      }),
       bookingUrl: null,
       checkInDate: leg.arriveDate ?? null,
       checkInTime: null,

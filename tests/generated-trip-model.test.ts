@@ -32,7 +32,11 @@ import {
   hashTravelerPassword,
   verifyTravelerPassword,
 } from "@/lib/traveler-access";
-import { classifyAddressSensitivity } from "@/lib/traveler-privacy";
+import {
+  classifyAddressSensitivity,
+  classifySensitiveText,
+  getStayAddressVisibility,
+} from "@/lib/trip-privacy-policy";
 import {
   createTravelerAppViewModel,
   getAsiaDemoStructuredTripRecords,
@@ -3716,6 +3720,34 @@ test("private rental stay addresses remain protected", () => {
 
   assert.equal(records.stays[0]?.addressVisibility, "traveler_password");
   assert.equal(records.privateDetails[0]?.detailType, "private_address");
+});
+
+test("ambiguous non-commercial stay addresses default protected", () => {
+  assert.equal(
+    getStayAddressVisibility({
+      address: "12 Garden Lane",
+      name: "Garden Lane B&B",
+    }),
+    "traveler_password"
+  );
+  assert.equal(
+    getStayAddressVisibility({
+      address: "1 Museum Way",
+      name: "The Grand Hotel",
+    }),
+    "public"
+  );
+});
+
+test("public business contacts remain public but host contacts are protected", () => {
+  assert.equal(
+    classifySensitiveText("U Maliru restaurant phone +420 257 530 794"),
+    null
+  );
+  assert.equal(
+    classifySensitiveText("Prague Airbnb host phone +420 777 111 222")?.kind,
+    "private_contact"
+  );
 });
 
 test("medium-confidence core date guesses stay questions without explicit evidence", () => {
