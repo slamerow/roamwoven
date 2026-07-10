@@ -22,10 +22,13 @@ import {
   type TransportCompletenessRecord,
 } from "@/lib/trip-transport-policy";
 import {
+  inferTravelBoundaryTransportKind,
   isRentalCarPickupCandidate,
   isScenicRideCandidate,
   isSeparateLocalMovementCandidate,
   isTravelActionCandidate,
+  shouldBeTravelRow,
+  type TravelBoundaryTransportType,
   type TravelBoundaryRecord,
 } from "@/lib/trip-travel-boundary-policy";
 
@@ -219,12 +222,14 @@ function extractClockTimes(value: string | null | undefined) {
     return [];
   }
 
-  const matches = value.matchAll(/\b(?:at\s*)?(\d{1,2})(?::(\d{2})|\s*(am|pm))\b/gi);
+  const matches = value.matchAll(
+    /\b(?:at\s*)?(\d{1,2})(?:(?::(\d{2})\s*(am|pm)?)|\s*(am|pm))\b/gi
+  );
   const times: string[] = [];
 
   for (const match of matches) {
     const time = normalizeClockTime(
-      `${match[1]}:${match[2] ?? "00"}${match[3] ? ` ${match[3]}` : ""}`
+      `${match[1]}:${match[2] ?? "00"}${match[3] ?? match[4] ? ` ${match[3] ?? match[4]}` : ""}`
     );
 
     if (time && !times.includes(time)) {
@@ -328,6 +333,317 @@ function isSeparateLocalMovement(value: string) {
   return isSeparateLocalMovementCandidate({ title: value });
 }
 
+function hasArrivalDepartureCategory(record: DraftObject) {
+  return normalizeText(getString(record, "category")) === "arrival departure";
+}
+
+function extractIataRoute(value: string | null | undefined) {
+  const match = value?.match(/\b([A-Z]{3})\s*(?:->|→|to)\s*([A-Z]{3})\b/);
+
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+
+  return {
+    arrival: match[2],
+    departure: match[1],
+  };
+}
+
+function routeEndpointFingerprint(value: string | null | undefined) {
+  const airportCode = value?.match(/\b[A-Z]{3}\b/)?.[0];
+
+  return airportCode ?? normalizeText(value);
+}
+
+function routeForRecord(record: DraftObject) {
+  const departure = getStringFromKeys(record, [
+    "departure",
+    "departureLocation",
+    "from",
+  ]);
+  const arrival = getStringFromKeys(record, ["arrival", "arrivalLocation", "to"]);
+  const textRoute = extractIataRoute(
+    textFor(record, [
+      "title",
+      "description",
+      "departure",
+      "arrival",
+      "provider",
+      "confirmation",
+      "flightNumber",
+      "trainNumber",
+    ])
+  );
+
+  if (departure && arrival) {
+    return {
+      arrival: routeEndpointFingerprint(arrival),
+      departure: routeEndpointFingerprint(departure),
+    };
+  }
+
+  if (textRoute) {
+    return {
+      arrival: routeEndpointFingerprint(textRoute.arrival),
+      departure: routeEndpointFingerprint(textRoute.departure),
+    };
+  }
+
+  return null;
+}
+
+function extractTransportNumbers(record: DraftObject) {
+  const rawText = textFor(record, [
+    "title",
+    "description",
+    "provider",
+    "confirmation",
+    "flightNumber",
+    "trainNumber",
+  ]);
+  const numbers = [
+    getString(record, "flightNumber"),
+    getString(record, "trainNumber"),
+  ].filter(Boolean) as string[];
+
+  for (const match of rawText.matchAll(
+    /\b(?:flight|flt|train|rail|rj|ic|ec)\s*([A-Z0-9]{0,3}\s?\d{2,4})\b/gi
+  )) {
+    if (match[1]) {
+      numbers.push(match[1]);
+    }
+  }
+
+  for (const match of rawText.matchAll(/\b([A-Z][A-Z0-9]\s?\d{2,4})\b/g)) {
+    if (match[1]) {
+      numbers.push(match[1]);
+    }
+  }
+
+  return Array.from(
+    new Set(
+      numbers
+        .map((value) => normalizeText(value).replace(/\s+/g, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
+function hasConflictingTransportIdentity(
+  activity: DraftObject,
+  transport: DraftObject
+) {
+  const activityRoute = routeForRecord(activity);
+  const transportRoute = routeForRecord(transport);
+
+  if (
+    activityRoute &&
+    transportRoute &&
+    (activityRoute.departure !== transportRoute.departure ||
+      activityRoute.arrival !== transportRoute.arrival)
+  ) {
+    return true;
+  }
+
+  const activityNumbers = extractTransportNumbers(activity);
+  const transportNumbers = extractTransportNumbers(transport);
+
+  return Boolean(
+    activityNumbers.length &&
+      transportNumbers.length &&
+      !activityNumbers.some((number) => transportNumbers.includes(number))
+  );
+}
+
+function inferPromotedTravelActivityKind(
+  activity: DraftObject
+): TravelBoundaryTransportType | null {
+  const boundary = travelBoundaryRecordForDraft(activity);
+  const policyKind = inferTravelBoundaryTransportKind(boundary);
+  const rawText = textFor(activity, [
+    "title",
+    "description",
+    "departure",
+    "arrival",
+    "provider",
+    "confirmation",
+    "flightNumber",
+    "trainNumber",
+  ]);
+  const text = normalizeText(rawText);
+
+  if (policyKind) {
+    return policyKind;
+  }
+
+  if (
+    getString(activity, "trainNumber") ||
+    /\b(train|rail|railjet|regiojet|intercity train|bahnhof|hbf|hl n)\b/.test(
+      text
+    )
+  ) {
+    return "train";
+  }
+
+  if (
+    getString(activity, "flightNumber") ||
+    extractIataRoute(rawText) ||
+    /\b[A-Z0-9]{2}\s?\d{2,4}\b/.test(rawText)
+  ) {
+    return "flight";
+  }
+
+  return null;
+}
+
+function hasStrongTravelPromotionSignal(activity: DraftObject) {
+  const rawText = textFor(activity, [
+    "title",
+    "description",
+    "departure",
+    "arrival",
+    "provider",
+    "confirmation",
+    "flightNumber",
+    "trainNumber",
+  ]);
+  const text = normalizeText(rawText);
+
+  return Boolean(
+    (getString(activity, "departure") && getString(activity, "arrival")) ||
+      getString(activity, "provider") ||
+      getStringFromKeys(activity, [
+        "confirmation",
+        "reservation",
+        "bookingNumber",
+        "orderNumber",
+      ]) ||
+      getStringFromKeys(activity, ["flightNumber", "trainNumber"]) ||
+      extractIataRoute(rawText) ||
+      /\b(flight|fly|airline|boarding|terminal)\b/.test(text) ||
+      /\b(train to|train from|rail to|rail from|train code|intercity train|railjet|regiojet|bahnhof|hbf|hl n)\b/.test(
+        text
+      ) ||
+      /\b(bus to|bus from|coach to|coach from|ferry to|ferry from)\b/.test(text)
+  );
+}
+
+function isPromotableTravelActivity(activity: DraftObject) {
+  if (!dateFor(activity)) {
+    return false;
+  }
+
+  const kind = inferPromotedTravelActivityKind(activity);
+
+  if (!kind || kind === "other" || kind === "rental_car") {
+    return false;
+  }
+
+  const boundary = {
+    ...travelBoundaryRecordForDraft(activity),
+    transportType: kind,
+  };
+
+  return (
+    hasArrivalDepartureCategory(activity) &&
+    hasStrongTravelPromotionSignal(activity) &&
+    shouldBeTravelRow(boundary)
+  );
+}
+
+function createTransportFromTravelActivity(activity: DraftObject) {
+  const rawText = textFor(activity, [
+    "title",
+    "description",
+    "departure",
+    "arrival",
+    "provider",
+    "confirmation",
+    "flightNumber",
+    "trainNumber",
+  ]);
+  const iataRoute = extractIataRoute(rawText);
+  const times = extractClockTimes(rawText);
+  const kind = inferPromotedTravelActivityKind(activity) ?? "other";
+  const transport: DraftObject = {
+    arrival: getStringFromKeys(activity, ["arrival", "arrivalLocation", "to"]) ??
+      iataRoute?.arrival,
+    arrivalTime: firstKnownTime(activity, ["arrivalTime", "endTime"]) ?? times[1],
+    confirmation: getStringFromKeys(activity, [
+      "confirmation",
+      "reservation",
+      "bookingNumber",
+      "orderNumber",
+    ]),
+    date: dateFor(activity),
+    departure:
+      getStringFromKeys(activity, ["departure", "departureLocation", "from"]) ??
+      iataRoute?.departure,
+    departureTime:
+      firstKnownTime(activity, ["departureTime", "startTime", "time"]) ?? times[0],
+    description: getString(activity, "description"),
+    provider: getString(activity, "provider"),
+    title: getString(activity, "title") ?? "Transport",
+    type: kind,
+  };
+  const flightNumber = getString(activity, "flightNumber");
+  const trainNumber = getString(activity, "trainNumber");
+
+  if (flightNumber) {
+    transport.flightNumber = flightNumber;
+  }
+
+  if (trainNumber) {
+    transport.trainNumber = trainNumber;
+  }
+
+  return transport;
+}
+
+function promoteTravelActivitiesToTransport({
+  activities,
+  debug,
+  transports,
+}: {
+  activities: DraftObject[];
+  debug: TripDraftConsolidationDebug;
+  transports: DraftObject[];
+}) {
+  const retainedActivities: DraftObject[] = [];
+  const nextTransports = [...transports];
+
+  for (const activity of activities) {
+    if (!isPromotableTravelActivity(activity)) {
+      retainedActivities.push(activity);
+      continue;
+    }
+
+    const duplicate = findDuplicateTransport(activity, nextTransports);
+
+    if (duplicate) {
+      retainedActivities.push(activity);
+      continue;
+    }
+
+    const transport = createTransportFromTravelActivity(activity);
+
+    nextTransports.push(transport);
+    debug.promotedTravelActivities.push({
+      date: dateFor(activity),
+      promotedTitle: getString(activity, "title") ?? "Untitled activity",
+      transportTitle: getString(transport, "title") ?? "Transport",
+    });
+  }
+
+  promoteTransportExtractedDetails(nextTransports);
+
+  return {
+    activities: retainedActivities,
+    transports: nextTransports,
+  };
+}
+
 function transportMatchScore(activity: DraftObject, transport: DraftObject) {
   const activityText = normalizeText(
     textFor(activity, ["title", "description", "departure", "arrival"])
@@ -386,7 +702,11 @@ function findDuplicateTransport(
     return null;
   }
 
-  const sameDayTransports = transports.filter((transport) => dateFor(transport) === date);
+  const sameDayTransports = transports.filter(
+    (transport) =>
+      dateFor(transport) === date &&
+      !hasConflictingTransportIdentity(activity, transport)
+  );
   const activityTitle = normalizeText(getString(activity, "title"));
   const exactTitleMatch = sameDayTransports.find((transport) => {
     const transportTitle = normalizeText(getString(transport, "title"));
@@ -2456,6 +2776,11 @@ export function consolidateTripDraft(draft: unknown): {
 
   promoteTransportExtractedDetails(transports);
   ({ activities, transports } = normalizeRentalCarPickups({
+    activities,
+    debug,
+    transports,
+  }));
+  ({ activities, transports } = promoteTravelActivitiesToTransport({
     activities,
     debug,
     transports,

@@ -354,6 +354,110 @@ test("draft consolidation suppresses duplicate travel activities without droppin
   );
 });
 
+test("draft consolidation promotes obvious travel activities into transport rows", () => {
+  const { debug, draft } = consolidateTripDraft({
+    activities: [
+      {
+        category: "arrival_departure",
+        date: "2019-01-25",
+        description: "Delta 1043 FCO -> JFK departs 10:30 AM and arrives 2:33 PM.",
+        itemType: "activity",
+        startTime: "10:30",
+        title: "Delta Flight 1043",
+      },
+      {
+        category: "arrival_departure",
+        date: "2019-01-25",
+        description: "Delta 2934 JFK -> DCA departs 5:10 PM and arrives 6:35 PM.",
+        itemType: "activity",
+        startTime: "17:10",
+        title: "Delta Flight 2934",
+      },
+      {
+        category: "arrival_departure",
+        date: "2019-01-25",
+        itemType: "activity",
+        startTime: "07:30",
+        title: "Check out and leave bags",
+      },
+    ],
+    places: [],
+    stays: [],
+    transport: [],
+  }) as {
+    debug: ReturnType<typeof consolidateTripDraft>["debug"];
+    draft: {
+      activities: Array<{ title?: string }>;
+      transport: Array<{
+        arrival?: string;
+        arrivalTime?: string;
+        departure?: string;
+        departureTime?: string;
+        title?: string;
+        type?: string;
+      }>;
+    };
+  };
+
+  assert.deepEqual(
+    draft.activities.map((activity) => activity.title),
+    ["Check out and leave bags"]
+  );
+  assert.deepEqual(
+    draft.transport.map((transport) => transport.title),
+    ["Delta Flight 1043", "Delta Flight 2934"]
+  );
+  assert.equal(draft.transport[0]?.type, "flight");
+  assert.equal(draft.transport[0]?.departure, "FCO");
+  assert.equal(draft.transport[0]?.arrival, "JFK");
+  assert.equal(draft.transport[0]?.departureTime, "10:30");
+  assert.equal(draft.transport[0]?.arrivalTime, "14:33");
+  assert.equal(draft.transport[1]?.departure, "JFK");
+  assert.equal(draft.transport[1]?.arrival, "DCA");
+  assert.equal(debug.promotedTravelActivities.length, 2);
+});
+
+test("structured records do not surface promoted travel activities as item cards", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "arrival_departure",
+          date: "2019-01-25",
+          description: "Delta 2934 JFK -> DCA departs 5:10 PM and arrives 6:35 PM.",
+          itemType: "activity",
+          startTime: "17:10",
+          title: "Delta Flight 2934",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-21",
+          city: "Rome",
+          leaveDate: "2019-01-25",
+        },
+      ],
+      sensitiveDetails: [],
+      stays: [],
+      transport: [],
+      tripOverview: {
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Fallback trip",
+    tripId: "trip-promoted-travel-activity",
+  });
+
+  assert.equal(records.transport.length, 1);
+  assert.equal(records.transport[0]?.routeLabel, "Delta Flight 2934");
+  assert.equal(records.transport[0]?.transportType, "flight");
+  assert.equal(
+    records.items.some((item) => item.title === "Delta Flight 2934"),
+    false
+  );
+});
+
 test("draft consolidation keeps day-trip rental car pickup as an activity", () => {
   const { debug, draft } = consolidateTripDraft({
     activities: [
@@ -649,7 +753,7 @@ test("extraction audit report compares raw candidates, assembly, and structured 
   assert.equal(report.structured.hardWarnings, 0);
 });
 
-test("extraction audit flags transport candidates that remain activity cards", () => {
+test("extraction audit tracks promoted transport candidates", () => {
   const draft = {
     activities: [
       {
@@ -683,7 +787,9 @@ test("extraction audit flags transport candidates that remain activity cards", (
       title: "Central Europe",
     },
   };
+  const { debug: consolidation, draft: assembledDraft } = consolidateTripDraft(draft);
   const snapshot = createDraftAuditSnapshot(draft);
+  const assembledSnapshot = createDraftAuditSnapshot(assembledDraft);
   const records = createStructuredTripRecordsFromDraft({
     draft,
     fallbackTripName: "Fallback trip",
@@ -695,10 +801,10 @@ test("extraction audit flags transport candidates that remain activity cards", (
     usage: {
       openai: {
         audit: {
-          assembledDraft: snapshot,
+          assembledDraft: assembledSnapshot,
           preAssemblyDraft: snapshot,
         },
-        consolidation: {},
+        consolidation,
         staged: true,
       },
     },
@@ -707,16 +813,16 @@ test("extraction audit flags transport candidates that remain activity cards", (
     (diagnostic) => diagnostic.code === "critical_transport_not_travel_row"
   );
 
-  assert.ok(transportDiagnostic);
-  assert.equal(transportDiagnostic.severity, "p0");
-  assert.deepEqual(transportDiagnostic.evidence, [
-    "2026-09-02 - Train to Vienna",
-  ]);
+  assert.equal(transportDiagnostic, undefined);
+  assert.equal(records.transport.length, 1);
   assert.equal(
     report.lineage.some(
       (row) =>
         row.title === "Train to Vienna" &&
-        row.finalRecords.some((record) => record.recordType === "item")
+        row.finalRecords.some((record) => record.recordType === "transport") &&
+        row.assemblyActions.some(
+          (action) => action.action === "promoted_travel_activity"
+        )
     ),
     true
   );

@@ -136,6 +136,7 @@ export type TripExtractionAuditReport = {
   assembly: {
     foldedLodgingNotes: number;
     mergedCityNotes: number;
+    promotedTravelActivities: number;
     removedDuplicateParents: number;
     removedGroupedChildren: number;
     suppressedDayOverviews: number;

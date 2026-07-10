@@ -161,6 +161,17 @@ function createAssemblyActionIndex(usage: unknown) {
     });
   }
 
+  for (const item of asArray(consolidation.promotedTravelActivities)) {
+    const record = asRecord(item);
+    const promotedTitle =
+      getString(record, "promotedTitle") ?? "Untitled activity";
+
+    addAction(index, lineageKey({ date: getString(record, "date"), title: promotedTitle }), {
+      action: "promoted_travel_activity",
+      detail: `Promoted to ${getString(record, "transportTitle") ?? "transport"}.`,
+    });
+  }
+
   for (const item of asArray(consolidation.foldedLodgingNotes)) {
     const record = asRecord(item);
     const title = getString(record, "title") ?? "Untitled activity";

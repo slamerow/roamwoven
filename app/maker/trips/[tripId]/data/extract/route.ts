@@ -164,6 +164,10 @@ function summarizeAssemblyUsage(usage: unknown) {
           triggered: overproductionRetry.triggered ?? null,
         }
       : null,
+    promotedTravelActivities: countArrayField(
+      consolidation,
+      "promotedTravelActivities"
+    ),
     removedDuplicateParents: countArrayField(
       consolidation,
       "removedDuplicateParents"

@@ -25,6 +25,7 @@ type ProcessingEvent = TripExtractionAuditPayload["processingEvents"][number];
 const assemblyLabels: Array<[keyof AuditReport["assembly"], string]> = [
   ["foldedLodgingNotes", "Stay-flow folds"],
   ["mergedCityNotes", "City-note merges"],
+  ["promotedTravelActivities", "Travel activities promoted"],
   ["removedDuplicateParents", "Duplicate parents removed"],
   ["removedGroupedChildren", "Grouped children removed"],
   ["suppressedDayOverviews", "Day overviews suppressed"],

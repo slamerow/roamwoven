@@ -27,6 +27,11 @@ export type TripDraftConsolidationDebug = {
     maxPlansPerDay: number;
     triggered: boolean;
   };
+  promotedTravelActivities: Array<{
+    date: string | null;
+    promotedTitle: string;
+    transportTitle: string;
+  }>;
   removedDuplicateParents: Array<{
     date: string | null;
     reason: string;
@@ -57,7 +62,7 @@ export type TripDraftConsolidationDebug = {
   }>;
 };
 
-export const ASSEMBLY_VERSION = 2;
+export const ASSEMBLY_VERSION = 3;
 
 export function createEmptyConsolidationDebug(): TripDraftConsolidationDebug {
   return {
@@ -70,6 +75,7 @@ export function createEmptyConsolidationDebug(): TripDraftConsolidationDebug {
       maxPlansPerDay: 0,
       triggered: false,
     },
+    promotedTravelActivities: [],
     removedDuplicateParents: [],
     removedGroupedChildren: [],
     suppressedDayOverviews: [],

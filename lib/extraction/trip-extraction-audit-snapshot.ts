@@ -111,6 +111,10 @@ export function createAssemblySummary(usage: unknown) {
   return {
     foldedLodgingNotes: getArrayCount(consolidation, "foldedLodgingNotes"),
     mergedCityNotes: getArrayCount(consolidation, "mergedCityNotes"),
+    promotedTravelActivities: getArrayCount(
+      consolidation,
+      "promotedTravelActivities"
+    ),
     removedDuplicateParents: getArrayCount(consolidation, "removedDuplicateParents"),
     removedGroupedChildren: getArrayCount(consolidation, "removedGroupedChildren"),
     suppressedDayOverviews: getArrayCount(consolidation, "suppressedDayOverviews"),
