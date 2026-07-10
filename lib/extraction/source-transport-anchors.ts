@@ -299,6 +299,15 @@ function inferDefaultYear(materials: TripExtractionMaterial[]) {
 }
 
 function initialProvenanceFor(material: TripExtractionMaterial): SourceTransportAnchorProvenance {
+  if (
+    material.sourceProvenance === "manual_note" ||
+    material.sourceProvenance === "ocr" ||
+    material.sourceProvenance === "text_layer" ||
+    material.sourceProvenance === "unknown"
+  ) {
+    return material.sourceProvenance;
+  }
+
   if (material.type === "note") {
     return "manual_note";
   }

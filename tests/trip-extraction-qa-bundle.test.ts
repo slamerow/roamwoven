@@ -65,12 +65,27 @@ const uploads: TripUpload[] = [
   },
 ];
 
+const ocrCheckpointText = [
+  "Central Europe January 2019",
+  "Friday, January 18th",
+  "Train to Vienna",
+  "Train Code: 1beb5005",
+  "Outbound - Jan 18, 2019",
+  "09:20",
+  "Praha, Hlavni Nadrazi",
+  "04:03h",
+  "RegioJet | RJ 1033",
+  "13:23",
+  "Wien, Hauptbahnhof",
+  "Friday, January 25th Home Delta Flight 1043 (Operated by Alitalia) Confirmation #GHFHPG FCO -> JFK (10 hours) 14J 2:45 -> 6:45 Delta Flight 2934 (Operated by Alitalia) JFK-> DCA 13D 8:30 PM -> 9:50 PM",
+].join("\n");
+
 const checkpoints: MaterialExtractionRecord[] = [
   {
     completedAt: "2026-07-08T00:01:00.000Z",
     createdAt: "2026-07-08T00:00:30.000Z",
     errorMessage: null,
-    extractedCharCount: 88,
+    extractedCharCount: ocrCheckpointText.length,
     extractionMethod: "ocr",
     failureClass: null,
     id: "checkpoint-1",
@@ -80,8 +95,7 @@ const checkpoints: MaterialExtractionRecord[] = [
       pageCount: 2,
     },
     status: "text_ready",
-    textContent:
-      "Train to Vienna 09:20 Praha Hlavni Nadrazi 13:23 Wien Hauptbahnhof",
+    textContent: ocrCheckpointText,
     tripId: "trip-qa",
     updatedAt: "2026-07-08T00:01:00.000Z",
     uploadId: "upload-1",
@@ -266,6 +280,23 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(bundle.materialPipeline.checkpoints[0]?.textPreview, null);
   assert.equal(bundle.materialPipeline.checkpoints[0]?.textPreviewRedacted, true);
   assert.equal("ocrRawText" in bundle.materialPipeline.checkpoints[0]?.metadata!, false);
+  const trainAnchor = bundle.materialPipeline.sourceAnchors.transport.find(
+    (anchor) => anchor.kind === "train"
+  );
+  const jfkToDcaAnchor = bundle.materialPipeline.sourceAnchors.transport.find(
+    (anchor) =>
+      anchor.kind === "flight" &&
+      anchor.departureLocation === "JFK" &&
+      anchor.arrivalLocation === "DCA"
+  );
+  assert.ok(trainAnchor, "expected OCR checkpoint train anchor");
+  assert.equal(trainAnchor.departureTime, "09:20");
+  assert.equal(trainAnchor.arrivalTime, "13:23");
+  assert.deepEqual(trainAnchor.provenance, ["ocr"]);
+  assert.ok(jfkToDcaAnchor, "expected OCR checkpoint JFK to DCA anchor");
+  assert.equal(jfkToDcaAnchor.departureTime, "20:30");
+  assert.equal(jfkToDcaAnchor.arrivalTime, "21:50");
+  assert.match(jfkToDcaAnchor.evidence ?? "", /JFK/);
   assert.equal(bundle.records?.privateDetails[0]?.value, "[redacted private detail]");
   assert.equal(bundle.records?.stays[0]?.address, "[redacted stay address]");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "[redacted confirmation]");
@@ -317,7 +348,11 @@ test("QA bundle can include private debug previews when explicitly requested", (
   assert.equal(bundle.redaction.privateDetailValues, "included");
   assert.match(
     bundle.materialPipeline.checkpoints[0]?.textPreview ?? "",
-    /Train to Vienna 09:20/
+    /Train to Vienna/
+  );
+  assert.match(
+    bundle.materialPipeline.checkpoints[0]?.textPreview ?? "",
+    /09:20/
   );
   assert.equal(bundle.records?.privateDetails[0]?.value, "2468");
   assert.equal(bundle.records?.stays[0]?.address, "Private apartment address");

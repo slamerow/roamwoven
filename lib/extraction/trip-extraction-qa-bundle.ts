@@ -2,9 +2,11 @@ import { getAppliedTripRecords } from "@/lib/applied-trip-records";
 import {
   getMaterialOcrReadinessIssue,
   listMaterialExtractionCheckpoints,
+  materialFromCheckpoint,
   type MaterialExtractionRecord,
 } from "@/lib/extraction/material-extractions";
 import { createRedactedTripProcessingEvent } from "@/lib/extraction/processing-events";
+import { extractSourceTransportAnchorsFromMaterials } from "@/lib/extraction/source-transport-anchors";
 import {
   getTripExtractionAuditPayload,
   type TripExtractionAuditPayload,
@@ -139,6 +141,16 @@ function summarizeUploads(uploads: TripUpload[]) {
   }));
 }
 
+function materialTypeForUpload(upload: TripUpload | undefined) {
+  if (upload?.sourceKind === "note" || upload?.userNote?.trim()) {
+    return "note" as const;
+  }
+
+  return upload?.fileType === "application/pdf"
+    ? "pdf_text" as const
+    : "file_text" as const;
+}
+
 function summarizeMaterialCheckpoints({
   checkpoints,
   includePrivate,
@@ -153,6 +165,18 @@ function summarizeMaterialCheckpoints({
   const byMethod = countBy(
     checkpoints.map((record) => record.extractionMethod ?? "unknown")
   );
+  const materials = checkpoints.flatMap((record) => {
+    const upload = uploadById.get(record.uploadId);
+    const material = materialFromCheckpoint({
+      filename: upload?.originalFilename ?? "source material",
+      record,
+      type: materialTypeForUpload(upload),
+    });
+
+    return material ? [material] : [];
+  });
+  const sourceTransportAnchors =
+    extractSourceTransportAnchorsFromMaterials(materials);
 
   return {
     byMethod,
@@ -180,6 +204,29 @@ function summarizeMaterialCheckpoints({
       };
     }),
     ocrReadinessIssue: getMaterialOcrReadinessIssue(checkpoints),
+    sourceAnchors: {
+      transport: sourceTransportAnchors.map((anchor) => ({
+        arrivalLocation: anchor.arrivalLocation,
+        arrivalTime: anchor.arrivalTime,
+        confidence: anchor.confidence,
+        confirmation: redactPrivateValue(
+          anchor.confirmation,
+          includePrivate,
+          "confirmation"
+        ),
+        date: anchor.date,
+        departureLocation: anchor.departureLocation,
+        departureTime: anchor.departureTime,
+        evidence: redactSensitiveText(anchor.evidence, includePrivate),
+        kind: anchor.kind,
+        number: anchor.number,
+        provider: anchor.provider,
+        provenance: anchor.provenance,
+        routeLabel: anchor.routeLabel,
+        sourceFilename: anchor.sourceFilename,
+        sourceUploadId: anchor.sourceUploadId,
+      })),
+    },
     totalExtractedChars: checkpoints.reduce(
       (sum, record) => sum + record.extractedCharCount,
       0

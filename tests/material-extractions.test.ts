@@ -49,6 +49,7 @@ export default async function run() {
 
     assert.deepEqual(material, {
       filename: "reservation.pdf",
+      sourceProvenance: "text_layer",
       sourceUploadId: "upload-1",
       text: "Flight and hotel details.",
       type: "pdf_text",
@@ -69,7 +70,7 @@ export default async function run() {
     assert.equal(material, null);
   });
 
-  await test("readable PDFs awaiting OCR can still seed fallback text", () => {
+  await test("readable PDFs awaiting OCR do not seed model extraction until OCR finishes", () => {
     const material = materialFromCheckpoint({
       filename: "image-rich-itinerary.pdf",
       record: checkpoint({
@@ -80,12 +81,7 @@ export default async function run() {
       type: "pdf_text",
     });
 
-    assert.deepEqual(material, {
-      filename: "image-rich-itinerary.pdf",
-      sourceUploadId: "upload-1",
-      text: "Readable PDF text while OCR is pending.",
-      type: "pdf_text",
-    });
+    assert.equal(material, null);
   });
 
   await test("checkpoint writes cap stored text while preserving extracted character count", async () => {

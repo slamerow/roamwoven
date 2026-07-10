@@ -11,6 +11,7 @@ import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
 export type TripExtractionMaterial = {
   filename: string;
+  sourceProvenance?: "manual_note" | "ocr" | "text_layer" | "unknown";
   sourceUploadId?: string;
   text: string;
   type: "file_text" | "note" | "pdf_text";

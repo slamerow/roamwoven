@@ -447,17 +447,20 @@ export function materialFromCheckpoint({
   record: MaterialExtractionRecord;
   type: TripExtractionMaterial["type"];
 }): TripExtractionMaterial | null {
-  const canUseText =
-    record.status === "text_ready" ||
-    (record.status === "ocr_needed" &&
-      record.failureClass === "ocr_backfill_needed");
-
-  if (!canUseText || !record.textContent?.trim()) {
+  if (record.status !== "text_ready" || !record.textContent?.trim()) {
     return null;
   }
 
   return {
     filename,
+    sourceProvenance:
+      record.extractionMethod === "manual_note"
+        ? "manual_note"
+        : record.extractionMethod === "ocr"
+          ? "ocr"
+          : record.extractionMethod === "pdf_text"
+            ? "text_layer"
+            : "unknown",
     sourceUploadId: record.uploadId,
     text: record.textContent.trim(),
     type,
