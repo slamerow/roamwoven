@@ -38,6 +38,7 @@ import {
   getTripCategoryEmoji,
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
+import { isRedundantLocalAirportTransferCandidate } from "@/lib/trip-travel-boundary-policy";
 
 function slugify(value: string) {
   const slug = value
@@ -113,49 +114,6 @@ function cleanTransportDescription(
   );
 
   return kept.length > 0 ? kept.join(" ") : description;
-}
-
-function isRedundantLocalAirportTransfer({
-  arrival,
-  confirmation,
-  departure,
-  description,
-  provider,
-  title,
-  transportType,
-}: {
-  arrival: string | null;
-  confirmation: string | null;
-  departure: string | null;
-  description: string | null;
-  provider: string | null;
-  title: string;
-  transportType: TripTransportType;
-}) {
-  const text = normalizeText(
-    [title, description, departure, arrival, provider, confirmation]
-      .filter(Boolean)
-      .join(" ")
-  );
-
-  if (!text.includes("airport")) {
-    return false;
-  }
-
-  if (
-    /\b(confirmation|driver|private\b.*\btransfer|reservation|reserved|shuttle|ticket|voucher)\b/.test(
-      text
-    )
-  ) {
-    return false;
-  }
-
-  return (
-    transportType === "transfer" ||
-    /\b(leave for airport|move to airport|public transport|take public transport|taxi to airport|airport transfer|go to airport|wake.*airport)\b/.test(
-      text
-    )
-  ) && /\b(before|flight|fly|depart|departure|ryanair|delta|airport)\b/.test(text);
 }
 
 function normalizeItemType(value: string | null, title: string, description: string | null): TripItemType {
@@ -713,23 +671,25 @@ function createTransportRecords({
     const departure = getString(transport, "departure");
     const arrival = getString(transport, "arrival");
     const provider = getString(transport, "provider");
-    const redundantLocalAirportTransfer = isRedundantLocalAirportTransfer({
-      arrival,
-      confirmation: getString(transport, "confirmation"),
-      departure,
-      description,
-      provider,
-      title,
-      transportType,
-    });
+    const confirmation = getString(transport, "confirmation");
+    const redundantLocalAirportTransfer =
+      isRedundantLocalAirportTransferCandidate({
+        arrivalLocation: arrival,
+        confirmationLabel: confirmation,
+        departureLocation: departure,
+        description,
+        provider,
+        title,
+        transportType,
+      });
 
     return {
       arrivalLocation: arrival,
       arrivalTime: getStringFromKeys(transport, ["arrivalTime", "endTime"]),
       bookingUrl: null,
       bookingUrlVisibility: "traveler_password",
-      confirmationLabel: getString(transport, "confirmation"),
-      confirmationVisibility: getString(transport, "confirmation")
+      confirmationLabel: confirmation,
+      confirmationVisibility: confirmation
         ? "traveler_password"
         : "public",
       date,

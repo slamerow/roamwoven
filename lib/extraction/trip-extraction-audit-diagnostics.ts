@@ -7,7 +7,6 @@ import {
   hasAuditTokenOverlap,
   summarizeFinalAuditRecords,
   textForAudit,
-  transportKindForAuditText,
 } from "@/lib/extraction/trip-extraction-audit-lineage";
 import type {
   AuditFinalRecordSummary,
@@ -30,13 +29,38 @@ import {
   type TransportCompletenessRecord,
 } from "@/lib/trip-transport-policy";
 import { isDayOverviewActivityTitle } from "@/lib/trip-card-taxonomy";
+import {
+  inferTravelBoundaryTransportKind,
+  shouldBeTravelRow,
+  type TravelBoundaryRecord,
+} from "@/lib/trip-travel-boundary-policy";
+
+function travelBoundaryRecordForLineageCandidate(
+  candidate: DraftLineageCandidate
+): TravelBoundaryRecord {
+  return {
+    arrivalLocation: "arrival" in candidate ? candidate.arrival : null,
+    category: "category" in candidate ? candidate.category : null,
+    confirmationLabel:
+      "confirmation" in candidate ? candidate.confirmation : null,
+    departureLocation: "departure" in candidate ? candidate.departure : null,
+    description:
+      "description" in candidate ? candidate.description : null,
+    itemType: "itemType" in candidate ? candidate.itemType : null,
+    provider: "provider" in candidate ? candidate.provider : null,
+    title: candidate.title,
+    transportType: "type" in candidate ? candidate.type : null,
+  };
+}
 
 function finalTransportMatchesCandidate(
   candidate: DraftLineageCandidate,
   finalRecords: AuditFinalRecordSummary[]
 ) {
   const candidateText = textForAudit(candidate);
-  const kind = transportKindForAuditText(candidateText);
+  const kind = inferTravelBoundaryTransportKind(
+    travelBoundaryRecordForLineageCandidate(candidate)
+  );
 
   if (!kind) {
     return true;
@@ -93,10 +117,7 @@ function isCriticalTransportRecord(record: AuditFinalRecordSummary) {
 }
 
 function isCriticalTransportCandidate(candidate: DraftLineageCandidate) {
-  const text = textForAudit(candidate);
-  const kind = transportKindForAuditText(text);
-
-  return kind === "flight" || kind === "train";
+  return shouldBeTravelRow(travelBoundaryRecordForLineageCandidate(candidate));
 }
 
 function isActivityCandidate(candidate: DraftLineageCandidate) {

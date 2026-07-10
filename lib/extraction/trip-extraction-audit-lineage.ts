@@ -73,34 +73,6 @@ export function hasAuditTokenOverlap(a: string, b: string) {
   return false;
 }
 
-export function transportKindForAuditText(value: string) {
-  const text = value.toLowerCase();
-
-  if (
-    /\b(children'?s train|ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|chairlift|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
-      text
-    )
-  ) {
-    return null;
-  }
-
-  if (/\b(flight|fly|airport|fco|jfk|dca|terminal)\b/.test(text)) {
-    return "flight";
-  }
-
-  if (
-    /\b(train to|train from|rail to|rail from|train code|intercity train)\b/.test(
-      text
-    ) ||
-    /\bbooking code\b.*\b(train|rail)\b/.test(text) ||
-    /\b(wien hbf|praha hl\.?\s?n\.?)\b/.test(text)
-  ) {
-    return "train";
-  }
-
-  return null;
-}
-
 export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
   const items: AuditFinalRecordSummary[] = records.items
     .filter((item) => item.status !== "ignored")

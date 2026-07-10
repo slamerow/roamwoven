@@ -21,6 +21,13 @@ import {
   isCriticalTransportRecord,
   type TransportCompletenessRecord,
 } from "@/lib/trip-transport-policy";
+import {
+  isRentalCarPickupCandidate,
+  isScenicRideCandidate,
+  isSeparateLocalMovementCandidate,
+  isTravelActionCandidate,
+  type TravelBoundaryRecord,
+} from "@/lib/trip-travel-boundary-policy";
 
 type NoteSectionName =
   | "Food"
@@ -232,28 +239,35 @@ function firstKnownTime(record: DraftObject, keys: string[]) {
   return normalizeClockTime(getStringFromKeys(record, keys));
 }
 
+function travelBoundaryRecordForDraft(record: DraftObject): TravelBoundaryRecord {
+  return {
+    arrivalLocation: getString(record, "arrival"),
+    category: getString(record, "category"),
+    confirmationLabel: getStringFromKeys(record, [
+      "confirmation",
+      "reservation",
+      "bookingNumber",
+      "orderNumber",
+    ]),
+    departureLocation: getString(record, "departure") ?? getString(record, "address"),
+    description: getString(record, "description"),
+    itemType: getString(record, "itemType"),
+    provider: getString(record, "provider"),
+    title: getString(record, "title"),
+    transportType: getString(record, "type"),
+  };
+}
+
 function isRentalCarText(value: string | null | undefined) {
-  return /\b(rental car|car rental|car pickup|pick up car|pickup car|hire car)\b/.test(
-    normalizeText(value)
-  );
+  return isRentalCarPickupCandidate({ title: value });
 }
 
 function isScenicRideOrAttractionText(value: string | null | undefined) {
-  return /\b(ferris wheel|observation wheel|panorama train|scenic train|scenic railway|ring tram|tram tour|funicular|cable car|gondola|boat tour|river cruise|sightseeing cruise)\b/.test(
-    normalizeText(value)
-  );
+  return isScenicRideCandidate({ title: value });
 }
 
 function isTransportActionText(value: string) {
-  const text = normalizeText(value);
-
-  if (isRentalCarText(text) || isScenicRideOrAttractionText(text)) {
-    return false;
-  }
-
-  return /\b(flight|fly|train to|rail to|bus to|ferry to|airport|station|transfer|depart|departure|arrive|arrival|get to|travel to)\b/.test(
-    text
-  );
+  return isTravelActionCandidate({ title: value });
 }
 
 function normalizeRentalCarTitle(transport: DraftObject) {
@@ -307,27 +321,11 @@ function normalizedRentalCarPickupTitle(record: DraftObject) {
 }
 
 function isRentalCarTransport(record: DraftObject) {
-  const type = normalizeText(getString(record, "type"));
-  const text = textFor(record, [
-    "title",
-    "description",
-    "departure",
-    "arrival",
-    "provider",
-  ]);
-
-  return type === "rental car" || isRentalCarText(text);
+  return isRentalCarPickupCandidate(travelBoundaryRecordForDraft(record));
 }
 
 function isSeparateLocalMovement(value: string) {
-  const text = normalizeText(value);
-
-  return (
-    /\b(take|catch|ride|get on|board|leave for|go to)\b/.test(text) &&
-    /\b(metro|subway|bus|tram|taxi|uber|lyft|shuttle|driver|private transfer|car service|pickup|pick up)\b/.test(
-      text
-    )
-  );
+  return isSeparateLocalMovementCandidate({ title: value });
 }
 
 function transportMatchScore(activity: DraftObject, transport: DraftObject) {
