@@ -1076,7 +1076,7 @@ function getExtractionErrorMessage(error?: string) {
   }
 
   if (error === "quality-recovery-required") {
-    return "Roamwoven found a conflict while checking the assembled trip and kept the draft internal instead of showing you a misleading review. The extraction can be retried after the source evidence is reconciled.";
+    return "This earlier run stopped at a quality check before its draft was saved. Review remains open as the recovery surface; retry once to create a draft under the new non-blocking review policy.";
   }
 
   return "Parsing failed. Review the failure detail below before retrying.";
@@ -1096,6 +1096,10 @@ function getFriendlyRunFailureMessage(errorMessage: string | null) {
 
   if (errorMessage.includes("missing dates") || errorMessage.includes("missing destinations")) {
     return "Roamwoven could not find enough trip basics to build the first draft. Add dates, destinations, stays, transport, or anchor plans, then try again.";
+  }
+
+  if (errorMessage.includes("unresolved P0 extraction diagnostics")) {
+    return "This earlier build stopped at a quality check. Retry once to create a reviewable draft; future quality findings will continue into Review instead of stopping the build.";
   }
 
   return "Roamwoven could not finish this draft. Try again, and contact support if it happens twice.";
@@ -1130,6 +1134,7 @@ function RealTripFirstPass({
   const canExtract = extractionEnabled && extractionReadyMaterialCount > 0;
   const latestRunFailed = latestRun?.status === "failed";
   const extractionErrorMessage = getExtractionErrorMessage(error);
+  const completedWithReview = extractionStatus === "completed-with-review";
   const draft = latestDraft?.draftJson ?? null;
   const structuredDraft = draft
     ? createStructuredTripRecordsFromDraft({
@@ -1198,6 +1203,13 @@ function RealTripFirstPass({
       {extractionErrorMessage ? (
         <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
           {extractionErrorMessage}
+        </p>
+      ) : null}
+      {completedWithReview ? (
+        <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
+          Your draft is ready. Roamwoven continued into Review instead of
+          making you rerun the extraction; any material decisions are listed
+          below.
         </p>
       ) : null}
       <section
@@ -1297,9 +1309,9 @@ function RealTripFirstPass({
                 </p>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
                   If the saved materials do not contain enough basics for a V1
-                  trip spine, the build should stop and ask for the missing
-                  dates, destinations, stays, transport, or anchor plans instead
-                  of generating a thin app.
+                  trip spine, Roamwoven will continue into Review and ask for
+                  the missing dates, destinations, stays, transport, or anchor
+                  plans there.
                 </p>
               </div>
               <span className="rounded-md bg-paper px-4 py-3 text-sm font-semibold text-ink/70">
@@ -1648,6 +1660,9 @@ export default async function StructuredDataPage({
   const reviewDecisions = makerTrip.isDemo
     ? []
     : await listTripReviewDecisions(tripId);
+  const reviewAvailable = Boolean(
+    latestDraft || makerTrip.isDemo || latestRun?.status === "failed" || error
+  );
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -1668,17 +1683,19 @@ export default async function StructuredDataPage({
         </header>
 
         <MakerProgress
-          completedSteps={latestDraft || makerTrip.isDemo ? 5 : 4}
+          completedSteps={reviewAvailable ? 5 : 4}
           currentStep={
-            !canShowUploads ? 4 : latestDraft || makerTrip.isDemo ? 6 : 5
+            !canShowUploads ? 4 : reviewAvailable ? 6 : 5
           }
           detail={
-            latestDraft || makerTrip.isDemo
-              ? "Review the questions and flagged details before continuing."
+            reviewAvailable
+              ? latestDraft || makerTrip.isDemo
+                ? "Review the questions and flagged details before continuing."
+                : "Review what Roamwoven recovered and choose the targeted next action."
               : "Create the first structured draft from the confirmed materials."
           }
           maxAccessibleStep={
-            !canShowUploads ? 4 : latestDraft || makerTrip.isDemo ? 6 : 5
+            !canShowUploads ? 4 : reviewAvailable ? 6 : 5
           }
           tripId={tripId}
         />

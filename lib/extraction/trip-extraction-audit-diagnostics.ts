@@ -261,9 +261,11 @@ function transportDescriptionLooksContaminated(record: AuditFinalRecordSummary) 
 function finalRecordForSourceAnchorMatch(record: AuditFinalRecordSummary) {
   return {
     arrivalLocation: record.arrivalLocation,
+    arrivalTime: record.endTime,
     confirmationLabel: record.confirmationLabel,
     date: record.date,
     departureLocation: record.departureLocation,
+    departureTime: record.startTime,
     provider: record.provider,
     routeLabel: record.title,
     transportType: record.type,

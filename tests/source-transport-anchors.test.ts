@@ -325,32 +325,34 @@ test("canonical evidence versions never reactivate legacy anchor row creation", 
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
   ]);
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      _evidence: {
-        canonicalPieceIds: [],
-        observationIds: [],
-        version: EVIDENCE_CLUSTER_VERSION + 1,
-      },
-      [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: { transport: anchors },
-      activities: [],
-      missingDetails: [],
-      places: [
-        {
-          arriveDate: "2019-01-24",
-          city: "Rome",
-          leaveDate: "2019-01-25",
+  for (const version of [2, EVIDENCE_CLUSTER_VERSION + 1]) {
+    const records = createStructuredTripRecordsFromDraft({
+      draft: {
+        _evidence: {
+          canonicalPieceIds: [],
+          observationIds: [],
+          version,
         },
-      ],
-      stays: [],
-      transport: [],
-      tripOverview: { title: "Central Europe" },
-    },
-    fallbackTripName: "Central Europe",
-    tripId: "future-canonical-boundary",
-  });
+        [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: { transport: anchors },
+        activities: [],
+        missingDetails: [],
+        places: [
+          {
+            arriveDate: "2019-01-24",
+            city: "Rome",
+            leaveDate: "2019-01-25",
+          },
+        ],
+        stays: [],
+        transport: [],
+        tripOverview: { title: "Central Europe" },
+      },
+      fallbackTripName: "Central Europe",
+      tripId: `canonical-boundary-${version}`,
+    });
 
-  assert.equal(records.transport.length, 0);
+    assert.equal(records.transport.length, 0);
+  }
 });
 
 test("source anchors extract embedded visual train times from mixed PDF text", () => {
@@ -548,5 +550,64 @@ test("audit flags source-backed transport anchors missing from final records", (
     getStructuredReviewSections(records).find((section) => section.id === "questions")
       ?.count,
     0
+  );
+});
+
+test("audit reconciles alternate date formats and exact segment times", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [],
+      places: [],
+      stays: [],
+      transport: [
+        {
+          arrival: "DCA",
+          arrivalTime: "21:50",
+          date: "January 25th",
+          departure: "JFK",
+          departureTime: "20:30",
+          title: "Flight JFK to DCA",
+          type: "flight",
+        },
+      ],
+      tripOverview: {
+        dateRange: "January 12-25, 2019",
+        title: "Central Europe",
+      },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "source-anchor-alternate-date",
+  });
+  const diagnostics = createAuditDiagnostics({
+    lineage: [],
+    records,
+    sourceTransportAnchors: [
+      {
+        anchorId: "corrupt-costs-anchor",
+        arrivalLocation: "Costs",
+        arrivalTime: "21:50",
+        confidence: "medium",
+        confirmation: null,
+        date: "2019-01-25",
+        departureLocation: "Flight",
+        departureTime: "20:30",
+        evidence: "8:30 PM Costs 9:50 PM",
+        kind: "flight",
+        number: "2934",
+        provider: "Delta",
+        provenance: ["ocr"],
+        routeLabel: "Flight",
+        sourceFilename: "central-europe.pdf",
+        sourceUploadId: "upload-return",
+      },
+    ],
+  });
+
+  assert.equal(
+    diagnostics.some(
+      (diagnostic) => diagnostic.code === "critical_transport_source_anchor_missing"
+    ),
+    false
   );
 });

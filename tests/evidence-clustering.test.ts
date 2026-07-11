@@ -304,6 +304,57 @@ export default async function run() {
     assert.equal((result.draft as { transport: unknown[] }).transport.length, 2);
   });
 
+  await test("written and ISO transport dates cluster before assembly", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [
+        anchor({
+          anchorId: "vienna-train-anchor",
+          arrivalLocation: "Vienna",
+          arrivalTime: "13:23",
+          confirmation: "1beb5005",
+          date: "2019-01-18",
+          departureLocation: "Train",
+          departureTime: "09:20",
+          number: "RJ 1033",
+          routeLabel: "Train to Vienna",
+        }),
+      ],
+      stages: [
+        stage(
+          "written-date-train",
+          emptyStage({
+            transport: [
+              {
+                arrival: "Wien Hauptbahnhof",
+                arrivalTime: "13:23",
+                confirmation: "1beb5005",
+                date: "January 18th",
+                departure: "Praha Hlavni Nadrazi",
+                departureTime: "9:20 AM",
+                provider: "RegioJet",
+                title: "Prague to Vienna train",
+                type: "train",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: {
+        dateRange: "January 12-25, 2019",
+        title: "Central Europe",
+      },
+    });
+    const transports = (result.draft as {
+      transport: Array<Record<string, unknown>>;
+    }).transport;
+
+    assert.equal(transports.length, 1);
+    assert.equal(transports[0]?.date, "2019-01-18");
+    assert.equal(transports[0]?.departure, "Praha Hlavni Nadrazi");
+    assert.equal(transports[0]?.departureTime, "9:20 AM");
+    assert.equal(result.pieces.find((piece) => piece.kind === "transport")?.observationIds.length, 2);
+  });
+
   await test("source anchors enrich a matching piece but weak anchors cannot manufacture rows", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [

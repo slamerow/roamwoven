@@ -1,5 +1,5 @@
 import { type DraftObject } from "@/lib/extraction/draft-value";
-import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
+import { CANONICAL_EVIDENCE_BOUNDARY_VERSION } from "@/lib/extraction/evidence-clustering";
 import {
   ASSEMBLY_VERSION,
   createEmptyConsolidationDebug,
@@ -2786,7 +2786,7 @@ export function consolidateTripDraft(draft: unknown): {
   const evidenceMetadata = asRecord(record._evidence);
   const hasCanonicalAuthority =
     typeof evidenceMetadata.version === "number" &&
-    evidenceMetadata.version >= EVIDENCE_CLUSTER_VERSION;
+    evidenceMetadata.version >= CANONICAL_EVIDENCE_BOUNDARY_VERSION;
   const places = cloneRecordArray(record.places);
   const stays = cloneRecordArray(record.stays);
   let transports = cloneRecordArray(record.transport);

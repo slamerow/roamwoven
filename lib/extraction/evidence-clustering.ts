@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
-import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  normalizeText,
+  normalizeTripDate,
+  tripDatesMatch,
+} from "@/lib/extraction/traveler-text";
 import {
   classifyDraftActivityCard,
   isPlannedAreaActivityGroup,
@@ -9,7 +13,8 @@ import {
   isTourActivityGroup,
 } from "@/lib/trip-card-taxonomy";
 
-export const EVIDENCE_CLUSTER_VERSION = 2;
+export const CANONICAL_EVIDENCE_BOUNDARY_VERSION = 2;
+export const EVIDENCE_CLUSTER_VERSION = 3;
 
 export type EvidenceKind =
   | "activity"
@@ -119,6 +124,53 @@ function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+const DATE_FIELDS = new Set([
+  "arriveDate",
+  "arrivalDate",
+  "checkIn",
+  "checkInDate",
+  "checkOut",
+  "checkOutDate",
+  "date",
+  "departureDate",
+  "firstNightDate",
+  "lastNightDate",
+  "leaveDate",
+]);
+
+function inferTripYear(...values: unknown[]) {
+  for (const value of values) {
+    const text = JSON.stringify(value) ?? "";
+    const isoYear = /\b((?:19|20)\d{2})-\d{1,2}-\d{1,2}\b/.exec(text)?.[1];
+    const writtenYear = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[^\d]{0,12}\d{1,2}(?:st|nd|rd|th)?[^\d]{0,8}((?:19|20)\d{2})\b/i.exec(
+      text
+    )?.[1];
+    const explicitYear = /\b((?:19|20)\d{2})\b/.exec(text)?.[1];
+    const year = isoYear ?? writtenYear ?? explicitYear;
+
+    if (year) {
+      return Number(year);
+    }
+  }
+
+  return null;
+}
+
+function normalizePayloadDates(
+  payload: Record<string, unknown>,
+  defaultYear: number | null
+) {
+  return Object.fromEntries(
+    Object.entries(payload).map(([field, value]) => {
+      if (!DATE_FIELDS.has(field) || typeof value !== "string") {
+        return [field, value];
+      }
+
+      return [field, normalizeTripDate(value, defaultYear) ?? value];
+    })
+  );
+}
+
 function stringValue(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -172,6 +224,9 @@ function normalizedClockTime(value: unknown) {
 
 const LOCATION_ALIASES: Record<string, string> = {
   "fiumicino": "fco",
+  "fiumicino airport": "fco",
+  "rome fiumicino": "fco",
+  "rome fiumicino airport": "fco",
   "prague hlavni nadrazi": "prague central station",
   "praha hlavni nadrazi": "prague central station",
   "wien hauptbahnhof": "vienna central station",
@@ -192,6 +247,8 @@ function normalizedLocation(value: unknown) {
 
   if (
     !normalized ||
+    /^(?:flight|train|travel|transport)$/.test(normalized) ||
+    /^(?:flight|train|travel|transport)\s+(?:from|to)\b/.test(normalized) ||
     /\b(?:am|pm|budget|code|confirmation|costs?|key|lockbox|ticketcode)\b/.test(
       normalized
     ) ||
@@ -201,6 +258,28 @@ function normalizedLocation(value: unknown) {
   }
 
   return LOCATION_ALIASES[normalized] ?? normalized;
+}
+
+function locationsMatch(left: unknown, right: unknown) {
+  const normalizedLeft = normalizedLocation(left);
+  const normalizedRight = normalizedLocation(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  const short =
+    normalizedLeft.split(" ").length === 1 ? normalizedLeft :
+      normalizedRight.split(" ").length === 1 ? normalizedRight : "";
+  const long = short === normalizedLeft ? normalizedRight : normalizedLeft;
+
+  return Boolean(
+    short.length >= 4 && new RegExp(`\\b${short}\\b`).test(long)
+  );
 }
 
 function locationQuality(value: unknown) {
@@ -252,7 +331,10 @@ function sameOrMissingDate(
   left: Record<string, unknown>,
   right: Record<string, unknown>
 ) {
-  return compatibleField(left, right, "date");
+  const leftDate = typeof left.date === "string" ? left.date : null;
+  const rightDate = typeof right.date === "string" ? right.date : null;
+
+  return !leftDate || !rightDate || tripDatesMatch(leftDate, rightDate);
 }
 
 function confirmationFrom(record: Record<string, unknown>) {
@@ -349,8 +431,14 @@ function endpointsConflict(
   const rightArrival = routeEndpoint(right, "arrival");
 
   return (
-    Boolean(leftDeparture && rightDeparture && leftDeparture !== rightDeparture) ||
-    Boolean(leftArrival && rightArrival && leftArrival !== rightArrival)
+    Boolean(
+      leftDeparture &&
+        rightDeparture &&
+        !locationsMatch(leftDeparture, rightDeparture)
+    ) ||
+    Boolean(
+      leftArrival && rightArrival && !locationsMatch(leftArrival, rightArrival)
+    )
   );
 }
 
@@ -374,11 +462,17 @@ function transportMatchReason(
   );
   const departureMatches = Boolean(
     routeEndpoint(left, "departure") &&
-      routeEndpoint(left, "departure") === routeEndpoint(right, "departure")
+      locationsMatch(
+        left.departure ?? left.departureLocation,
+        right.departure ?? right.departureLocation
+      )
   );
   const arrivalMatches = Boolean(
     routeEndpoint(left, "arrival") &&
-      routeEndpoint(left, "arrival") === routeEndpoint(right, "arrival")
+      locationsMatch(
+        left.arrival ?? left.arrivalLocation,
+        right.arrival ?? right.arrivalLocation
+      )
   );
   const leftTitle = normalizedComparable(left.title);
   const rightTitle = normalizedComparable(right.title);
@@ -955,6 +1049,11 @@ export function clusterExtractedEvidence({
   const observations: EvidenceObservation[] = [];
   const missingDetails: unknown[] = [];
   const sensitiveDetails: unknown[] = [];
+  const tripYear = inferTripYear(
+    tripOverview,
+    ...stages.map((stageInput) => stageInput.stage),
+    sourceTransportAnchors
+  );
   let ordinal = 0;
 
   for (const stageInput of stages) {
@@ -964,7 +1063,7 @@ export function clusterExtractedEvidence({
 
     for (const { collection, kind: defaultKind } of COLLECTIONS) {
       for (const item of asArray(stage[collection])) {
-        const payload = asRecord(item);
+        const payload = normalizePayloadDates(asRecord(item), tripYear);
         if (Object.keys(payload).length === 0) continue;
         ordinal += 1;
         const kind =
@@ -996,7 +1095,7 @@ export function clusterExtractedEvidence({
       createObservation({
         kind: "transport",
         ordinal,
-        payload: anchorPayload(anchor),
+        payload: normalizePayloadDates(anchorPayload(anchor), tripYear),
         source: "source_anchor",
         sourceFilename: anchor.sourceFilename,
         sourceLabel: anchor.anchorId,

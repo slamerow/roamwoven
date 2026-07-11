@@ -6,7 +6,7 @@ import {
   type SourceTransportAnchor,
 } from "@/lib/extraction/source-transport-anchors";
 import { createTripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
-import { assertTripDraftQuality } from "@/lib/extraction/trip-quality-gate";
+import { assessTripDraftQuality } from "@/lib/extraction/trip-quality-assessment";
 import {
   createCentralEuropeFirstHalfDraft,
   createCentralEuropeGoldenDraft,
@@ -206,7 +206,7 @@ export default function run() {
     assert.equal(records.transport.length, 8);
     assert.equal(viennaTrain?.departureTime, "09:20");
     assert.equal(
-      assertTripDraftQuality({ draft: clustered.draft, records }).diagnostics.some(
+      assessTripDraftQuality({ draft: clustered.draft, records }).report.diagnostics.some(
         (diagnostic) => diagnostic.severity === "p0"
       ),
       false

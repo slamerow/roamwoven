@@ -12,7 +12,7 @@ import type {
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
 import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
-import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
+import { CANONICAL_EVIDENCE_BOUNDARY_VERSION } from "@/lib/extraction/evidence-clustering";
 import {
   type DraftObject,
   getArray,
@@ -1068,7 +1068,8 @@ export function createStructuredTripRecordsFromDraft({
   });
   const evidenceMetadata = getObject(consolidatedDraft, "_evidence");
   const hasCanonicalEvidenceBoundary =
-    (getNumber(evidenceMetadata, "version") ?? 0) >= EVIDENCE_CLUSTER_VERSION;
+    (getNumber(evidenceMetadata, "version") ?? 0) >=
+    CANONICAL_EVIDENCE_BOUNDARY_VERSION;
   const transport = hasCanonicalEvidenceBoundary
     ? extractedTransport
     : applySourceTransportAnchorsToRecords({

@@ -8,9 +8,9 @@ import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser"
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
-  assertTripDraftQuality,
-  TripDraftQualityGateError,
-} from "@/lib/extraction/trip-quality-gate";
+  assessTripDraftQuality,
+  attachTripQualityAssessment,
+} from "@/lib/extraction/trip-quality-assessment";
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
@@ -20,10 +20,7 @@ import {
   getLatestTripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import { recordTripProcessingEvent } from "@/lib/extraction/processing-events";
-import {
-  assertTripSpineBasics,
-  MissingTripSpineBasicsError,
-} from "@/lib/extraction/trip-spine-validation";
+import { prepareTripDraftForReview } from "@/lib/extraction/trip-spine-validation";
 import {
   createTripExtractionMaterialsIdempotencyKey,
   getTripExtractionMaterialsWithSummary,
@@ -422,32 +419,37 @@ export async function POST(
       tripId,
     });
 
-    assertTripSpineBasics(result.draft);
-
+    const reviewableDraft = prepareTripDraftForReview(result.draft);
     const qualityRecords = createStructuredTripRecordsFromDraft({
-      draft: result.draft,
+      draft: reviewableDraft,
       fallbackTripName: trip.name,
       tripId,
     });
-    const qualityReport = assertTripDraftQuality({
-      draft: result.draft,
+    const qualityAssessment = assessTripDraftQuality({
+      draft: reviewableDraft,
       records: qualityRecords,
       usage: result.usage,
     });
+    const completedDraft = attachTripQualityAssessment({
+      assessment: qualityAssessment,
+      draft: reviewableDraft,
+    });
     await recordTripProcessingEvent({
       details: {
-        diagnosticCount: qualityReport.diagnostics.length,
-        fingerprints: qualityReport.fingerprints,
-        p0DiagnosticCount: 0,
+        diagnosticCount: qualityAssessment.report.diagnostics.length,
+        disposition: qualityAssessment.disposition,
+        fingerprintHash: qualityAssessment.report.fingerprints.hash,
+        p0DiagnosticCount: qualityAssessment.p0Diagnostics.length,
+        structured: qualityAssessment.report.structured,
       },
       processingRunId: run.id,
-      stage: "quality_gate",
+      stage: "quality_assessment",
       status: "completed",
       tripId,
     });
 
     await completeTripProcessingRun({
-      draftJson: result.draft,
+      draftJson: completedDraft,
       model: result.model,
       runId: run.id,
       tripId,
@@ -460,10 +462,21 @@ export async function POST(
         materialDedupe: preparedMaterials.dedupeSummary,
         ocr: ocrSummary,
         openai: result.usage,
+        qualityAssessment: {
+          diagnosticCount: qualityAssessment.report.diagnostics.length,
+          diagnostics: qualityAssessment.report.diagnostics,
+          disposition: qualityAssessment.disposition,
+          p0DiagnosticCount: qualityAssessment.p0Diagnostics.length,
+        },
       },
     });
 
-    return redirectToData(request, tripId, { extraction: "completed" });
+    return redirectToData(request, tripId, {
+      extraction:
+        qualityAssessment.disposition === "needs_review"
+          ? "completed-with-review"
+          : "completed",
+    });
   } catch (error) {
     if (error instanceof DuplicateProcessingRunError) {
       const existingStatus = error.existingRun?.status;
@@ -486,12 +499,7 @@ export async function POST(
       runId: run?.id ?? null,
       tripId,
     });
-    const errorCode =
-      error instanceof MissingTripSpineBasicsError
-        ? "missing-spine-basics"
-        : error instanceof TripDraftQualityGateError
-          ? "quality-recovery-required"
-          : "extraction-failed";
+    const errorCode = "extraction-failed";
 
     if (run) {
       const failureDetails =
@@ -520,12 +528,7 @@ export async function POST(
         details: failureDetails,
         errorMessage: message,
         processingRunId: run.id,
-        stage:
-          error instanceof MissingTripSpineBasicsError
-            ? "spine_validation"
-            : error instanceof TripDraftQualityGateError
-              ? "quality_gate"
-              : "extraction",
+        stage: "extraction",
         status: "failed",
         tripId,
       });

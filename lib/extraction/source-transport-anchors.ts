@@ -4,7 +4,10 @@ import type {
   TripTransportType,
 } from "@/lib/generated-trip-model";
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
-import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  normalizeText,
+  tripDatesMatch,
+} from "@/lib/extraction/traveler-text";
 
 export const SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY = "_sourceTransportAnchors";
 
@@ -1108,9 +1111,11 @@ export function sourceTransportAnchorMatchesRecord(
   anchor: SourceTransportAnchor,
   record: {
     arrivalLocation: string | null;
+    arrivalTime?: string | null;
     confirmationLabel: string | null;
     date: string | null;
     departureLocation: string | null;
+    departureTime?: string | null;
     provider: string | null;
     routeLabel: string;
     transportType: string | null;
@@ -1120,8 +1125,23 @@ export function sourceTransportAnchorMatchesRecord(
     return false;
   }
 
-  if (anchor.date && record.date && anchor.date !== record.date) {
+  if (anchor.date && record.date && !tripDatesMatch(anchor.date, record.date)) {
     return false;
+  }
+
+  const departureTimeMatches = Boolean(
+    anchor.departureTime &&
+      record.departureTime &&
+      anchor.departureTime === record.departureTime
+  );
+  const arrivalTimeMatches = Boolean(
+    anchor.arrivalTime &&
+      record.arrivalTime &&
+      anchor.arrivalTime === record.arrivalTime
+  );
+
+  if (departureTimeMatches && arrivalTimeMatches) {
+    return true;
   }
 
   const recordText = [
@@ -1170,6 +1190,14 @@ export function sourceTransportAnchorMatchesRecord(
   }
 
   if (routeOverlap >= 2) {
+    return true;
+  }
+
+  if (
+    (departureTimeMatches || arrivalTimeMatches) &&
+    (locationMatches(anchor.departureLocation, record.departureLocation) ||
+      locationMatches(anchor.arrivalLocation, record.arrivalLocation))
+  ) {
     return true;
   }
 

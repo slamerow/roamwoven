@@ -1,9 +1,3 @@
-export class MissingTripSpineBasicsError extends Error {
-  constructor(public missingBasics: string[]) {
-    super(`Trip spine is missing: ${missingBasics.join(", ")}`);
-  }
-}
-
 function getObject(value: unknown, key: string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -80,10 +74,88 @@ export function getMissingTripSpineBasics(draft: unknown) {
   return missing;
 }
 
-export function assertTripSpineBasics(draft: unknown) {
-  const missingBasics = getMissingTripSpineBasics(draft);
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
-  if (missingBasics.length > 0) {
-    throw new MissingTripSpineBasicsError(missingBasics);
+function reviewDetailForMissingBasic(missingBasic: string) {
+  if (missingBasic === "trip title") {
+    return {
+      answerType: "text",
+      prompt: "What should this trip be called?",
+      reason: "Roamwoven could not find a clear trip title in the source materials.",
+      targetField: "travelerAppTitle",
+    };
   }
+
+  if (missingBasic === "destination or city") {
+    return {
+      answerType: "text",
+      prompt: "Which destination or cities belong in this trip?",
+      reason: "Roamwoven could not confidently identify the trip destinations.",
+      targetField: "destinationSummary",
+    };
+  }
+
+  if (missingBasic === "trip dates") {
+    return {
+      answerType: "text",
+      prompt: "What dates should this trip cover?",
+      reason: "Roamwoven could not confidently identify the trip date range.",
+      targetField: "dateRange",
+    };
+  }
+
+  return {
+    answerType: "text",
+    prompt: "What should Roamwoven include in the first trip draft?",
+    reason:
+      "The readable source material did not contain a clear stay, transport item, destination, or anchor plan.",
+    targetField: "tripSpine",
+  };
+}
+
+export function prepareTripDraftForReview(draft: unknown) {
+  const record = asRecord(draft);
+  const missingBasics = getMissingTripSpineBasics(record);
+
+  if (missingBasics.length === 0) {
+    return record;
+  }
+
+  const existingDetails = Array.isArray(record.missingDetails)
+    ? record.missingDetails
+    : [];
+  const existingTargets = new Set(
+    existingDetails
+      .map((detail) =>
+        detail && typeof detail === "object" && !Array.isArray(detail)
+          ? (detail as Record<string, unknown>).targetField
+          : null
+      )
+      .filter((target): target is string => typeof target === "string")
+  );
+  const recoveryDetails = missingBasics
+    .map(reviewDetailForMissingBasic)
+    .filter((detail) => !existingTargets.has(detail.targetField))
+    .map((detail) => ({
+      ...detail,
+      confidence: "low",
+      evidence: null,
+      guessedValue: null,
+      relatedTitle: null,
+      subjectType: "trip",
+    }));
+
+  return {
+    ...record,
+    _processingReview: {
+      disposition: "needs_review",
+      missingBasics,
+      version: 1,
+    },
+    missingDetails: [...existingDetails, ...recoveryDetails],
+  };
 }
