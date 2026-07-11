@@ -159,6 +159,10 @@ export function isPlannedAreaActivityGroup(input: DraftActivityCardInput) {
     return false;
   }
 
+  if (/^explore (?:the )?[a-z]+(?: city)?$/.test(title)) {
+    return false;
+  }
+
   return (
     /\b(explore|wander|stroll|walk|neighborhood|neighbourhood|quarter|district|area|morning|afternoon|evening)\b/.test(
       title

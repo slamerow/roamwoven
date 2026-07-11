@@ -22,6 +22,7 @@ import {
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
 import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
+import { normalizeText } from "@/lib/extraction/traveler-text";
 
 type SeedLeg = {
   arriveDate?: string;
@@ -644,15 +645,23 @@ export function createTravelerAppViewModel(
     }
 
     const category = categoryById.get(item.categoryId);
-    const tips = tipsByLegId.get(item.legId) ?? [];
-    tips.push({
-      categoryId: item.categoryId,
-      categoryLabel: category?.label ?? getTripCategoryLabel(item.categoryId),
-      description: item.description,
-      id: item.id,
-      title: item.title,
-    });
-    tipsByLegId.set(item.legId, tips);
+    const sourceLeg = records.legs.find((leg) => leg.id === item.legId);
+    const sourceCity = normalizeText(sourceLeg?.city);
+    const targetLegs = sourceCity
+      ? records.legs.filter((leg) => normalizeText(leg.city) === sourceCity)
+      : [sourceLeg].filter((leg): leg is TripLegRecord => Boolean(leg));
+
+    for (const leg of targetLegs) {
+      const tips = tipsByLegId.get(leg.id) ?? [];
+      tips.push({
+        categoryId: item.categoryId,
+        categoryLabel: category?.label ?? getTripCategoryLabel(item.categoryId),
+        description: item.description,
+        id: item.id,
+        title: item.title,
+      });
+      tipsByLegId.set(leg.id, tips);
+    }
   }
 
   const cards: TravelerCardView[] = cardItems.map((item) => {

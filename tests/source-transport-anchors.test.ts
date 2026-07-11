@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
-import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
+import {
+  clusterExtractedEvidence,
+  EVIDENCE_CLUSTER_VERSION,
+} from "@/lib/extraction/evidence-clustering";
 import {
   getStructuredReviewCount,
   getStructuredReviewSections,
@@ -143,6 +146,9 @@ test("source anchors split merged PDF text into separate flight legs", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
   ]);
+  const budapestToRome = anchors.find(
+    (anchor) => anchor.kind === "flight" && anchor.number === "W6 2339"
+  );
   const fcoToJfk = anchors.find(
     (anchor) =>
       anchor.kind === "flight" &&
@@ -158,6 +164,9 @@ test("source anchors split merged PDF text into separate flight legs", () => {
       anchor.arrivalLocation === "DCA"
   );
 
+  assert.ok(budapestToRome, "expected Wizz Air Budapest to Rome anchor");
+  assert.equal(budapestToRome.departureLocation, "Budapest");
+  assert.equal(budapestToRome.arrivalLocation, "Rome Fiumicino");
   assert.ok(fcoToJfk, "expected Delta 1043 FCO to JFK anchor");
   assert.equal(fcoToJfk.date, "2019-01-25");
   assert.equal(fcoToJfk.confirmation, "GHFHPG");
@@ -247,46 +256,46 @@ test("source anchors split a generic same-day return flight into connecting legs
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
   ]);
+  const canonicalDraft = canonicalizeWithAnchors({
+    [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
+      transport: anchors,
+    },
+    activities: [],
+    missingDetails: [],
+    places: [
+      {
+        arriveDate: "2019-01-24",
+        city: "Rome",
+        leaveDate: "2019-01-25",
+      },
+    ],
+    sensitiveDetails: [],
+    stays: [],
+    transport: [
+      {
+        arrival: null,
+        arrivalTime: null,
+        confirmation: "GHFHPG",
+        date: "2019-01-25",
+        departure: null,
+        departureTime: null,
+        provider: "Delta",
+        title: "Return flight home",
+        type: "flight",
+      },
+    ],
+    tripOverview: {
+      title: "Central Europe",
+    },
+  }, anchors);
   const records = createStructuredTripRecordsFromDraft({
-    draft: canonicalizeWithAnchors({
-      [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
-        transport: anchors,
-      },
-      activities: [],
-      missingDetails: [],
-      places: [
-        {
-          arriveDate: "2019-01-24",
-          city: "Rome",
-          leaveDate: "2019-01-25",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: null,
-          arrivalTime: null,
-          confirmation: "GHFHPG",
-          date: "2019-01-25",
-          departure: null,
-          departureTime: null,
-          provider: "Delta",
-          title: "Return flight home",
-          type: "flight",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    }, anchors),
+    draft: canonicalDraft,
     fallbackTripName: "Central Europe",
     tripId: "return-flight-generic-anchor-repair",
   });
   const jan25ReturnFlights = records.transport.filter(
     (item) => item.date === "2019-01-25" && item.transportType === "flight"
   );
-
   assert.equal(
     jan25ReturnFlights.length,
     2,
@@ -312,6 +321,38 @@ test("source anchors split a generic same-day return flight into connecting legs
   );
 });
 
+test("canonical evidence versions never reactivate legacy anchor row creation", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    longMergedFlightMaterial,
+  ]);
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      _evidence: {
+        canonicalPieceIds: [],
+        observationIds: [],
+        version: EVIDENCE_CLUSTER_VERSION + 1,
+      },
+      [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: { transport: anchors },
+      activities: [],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2019-01-24",
+          city: "Rome",
+          leaveDate: "2019-01-25",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Central Europe" },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "future-canonical-boundary",
+  });
+
+  assert.equal(records.transport.length, 0);
+});
+
 test("source anchors extract embedded visual train times from mixed PDF text", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     embeddedTrainMaterial,
@@ -328,6 +369,43 @@ test("source anchors extract embedded visual train times from mixed PDF text", (
   assert.equal(train.number, "RJ 1033");
   assert.equal(train.confirmation, "1beb5005");
   assert.deepEqual(train.provenance.sort(), ["ocr", "text_layer"]);
+});
+
+test("ticket dates parse in day-month and numeric formats without crossing PDF pages", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    {
+      filename: "tickets-and-lockbox.pdf",
+      sourceUploadId: "upload-ticket-pages",
+      text: [
+        "[OCR text from embedded images]",
+        "=== Page 16 ===",
+        "Fri, 18 Jan 2019 09:20",
+        "RegioJet | RJ 1033",
+        "09:20 Praha, Hlavni Nadrazi",
+        "13:23 Wien, Hauptbahnhof",
+        "=== Page 17 ===",
+        "OBB Personenverkehr AG",
+        "DATUM: 21.01",
+        "ZEIT: 10:42",
+        "Train to Budapest",
+        "10:42 WIEN HBF",
+        "13:19 BUDAPEST",
+        "=== Page 18 ===",
+        "Lockbox code 2580",
+        "The key will be prepared on the day of arrival at 3 PM.",
+      ].join("\n"),
+      type: "pdf_text" as const,
+    },
+  ]);
+
+  assert.ok(anchors.some((item) => item.date === "2019-01-18"));
+  assert.ok(anchors.some((item) => item.date === "2019-01-21"));
+  assert.equal(
+    anchors.some(
+      (item) => item.confirmation === "2580" || item.departureTime === "15:00"
+    ),
+    false
+  );
 });
 
 test("source anchors repair transport and suppress already-answered time questions", () => {

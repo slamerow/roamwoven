@@ -5,7 +5,12 @@ import {
   isTripAllowedForOpenAIExtraction,
 } from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
+import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
+import {
+  assertTripDraftQuality,
+  TripDraftQualityGateError,
+} from "@/lib/extraction/trip-quality-gate";
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
@@ -419,6 +424,28 @@ export async function POST(
 
     assertTripSpineBasics(result.draft);
 
+    const qualityRecords = createStructuredTripRecordsFromDraft({
+      draft: result.draft,
+      fallbackTripName: trip.name,
+      tripId,
+    });
+    const qualityReport = assertTripDraftQuality({
+      draft: result.draft,
+      records: qualityRecords,
+      usage: result.usage,
+    });
+    await recordTripProcessingEvent({
+      details: {
+        diagnosticCount: qualityReport.diagnostics.length,
+        fingerprints: qualityReport.fingerprints,
+        p0DiagnosticCount: 0,
+      },
+      processingRunId: run.id,
+      stage: "quality_gate",
+      status: "completed",
+      tripId,
+    });
+
     await completeTripProcessingRun({
       draftJson: result.draft,
       model: result.model,
@@ -462,7 +489,9 @@ export async function POST(
     const errorCode =
       error instanceof MissingTripSpineBasicsError
         ? "missing-spine-basics"
-        : "extraction-failed";
+        : error instanceof TripDraftQualityGateError
+          ? "quality-recovery-required"
+          : "extraction-failed";
 
     if (run) {
       const failureDetails =
@@ -494,7 +523,9 @@ export async function POST(
         stage:
           error instanceof MissingTripSpineBasicsError
             ? "spine_validation"
-            : "extraction",
+            : error instanceof TripDraftQualityGateError
+              ? "quality_gate"
+              : "extraction",
         status: "failed",
         tripId,
       });

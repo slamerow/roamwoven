@@ -579,3 +579,78 @@ export function createCentralEuropeFirstHalfDraft() {
     },
   };
 }
+
+export function createCentralEuropeGoldenDraft() {
+  const draft = createCentralEuropeFirstHalfDraft();
+
+  return {
+    ...draft,
+    places: [
+      ...draft.places,
+      {
+        arriveDate: "2019-01-24",
+        city: "Rome",
+        country: "Italy",
+        leaveDate: "2019-01-25",
+      },
+    ],
+    stays: [
+      ...draft.stays,
+      {
+        address: "Via Torino 45, Rome",
+        checkIn: "2019-01-24",
+        checkInTime: null,
+        checkOut: "2019-01-25",
+        checkOutTime: null,
+        firstNightDate: "2019-01-24",
+        name: "The RomeHello Hostel",
+        nights: 1,
+        sourceFilename,
+      },
+    ],
+    transport: [
+      ...draft.transport,
+      {
+        arrival: "Rome FCO",
+        arrivalTime: "14:10",
+        confirmation: "RDGHMT",
+        date: "2019-01-24",
+        departure: "Budapest",
+        departureTime: "12:20",
+        provider: "Wizz Air",
+        sourceFilename,
+        title: "Budapest to Rome flight",
+        type: "flight",
+      },
+      {
+        arrival: "JFK",
+        arrivalTime: "18:45",
+        confirmation: "GHFHPG",
+        date: "2019-01-25",
+        departure: "FCO",
+        departureTime: "14:45",
+        provider: "Delta 1043",
+        sourceFilename,
+        title: "Rome to JFK flight",
+        type: "flight",
+      },
+      {
+        arrival: "DCA",
+        arrivalTime: "21:50",
+        confirmation: "GHFHPG",
+        date: "2019-01-25",
+        departure: "JFK",
+        departureTime: "20:30",
+        provider: "Delta 2934",
+        sourceFilename,
+        title: "JFK to DCA flight",
+        type: "flight",
+      },
+    ],
+    tripOverview: {
+      ...draft.tripOverview,
+      dateRange: "Jan 12-25, 2019",
+      destinationSummary: "Rome, Prague, Vienna, Budapest, Rome",
+    },
+  };
+}

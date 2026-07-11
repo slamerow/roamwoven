@@ -171,6 +171,61 @@ export default async function run() {
     );
   });
 
+  await test("repeated visits to the same city remain separate dated place pieces", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "trip spine",
+          emptyStage({
+            places: [
+              {
+                arriveDate: "2030-04-12",
+                city: "Rome",
+                country: "Italy",
+                leaveDate: "2030-04-14",
+              },
+              {
+                arriveDate: "2030-04-20",
+                city: "Rome",
+                country: "Italy",
+                leaveDate: "2030-04-21",
+              },
+            ],
+          })
+        ),
+        stage(
+          "supporting chunks",
+          emptyStage({
+            places: [
+              {
+                arriveDate: "2030-04-12",
+                city: "Rome",
+                country: "Italy",
+                leaveDate: "2030-04-14",
+              },
+              {
+                arriveDate: "2030-04-20",
+                city: "Rome",
+                country: "Italy",
+                leaveDate: "2030-04-21",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: {},
+    });
+    const places = (result.draft as { places: Array<Record<string, unknown>> })
+      .places;
+
+    assert.equal(places.length, 2);
+    assert.deepEqual(
+      places.map((place) => place.arriveDate),
+      ["2030-04-12", "2030-04-20"]
+    );
+  });
+
   await test("source overview containers do not become traveler activities", () => {
     const childOne = activity({
       sourceFilename: "plan.pdf",
@@ -298,6 +353,40 @@ export default async function run() {
     assert.equal(transport[0]?.departureTime, "09:15");
     assert.equal(transport[0]?.arrivalTime, "13:20");
     assert.equal(result.summary.suppressedWeakAnchorCount, 1);
+  });
+
+  await test("corrupt source fragments cannot become standalone transport rows", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [
+        anchor({
+          anchorId: "corrupt-budget-fragment",
+          arrivalLocation: "Rome",
+          arrivalTime: "21:50",
+          confirmation: null,
+          date: "2030-04-20",
+          departureLocation: "-> 9:50 PM",
+          departureTime: "20:30",
+          evidence: "Costs Travel budget. Flight to Rome: $300.",
+          kind: "flight",
+          routeLabel: "Flight Flight to Rome",
+        }),
+        anchor({
+          anchorId: "corrupt-lockbox-fragment",
+          arrivalLocation: null,
+          confirmation: "2580",
+          date: "2030-04-20",
+          departureLocation: null,
+          departureTime: "15:00",
+          evidence: "Lockbox code 2580. The key will be prepared at 3 PM.",
+          routeLabel: "Train",
+        }),
+      ],
+      stages: [stage("empty", emptyStage())],
+      tripOverview: {},
+    });
+
+    assert.equal((result.draft as { transport: unknown[] }).transport.length, 0);
+    assert.equal(result.summary.suppressedWeakAnchorCount, 2);
   });
 
   await test("canonical facts suppress source-obvious review questions", () => {

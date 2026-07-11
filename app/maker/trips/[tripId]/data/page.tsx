@@ -1075,6 +1075,10 @@ function getExtractionErrorMessage(error?: string) {
     return "Roamwoven could not find enough basics to build a V1 trip spine. Add the missing dates, destinations, stays, transport, or anchor plans before trying again.";
   }
 
+  if (error === "quality-recovery-required") {
+    return "Roamwoven found a conflict while checking the assembled trip and kept the draft internal instead of showing you a misleading review. The extraction can be retried after the source evidence is reconciled.";
+  }
+
   return "Parsing failed. Review the failure detail below before retrying.";
 }
 

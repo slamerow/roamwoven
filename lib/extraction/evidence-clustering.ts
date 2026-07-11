@@ -9,7 +9,7 @@ import {
   isTourActivityGroup,
 } from "@/lib/trip-card-taxonomy";
 
-export const EVIDENCE_CLUSTER_VERSION = 1;
+export const EVIDENCE_CLUSTER_VERSION = 2;
 
 export type EvidenceKind =
   | "activity"
@@ -135,6 +135,92 @@ function normalizedComparable(value: unknown) {
   return typeof value === "string" ? normalizeText(value) : "";
 }
 
+function normalizedClockTime(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(value.trim());
+
+  if (!match) {
+    return normalizedComparable(value);
+  }
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const suffix = match[3]?.toLowerCase();
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return normalizedComparable(value);
+  }
+
+  if (suffix === "pm" && hour < 12) {
+    hour += 12;
+  } else if (suffix === "am" && hour === 12) {
+    hour = 0;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+const LOCATION_ALIASES: Record<string, string> = {
+  "fiumicino": "fco",
+  "prague hlavni nadrazi": "prague central station",
+  "praha hlavni nadrazi": "prague central station",
+  "wien hauptbahnhof": "vienna central station",
+  "wien hbf": "vienna central station",
+};
+
+function normalizedLocation(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = normalizeText(
+    value.replace(/^(?:-|–|—|>|→)+\s*/, "")
+  )
+    .replace(/\b(?:train|flight)\s+code\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    !normalized ||
+    /\b(?:am|pm|budget|code|confirmation|costs?|key|lockbox|ticketcode)\b/.test(
+      normalized
+    ) ||
+    /^\d{1,2}\s+\d{2}$/.test(normalized)
+  ) {
+    return "";
+  }
+
+  return LOCATION_ALIASES[normalized] ?? normalized;
+}
+
+function locationQuality(value: unknown) {
+  const normalized = normalizedLocation(value);
+
+  if (!normalized) {
+    return 0;
+  }
+
+  if (/^[a-z]{3}$/.test(normalized)) {
+    return 4;
+  }
+
+  if (/\b(?:airport|bahnhof|hbf|nadrazi|station|terminal)\b/.test(normalized)) {
+    return 4;
+  }
+
+  return normalized.split(" ").length >= 2 ? 3 : 2;
+}
+
 function identityTokens(value: unknown) {
   return normalizedComparable(value)
     .split(/\s+/)
@@ -176,7 +262,7 @@ function confirmationFrom(record: Record<string, unknown>) {
 }
 
 function timeFrom(record: Record<string, unknown>) {
-  return normalizedComparable(
+  return normalizedClockTime(
     record.startTime ?? record.departureTime ?? record.checkInTime
   );
 }
@@ -233,15 +319,22 @@ function activityMatchReason(
 }
 
 function transportNumber(record: Record<string, unknown>) {
-  const text = [record.number, record.provider, record.title]
-    .filter(Boolean)
-    .join(" ");
-  const match = /\b([a-z]{1,3})\s*[- ]?(\d{2,5})\b/i.exec(text);
+  if (typeof record.number === "string") {
+    const explicit = record.number.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+    if (/^(?=.*\d)[a-z0-9]{2,10}$/.test(explicit)) {
+      return explicit;
+    }
+  }
+
+  const match = /\b([a-z]{1,3})\s*[- ]?(\d{2,5})\b/i.exec(
+    typeof record.title === "string" ? record.title : ""
+  );
   return match ? `${match[1]}${match[2]}`.toLowerCase() : "";
 }
 
 function routeEndpoint(record: Record<string, unknown>, side: "arrival" | "departure") {
-  return normalizedComparable(
+  return normalizedLocation(
     record[side] ?? record[`${side}Location`] ?? null
   );
 }
@@ -265,11 +358,7 @@ function transportMatchReason(
   left: Record<string, unknown>,
   right: Record<string, unknown>
 ) {
-  if (
-    !sameOrMissingDate(left, right) ||
-    !compatibleField(left, right, "type") ||
-    endpointsConflict(left, right)
-  ) {
+  if (!sameOrMissingDate(left, right) || !compatibleField(left, right, "type")) {
     return null;
   }
 
@@ -296,6 +385,10 @@ function transportMatchReason(
   const leftIdentityTitle = identityTokens(left.title).join(" ");
   const rightIdentityTitle = identityTokens(right.title).join(" ");
 
+  if (leftNumber && rightNumber && leftNumber !== rightNumber) {
+    return null;
+  }
+
   if (leftNumber && leftNumber === rightNumber) {
     return "same transport segment number";
   }
@@ -315,6 +408,7 @@ function transportMatchReason(
   if (
     leftConfirmation &&
     leftConfirmation === rightConfirmation &&
+    !endpointsConflict(left, right) &&
     (departureMatches || arrivalMatches)
   ) {
     return "same booking and compatible segment";
@@ -326,6 +420,18 @@ function transportMatchReason(
     (!leftHasRoute || !rightHasRoute)
   ) {
     return "generic booking resolved to one segment";
+  }
+
+  if (
+    leftConfirmation &&
+    leftConfirmation === rightConfirmation &&
+    (leftNumber || rightNumber) &&
+    (locationQuality(left.departure ?? left.departureLocation) < 2 ||
+      locationQuality(right.departure ?? right.departureLocation) < 2 ||
+      locationQuality(left.arrival ?? left.arrivalLocation) < 2 ||
+      locationQuality(right.arrival ?? right.arrivalLocation) < 2)
+  ) {
+    return "generic booking evidence resolved to numbered segment";
   }
 
   const titleOverlap = overlapCount(identityTokens(left.title), identityTokens(right.title));
@@ -376,7 +482,19 @@ function placeMatchReason(
     return null;
   }
 
-  return compatibleField(left, right, "country") ? "same trip place" : null;
+  const leftArrive = normalizedComparable(left.arriveDate ?? left.arrivalDate);
+  const rightArrive = normalizedComparable(right.arriveDate ?? right.arrivalDate);
+  const leftLeave = normalizedComparable(left.leaveDate ?? left.departureDate);
+  const rightLeave = normalizedComparable(right.leaveDate ?? right.departureDate);
+
+  if (
+    (leftArrive && rightArrive && leftArrive !== rightArrive) ||
+    (leftLeave && rightLeave && leftLeave !== rightLeave)
+  ) {
+    return null;
+  }
+
+  return compatibleField(left, right, "country") ? "same dated trip visit" : null;
 }
 
 function matchReason(
@@ -460,9 +578,31 @@ function mergeObservationIntoPiece(
       }
     } else if (field === "sourceFilename") {
       next[field] = existing ?? value;
+    } else if (
+      ["arrival", "arrivalLocation", "departure", "departureLocation"].includes(
+        field
+      ) &&
+      locationQuality(value) > locationQuality(existing)
+    ) {
+      next[field] = value;
+    } else if (
+      ["arrivalTime", "departureTime", "endTime", "startTime", "time"].includes(
+        field
+      ) &&
+      normalizedClockTime(existing) === normalizedClockTime(value)
+    ) {
+      next[field] = existing;
     } else if (existing === null || existing === undefined || existing === "") {
       next[field] = value;
-    } else if (valuesConflict(existing, value)) {
+    } else if (
+      valuesConflict(existing, value) &&
+      !(
+        ["arrival", "arrivalLocation", "departure", "departureLocation"].includes(
+          field
+        ) &&
+        normalizedLocation(existing) === normalizedLocation(value)
+      )
+    ) {
       const existingConflict = conflicts.find((conflict) => conflict.field === field);
       const values = Array.from(
         new Set([String(existing), String(value), ...(existingConflict?.values ?? [])])
@@ -508,9 +648,52 @@ function isStrongStandaloneAnchor(record: Record<string, unknown>) {
 
   return Boolean(
     record.date &&
-      ((departure && arrival && (hasTime || number || hasBooking)) ||
-        (number && hasTime))
+      departure &&
+      arrival &&
+      hasTime &&
+      (number || hasBooking)
   );
+}
+
+function hasSpecificTransportRoute(record: Record<string, unknown>) {
+  return Boolean(routeEndpoint(record, "departure") && routeEndpoint(record, "arrival"));
+}
+
+function suppressRedundantTransportParents(pieces: CanonicalEvidencePiece[]) {
+  const transportPieces = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+
+  for (const piece of transportPieces) {
+    if (hasSpecificTransportRoute(piece.payload) || transportNumber(piece.payload)) {
+      continue;
+    }
+
+    const confirmation = confirmationFrom(piece.payload);
+    const date = normalizedComparable(piece.payload.date);
+    const type = normalizedComparable(piece.payload.type);
+    const candidates = transportPieces.filter(
+      (candidate) =>
+        candidate !== piece &&
+        hasSpecificTransportRoute(candidate.payload) &&
+        normalizedComparable(candidate.payload.date) === date &&
+        normalizedComparable(candidate.payload.type) === type &&
+        Boolean(
+          (confirmation && confirmationFrom(candidate.payload) === confirmation) ||
+            matchReason("transport", piece.payload, candidate.payload)
+        )
+    );
+
+    if (candidates.length > 0) {
+      piece.outputEligible = false;
+      piece.mergeReasons = Array.from(
+        new Set([
+          ...piece.mergeReasons,
+          "generic transport parent represented by specific segment",
+        ])
+      );
+    }
+  }
 }
 
 function createPiece(
@@ -551,6 +734,9 @@ function activityKind(payload: Record<string, unknown>): EvidenceKind {
     return "context";
   }
 
+  // Classification suggestions are intentionally not allowed to demote an
+  // observation here. Untimed planned sights and ambiguous recommendations
+  // need cluster context; only explicit note evidence crosses this boundary.
   return stringValue(payload, "itemType") === "note" ? "note" : "activity";
 }
 
@@ -855,6 +1041,8 @@ export function clusterExtractedEvidence({
 
     pieces.push(createPiece(observation));
   }
+
+  suppressRedundantTransportParents(pieces);
 
   const outputFor = (kind: EvidenceKind) =>
     pieces

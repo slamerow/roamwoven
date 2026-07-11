@@ -251,25 +251,48 @@ function likelyLocationLine(value: string) {
       !/\b(adult|booking|code|duration|flight|free|open|paid|paypal|price|status|ticket|total)\b/.test(
         text
       ) &&
-      !/^\d{1,2}:\d{2}\s*h\b/.test(text)
+      !/^\d{1,2}:\d{2}\s*h\b/.test(text) &&
+      !/^(?:to\s+)?\d{1,2}\s+\d{2}(?:\s+(?:am|pm))?$/.test(text) &&
+      !/(?:->|→)/.test(value)
   );
 }
 
 function parseDateFromText(value: string, defaultYear: number | null) {
-  const match = new RegExp(
+  const monthFirst = new RegExp(
     String.raw`\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?[,]?\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:[,]?\s+(\d{4}))?\b`,
     "i"
   ).exec(value);
+  const dayFirst = new RegExp(
+    String.raw`\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?[,]?\s*(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[,]?\s+(\d{2,4}))?\b`,
+    "i"
+  ).exec(value);
+  const numeric = /\b(?:datum\s*:\s*)?(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b/i.exec(
+    value
+  );
 
-  if (!match) {
+  if (!monthFirst && !dayFirst && !numeric) {
     return null;
   }
 
-  const month = MONTHS[match[1].toLowerCase()];
-  const day = Number(match[2]);
-  const year = Number(match[3] ?? defaultYear);
+  const month = monthFirst
+    ? MONTHS[monthFirst[1].toLowerCase()]
+    : dayFirst
+      ? MONTHS[dayFirst[2].toLowerCase()]
+      : Number(numeric?.[2]);
+  const day = Number(monthFirst?.[2] ?? dayFirst?.[1] ?? numeric?.[1]);
+  const rawYear = monthFirst?.[3] ?? dayFirst?.[3] ?? numeric?.[3];
+  const yearValue = rawYear ? Number(rawYear) : defaultYear;
+  const year = yearValue && yearValue < 100 ? 2000 + yearValue : yearValue;
 
-  if (!month || !year || Number.isNaN(day) || day < 1 || day > 31) {
+  if (
+    !month ||
+    month < 1 ||
+    month > 12 ||
+    !year ||
+    Number.isNaN(day) ||
+    day < 1 ||
+    day > 31
+  ) {
     return null;
   }
 
@@ -356,6 +379,10 @@ function createSourceLines(materials: TripExtractionMaterial[]) {
   return lines;
 }
 
+function isPageBoundaryLine(value: string) {
+  return /^===\s*page\s+\d+\s*===$/i.test(value.trim());
+}
+
 function isScenicOrLocalRideLine(value: string) {
   return /\b(ferris wheel|funicular|gondola|panorama train|ring tram|scenic train|tram tour)\b/i.test(
     value
@@ -419,6 +446,10 @@ function getBlock(lines: SourceLine[], index: number, defaultYear: number | null
     cursor >= Math.max(0, index - 3);
     cursor -= 1
   ) {
+    if (isPageBoundaryLine(lines[cursor].line)) {
+      break;
+    }
+
     if (
       parseDateFromText(lines[cursor].line, defaultYear) &&
       !isTicketSectionDateLine(lines[cursor].line)
@@ -431,6 +462,10 @@ function getBlock(lines: SourceLine[], index: number, defaultYear: number | null
 
   for (let cursor = startIndex; cursor < lines.length; cursor += 1) {
     if (cursor > index + 14) {
+      break;
+    }
+
+    if (cursor !== index && isPageBoundaryLine(lines[cursor].line)) {
       break;
     }
 
@@ -616,7 +651,7 @@ function extractProviderAndNumber(kind: SourceTransportAnchorKind, blockText: st
 function extractRouteFromText(kind: SourceTransportAnchorKind, blockText: string) {
   const routeArrow =
     /\b([A-Z]{3})\s*(?:->|\u2192|to)\s*([A-Z]{3})\b/.exec(blockText) ??
-    /\b([A-Z][A-Za-z .'-]{2,40})\s+(?:->|\u2192|to)\s+([A-Z][A-Za-z .'-]{2,40})\b/.exec(
+    /\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,4})\s*(?:\([^)]*\))?\s*(?:->|\u2192)\s*([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,4})(?=\s+\d{1,2}:\d{2}|\s*$)/.exec(
       blockText
     );
   const trainTo = /\btrain\s+to\s+([A-Z][A-Za-z .'-]{2,50})\b/i.exec(blockText);
@@ -787,11 +822,16 @@ function createAnchorId(anchor: SourceTransportAnchor, index: number) {
 }
 
 function anchorDedupeKey(anchor: SourceTransportAnchor) {
+  const segmentIdentity = anchor.number
+    ? normalizeText(anchor.number)
+    : anchor.departureLocation && anchor.arrivalLocation
+      ? `${normalizeText(anchor.departureLocation)}>${normalizeText(anchor.arrivalLocation)}`
+      : normalizeText(anchor.confirmation ?? anchor.routeLabel);
+
   return [
     anchor.kind,
     anchor.date ?? "",
-    normalizeText(anchor.number ?? anchor.confirmation ?? anchor.routeLabel),
-    anchor.departureTime ?? "",
+    segmentIdentity,
   ].join("|");
 }
 
@@ -804,6 +844,11 @@ export function extractSourceTransportAnchorsFromMaterials(
   let currentDate: string | null = null;
 
   lines.forEach((entry, index) => {
+    if (isPageBoundaryLine(entry.line)) {
+      currentDate = null;
+      return;
+    }
+
     currentDate = parseDateFromText(entry.line, defaultYear) ?? currentDate;
 
     const kind = getSignalKind(entry.line);
@@ -832,7 +877,18 @@ export function extractSourceTransportAnchorsFromMaterials(
       const existing = anchors.get(key);
 
       if (!existing || filledAnchorScore(anchor) > filledAnchorScore(existing)) {
-        anchors.set(key, anchor);
+        anchors.set(key, {
+          ...anchor,
+          provenance: uniqueValues([
+            ...(existing?.provenance ?? []),
+            ...anchor.provenance,
+          ]),
+        });
+      } else {
+        existing.provenance = uniqueValues([
+          ...existing.provenance,
+          ...anchor.provenance,
+        ]);
       }
     }
   });

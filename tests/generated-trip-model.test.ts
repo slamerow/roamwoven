@@ -2068,6 +2068,49 @@ test("city notes and tips attach to legs without becoming activity cards", () =>
   );
 });
 
+test("one city-notes collection is referenced by repeated legs in the same city", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          date: null,
+          description: "Rome food ideas and local shopping notes.",
+          itemType: "note",
+          title: "Rome Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2026-09-03",
+        },
+        {
+          arriveDate: "2026-09-10",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2026-09-11",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Italy" },
+    },
+    fallbackTripName: "Italy",
+    tripId: "trip-repeat-rome-notes",
+  });
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(records.items.filter((item) => item.itemType === "note").length, 1);
+  assert.equal(viewModel.legs.length, 2);
+  assert.equal(viewModel.legs[0]?.tips[0]?.title, "Rome Notes & Tips");
+  assert.equal(viewModel.legs[1]?.tips[0]?.title, "Rome Notes & Tips");
+  assert.equal(viewModel.legs[0]?.tips[0]?.id, viewModel.legs[1]?.tips[0]?.id);
+});
+
 test("food reservations stay activities while loose food lists become tips", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -3873,6 +3916,64 @@ test("strong lodging title guesses become stay names instead of questions", () =
   assert.equal(stay?.checkInTime, "14:30");
   assert.equal(getStructuredReviewCount(records), 0);
   assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+});
+
+test("an unscoped lodging guess cannot overwrite every distinct stay name", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [],
+      missingDetails: [
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence: "One lodging mention may be an apartment.",
+          guessedValue: "Budapest apartment",
+          prompt: "Is this the correct lodging title?",
+          reason: "The lodging type was unclear.",
+          relatedTitle: null,
+          subjectType: "stay",
+          targetField: "title",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-13",
+          city: "Rome",
+          country: "Italy",
+          leaveDate: "2019-01-14",
+        },
+        {
+          arriveDate: "2019-01-21",
+          city: "Budapest",
+          country: "Hungary",
+          leaveDate: "2019-01-24",
+        },
+      ],
+      stays: [
+        {
+          address: "Via Palestro 51",
+          checkIn: "2019-01-13",
+          checkOut: "2019-01-14",
+          name: "The Yellow",
+        },
+        {
+          address: "Erzsebet korut 50, Budapest, Hungary",
+          checkIn: "2019-01-21",
+          checkOut: "2019-01-24",
+          name: "Vitae Hostel",
+        },
+      ],
+      transport: [],
+      tripOverview: { title: "Central Europe" },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "trip-distinct-stay-names",
+  });
+
+  assert.deepEqual(
+    records.stays.map((stay) => stay.name),
+    ["The Yellow", "Vitae Hostel"]
+  );
 });
 
 test("commercial stay addresses remain public", () => {
@@ -5810,6 +5911,70 @@ test("grouped route cards keep specific unresolved ticket questions recoverable"
   assert.equal(
     records.reviewQuestions[0]?.prompt,
     "Which ticket or tour option should be listed for Prague Castle?"
+  );
+});
+
+test("internal card-split questions are dismissed while the real ticket decision remains", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "tours_tickets",
+          date: "2019-01-16",
+          description: "Prague Castle. Need to decide which ticket to get.",
+          itemType: "activity",
+          title: "Prague Castle",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "choice",
+          confidence: "medium",
+          evidence: "Prague Castle and a ticket decision are in the source.",
+          guessedValue: null,
+          prompt:
+            "Should Prague Castle be one grouped card or split into separate cards?",
+          reason: "The card grouping is ambiguous.",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "itemType",
+        },
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "Need to decide which ticket to get.",
+          guessedValue: null,
+          prompt: "Which Prague Castle ticket should be used?",
+          reason: "The ticket choice is still unresolved.",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "ticketType",
+        },
+      ],
+      places: [
+        {
+          arriveDate: "2019-01-15",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Central Europe" },
+    },
+    fallbackTripName: "Central Europe",
+    tripId: "trip-ticket-decision-dedupe",
+  });
+  const open = records.reviewQuestions.filter(
+    (question) => question.status === "open"
+  );
+
+  assert.equal(open.length, 1);
+  assert.equal(open[0]?.prompt, "Which Prague Castle ticket should be used?");
+  assert.equal(
+    records.reviewQuestions.find((question) => /grouped card/.test(question.prompt))
+      ?.status,
+    "dismissed"
   );
 });
 

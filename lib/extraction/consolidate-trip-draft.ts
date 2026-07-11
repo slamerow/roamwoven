@@ -1,4 +1,5 @@
 import { type DraftObject } from "@/lib/extraction/draft-value";
+import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
 import {
   ASSEMBLY_VERSION,
   createEmptyConsolidationDebug,
@@ -2782,30 +2783,38 @@ export function consolidateTripDraft(draft: unknown): {
   }
 
   const debug = createEmptyConsolidationDebug();
+  const evidenceMetadata = asRecord(record._evidence);
+  const hasCanonicalAuthority =
+    typeof evidenceMetadata.version === "number" &&
+    evidenceMetadata.version >= EVIDENCE_CLUSTER_VERSION;
   const places = cloneRecordArray(record.places);
   const stays = cloneRecordArray(record.stays);
   let transports = cloneRecordArray(record.transport);
   let activities = cloneRecordArray(record.activities).map(improvesGenericTourTitle);
 
   promoteTransportExtractedDetails(transports);
-  ({ activities, transports } = normalizeRentalCarPickups({
-    activities,
-    debug,
-    transports,
-  }));
-  ({ activities, transports } = promoteTravelActivitiesToTransport({
-    activities,
-    debug,
-    transports,
-  }));
+  if (!hasCanonicalAuthority) {
+    ({ activities, transports } = normalizeRentalCarPickups({
+      activities,
+      debug,
+      transports,
+    }));
+    ({ activities, transports } = promoteTravelActivitiesToTransport({
+      activities,
+      debug,
+      transports,
+    }));
+  }
   activities = suppressTransportDuplicates({ activities, debug, transports });
   activities = suppressStayFlowActivities({ activities, debug, stays });
   activities = suppressLodgingNotes({ activities, debug, stays });
   activities = suppressDayOverviewActivities({ activities, debug });
   activities = reconcileWrongCityAssignments({ activities, debug, places });
   activities = pruneParentChildActivities({ activities, debug });
-  activities = groupMuseumOptionActivities({ activities, debug });
-  activities = groupOpenDayLooseActivities({ activities, debug, places });
+  if (!hasCanonicalAuthority) {
+    activities = groupMuseumOptionActivities({ activities, debug });
+    activities = groupOpenDayLooseActivities({ activities, debug, places });
+  }
   activities = mergeCityNotes({ activities, debug, places });
   activities = markOptionalActivities({ activities, debug });
   debug.overproductionRetry = timelinePlanCounts({ activities, transports });

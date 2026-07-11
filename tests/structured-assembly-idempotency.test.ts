@@ -6,7 +6,11 @@ import {
   type SourceTransportAnchor,
 } from "@/lib/extraction/source-transport-anchors";
 import { createTripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
-import { createCentralEuropeFirstHalfDraft } from "@/tests/fixtures/central-europe-extraction-qa";
+import { assertTripDraftQuality } from "@/lib/extraction/trip-quality-gate";
+import {
+  createCentralEuropeFirstHalfDraft,
+  createCentralEuropeGoldenDraft,
+} from "@/tests/fixtures/central-europe-extraction-qa";
 
 function test(name: string, fn: () => void) {
   try {
@@ -145,6 +149,70 @@ export default function run() {
     assert.equal(first.counts.openQuestions, 1);
   });
 
+  test("Central Europe golden extraction preserves visit, stay, and transport invariants", () => {
+    const golden = createCentralEuropeGoldenDraft();
+    const clustered = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "Central Europe golden source",
+          source: "model_spine",
+          stage: golden,
+        },
+        {
+          label: "Central Europe repeated chunk evidence",
+          source: "model_chunk",
+          stage: cloneDraft(golden),
+        },
+      ],
+      tripOverview: golden.tripOverview,
+    });
+    const records = createStructuredTripRecordsFromDraft({
+      draft: clustered.draft,
+      fallbackTripName: "Central Europe",
+      tripId: "central-europe-golden",
+    });
+    const viennaTrain = records.transport.find(
+      (item) =>
+        item.date === "2019-01-18" && item.transportType === "train"
+    );
+
+    assert.equal(records.legs.length, 5);
+    assert.deepEqual(
+      records.legs.map((leg) => leg.city),
+      ["Rome", "Prague", "Vienna", "Budapest", "Rome"]
+    );
+    assert.deepEqual(
+      records.legs.map((leg) => [leg.arriveDate, leg.leaveDate]),
+      [
+        ["2019-01-13", "2019-01-14"],
+        ["2019-01-14", "2019-01-18"],
+        ["2019-01-18", "2019-01-21"],
+        ["2019-01-21", "2019-01-24"],
+        ["2019-01-24", "2019-01-25"],
+      ]
+    );
+    assert.equal(records.stays.length, 5);
+    assert.deepEqual(
+      records.stays.map((stay) => stay.name),
+      [
+        "The Yellow",
+        "Prague Airbnb",
+        "Wombats City Hostel Vienna",
+        "Vitae Hostel",
+        "The RomeHello Hostel",
+      ]
+    );
+    assert.equal(records.transport.length, 8);
+    assert.equal(viennaTrain?.departureTime, "09:20");
+    assert.equal(
+      assertTripDraftQuality({ draft: clustered.draft, records }).diagnostics.some(
+        (diagnostic) => diagnostic.severity === "p0"
+      ),
+      false
+    );
+  });
+
   test("structured assembly fingerprint changes when traveler-visible transport changes", () => {
     const draft = createCentralEuropeFirstHalfDraft();
     const changedDraft = cloneDraft(draft);
@@ -203,6 +271,80 @@ export default function run() {
       ),
       false
     );
+  });
+
+  test("canonical assembly does not manufacture a city-wide Explore group", () => {
+    const clustered = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "Budapest day",
+          source: "model_chunk",
+          stage: {
+            activities: [
+              {
+                category: "art_culture",
+                date: "2019-01-22",
+                description:
+                  "House of Terror Museum, New York Cafe, Gellert Baths, and Great Market Hall.",
+                itemType: "activity",
+                title: "Explore Budapest",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "House of Terror Museum",
+              },
+              {
+                category: "food_dining",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "New York Cafe lunch",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "Gellert Baths",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "Great Market Hall",
+              },
+            ],
+            missingDetails: [],
+            places: [
+              {
+                arriveDate: "2019-01-21",
+                city: "Budapest",
+                country: "Hungary",
+                leaveDate: "2019-01-24",
+              },
+            ],
+            stays: [],
+            transport: [],
+          },
+        },
+      ],
+      tripOverview: { title: "Central Europe" },
+    });
+    const records = createStructuredTripRecordsFromDraft({
+      draft: clustered.draft,
+      fallbackTripName: "Central Europe",
+      tripId: "canonical-no-budapest-overgroup",
+    });
+    const titles = records.items
+      .filter((item) => item.itemType === "activity")
+      .map((item) => item.title);
+
+    assert.equal(titles.includes("Explore Budapest"), false);
+    assert.ok(titles.includes("House of Terror Museum"));
+    assert.ok(titles.includes("New York Cafe lunch"));
+    assert.ok(titles.includes("Gellert Baths"));
+    assert.ok(titles.includes("Great Market Hall"));
   });
 
   test("return-day source-anchor repair is idempotent and keeps connecting flights separate", () => {

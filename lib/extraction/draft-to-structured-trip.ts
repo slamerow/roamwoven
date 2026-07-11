@@ -342,8 +342,9 @@ function getStayNameGuess({
 
     return (
       Boolean(normalizedFallback) &&
-      (relatedTitle.includes(normalizedFallback) ||
-        normalizedFallback.includes(relatedTitle) ||
+      ((Boolean(relatedTitle) &&
+        (relatedTitle.includes(normalizedFallback) ||
+          normalizedFallback.includes(relatedTitle))) ||
         prompt.includes(normalizedFallback) ||
         reason.includes(normalizedFallback))
     );
@@ -1067,7 +1068,7 @@ export function createStructuredTripRecordsFromDraft({
   });
   const evidenceMetadata = getObject(consolidatedDraft, "_evidence");
   const hasCanonicalEvidenceBoundary =
-    getNumber(evidenceMetadata, "version") === EVIDENCE_CLUSTER_VERSION;
+    (getNumber(evidenceMetadata, "version") ?? 0) >= EVIDENCE_CLUSTER_VERSION;
   const transport = hasCanonicalEvidenceBoundary
     ? extractedTransport
     : applySourceTransportAnchorsToRecords({

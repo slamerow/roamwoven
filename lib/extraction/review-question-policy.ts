@@ -456,10 +456,6 @@ function getQuestionClusterKey(question: TripReviewQuestionRecord) {
     return "provider";
   }
 
-  if (target.includes("name") || target.includes("title")) {
-    return "title";
-  }
-
   if (target.includes("time") || /\b(time|start time|pick a time)\b/i.test(question.prompt)) {
     return "time";
   }
@@ -468,8 +464,16 @@ function getQuestionClusterKey(question: TripReviewQuestionRecord) {
     return "ticket";
   }
 
+  if (target.includes("tour") || /\b(tour|guided|self-guided)\b/i.test(question.prompt)) {
+    return "tour";
+  }
+
   if (target.includes("booking") || /\b(book|booking|reserve|reservation)\b/i.test(question.prompt)) {
     return "booking";
+  }
+
+  if (target.includes("name") || target.includes("title")) {
+    return "title";
   }
 
   return (
@@ -658,7 +662,7 @@ function getExplicitTodoQuestionSubject(item: TripItemRecord) {
       cleanTravelerText(colonSubject?.[1] ?? null) ??
       cleanTravelerText(ticketSubject?.[1] ?? null);
 
-    if (subject) {
+    if (subject && !/^(?:details|includes|possible stops?)$/i.test(subject)) {
       return subject;
     }
   }
@@ -1140,6 +1144,19 @@ export function createReviewQuestions({
       reason,
       targetField,
     });
+    const internalPresentationChoice = Boolean(
+      subjectType === "item" &&
+        targetField &&
+        /\b(itemtype|item type|presentation|grouping|card split)\b/i.test(
+          targetField
+        ) &&
+        /\b(group|grouped|one card|separate cards?|split)\b/i.test(
+          [prompt, reason].filter(Boolean).join(" ")
+        ) &&
+        /\b(should|could|would|do you want|which presentation|one card or)\b/i.test(
+          prompt ?? ""
+        )
+    );
     let status: TripReviewQuestionRecord["status"] = "open";
 
     if (
@@ -1149,6 +1166,7 @@ export function createReviewQuestions({
       obviousFactCall ||
       privacyPolicyQuestion ||
       sourceObviousAnswer ||
+      internalPresentationChoice ||
       (dismissOptionalDetail && !isExplicitSourceTodo)
     ) {
       status = "dismissed";
