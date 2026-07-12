@@ -9,12 +9,10 @@ import type {
 import {
   type DraftObject,
   getArray,
-  getNumber,
   getString,
 } from "@/lib/extraction/draft-value";
 import {
   cleanTravelerText,
-  formatReadableIsoDate,
   normalizeText,
 } from "@/lib/extraction/traveler-text";
 import { isDefaultPrivacyPolicyQuestion } from "@/lib/trip-privacy-policy";
@@ -982,6 +980,30 @@ export function createReviewQuestions({
     });
   }
 
+  const canonicalSubjectIds = new Map<string, string>();
+  const registerCanonicalSubjects = (
+    collection: string,
+    records: Array<{ id: string }>
+  ) => {
+    getArray(draft, collection).forEach((value, index) => {
+      const record =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as DraftObject)
+          : null;
+      const canonicalPieceId = getString(record, "_canonicalPieceId");
+      const structuredId = records[index]?.id;
+
+      if (canonicalPieceId && structuredId) {
+        canonicalSubjectIds.set(canonicalPieceId, structuredId);
+      }
+    });
+  };
+
+  registerCanonicalSubjects("activities", items);
+  registerCanonicalSubjects("places", legs);
+  registerCanonicalSubjects("stays", stays);
+  registerCanonicalSubjects("transport", transport);
+
   const findSubjectId = (
     subjectType: TripReviewQuestionRecord["subjectType"],
     relatedTitle: string | null
@@ -1056,9 +1078,16 @@ export function createReviewQuestions({
       ? (item as DraftObject)
       : {};
     const relatedTitle = getString(detail, "relatedTitle");
+    const relatedCanonicalPieceId = getString(
+      detail,
+      "relatedCanonicalPieceId"
+    );
     const rawSubjectType = getString(detail, "subjectType");
     let subjectType = getReviewSubjectType(rawSubjectType);
-    let subjectId = findSubjectId(subjectType, relatedTitle);
+    let subjectId =
+      (relatedCanonicalPieceId
+        ? canonicalSubjectIds.get(relatedCanonicalPieceId)
+        : null) ?? findSubjectId(subjectType, relatedTitle);
 
     if (!rawSubjectType && relatedTitle && !subjectId) {
       for (const candidateSubjectType of [
@@ -1151,12 +1180,11 @@ export function createReviewQuestions({
       targetField,
     });
     const internalPresentationChoice = Boolean(
-      subjectType === "item" &&
-        targetField &&
+      targetField &&
         /\b(itemtype|item type|presentation|grouping|card split)\b/i.test(
           targetField
         ) &&
-        /\b(group|grouped|one card|separate cards?|split)\b/i.test(
+        /\b(group|grouped|one card|separate(?: day)? activit(?:y|ies)|separate cards?|split|absorbed?|arrival flow)\b/i.test(
           [prompt, reason].filter(Boolean).join(" ")
         ) &&
         /\b(should|could|would|do you want|which presentation|one card or)\b/i.test(
@@ -1298,53 +1326,6 @@ export function createReviewQuestions({
       );
     });
   };
-  const rawStays = getArray(draft, "stays");
-  const inferredStayCheckOutQuestions = stays.flatMap((stay, index) => {
-    const rawStay = rawStays[index];
-    const stayDraft =
-      rawStay && typeof rawStay === "object" && !Array.isArray(rawStay)
-        ? (rawStay as DraftObject)
-        : null;
-    const rawCheckOut = getString(stayDraft, "checkOut");
-    const rawNights = getNumber(stayDraft, "nights");
-
-    if (
-      rawCheckOut ||
-      rawNights ||
-      !stay.checkInDate ||
-      !stay.checkOutDate ||
-      stay.checkOutDate <= stay.checkInDate
-    ) {
-      return [];
-    }
-
-    const question: TripReviewQuestionRecord = {
-      answerType: "date",
-      answerValue: null,
-      createdAt: null,
-      evidence: `The stay starts on ${formatReadableIsoDate(stay.checkInDate)} and the next leg begins on ${formatReadableIsoDate(stay.checkOutDate)}.`,
-      guessedValue: stay.checkOutDate,
-      id: `${tripId}-inferred-stay-checkout-${index + 1}`,
-      prompt: `This looks like ${stay.name} checks out on ${formatReadableIsoDate(stay.checkOutDate)}. Is that correct?`,
-      reason:
-        "Roamwoven inferred the checkout date from the next leg so the stay can show a complete date range.",
-      resolvedAt: null,
-      sourceConfidence: "medium",
-      status: "open",
-      subjectId: stay.id,
-      subjectType: "stay",
-      targetField: "checkOutDate",
-      tripId,
-    };
-    const key = `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`;
-
-    if (questionKeys.has(key)) {
-      return [];
-    }
-
-    questionKeys.add(key);
-    return [question];
-  });
   const explicitTodoQuestions = items
     .filter((item) => hasExplicitSourceTodoText(item.title, item.description))
     .flatMap((item, index): TripReviewQuestionRecord[] => {
@@ -1407,7 +1388,6 @@ export function createReviewQuestions({
   return [
     ...draftQuestions,
     ...missingTransportDepartureQuestions,
-    ...inferredStayCheckOutQuestions,
     ...explicitTodoQuestions,
     ...missingItemDateQuestions,
   ].filter((question, index, questions) => {

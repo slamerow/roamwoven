@@ -540,7 +540,7 @@ export default async function run() {
     assert.match(String(activities[0]?.description), /degustation/i);
   });
 
-  await test("parenthetical aliases and repeated venue sightings stay one piece", () => {
+  await test("same-day aliases merge while explicit cross-date visits stay separate", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -598,12 +598,12 @@ export default async function run() {
       missingDetails: Array<{ prompt?: string }>;
     };
 
-    assert.equal(draft.activities.filter((item) => /gellert|bath house/i.test(String(item.title))).length, 1);
-    assert.equal(draft.activities.filter((item) => /pinball/i.test(String(item.title))).length, 1);
+    assert.equal(draft.activities.filter((item) => /gellert|bath house/i.test(String(item.title))).length, 2);
+    assert.equal(draft.activities.filter((item) => /pinball/i.test(String(item.title))).length, 2);
     assert.equal(draft.activities.filter((item) => /synagogue/i.test(String(item.title))).length, 1);
     assert.equal(
       draft.missingDetails.filter((item) => /Which day should/i.test(item.prompt ?? "")).length,
-      2
+      0
     );
   });
 
@@ -781,7 +781,7 @@ export default async function run() {
     assert.match(String(rental.description), /Return location: Return Road 99/i);
   });
 
-  await test("out-of-range model dates are quarantined without extending canonical output", () => {
+  await test("out-of-range model dates are removed without dropping named evidence", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -813,13 +813,23 @@ export default async function run() {
       tripOverview: { dateRange: "January 12-25, 2019" },
     });
 
-    assert.equal((result.draft as { transport: unknown[] }).transport.length, 0);
+    const transport = (result.draft as {
+      transport: Array<Record<string, unknown>>;
+    }).transport;
+
+    assert.equal(transport.length, 1);
+    assert.equal(transport[0]?.date, null);
+    assert.equal(transport[0]?._recoveryRequired, true);
     assert.ok(
       result.pieces.some(
         (piece) =>
           piece.kind === "transport" &&
-          !piece.outputEligible &&
-          piece.mergeReasons.some((reason) => /outside established trip range/.test(reason))
+          piece.outputEligible &&
+          piece.actions.some(
+            (action) =>
+              action.type === "recovered" &&
+              /outside established trip range/.test(action.reason)
+          )
       )
     );
   });
@@ -931,5 +941,261 @@ export default async function run() {
     assert.equal(notes[0]?.date, null);
     assert.match(String(notes[0]?.description), /Pizza ideas/);
     assert.match(String(notes[0]?.description), /Watch shop note/);
+  });
+
+  await test("independently named same-city stays do not collapse on generic lodging words", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "parallel-stays",
+          emptyStage({
+            places: [
+              {
+                arriveDate: "2031-04-01",
+                city: "Paris",
+                country: "France",
+                leaveDate: "2031-04-05",
+              },
+            ],
+            stays: [
+              {
+                address: "1 Rue Alpha",
+                checkIn: "2031-04-01",
+                checkOut: "2031-04-05",
+                name: "Hotel Central",
+                nights: 4,
+              },
+              {
+                address: "9 Rue Beta",
+                checkIn: "2031-04-01",
+                checkOut: "2031-04-05",
+                name: "Hotel Plaza",
+                nights: 4,
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+
+    assert.deepEqual(
+      (result.draft as { stays: Array<{ name: string }> }).stays.map(
+        (stay) => stay.name
+      ),
+      ["Hotel Central", "Hotel Plaza"]
+    );
+  });
+
+  await test("generic timed placeholders resolve to one uniquely matching named activity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "day outline",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2031-04-05",
+                description: "Lunch at 1 PM.",
+                sourceFilename: "outline.txt",
+                startTime: "13:00",
+                title: "Lunch",
+              }),
+            ],
+          })
+        ),
+        stage(
+          "reservation",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2031-04-05",
+                description: "Reservation for one.",
+                sourceFilename: "reservation.txt",
+                startTime: "13:00",
+                title: "U Maliru lunch reservation",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "April 1-10, 2031" },
+    });
+    const activities = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+
+    assert.equal(activities.length, 1);
+    assert.equal(activities[0]?.title, "U Maliru lunch reservation");
+  });
+
+  await test("source hierarchy keeps city-reference venues out of a dated itinerary block", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "vienna hierarchy",
+          emptyStage({
+            activities: [
+              {
+                ...activity({
+                  date: "2031-04-04",
+                  sourceFilename: "vienna.txt",
+                  title: "Ferris wheel",
+                }),
+                evidenceRole: "atomic_candidate",
+                sourceHeadingPath: ["Saturday", "Explore Vienna"],
+                sourceSectionLabel: "Explore Vienna",
+                sourceSectionType: "dated_itinerary",
+              },
+              {
+                ...activity({
+                  date: "2031-04-04",
+                  sourceFilename: "vienna.txt",
+                  title: "Mozarthaus",
+                }),
+                city: "Vienna",
+                evidenceRole: "city_note_candidate",
+                sourceHeadingPath: ["Saturday", "Vienna"],
+                sourceSectionLabel: "Vienna",
+                sourceSectionType: "city_reference",
+              },
+              {
+                ...activity({
+                  date: "2031-04-04",
+                  sourceFilename: "vienna.txt",
+                  title: "Leopold Museum",
+                }),
+                city: "Vienna",
+                evidenceRole: "city_note_candidate",
+                sourceHeadingPath: ["Saturday", "Vienna"],
+                sourceSectionLabel: "Vienna",
+                sourceSectionType: "city_reference",
+              },
+            ],
+            places: [
+              {
+                arriveDate: "2031-04-03",
+                city: "Vienna",
+                leaveDate: "2031-04-06",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "April 3-6, 2031" },
+    });
+    const activities = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+
+    assert.equal(
+      activities.filter((item) => item.itemType !== "note").length,
+      1
+    );
+    assert.equal(activities.find((item) => item.itemType === "note")?.title, "Vienna Notes & Tips");
+  });
+
+  await test("chunk-local precise time beats a conflicting spine normalization", () => {
+    const transport = (departureTime: string) => ({
+      arrival: "JFK",
+      arrivalTime: "18:45",
+      confirmation: "GHFHPG",
+      date: "2019-01-25",
+      departure: "FCO",
+      departureTime,
+      description: null,
+      number: "DL1043",
+      provider: "Delta",
+      title: "Flight Rome to JFK",
+      type: "flight",
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "trip spine",
+          source: "model_spine",
+          stage: emptyStage({ transport: [transport("02:45")] }),
+        },
+        {
+          label: "return flight booking",
+          source: "model_chunk",
+          sourceProvenance: "text_layer",
+          stage: emptyStage({ transport: [transport("14:45")] }),
+        },
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+
+    assert.equal(
+      (result.draft as { transport: Array<{ departureTime: string }> })
+        .transport[0]?.departureTime,
+      "14:45"
+    );
+  });
+
+  await test("missing named source evidence becomes review-required content", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "missing venue",
+          emptyStage({
+            missingDetails: [
+              {
+                answerType: "confirm",
+                confidence: "low",
+                evidence: "The itinerary lists Hospital in the Rock.",
+                guessedValue: null,
+                prompt: "Where should Hospital in the Rock appear?",
+                reason: "The source lists the venue but its placement is unclear.",
+                relatedTitle: "Hospital in the Rock",
+                subjectType: "item",
+                targetField: "date",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const recovered = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities.find((item) => item.title === "Hospital in the Rock");
+
+    assert.ok(recovered);
+    assert.equal(recovered?._recoveryRequired, true);
+  });
+
+  await test("protected access values cannot survive in public activity text", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "private access",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2031-04-01",
+                description: "WiFi password: secretword. Door code: 1234.",
+                sourceFilename: "private.txt",
+                title: "Arrival note",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const description = String(
+      (result.draft as { activities: Array<{ description: string }> }).activities[0]
+        ?.description
+    );
+
+    assert.doesNotMatch(description, /secretword|1234/);
+    assert.match(description, /protected trip details/i);
   });
 }

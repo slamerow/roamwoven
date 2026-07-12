@@ -16,7 +16,7 @@ import {
   type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
 
-export const EVIDENCE_CLUSTER_VERSION = 4;
+export const EVIDENCE_CLUSTER_VERSION = 5;
 
 export type EvidenceKind =
   | "activity"
@@ -27,6 +27,37 @@ export type EvidenceKind =
   | "transport";
 
 export type EvidenceSource = "model_chunk" | "model_spine" | "source_anchor";
+
+export type EvidenceRole =
+  | "accessory_detail"
+  | "atomic_candidate"
+  | "city_note_candidate"
+  | "context"
+  | "grouping_proposal"
+  | "rejected";
+
+export type EvidenceSourceStructure = {
+  headingPath: string[];
+  sectionLabel: string | null;
+  sectionType:
+    | "booking_detail"
+    | "city_reference"
+    | "dated_itinerary"
+    | "unknown";
+};
+
+export type CanonicalEvidenceAction = {
+  absorbedTitles: string[];
+  observationIds: string[];
+  reason: string;
+  type:
+    | "attached"
+    | "field_selected"
+    | "grouped"
+    | "merged"
+    | "recovered"
+    | "rejected";
+};
 
 export type EvidenceStageInput = {
   label: string;
@@ -42,10 +73,12 @@ export type EvidenceObservation = {
   kind: EvidenceKind;
   ordinal: number;
   payload: Record<string, unknown>;
+  role: EvidenceRole;
   source: EvidenceSource;
   sourceFilename: string | null;
   sourceLabel: string;
   sourceProvenance: string | null;
+  sourceStructure: EvidenceSourceStructure;
   sourceUploadId: string | null;
 };
 
@@ -56,15 +89,18 @@ export type CanonicalEvidenceConflict = {
 };
 
 export type CanonicalEvidencePiece = {
+  actions: CanonicalEvidenceAction[];
   confidence: "high" | "medium";
   conflicts: CanonicalEvidenceConflict[];
   fieldSources: Record<string, string[]>;
+  fieldWinnerRanks: Record<string, number>;
   id: string;
   kind: EvidenceKind;
   mergeReasons: string[];
   observationIds: string[];
   outputEligible: boolean;
   payload: Record<string, unknown>;
+  role: EvidenceRole;
 };
 
 export type EvidenceClusteringResult = {
@@ -221,6 +257,76 @@ function normalizePayloadDates(
 function stringValue(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+const EVIDENCE_ROLES = new Set<EvidenceRole>([
+  "accessory_detail",
+  "atomic_candidate",
+  "city_note_candidate",
+  "context",
+  "grouping_proposal",
+  "rejected",
+]);
+
+function evidenceRoleFromPayload(
+  payload: Record<string, unknown>,
+  kind: EvidenceKind
+): EvidenceRole {
+  const explicit = stringValue(payload, "evidenceRole") as EvidenceRole | null;
+
+  if (explicit && EVIDENCE_ROLES.has(explicit)) {
+    return explicit;
+  }
+
+  if (kind === "context") return "context";
+  if (kind === "note") return "city_note_candidate";
+  return "atomic_candidate";
+}
+
+function sourceStructureFromPayload(
+  payload: Record<string, unknown>
+): EvidenceSourceStructure {
+  const rawSectionType = stringValue(payload, "sourceSectionType");
+  const sectionType =
+    rawSectionType === "booking_detail" ||
+    rawSectionType === "city_reference" ||
+    rawSectionType === "dated_itinerary"
+      ? rawSectionType
+      : "unknown";
+  const headingPath = Array.isArray(payload.sourceHeadingPath)
+    ? payload.sourceHeadingPath.filter(
+        (value): value is string => typeof value === "string" && Boolean(value.trim())
+      )
+    : [];
+
+  return {
+    headingPath,
+    sectionLabel: stringValue(payload, "sourceSectionLabel"),
+    sectionType,
+  };
+}
+
+function publicPayload(payload: Record<string, unknown>) {
+  const {
+    evidenceRole: _evidenceRole,
+    sourceHeadingPath: _sourceHeadingPath,
+    sourceSectionLabel: _sourceSectionLabel,
+    sourceSectionType: _sourceSectionType,
+    ...publicFields
+  } = payload;
+
+  return publicFields;
+}
+
+function addCanonicalAction(
+  piece: CanonicalEvidencePiece,
+  action: CanonicalEvidenceAction
+) {
+  const key = JSON.stringify(action);
+
+  if (!piece.actions.some((candidate) => JSON.stringify(candidate) === key)) {
+    piece.actions.push(action);
+  }
 }
 
 function stableHash(value: unknown) {
@@ -434,6 +540,15 @@ function activityMatchReason(
     return "same rental-car pickup";
   }
 
+  const leftDate = stringValue(left, "date");
+  const rightDate = stringValue(right, "date");
+
+  // A repeated venue name is not proof that two scheduled visits are one plan.
+  // Cross-date evidence only clusters when a stronger booking identity matched above.
+  if (leftDate && rightDate && !datesMatch) {
+    return null;
+  }
+
   const leftTitle = aliasIdentityTokens(left);
   const rightTitle = aliasIdentityTokens(right);
   const overlap = overlapCount(leftTitle, rightTitle);
@@ -465,13 +580,9 @@ function activityMatchReason(
   }
 
   if (leftTitleText && leftTitleText === rightTitleText) {
-    if (datesMatch) {
-      return leftTime || rightTime
-        ? "same named and timed plan"
-        : "same named plan";
-    }
-
-    return "repeated venue sighting across dates";
+    return leftTime || rightTime
+      ? "same named and timed plan"
+      : "same named plan";
   }
 
   if (
@@ -481,13 +592,7 @@ function activityMatchReason(
       (datesMatch && sameDistinctiveSingle) ||
       (datesMatch && leftTime && leftTime === rightTime))
   ) {
-    return datesMatch
-      ? "same venue alias"
-      : "repeated venue alias across dates";
-  }
-
-  if (!datesMatch) {
-    return null;
+    return "same venue alias";
   }
 
   return overlap >= 2 && titleSimilarity >= 0.8
@@ -651,13 +756,62 @@ function stayMatchReason(
 
   const leftAddress = normalizedComparable(left.address);
   const rightAddress = normalizedComparable(right.address);
+  const leftName = normalizedComparable(left.name);
+  const rightName = normalizedComparable(right.name);
 
-  if (leftAddress && leftAddress === rightAddress) {
+  if (
+    leftAddress &&
+    rightAddress &&
+    (leftAddress === rightAddress ||
+      leftAddress.includes(rightAddress) ||
+      rightAddress.includes(leftAddress))
+  ) {
     return "same stay address";
   }
 
-  const overlap = overlapCount(identityTokens(left.name), identityTokens(right.name));
-  return overlap >= 1 ? "same stay identity" : null;
+  if (
+    (leftAddress && rightName && leftAddress.includes(rightName)) ||
+    (rightAddress && leftName && rightAddress.includes(leftName))
+  ) {
+    return "stay address evidence attached to lodging";
+  }
+
+  const leftConfirmation = confirmationFrom(left);
+  const rightConfirmation = confirmationFrom(right);
+
+  if (leftConfirmation && leftConfirmation === rightConfirmation) {
+    return "same stay booking";
+  }
+
+  if (leftAddress && rightAddress) {
+    return null;
+  }
+
+  if (leftName && leftName === rightName) {
+    return "same stay identity";
+  }
+
+  const genericStayTokens = new Set([
+    "accommodation",
+    "airbnb",
+    "apartment",
+    "hostel",
+    "hotel",
+    "lodging",
+    "rental",
+    "stay",
+  ]);
+  const leftTokens = identityTokens(left.name).filter(
+    (token) => !genericStayTokens.has(token)
+  );
+  const rightTokens = identityTokens(right.name).filter(
+    (token) => !genericStayTokens.has(token)
+  );
+  const overlap = overlapCount(leftTokens, rightTokens);
+
+  return overlap >= 2 || (overlap === 1 && leftTokens.length === 1 && rightTokens.length === 1)
+    ? "same distinctive stay identity"
+    : null;
 }
 
 function placeMatchReason(
@@ -754,6 +908,30 @@ function evidenceSpecificity(record: Record<string, unknown>) {
   );
 }
 
+function evidenceValueRank(
+  observation: EvidenceObservation,
+  field: string,
+  value: unknown
+) {
+  const provenance = normalizeText(observation.sourceProvenance);
+  let rank =
+    observation.source === "source_anchor"
+      ? 180
+      : observation.source === "model_chunk"
+        ? 150
+        : 100;
+
+  if (provenance.includes("manual note")) rank += 60;
+  if (provenance.includes("text layer")) rank += 50;
+  if (provenance.includes("ocr")) rank += 20;
+  if (field === "title") rank += titleQuality(value) / 10;
+  if (field === "description" && typeof value === "string") {
+    rank += Math.min(value.length, 240) / 24;
+  }
+
+  return rank;
+}
+
 function recordCanonicalConflict({
   conflicts,
   existing,
@@ -803,6 +981,8 @@ function mergeObservationIntoPiece(
     }
 
     const existing = next[field];
+    const incomingRank = evidenceValueRank(observation, field, value);
+    const existingRank = piece.fieldWinnerRanks[field] ?? 0;
 
     if (field === "description") {
       next[field] = uniqueDescription(existing, value);
@@ -812,6 +992,7 @@ function mergeObservationIntoPiece(
         (observation.source !== "source_anchor" || isGenericTitle(existing))
       ) {
         next[field] = value;
+        piece.fieldWinnerRanks[field] = incomingRank;
       }
     } else if (field === "sourceFilename") {
       next[field] = existing ?? value;
@@ -822,6 +1003,7 @@ function mergeObservationIntoPiece(
       locationQuality(value) > locationQuality(existing)
     ) {
       next[field] = value;
+      piece.fieldWinnerRanks[field] = incomingRank;
     } else if (
       ["arrivalTime", "departureTime", "endTime", "startTime", "time"].includes(
         field
@@ -830,11 +1012,35 @@ function mergeObservationIntoPiece(
     ) {
       next[field] = existing;
     } else if (
+      ["arrivalTime", "departureTime", "endTime", "startTime", "time"].includes(
+        field
+      ) &&
+      valuesConflict(existing, value) &&
+      incomingRank > existingRank
+    ) {
+      next[field] = value;
+      piece.fieldWinnerRanks[field] = incomingRank;
+      recordCanonicalConflict({
+        conflicts,
+        existing,
+        field,
+        observation,
+        piece,
+        value,
+      });
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [observation.id],
+        reason: `Selected stronger ${field} evidence from ${observation.sourceLabel}.`,
+        type: "field_selected",
+      });
+    } else if (
       field === "date" &&
       valuesConflict(existing, value) &&
       evidenceSpecificity(observation.payload) > evidenceSpecificity(next)
     ) {
       next[field] = value;
+      piece.fieldWinnerRanks[field] = incomingRank;
       recordCanonicalConflict({
         conflicts,
         existing,
@@ -845,6 +1051,7 @@ function mergeObservationIntoPiece(
       });
     } else if (existing === null || existing === undefined || existing === "") {
       next[field] = value;
+      piece.fieldWinnerRanks[field] = incomingRank;
     } else if (
       valuesConflict(existing, value) &&
       !(
@@ -873,6 +1080,20 @@ function mergeObservationIntoPiece(
   piece.conflicts = conflicts;
   piece.observationIds.push(observation.id);
   piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
+  piece.role =
+    piece.role === "atomic_candidate" && observation.role !== "atomic_candidate"
+      ? observation.role
+      : piece.role;
+  addCanonicalAction(piece, {
+    absorbedTitles: [
+      stringValue(observation.payload, "title") ??
+        stringValue(observation.payload, "name") ??
+        observation.sourceLabel,
+    ],
+    observationIds: [observation.id],
+    reason,
+    type: "merged",
+  });
   piece.confidence = conflicts.length === 0 ? "high" : "medium";
   piece.id = `piece_${stableHash({
     kind: piece.kind,
@@ -932,15 +1153,25 @@ function createPiece(
   );
 
   return {
+    actions: [],
     confidence: observation.source === "source_anchor" ? "medium" : "high",
     conflicts: [],
     fieldSources,
+    fieldWinnerRanks: Object.fromEntries(
+      Object.entries(observation.payload)
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([field, value]) => [
+          field,
+          evidenceValueRank(observation, field, value),
+        ])
+    ),
     id: `piece_${stableHash({ kind: observation.kind, observation: observation.id })}`,
     kind: observation.kind,
     mergeReasons: ["initial observation"],
     observationIds: [observation.id],
     outputEligible,
     payload: { ...observation.payload },
+    role: observation.role,
   };
 }
 
@@ -950,6 +1181,12 @@ function suppressCanonicalPiece(
 ) {
   piece.outputEligible = false;
   piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
+  addCanonicalAction(piece, {
+    absorbedTitles: [],
+    observationIds: [...piece.observationIds],
+    reason,
+    type: "rejected",
+  });
 }
 
 function mergeCanonicalPieceInto({
@@ -967,10 +1204,15 @@ function mergeCanonicalPieceInto({
   target.mergeReasons = Array.from(
     new Set([...target.mergeReasons, ...source.mergeReasons, reason])
   );
+  target.actions = [...target.actions, ...source.actions];
 
   for (const [field, observationIds] of Object.entries(source.fieldSources)) {
     target.fieldSources[field] = Array.from(
       new Set([...(target.fieldSources[field] ?? []), ...observationIds])
+    );
+    target.fieldWinnerRanks[field] = Math.max(
+      target.fieldWinnerRanks[field] ?? 0,
+      source.fieldWinnerRanks[field] ?? 0
     );
   }
 
@@ -986,6 +1228,16 @@ function mergeCanonicalPieceInto({
     ),
   ];
   target.confidence = target.conflicts.length === 0 ? "high" : "medium";
+  addCanonicalAction(target, {
+    absorbedTitles: [
+      stringValue(source.payload, "title") ??
+        stringValue(source.payload, "name") ??
+        "Untitled evidence",
+    ],
+    observationIds: [...source.observationIds],
+    reason,
+    type: reason.startsWith("explicit ") ? "grouped" : "attached",
+  });
   target.id = `piece_${stableHash({
     kind: target.kind,
     observations: [...target.observationIds].sort(),
@@ -1060,6 +1312,74 @@ function attachGenericActivityAccessories(pieces: CanonicalEvidencePiece[]) {
     mergeCanonicalPieceInto({
       reason: "supporting admission evidence attached to named activity",
       source: accessory,
+      target,
+    });
+  }
+}
+
+function genericActivityConcept(payload: Record<string, unknown>) {
+  const title = normalizeText(stringValue(payload, "title"));
+
+  if (/^(?:breakfast|brunch|dinner|lunch|supper)$/.test(title)) {
+    return title;
+  }
+
+  if (/^(?:[a-z]+\s+)?walking tour$/.test(title)) {
+    return "walking tour";
+  }
+
+  if (/^(?:bath|baths|bath house|bath houses)$/.test(title)) {
+    return "bath";
+  }
+
+  return null;
+}
+
+function attachGenericActivityPlaceholders(pieces: CanonicalEvidencePiece[]) {
+  const activities = pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  );
+
+  for (const generic of activities) {
+    const concept = genericActivityConcept(generic.payload);
+
+    if (!concept || !generic.outputEligible) {
+      continue;
+    }
+
+    const genericTime = timeFrom(generic.payload);
+    const candidates = activities.filter((candidate) => {
+      if (
+        candidate === generic ||
+        !candidate.outputEligible ||
+        genericActivityConcept(candidate.payload) ||
+        !sameCanonicalDate(candidate.payload, generic.payload)
+      ) {
+        return false;
+      }
+
+      const candidateText = activityText(candidate.payload);
+      const candidateTime = timeFrom(candidate.payload);
+
+      if (genericTime) {
+        return candidateTime === genericTime;
+      }
+
+      return candidateText.includes(concept);
+    });
+
+    if (candidates.length !== 1) {
+      continue;
+    }
+
+    const target = candidates[0];
+    target.payload.description = uniqueDescription(
+      target.payload.description,
+      generic.payload.description
+    );
+    mergeCanonicalPieceInto({
+      reason: `generic ${concept} evidence resolved to named activity`,
+      source: generic,
       target,
     });
   }
@@ -1257,6 +1577,34 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
+function scrubProtectedValuesFromActivityDescriptions(
+  pieces: CanonicalEvidencePiece[]
+) {
+  for (const piece of pieces) {
+    if (!piece.outputEligible || piece.kind !== "activity") {
+      continue;
+    }
+
+    const description = stringValue(piece.payload, "description");
+
+    if (!description) {
+      continue;
+    }
+
+    const scrubbed = description
+      .replace(
+        /\b(wi-?fi(?: password)?|password|passcode|door code|gate code|lockbox code|access code)\s*[:#-]?\s*[^.;,]+/gi,
+        "$1 is saved with protected trip details"
+      )
+      .replace(
+        /\b(confirmation|booking(?: reference| number)?|reservation number|pnr)\s*[:#-]?\s*[a-z0-9][a-z0-9-]{2,}/gi,
+        "$1 is saved with protected trip details"
+      );
+
+    piece.payload.description = scrubbed;
+  }
+}
+
 function shiftIsoDate(value: string, days: number) {
   const parsed = new Date(`${value}T00:00:00.000Z`);
 
@@ -1268,7 +1616,7 @@ function shiftIsoDate(value: string, days: number) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function quarantineOutOfRangePieces(pieces: CanonicalEvidencePiece[]) {
+function recoverOutOfRangePieces(pieces: CanonicalEvidencePiece[]) {
   const boundaryDates = pieces
     .filter(
       (piece) =>
@@ -1308,10 +1656,18 @@ function quarantineOutOfRangePieces(pieces: CanonicalEvidencePiece[]) {
     const date = stringValue(piece.payload, "date");
 
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date) && (date < earliest || date > latest)) {
-      suppressCanonicalPiece(
-        piece,
-        `quarantined outside established trip range ${earliest} to ${latest}`
-      );
+      const reason =
+        `removed suspect date ${date} outside established trip range ${earliest} to ${latest}`;
+
+      piece.payload.date = null;
+      piece.payload._recoveryRequired = true;
+      piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [...piece.observationIds],
+        reason,
+        type: "recovered",
+      });
     }
   }
 }
@@ -1470,6 +1826,7 @@ function createCanonicalGroupingCalls(pieces: CanonicalEvidencePiece[]) {
       }.`,
       reason:
         "The source explicitly presented these as one route, option set, or same-site visit, so the traveler app keeps one card with visible included stops.",
+      relatedCanonicalPieceId: parent.id,
       relatedTitle: stringValue(parent.payload, "title"),
       subjectType: "item",
       targetField: "presentation",
@@ -1503,6 +1860,7 @@ function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
       prompt: `Which day should ${title} appear on?`,
       reason:
         "Repeated source evidence describes one canonical activity but disagrees about its day, so Roamwoven kept one card and needs one placement decision.",
+      relatedCanonicalPieceId: piece.id,
       relatedTitle: title,
       subjectType: "item",
       targetField: "date",
@@ -1511,6 +1869,8 @@ function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
 }
 
 function activityKind(payload: Record<string, unknown>): EvidenceKind {
+  const explicitRole = evidenceRoleFromPayload(payload, "activity");
+  const sourceStructure = sourceStructureFromPayload(payload);
   const classification = classifyDraftActivityCard({
     category: stringValue(payload, "category"),
     date: stringValue(payload, "date"),
@@ -1521,11 +1881,13 @@ function activityKind(payload: Record<string, unknown>): EvidenceKind {
     title: stringValue(payload, "title"),
   });
 
-  if (classification.isOverviewActivity) {
+  if (explicitRole === "context" || explicitRole === "rejected") {
     return "context";
   }
 
   if (
+    explicitRole === "city_note_candidate" ||
+    sourceStructure.sectionType === "city_reference" ||
     stringValue(payload, "itemType") === "note" ||
     classification.isLooseTipActivity ||
     (classification.isWeakDatedCityNoteCandidate &&
@@ -1534,7 +1896,12 @@ function activityKind(payload: Record<string, unknown>): EvidenceKind {
     return "note";
   }
 
+  if (explicitRole === "atomic_candidate" && payload._recoveryRequired === true) {
+    return "activity";
+  }
+
   if (
+    classification.isOverviewActivity ||
     !stringValue(payload, "date") &&
     !classification.hasStrongPlannedActivityLanguage
   ) {
@@ -1596,6 +1963,7 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
 
     if (mentionedChildren.length >= 2 || (containerTitle && mentionedChildren.length >= 1)) {
       observation.kind = "context";
+      observation.role = "context";
     }
   }
 }
@@ -1604,19 +1972,23 @@ function createObservation({
   kind,
   ordinal,
   payload,
+  role,
   source,
   sourceFilename,
   sourceLabel,
   sourceProvenance,
+  sourceStructure,
   sourceUploadId,
 }: Omit<EvidenceObservation, "id">): EvidenceObservation {
   const id = `obs_${stableHash({
     kind,
     ordinal,
     payload,
+    role,
     source,
     sourceFilename,
     sourceLabel,
+    sourceStructure,
     sourceUploadId,
   })}`;
 
@@ -1625,10 +1997,12 @@ function createObservation({
     kind,
     ordinal,
     payload,
+    role,
     source,
     sourceFilename,
     sourceLabel,
     sourceProvenance,
+    sourceStructure,
     sourceUploadId,
   };
 }
@@ -1670,16 +2044,112 @@ function pieceForMissingDetail(
     return null;
   }
 
-  return (
-    pieces
+  const candidates = pieces
       .filter((piece) => piece.outputEligible)
       .map((piece) => ({
         overlap: overlapCount(relatedTitle, identityTokens(piece.payload.title ?? piece.payload.name)),
         piece,
       }))
       .filter((candidate) => candidate.overlap > 0)
-      .sort((left, right) => right.overlap - left.overlap)[0]?.piece ?? null
-  );
+      .sort((left, right) => right.overlap - left.overlap);
+  const best = candidates[0];
+  const minimumOverlap = Math.min(2, relatedTitle.length);
+
+  if (
+    !best ||
+    best.overlap < minimumOverlap ||
+    candidates[1]?.overlap === best.overlap
+  ) {
+    return null;
+  }
+
+  return best.piece;
+}
+
+function recoverMissingNamedEvidence({
+  details,
+  observations,
+  pieces,
+  startingOrdinal,
+}: {
+  details: unknown[];
+  observations: EvidenceObservation[];
+  pieces: CanonicalEvidencePiece[];
+  startingOrdinal: number;
+}) {
+  let ordinal = startingOrdinal;
+
+  for (const value of details) {
+    const detail = asRecord(value);
+    const relatedTitle = stringValue(detail, "relatedTitle");
+    const subjectType = normalizedComparable(detail.subjectType);
+
+    if (
+      !relatedTitle ||
+      subjectType !== "item" ||
+      pieceForMissingDetail(detail, pieces)
+    ) {
+      continue;
+    }
+
+    const evidence = stringValue(detail, "evidence");
+    const reason = stringValue(detail, "reason");
+    const sourceBacked = /\b(source|document|itinerary|pdf|lists?|says?|states?|shows?)\b/.test(
+      normalizeText([evidence, reason].filter(Boolean).join(" "))
+    );
+
+    if (!sourceBacked) {
+      continue;
+    }
+
+    ordinal += 1;
+    const observation = createObservation({
+      kind: "activity",
+      ordinal,
+      payload: {
+        _recoveryRequired: true,
+        address: null,
+        category: "art_culture",
+        city: null,
+        date: null,
+        description:
+          evidence ??
+          "This named source item needs placement review before publishing.",
+        endTime: null,
+        evidenceRole: "atomic_candidate",
+        itemType: "placeholder",
+        sourceFilename: "canonical recovery",
+        sourceHeadingPath: [],
+        sourceSectionLabel: null,
+        sourceSectionType: "unknown",
+        startTime: null,
+        title: relatedTitle,
+      },
+      role: "atomic_candidate",
+      source: "model_chunk",
+      sourceFilename: null,
+      sourceLabel: "missing named evidence recovery",
+      sourceProvenance: "source review question",
+      sourceStructure: {
+        headingPath: [],
+        sectionLabel: null,
+        sectionType: "unknown",
+      },
+      sourceUploadId: null,
+    });
+    const piece = createPiece(observation);
+
+    addCanonicalAction(piece, {
+      absorbedTitles: [relatedTitle],
+      observationIds: [observation.id],
+      reason:
+        "Named source evidence had no surviving canonical target, so Roamwoven preserved a review-required card.",
+      type: "recovered",
+    });
+    detail.relatedCanonicalPieceId = piece.id;
+    observations.push(observation);
+    pieces.push(piece);
+  }
 }
 
 function unresolvedMissingDetails({
@@ -1778,11 +2248,13 @@ export function clusterExtractedEvidence({
         ordinal += 1;
         const kind =
           collection === "activities" ? activityKind(payload) : defaultKind;
+        const role = evidenceRoleFromPayload(payload, kind);
         observations.push(
           createObservation({
             kind,
             ordinal,
             payload,
+            role,
             source: stageInput.source,
             sourceFilename:
               stringValue(payload, "sourceFilename") ??
@@ -1790,6 +2262,7 @@ export function clusterExtractedEvidence({
               null,
             sourceLabel: stageInput.label,
             sourceProvenance: stageInput.sourceProvenance ?? null,
+            sourceStructure: sourceStructureFromPayload(payload),
             sourceUploadId: stageInput.sourceUploadId ?? null,
           })
         );
@@ -1806,10 +2279,16 @@ export function clusterExtractedEvidence({
         kind: "transport",
         ordinal,
         payload: normalizePayloadDates(anchorPayload(anchor), tripYear),
+        role: "atomic_candidate",
         source: "source_anchor",
         sourceFilename: anchor.sourceFilename,
         sourceLabel: anchor.anchorId,
         sourceProvenance: anchor.provenance.join(","),
+        sourceStructure: {
+          headingPath: [],
+          sectionLabel: null,
+          sectionType: "booking_detail",
+        },
         sourceUploadId: anchor.sourceUploadId,
       })
     );
@@ -1819,7 +2298,7 @@ export function clusterExtractedEvidence({
   let suppressedWeakAnchorCount = 0;
 
   for (const observation of observations) {
-    if (observation.kind === "context") {
+    if (observation.kind === "context" || observation.role === "rejected") {
       pieces.push(createPiece(observation, false));
       continue;
     }
@@ -1850,18 +2329,29 @@ export function clusterExtractedEvidence({
 
   suppressRedundantTransportParents(pieces);
   attachGenericActivityAccessories(pieces);
+  attachGenericActivityPlaceholders(pieces);
   attachRentalCarReturns(pieces);
   suppressRepresentedTravelAndStayActivities(pieces);
   applyAccessTaskPolicy(pieces);
-  quarantineOutOfRangePieces(pieces);
+  scrubProtectedValuesFromActivityDescriptions(pieces);
+  recoverOutOfRangePieces(pieces);
   mergeCanonicalCityNotes(pieces);
+  recoverMissingNamedEvidence({
+    details: missingDetails,
+    observations,
+    pieces,
+    startingOrdinal: ordinal,
+  });
   const canonicalGroupingCalls = createCanonicalGroupingCalls(pieces);
   const canonicalConflictQuestions = createCanonicalConflictQuestions(pieces);
 
   const outputFor = (kind: EvidenceKind) =>
     pieces
       .filter((piece) => piece.outputEligible && piece.kind === kind)
-      .map((piece) => piece.payload);
+      .map((piece) => ({
+        ...publicPayload(piece.payload),
+        _canonicalPieceId: piece.id,
+      }));
   const activities = [...outputFor("activity"), ...outputFor("note")];
   const finalMissingDetails = unresolvedMissingDetails({
     details: [
@@ -1884,6 +2374,12 @@ export function clusterExtractedEvidence({
       transport: sourceTransportAnchors,
     },
     _evidence: {
+      actions: pieces.flatMap((piece) =>
+        piece.actions.map((action) => ({
+          ...action,
+          canonicalPieceId: piece.id,
+        }))
+      ),
       canonicalPieceIds: pieces.map((piece) => piece.id),
       observationIds: observations.map((observation) => observation.id),
       version: EVIDENCE_CLUSTER_VERSION,

@@ -1,4 +1,10 @@
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
+import type {
+  CanonicalEvidenceAction,
+  EvidenceKind,
+  EvidenceRole,
+  EvidenceSource,
+} from "@/lib/extraction/evidence-clustering";
 import type { TripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
 
 export type DraftObject = Record<string, unknown>;
@@ -68,12 +74,25 @@ export type AuditFinalRecordSummary = {
 };
 
 export type TripExtractionAuditLineageRow = {
+  actions: CanonicalEvidenceAction[];
   canonical: DraftLineageCandidate | null;
+  canonicalPieceId: string | null;
   date: string | null;
   diagnostics: string[];
   finalRecords: AuditFinalRecordSummary[];
   identityKey: string;
-  status: "compiled" | "final_only" | "missing_from_structured";
+  mergeReasons: string[];
+  observations: Array<{
+    date: string | null;
+    id: string;
+    kind: EvidenceKind;
+    role: EvidenceRole;
+    source: EvidenceSource;
+    sourceLabel: string;
+    title: string;
+  }>;
+  outputEligible: boolean | null;
+  status: "compiled" | "final_only" | "missing_from_structured" | "suppressed";
   title: string;
 };
 

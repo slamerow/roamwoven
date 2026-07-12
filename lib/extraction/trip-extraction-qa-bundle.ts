@@ -601,6 +601,14 @@ function createAuditSummary({
     lineage: {
       includedRows: lineageRows.length,
       rows: lineageRows.map((row) => ({
+        actions: row.actions.map((action) => ({
+          absorbedTitles: action.absorbedTitles.map((title) =>
+            redactSensitiveText(title, includePrivate)
+          ),
+          reason: redactSensitiveText(action.reason, includePrivate),
+          type: action.type,
+        })),
+        canonicalPieceId: row.canonicalPieceId,
         date: row.date,
         diagnostics: row.diagnostics.map((item) =>
           redactSensitiveText(item, includePrivate)
@@ -614,6 +622,20 @@ function createAuditSummary({
           type: record.type,
         })),
         identityKey: row.identityKey,
+        mergeReasons: row.mergeReasons,
+        observations: row.observations.map((observation) => ({
+          date: observation.date,
+          id: observation.id,
+          kind: observation.kind,
+          role: observation.role,
+          source: observation.source,
+          sourceLabel: redactSensitiveText(
+            observation.sourceLabel,
+            includePrivate
+          ),
+          title: redactSensitiveText(observation.title, includePrivate),
+        })),
+        outputEligible: row.outputEligible,
         status: row.status,
         title: row.title,
       })),

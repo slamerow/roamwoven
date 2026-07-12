@@ -280,8 +280,9 @@ export async function POST(
     rawCharCount: optimizedMaterials.summary.rawCharCount,
     ocrSummary,
     statusCounts: materialCheckpointSummary.byStatus,
-    budgetedSpineCharCount: optimizedMaterials.summary.submittedCharCount,
-    truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
+    spineSubmittedCharCount: optimizedMaterials.summary.submittedCharCount,
+    spineTruncatedMaterialCount:
+      optimizedMaterials.summary.truncatedMaterialCount,
     tripId,
   });
   await recordTripProcessingEvent({
@@ -292,7 +293,9 @@ export async function POST(
       materialTypes: Array.from(new Set(optimizedMaterials.materials.map((material) => material.type))),
       rawCharCount: optimizedMaterials.summary.rawCharCount,
       statusCounts: materialCheckpointSummary.byStatus,
-      truncatedMaterialCount: optimizedMaterials.summary.truncatedMaterialCount,
+      spineSubmittedCharCount: optimizedMaterials.summary.submittedCharCount,
+      spineTruncatedMaterialCount:
+        optimizedMaterials.summary.truncatedMaterialCount,
     },
     stage: "material_checkpoint",
     status: "completed",
@@ -383,6 +386,7 @@ export async function POST(
     });
     const qualityAssessment = assessTripDraftQuality({
       draft: reviewableDraft,
+      evidenceArtifacts: result.evidenceArtifacts,
       records: qualityRecords,
       usage: result.usage,
     });

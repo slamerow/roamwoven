@@ -912,7 +912,107 @@ export function extractSourceTransportAnchorsFromMaterials(
     }
   });
 
-  return [...anchors.values()];
+  return canonicalizeSourceTransportAnchors([...anchors.values()]);
+}
+
+function anchorRecordForMatch(anchor: SourceTransportAnchor) {
+  return {
+    arrivalLocation: anchor.arrivalLocation,
+    arrivalTime: anchor.arrivalTime,
+    confirmationLabel: anchor.confirmation,
+    date: anchor.date,
+    departureLocation: anchor.departureLocation,
+    departureTime: anchor.departureTime,
+    provider: anchor.provider,
+    routeLabel: anchor.routeLabel,
+    transportType: transportTypeForAnchor(anchor.kind),
+  };
+}
+
+function anchorsRepresentSameSegment(
+  left: SourceTransportAnchor,
+  right: SourceTransportAnchor
+) {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+
+  if (left.date && right.date && !tripDatesMatch(left.date, right.date)) {
+    return false;
+  }
+
+  const weakEndpoint = (value: string | null) => {
+    const normalized = normalizeText(value);
+    return (
+      !normalized ||
+      /^(?:bus|ferry|flight|train|transfer|travel)(?: to)?$/.test(normalized)
+    );
+  };
+
+  if (
+    left.confirmation &&
+    right.confirmation &&
+    normalizeText(left.confirmation) === normalizeText(right.confirmation) &&
+    (weakEndpoint(left.departureLocation) ||
+      weakEndpoint(left.arrivalLocation) ||
+      weakEndpoint(right.departureLocation) ||
+      weakEndpoint(right.arrivalLocation))
+  ) {
+    return true;
+  }
+
+  return (
+    sourceTransportAnchorMatchesRecord(left, anchorRecordForMatch(right)) ||
+    sourceTransportAnchorMatchesRecord(right, anchorRecordForMatch(left))
+  );
+}
+
+function combineAnchorEvidence(left: string, right: string) {
+  const values = [left.trim(), right.trim()].filter(Boolean);
+  return Array.from(new Set(values)).join("\n").slice(0, 2400);
+}
+
+export function canonicalizeSourceTransportAnchors(
+  anchors: SourceTransportAnchor[]
+) {
+  const canonical: SourceTransportAnchor[] = [];
+
+  for (const anchor of anchors) {
+    const match = canonical.find((candidate) =>
+      anchorsRepresentSameSegment(candidate, anchor)
+    );
+
+    if (!match) {
+      canonical.push({ ...anchor, provenance: [...anchor.provenance] });
+      continue;
+    }
+
+    const preferred =
+      filledAnchorScore(anchor) > filledAnchorScore(match) ? anchor : match;
+    const fallback = preferred === anchor ? match : anchor;
+    const merged: SourceTransportAnchor = {
+      ...preferred,
+      arrivalLocation: preferred.arrivalLocation ?? fallback.arrivalLocation,
+      arrivalTime: preferred.arrivalTime ?? fallback.arrivalTime,
+      confirmation: preferred.confirmation ?? fallback.confirmation,
+      date: preferred.date ?? fallback.date,
+      departureLocation: preferred.departureLocation ?? fallback.departureLocation,
+      departureTime: preferred.departureTime ?? fallback.departureTime,
+      evidence: combineAnchorEvidence(preferred.evidence, fallback.evidence),
+      number: preferred.number ?? fallback.number,
+      provider: preferred.provider ?? fallback.provider,
+      provenance: uniqueValues([
+        ...preferred.provenance,
+        ...fallback.provenance,
+      ]),
+      sourceFilename: preferred.sourceFilename ?? fallback.sourceFilename,
+      sourceUploadId: preferred.sourceUploadId ?? fallback.sourceUploadId,
+    };
+
+    Object.assign(match, merged);
+  }
+
+  return canonical;
 }
 
 export function getSourceTransportAnchorsFromDraft(
@@ -921,9 +1021,9 @@ export function getSourceTransportAnchorsFromDraft(
   const record = asRecord(draft);
   const sourceRecord = asRecord(record[SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]);
 
-  return asArray(sourceRecord.transport)
+  return canonicalizeSourceTransportAnchors(asArray(sourceRecord.transport)
     .map((value) => normalizeSourceTransportAnchor(value))
-    .filter((value): value is SourceTransportAnchor => Boolean(value));
+    .filter((value): value is SourceTransportAnchor => Boolean(value)));
 }
 
 export function getSourceTransportAnchorsFromUsage(
@@ -933,9 +1033,9 @@ export function getSourceTransportAnchorsFromUsage(
   const openai = asRecord(record.openai ?? usage);
   const sourceRecord = asRecord(openai.sourceAnchors);
 
-  return asArray(sourceRecord.transport)
+  return canonicalizeSourceTransportAnchors(asArray(sourceRecord.transport)
     .map((value) => normalizeSourceTransportAnchor(value))
-    .filter((value): value is SourceTransportAnchor => Boolean(value));
+    .filter((value): value is SourceTransportAnchor => Boolean(value)));
 }
 
 function normalizeSourceTransportAnchor(value: unknown) {

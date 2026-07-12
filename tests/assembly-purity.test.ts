@@ -4,6 +4,7 @@ import {
   NonCanonicalDraftError,
   preparePersistedTripDraftForStructuredCompilation,
 } from "@/lib/extraction/canonical-trip-finalization";
+import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try {
@@ -37,7 +38,7 @@ export default async function run() {
       _evidence: {
         canonicalPieceIds: ["schonbrunn", "hundertwasser"],
         observationIds: ["obs-1", "obs-2"],
-        version: 4,
+        version: EVIDENCE_CLUSTER_VERSION,
       },
       activities,
       missingDetails: [],

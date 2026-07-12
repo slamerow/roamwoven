@@ -739,6 +739,7 @@ function createItemRecords({
     const startTime = getString(activity, "startTime");
     const endTime = getString(activity, "endTime");
     const sourceCategory = getString(activity, "category");
+    const recoveryRequired = activity._recoveryRequired === true;
     const candidateLeg =
       findLegForDate(legs, date) ?? findLegForText(legs, title, description);
     const finalDate = date;
@@ -763,11 +764,15 @@ function createItemRecords({
       locationName: null,
       longitude: null,
       parentItemId: null,
-      reviewRequired: itemType === "note" ? false : !finalDate,
+      reviewRequired:
+        itemType === "note" ? false : recoveryRequired || !finalDate,
       sortOrder: index,
       sourceConfidence: "medium",
       startTime,
-      status: !finalDate && itemType !== "note" ? "needs_review" : "draft",
+      status:
+        (recoveryRequired || !finalDate) && itemType !== "note"
+          ? "needs_review"
+          : "draft",
       summary: null,
       title,
       tripId,

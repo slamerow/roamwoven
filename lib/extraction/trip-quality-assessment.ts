@@ -1,18 +1,26 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
+import type { EvidenceArtifactBundle } from "@/lib/extraction/evidence-artifacts";
 import { createTripExtractionAuditReport } from "@/lib/extraction/trip-extraction-audit";
 
 export const TRIP_QUALITY_ASSESSMENT_VERSION = 1;
 
 export function assessTripDraftQuality({
   draft,
+  evidenceArtifacts,
   records,
   usage,
 }: {
   draft: unknown;
+  evidenceArtifacts?: EvidenceArtifactBundle | null;
   records: StructuredTripRecords;
   usage?: unknown;
 }) {
-  const report = createTripExtractionAuditReport({ draft, records, usage });
+  const report = createTripExtractionAuditReport({
+    draft,
+    evidenceArtifacts,
+    records,
+    usage,
+  });
   const p0Diagnostics = report.diagnostics.filter(
     (diagnostic) => diagnostic.severity === "p0"
   );

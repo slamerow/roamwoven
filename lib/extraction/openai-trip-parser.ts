@@ -101,6 +101,16 @@ const tripDraftSchema = {
           date: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           endTime: { type: ["string", "null"] },
+          evidenceRole: {
+            enum: [
+              "accessory_detail",
+              "atomic_candidate",
+              "city_note_candidate",
+              "context",
+              "grouping_proposal",
+              "rejected",
+            ],
+          },
           itemType: {
             enum: [
               "activity",
@@ -112,6 +122,19 @@ const tripDraftSchema = {
             ],
           },
           sourceFilename: { type: "string" },
+          sourceHeadingPath: {
+            items: { type: "string" },
+            type: "array",
+          },
+          sourceSectionLabel: { type: ["string", "null"] },
+          sourceSectionType: {
+            enum: [
+              "booking_detail",
+              "city_reference",
+              "dated_itinerary",
+              "unknown",
+            ],
+          },
           startTime: { type: ["string", "null"] },
           title: { type: "string" },
         },
@@ -122,8 +145,12 @@ const tripDraftSchema = {
           "date",
           "description",
           "endTime",
+          "evidenceRole",
           "itemType",
           "sourceFilename",
+          "sourceHeadingPath",
+          "sourceSectionLabel",
+          "sourceSectionType",
           "startTime",
           "title",
         ],
@@ -334,16 +361,20 @@ const systemPrompt = [
   "Travel-card purity rule: transport descriptions may include route, date, time, station/airport, provider/operator, confirmation/ticket, luggage, pickup/dropoff, platform/terminal, seat, and check-in/boarding notes. Do not put destination sightseeing, food plans, shopping plans, or loose notes/tips into a transport description; extract those as activities or notes.",
   "Do not create separate traveler cards or questions for ordinary local airport moves when a same-day flight card already contains the actionable flight details. Only keep an airport transfer when it has a booked provider, pickup arrangement, driver, voucher, or other distinct reservation detail.",
   "For trains between adjacent trip legs, infer the route from the surrounding leg sequence when the source says 'train to X' or shows the next stay in X. Do not ask where the train departed from unless there is competing evidence or the train cannot be placed.",
-  "Activity granularity rule: split named, source-backed venues by default. Group only when the source or common public knowledge clearly supports one guided tour, one walking/neighborhood route, one same-site complex, or one pick-one options cluster.",
+  "Activity granularity rule: split named, source-backed venues by default. Group only when the uploaded source structure clearly defines one guided tour, one walking/neighborhood route, one same-site visit, or one pick-one options cluster. Do not use outside knowledge to manufacture a grouping relationship.",
+  "Evidence-role rule: classify each extracted activity sighting as atomic_candidate, context, grouping_proposal, accessory_detail, city_note_candidate, or rejected. Entity type and evidence role are separate: a ticket can be accessory evidence for an activity, while a city recommendation can name a real venue without becoming a dated itinerary card.",
+  "Source-structure rule: preserve the source heading path, nearest section label, and section type. Use dated_itinerary for plans inside a dated itinerary block, city_reference for recommendations or general city notes, booking_detail for confirmations/access instructions, and unknown only when the hierarchy is genuinely unavailable. Headings, indentation/list boundaries, whitespace, and words such as ideas, maybe, or recommendations outweigh physical proximity to a dated heading.",
+  "Grouping-proposal rule: when a source block names multiple independently recognizable itinerary stops under one route or same-site heading, emit the parent as grouping_proposal and the named stops as atomic_candidate sightings so canonical finalization can make one auditable grouping Call. A single booked item that merely says it includes ordinary components stays one atomic_candidate and does not need a grouping proposal.",
   "Walking-tour and neighborhood-route rule: create one walking activity only when the source frames the stops as one walk/tour/route or the stops are untimed, nearby, and context-linked. Every absorbed stop must stay in the description. Split out any stop with its own time, reservation, ticket, booking, vehicle/drive leg, different site, or strong standalone importance.",
-  "Same-site cluster rule: if multiple included stops are clearly part of one complex or visit, create one activity card with included stops in the description. For example, a palace visit can include gardens, show, train pass, viewpoints, and related ticket notes in one card. Do not attach unrelated museums, churches, shops, restaurants, or city sights after 'also noted' to the same card.",
+  "Same-site cluster rule: when the source itself defines one booking or visit and lists included components, emit one atomic_candidate activity with those components in the description; that source-defined inclusion needs no grouping proposal. When independently named stops merely share a site, route, or heading, preserve the stops as separate atomic_candidate sightings and emit a grouping_proposal so canonical finalization can decide transparently. Do not attach unrelated museums, churches, shops, restaurants, or city sights after 'also noted' to the same card.",
   "Named-stop rule: if a dated day lists named landmarks directly and they are not clearly inside a walking-route anchor, same-site cluster, or pick-one cluster, create standalone activity cards rather than dropping them into a vague day summary. Generic titles like 'Rome note', 'Prague sights', 'Vienna sights', or 'city note' are only acceptable when the source itself is generic and no named venue exists.",
   "Timed/ticketed rule: named timed entry, ticketed tours, guided tours, attractions with booking numbers, and fixed restaurant reservations should be their own cards. A timed/ticketed item must not be swallowed by a broader sights or walking-tour card.",
   "Flexible-options rule: if the source lists a cluster of optional ideas that fits one dated window, create one flexible activity card only when the source implies a pick-one or choose-from-these plan. Use answerType choice for one targeted question when the maker's choice determines which options appear, and include the concrete source-backed options in the prompt or reason. If the source is simply a dated sequence/list of places, split the places into separate flexible activity cards instead.",
   "City notes/tips rule: never drop general city food ideas, restaurant lists, shopping ideas, beer hall lists, local tips, or loose travel notes. Source headers like 'Eat:', 'Food:', 'Bars:', 'Beer halls:', 'Cafes:', 'Restaurants:', 'Shopping:', 'Tips:', or 'Notes:' are strong note signals when they are loose recommendations rather than chosen dated plans. Create one itemType note with date null, attach it to the specific relevant city/leg, use a title that names that city or leg such as 'Prague food ideas', and keep the list in the description. These notes must be city-scoped: Prague notes belong only under Prague, Vienna notes only under Vienna, Budapest notes only under Budapest. If the city/leg cannot be inferred from the source chunk or surrounding trip spine, create a missingDetails question for placement instead of attaching it globally. Phrases like 'check out foods like...', 'some good beer halls are...', or a loose list of options belong in city notes/tips. A reservation, booking, ticket, chosen meal, time, specific dated plan, or day-specific sightseeing cluster stays an activity or flexible activity, not a note.",
   "Description rule for this extraction stage: write concise, source-backed descriptions only. Do not add public background or editorial enrichment here; a later enrichment pass can add neutral public context with separate provenance. Never invent logistics, tickets, addresses, bookings, confirmations, opening hours, or times. Sparse generic items such as 'Tour Rome' should become a placeholder or question, not a confident description.",
   "Traveler-facing text should use readable dates such as January 19th, not compact dates like 20190119. Do not repeat the year in every description when the trip is clearly contained to one year.",
-  "Duplicate-place rule: if the same place appears on multiple days, do not silently create duplicate cards. Place it once when context is clear; if two placements are genuinely plausible, create one targeted missingDetails question.",
+  "Opaque identifier rule: confirmation numbers, ticket numbers, reservation codes, and booking references are identifiers, never dates. Preserve their characters exactly in sensitiveDetails and never rewrite an identifier as a calendar date.",
+  "Repeated-sighting rule: repeated mentions of one visit, reservation, or stay are evidence for one canonical entity, but explicit visits on different dates, different bookings, or different addresses are distinct entities. Emit each explicit dated visit separately. Create one targeted missingDetails question only when the source truly conflicts about the placement of one visit.",
   "Flag private addresses, door codes, confirmation numbers, personal notes, and host contact details as sensitiveDetails instead of exposing them casually.",
   "Default sensitiveDetails should include exact private home addresses, exact rental or Airbnb addresses, door/gate/lockbox codes, Wi-Fi passwords, host phone numbers or emails, confirmation numbers, booking references, ticket numbers, passport/ID/payment details, and child/medical/personal safety notes.",
   "Hotel and hostel names, public landmarks, restaurants, shops, museums, commercial venue addresses, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
@@ -669,6 +700,7 @@ function formatActivityChunkInput({
       `Evidence source chunk ${chunkIndex + 1} of ${chunkTotal}: ${chunk.label}`,
       "Extract every source-backed activity, city note/tip, place, stay, transport segment, sensitive detail, and genuine unresolved material question from this chunk.",
       "If this chunk contains multiple named dated venues, preserve them as separate cards unless the source clearly makes them one tour, route, complex, or pick-one cluster.",
+      "Preserve the chunk's heading/list hierarchy in sourceHeadingPath, sourceSectionLabel, sourceSectionType, and evidenceRole. Do not promote recommendations from a city-reference section merely because a dated section appeared above them.",
       rescueInstructions,
     ].join("\n"),
     formatMaterials(chunk.materials),
@@ -1216,15 +1248,61 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
-  if (activityFailures.length > 0) {
-    throw new Error(
-      `Evidence extraction did not cover ${activityFailures.length} source chunk${
-        activityFailures.length === 1 ? "" : "s"
-      }. Roamwoven will not assemble a partial trip.`
-    );
-  }
-
   const spineRecord = asRecord(spineResult.json);
+  const recoveryStages: EvidenceStageInput[] = activityFailures.map(
+    ({ chunk }, index) => {
+      const material = chunk.materials[0];
+      const title = `Review missing source section ${index + 1}`;
+
+      return {
+        label: `automatic recovery required: ${chunk.label}`,
+        source: "model_chunk" as const,
+        sourceFilename: material?.filename ?? null,
+        sourceProvenance: material?.sourceProvenance ?? null,
+        sourceUploadId: material?.sourceUploadId ?? null,
+        stage: {
+          activities: [
+            {
+              _recoveryRequired: true,
+              address: null,
+              category: "admin_logistics",
+              city: null,
+              date: null,
+              description:
+                "Automatic extraction could not fully read this source section. Review the source and add or remove this placeholder before publishing.",
+              endTime: null,
+              evidenceRole: "atomic_candidate",
+              itemType: "placeholder",
+              sourceFilename: material?.filename ?? "source material",
+              sourceHeadingPath: [chunk.label],
+              sourceSectionLabel: chunk.label,
+              sourceSectionType: "unknown",
+              startTime: null,
+              title,
+            },
+          ],
+          missingDetails: [
+            {
+              answerType: "confirm",
+              confidence: "low",
+              evidence: chunk.label,
+              guessedValue: null,
+              prompt: `Please review ${chunk.label} and confirm or add any missing plans.`,
+              reason:
+                "Automatic extraction retries could not completely cover this source section, so Roamwoven preserved a review-required placeholder instead of dropping it or blocking Review.",
+              relatedTitle: title,
+              subjectType: "item",
+              targetField: "sourceRecovery",
+            },
+          ],
+          places: [],
+          sensitiveDetails: [],
+          stays: [],
+          transport: [],
+        },
+      };
+    }
+  );
   const evidenceStages: EvidenceStageInput[] = [
     {
       label: "trip spine",
@@ -1243,6 +1321,7 @@ export async function extractTripDraftWithOpenAI({
         stage: result.json,
       };
     }),
+    ...recoveryStages,
   ];
   const evidence = clusterExtractedEvidence({
     sourceTransportAnchors,

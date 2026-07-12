@@ -9,6 +9,7 @@ import {
   getStructuredReviewSections,
 } from "@/lib/generated-trip-review";
 import {
+  canonicalizeSourceTransportAnchors,
   extractSourceTransportAnchorsFromMaterials,
   SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
   type SourceTransportAnchor,
@@ -630,5 +631,53 @@ test("audit reconciles alternate date formats and exact segment times", () => {
       (diagnostic) => diagnostic.code === "critical_transport_source_anchor_missing"
     ),
     false
+  );
+});
+
+test("diagnostics assess canonical anchor groups instead of raw text and OCR variants", () => {
+  const variants = canonicalizeSourceTransportAnchors([
+    {
+      anchorId: "generic-vienna-train",
+      arrivalLocation: "Vienna",
+      arrivalTime: null,
+      confidence: "high",
+      confirmation: "1beb5005",
+      date: "2019-01-18",
+      departureLocation: "Train",
+      departureTime: null,
+      evidence: "Train to Vienna. Train Code 1beb5005.",
+      kind: "train",
+      number: null,
+      provider: null,
+      provenance: ["text_layer"],
+      routeLabel: "Train Train to Vienna",
+      sourceFilename: "trip.pdf",
+      sourceUploadId: "upload-1",
+    },
+    {
+      anchorId: "specific-vienna-train",
+      arrivalLocation: "Wien Hauptbahnhof",
+      arrivalTime: "13:23",
+      confidence: "high",
+      confirmation: "1beb5005",
+      date: "2019-01-18",
+      departureLocation: "Praha Hlavni Nadrazi",
+      departureTime: "09:20",
+      evidence: "RJ 1033 Praha to Wien 09:20 to 13:23.",
+      kind: "train",
+      number: "RJ 1033",
+      provider: "RegioJet",
+      provenance: ["ocr"],
+      routeLabel: "Train Prague to Vienna",
+      sourceFilename: "trip.pdf",
+      sourceUploadId: "upload-1",
+    },
+  ]);
+
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0]?.departureTime, "09:20");
+  assert.deepEqual(
+    new Set(variants[0]?.provenance),
+    new Set(["text_layer", "ocr"])
   );
 });

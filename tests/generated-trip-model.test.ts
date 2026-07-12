@@ -3271,7 +3271,7 @@ test("leg leave dates infer from the next leg arrival when missing", () => {
   ]);
 });
 
-test("stay summaries can use guessed check-in and inferred checkout with confirmation questions", () => {
+test("stay summaries use guessed check-in and silently infer routine leg-boundary checkout", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -3330,10 +3330,8 @@ test("stay summaries can use guessed check-in and inferred checkout with confirm
   assert.deepEqual(sections.find((section) => section.id === "stays")?.summaryItems, [
     "Left Bank Hotel\nCheck-in September 1, 2026 · Check-out September 4, 2026",
   ]);
-  assert.equal(questions.length, 2);
+  assert.equal(questions.length, 1);
   assert.equal(questions[0]?.targetField, "checkIn");
-  assert.equal(questions[1]?.targetField, "checkOutDate");
-  assert.match(questions[1]?.prompt ?? "", /checks out on September 4th, 2026/i);
 });
 
 test("high-confidence routine parser calls stay out of maker-facing review", () => {
@@ -4122,6 +4120,32 @@ test("internal card-split questions are dismissed while the real ticket decision
           subjectType: "item",
           targetField: "ticketType",
         },
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence:
+            "The final output already contains separate January 23 venue cards.",
+          guessedValue: "split into separate venue cards",
+          prompt:
+            "Should the January 23 list be split into separate venue cards rather than one grouped sightseeing card?",
+          reason: "The source lists several named venues.",
+          relatedTitle: null,
+          subjectType: "day",
+          targetField: "itemType",
+        },
+        {
+          answerType: "confirm",
+          confidence: "medium",
+          evidence:
+            "The source explicitly says to tour Rome after dropping bags.",
+          guessedValue: "keep sightseeing",
+          prompt:
+            "Should the Rome sightseeing remain a separate day activity or be absorbed into the arrival flow?",
+          reason: "The final activity already follows the source sequence.",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "itemType",
+        },
       ],
       places: [
         {
@@ -4145,6 +4169,16 @@ test("internal card-split questions are dismissed while the real ticket decision
   assert.equal(open[0]?.prompt, "Which Prague Castle ticket should be used?");
   assert.equal(
     records.reviewQuestions.find((question) => /grouped card/.test(question.prompt))
+      ?.status,
+    "dismissed"
+  );
+  assert.equal(
+    records.reviewQuestions.find((question) => /January 23 list/.test(question.prompt))
+      ?.status,
+    "dismissed"
+  );
+  assert.equal(
+    records.reviewQuestions.find((question) => /Rome sightseeing/.test(question.prompt))
       ?.status,
     "dismissed"
   );

@@ -1,6 +1,8 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
+import type { EvidenceArtifactBundle } from "@/lib/extraction/evidence-artifacts";
 import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
 import {
+  canonicalizeSourceTransportAnchors,
   getSourceTransportAnchorsFromDraft,
   getSourceTransportAnchorsFromUsage,
 } from "@/lib/extraction/source-transport-anchors";
@@ -23,10 +25,12 @@ export type {
 } from "@/lib/extraction/trip-extraction-audit-types";
 
 export function createTripExtractionAuditReport({
+  evidenceArtifacts,
   draft,
   records,
   usage,
 }: {
+  evidenceArtifacts?: EvidenceArtifactBundle | null;
   draft: unknown;
   records: StructuredTripRecords;
   usage?: unknown;
@@ -39,15 +43,15 @@ export function createTripExtractionAuditReport({
     subjectType: warning.subjectType,
     title: warning.title,
   }));
-  const lineage = createAuditLineageRows({ records, usage });
-  const sourceTransportAnchors = [
+  const lineage = createAuditLineageRows({
+    artifacts: evidenceArtifacts,
+    records,
+    usage,
+  });
+  const sourceTransportAnchors = canonicalizeSourceTransportAnchors([
     ...getSourceTransportAnchorsFromDraft(draft),
     ...getSourceTransportAnchorsFromUsage(usage),
-  ].filter(
-    (anchor, index, anchors) =>
-      anchors.findIndex((candidate) => candidate.anchorId === anchor.anchorId) ===
-      index
-  );
+  ]);
 
   return {
     canonicalization: createCanonicalizationSummary(usage),

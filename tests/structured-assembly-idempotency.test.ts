@@ -6,6 +6,7 @@ import {
   type SourceTransportAnchor,
 } from "@/lib/extraction/source-transport-anchors";
 import { createTripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
+import { createTripExtractionAuditReport } from "@/lib/extraction/trip-extraction-audit";
 import { assessTripDraftQuality } from "@/lib/extraction/trip-quality-assessment";
 import {
   createCentralEuropeFirstHalfDraft,
@@ -457,5 +458,26 @@ export default function run() {
       records.reviewQuestions.filter((question) => question.status === "open").length,
       0
     );
+
+    const report = createTripExtractionAuditReport({
+      draft: clustered.draft,
+      evidenceArtifacts: {
+        observations: clustered.observations,
+        pieces: clustered.pieces,
+      },
+      records,
+    });
+    const groupedLineage = report.lineage.find((row) =>
+      row.actions.some((action) => action.type === "grouped") &&
+      row.observations.some(
+        (observation) => observation.title === "Schönbrunn gardens"
+      )
+    );
+
+    assert.ok(groupedLineage);
+    assert.ok(
+      groupedLineage.actions.some((action) => action.type === "grouped")
+    );
+    assert.equal(groupedLineage.finalRecords.length, 1);
   });
 }

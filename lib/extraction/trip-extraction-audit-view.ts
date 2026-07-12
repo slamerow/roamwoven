@@ -1,4 +1,5 @@
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
+import { getEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
   listTripProcessingEvents,
   type TripProcessingEvent,
@@ -141,10 +142,17 @@ export async function getTripExtractionAuditPayload(
     snapshot?.processingRunId && latestRun?.id !== snapshot.processingRunId
       ? await getTripProcessingRun(snapshot.processingRunId)
       : latestRun;
+  const evidenceArtifacts = snapshotRun?.id
+    ? await getEvidenceArtifacts({
+        processingRunId: snapshotRun.id,
+        tripId,
+      })
+    : null;
   const report =
     appliedRecords.latestDraft && appliedRecords.records
       ? createTripExtractionAuditReport({
           draft: appliedRecords.latestDraft.draftJson,
+          evidenceArtifacts,
           records: appliedRecords.records,
           usage: snapshotRun?.openaiUsage ?? latestRun?.openaiUsage,
         })

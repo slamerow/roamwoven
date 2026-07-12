@@ -28,6 +28,18 @@ export function lineageMatchesQuery(row: AuditLineageRow, query: string) {
     candidateDescription(row.canonical),
     candidateEvidence(row.canonical),
     ...row.diagnostics,
+    ...row.mergeReasons,
+    ...row.actions.flatMap((action) => [
+      action.reason,
+      action.type,
+      ...action.absorbedTitles,
+    ]),
+    ...row.observations.flatMap((observation) => [
+      observation.title,
+      observation.sourceLabel,
+      observation.role,
+      observation.source,
+    ]),
     ...row.finalRecords.flatMap((record) => [
       record.title,
       record.description,
@@ -43,7 +55,47 @@ export function isDiagnosticLineageRow(row: AuditLineageRow) {
   return (
     row.status !== "compiled" ||
     row.diagnostics.length > 0 ||
+    row.actions.length > 0 ||
     row.finalRecords.length !== 1
+  );
+}
+
+function EvidenceActionsSummary({ row }: { row: AuditLineageRow }) {
+  if (!row.observations.length && !row.actions.length && !row.mergeReasons.length) {
+    return <span className="text-ink/35">None</span>;
+  }
+
+  return (
+    <div className="space-y-3 text-xs leading-5 text-ink/60">
+      {row.observations.length ? (
+        <div>
+          <p className="font-semibold text-ink/70">Source observations</p>
+          {row.observations.map((observation) => (
+            <p key={observation.id}>
+              {observation.title} · {observation.role} · {observation.sourceLabel}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {row.actions.length ? (
+        <div>
+          <p className="font-semibold text-ink/70">Canonical actions</p>
+          {row.actions.map((action, index) => (
+            <p key={`${action.type}-${index}`}>
+              {action.type}: {action.reason}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {!row.actions.length && row.mergeReasons.length ? (
+        <div>
+          <p className="font-semibold text-ink/70">Reasons</p>
+          {row.mergeReasons.map((reason) => (
+            <p key={reason}>{reason}</p>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -167,12 +219,13 @@ export function LineageTable({
     <div>
       <p className="mb-3 text-sm font-semibold text-ink/65">{title}</p>
       <div className="overflow-auto rounded-md border border-ink/10">
-        <table className="min-w-[54rem] border-collapse text-left text-sm">
+        <table className="min-w-[72rem] border-collapse text-left text-sm">
           <thead className="bg-paper text-xs font-semibold uppercase tracking-wide text-ink/45">
             <tr>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Date</th>
               <th className="px-3 py-2">Canonical piece</th>
+              <th className="px-3 py-2">Evidence & actions</th>
               <th className="px-3 py-2">Structured record</th>
             </tr>
           </thead>
@@ -190,6 +243,9 @@ export function LineageTable({
                 <td className="px-3 py-3 text-ink/55">{row.date ?? "None"}</td>
                 <td className="px-3 py-3 text-ink/70">
                   <CandidateSummary item={row.canonical} />
+                </td>
+                <td className="px-3 py-3 text-ink/70">
+                  <EvidenceActionsSummary row={row} />
                 </td>
                 <td className="px-3 py-3 text-ink/70">
                   <FinalRecordsSummary records={row.finalRecords} />
