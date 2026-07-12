@@ -397,7 +397,16 @@ export default function run() {
   });
 
   test("canonical system grouping survives assembly as one visible FYI Call", () => {
+    const decisionId = "group_test_schonbrunn_assembly";
     const clustered = clusterExtractedEvidence({
+      groupingDecisions: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2"],
+        claim: "The source block and venue evidence identify one palace-complex visit.",
+        decisionId,
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Schönbrunn Palace complex",
+        source: "canonical_resolver",
+      }],
       sourceTransportAnchors: [],
       stages: [
         {
@@ -410,6 +419,8 @@ export default function run() {
                 date: "2019-01-19",
                 description:
                   "Same-site Schönbrunn visit including Schönbrunn gardens.",
+                _canonicalGroupingDecisionIds: [decisionId],
+                _resolverCandidateId: "stage-1-item-1",
                 itemType: "activity",
                 title: "Schönbrunn Palace complex",
               },
@@ -417,6 +428,7 @@ export default function run() {
                 category: "art_culture",
                 date: "2019-01-19",
                 description: "Walk through the gardens.",
+                _resolverCandidateId: "stage-1-item-2",
                 itemType: "activity",
                 title: "Schönbrunn gardens",
               },
@@ -477,6 +489,11 @@ export default function run() {
     assert.ok(groupedLineage);
     assert.ok(
       groupedLineage.actions.some((action) => action.type === "grouped")
+    );
+    assert.ok(
+      groupedLineage.actions
+        .filter((action) => action.type === "grouped")
+        .every((action) => action.decisionId === decisionId)
     );
     assert.equal(groupedLineage.finalRecords.length, 1);
   });

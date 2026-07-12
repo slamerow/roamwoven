@@ -34,7 +34,11 @@ import {
   getTripCategoryEmoji,
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
-import { isRedundantLocalAirportTransferCandidate } from "@/lib/trip-travel-boundary-policy";
+import {
+  isRentalCarPickupCandidate,
+  isRedundantLocalAirportTransferCandidate,
+  shouldBeTravelRow,
+} from "@/lib/trip-travel-boundary-policy";
 
 function slugify(value: string) {
   const slug = value
@@ -652,7 +656,47 @@ function createTransportRecords({
   legs: TripLegRecord[];
   tripId: string;
 }): TripTransportRecord[] {
-  return getArray(draft, "transport").map((item, index) => {
+  const transportItems = getArray(draft, "transport").filter((item) => {
+    const transport = item && typeof item === "object" && !Array.isArray(item)
+      ? (item as DraftObject)
+      : {};
+
+    const boundaryRecord = {
+      arrivalDate: getStringFromKeys(transport, [
+        "arrivalDate",
+        "dropOffDate",
+        "endDate",
+      ]),
+      arrivalLocation: getStringFromKeys(transport, [
+        "arrival",
+        "arrivalLocation",
+        "dropOffLocation",
+      ]),
+      confirmationLabel: getString(transport, "confirmation"),
+      departureDate: getStringFromKeys(transport, [
+        "departureDate",
+        "pickupDate",
+        "startDate",
+        "date",
+      ]),
+      departureLocation: getStringFromKeys(transport, [
+        "departure",
+        "departureLocation",
+        "pickupLocation",
+      ]),
+      description: getString(transport, "description"),
+      provider: getString(transport, "provider"),
+      title: getString(transport, "title"),
+      transportType: getString(transport, "type"),
+    };
+
+    return (
+      !isRentalCarPickupCandidate(boundaryRecord) ||
+      shouldBeTravelRow(boundaryRecord)
+    );
+  });
+
+  return transportItems.map((item, index) => {
     const transport = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};

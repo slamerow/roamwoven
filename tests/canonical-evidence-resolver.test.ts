@@ -53,8 +53,12 @@ function stage(titles: string[], sourceText: string): EvidenceStageInput {
   };
 }
 
-function cluster(stages: EvidenceStageInput[]) {
+function cluster({
+  groupingDecisions,
+  stages,
+}: ReturnType<typeof applyCanonicalEvidenceResolution>) {
   return clusterExtractedEvidence({
+    groupingDecisions,
     sourceTransportAnchors: [],
     stages,
     tripOverview: { dateRange: "April 1-4, 2031" },
@@ -68,16 +72,19 @@ const noRoleDecisions: CanonicalEvidenceResolution["roleDecisions"] = [];
 
 export default async function run() {
   await test("verified same-site components become one auditable Call", () => {
-    const source = [
+    const titles = [
       "Schonbrunn Palace",
       "Gloriette",
       "Orangeriegarten",
       "Palm House",
       "Apple Strudel Show",
       "Panorama Train pass",
-    ].join("\n");
-    const input = stage(source.split("\n"), source);
-    const stages = applyCanonicalEvidenceResolution([input], {
+    ];
+    const source = titles
+      .map((title) => title.replace("Strudel", "Studel"))
+      .join("\n");
+    const input = stage(titles, source);
+    const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: [
           "stage-1-item-1",
@@ -94,7 +101,7 @@ export default async function run() {
       }],
       roleDecisions: noRoleDecisions,
     });
-    const draft = cluster(stages);
+    const draft = cluster(application);
 
     assert.deepEqual(draft.activities.map((item) => item.title), ["Schonbrunn Palace"]);
     assert.equal(
@@ -106,7 +113,7 @@ export default async function run() {
   await test("an inconclusive relationship preserves a clean three-stop day", () => {
     const titles = ["Albertina", "St. Stephen's Cathedral", "Prater Ferris Wheel"];
     const input = stage(titles, titles.join("\n"));
-    const stages = applyCanonicalEvidenceResolution([input], {
+    const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
         claim: "The venues are all in Vienna.",
@@ -116,7 +123,7 @@ export default async function run() {
       }],
       roleDecisions: noRoleDecisions,
     });
-    const draft = cluster(stages);
+    const draft = cluster(application);
 
     assert.deepEqual(draft.activities.map((item) => item.title), titles);
     assert.equal(draft.missingDetails.length, 0);
@@ -125,7 +132,7 @@ export default async function run() {
   await test("blank-separated source blocks cannot be collapsed by lookup", () => {
     const titles = ["Schonbrunn Palace", "Prater Ferris Wheel", "Albertina"];
     const input = stage(titles, titles.join("\n\n"));
-    const stages = applyCanonicalEvidenceResolution([input], {
+    const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
         claim: "All three are popular Vienna attractions.",
@@ -135,9 +142,51 @@ export default async function run() {
       }],
       roleDecisions: noRoleDecisions,
     });
-    const draft = cluster(stages);
+    const draft = cluster(application);
 
     assert.deepEqual(draft.activities.map((item) => item.title), titles);
     assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("a separately timed child rejects the whole proposed grouping", () => {
+    const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
+    const input = stage(titles, titles.join("\n"));
+    const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
+    stagedActivities[1].startTime = "14:30";
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
+        claim: "The stops are in one historic district.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Old Town walking tour",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+    const draft = cluster(application);
+
+    assert.deepEqual(draft.activities.map((item) => item.title), titles);
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("a high-confidence role decision is the source-role authority", () => {
+    const input = stage(["Museum evening"], "Museum evening");
+    const stagedActivity = (input.stage as { activities: Array<Record<string, unknown>> })
+      .activities[0];
+    stagedActivity.evidenceRole = "city_note_candidate";
+    stagedActivity.itemType = "note";
+    stagedActivity.sourceSectionType = "city_reference";
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [],
+      roleDecisions: [{
+        candidateId: "stage-1-item-1",
+        classification: "keep_activity",
+        confidence: "high",
+        reason: "The source hierarchy places this inside the dated itinerary block.",
+      }],
+    });
+    const draft = cluster(application);
+
+    assert.deepEqual(draft.activities.map((item) => item.title), ["Museum evening"]);
   });
 }

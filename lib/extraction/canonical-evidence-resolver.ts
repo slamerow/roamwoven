@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
-import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
+import type {
+  CanonicalGroupingDecision,
+  EvidenceStageInput,
+} from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 1;
+const CANONICAL_RESOLVER_VERSION = 2;
 const MAX_RESOLVER_CANDIDATES = 120;
 const resolverCache = new Map<
   string,
@@ -168,12 +171,52 @@ function sourcePosition(title: string, sourceText: string | null | undefined) {
     }
 
     const normalizedLine = normalizeText(line);
-    const matches = Boolean(
+    const exactMatch = Boolean(
       normalizedTitle &&
         normalizedLine &&
         (normalizedLine.includes(normalizedTitle) ||
           (normalizedTitle.includes(normalizedLine) && normalizedLine.length >= 5))
     );
+    const titleTokens = normalizedTitle.split(/\s+/).filter(Boolean);
+    const lineTokens = normalizedLine.split(/\s+/).filter(Boolean);
+    const editDistanceAtMostOne = (left: string, right: string) => {
+      if (left === right) return true;
+      if (Math.abs(left.length - right.length) > 1) return false;
+      let edits = 0;
+      let leftIndex = 0;
+      let rightIndex = 0;
+
+      while (leftIndex < left.length && rightIndex < right.length) {
+        if (left[leftIndex] === right[rightIndex]) {
+          leftIndex += 1;
+          rightIndex += 1;
+          continue;
+        }
+        edits += 1;
+        if (edits > 1) return false;
+        if (left.length > right.length) leftIndex += 1;
+        else if (right.length > left.length) rightIndex += 1;
+        else {
+          leftIndex += 1;
+          rightIndex += 1;
+        }
+      }
+
+      return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
+    };
+    const typoTolerantMatch = Boolean(
+      titleTokens.length >= 2 &&
+        titleTokens.every((titleToken) =>
+          lineTokens.some(
+            (lineToken) =>
+              lineToken === titleToken ||
+              (titleToken.length >= 5 &&
+                lineToken.length >= 5 &&
+                editDistanceAtMostOne(titleToken, lineToken))
+          )
+        )
+    );
+    const matches = exactMatch || typoTolerantMatch;
 
     if (!matches) {
       continue;
@@ -261,7 +304,8 @@ function hasAmbiguousCandidateCluster(candidates: ResolverCandidate[]) {
     groups.set(key, [...(groups.get(key) ?? []), candidate]);
   }
 
-  return Array.from(groups.values()).some((group) => group.length >= 3) ||
+  return candidates.some((candidate) => candidate.evidenceRole === "grouping_proposal") ||
+    Array.from(groups.values()).some((group) => group.length >= 3) ||
     candidates.some(
       (candidate, index) =>
         candidates.findIndex(
@@ -322,18 +366,32 @@ function applyResolution({
     return asRecord(activities[candidate.itemIndex]);
   };
 
+  for (const candidate of candidates) {
+    const item = itemFor(candidate.candidateId);
+    if (item) item._resolverCandidateId = candidate.candidateId;
+  }
+
   for (const decision of resolution.roleDecisions) {
-    if (decision.confidence !== "high" || decision.classification !== "city_note") {
+    if (decision.confidence !== "high") {
       continue;
     }
 
     const item = itemFor(decision.candidateId);
     if (!item) continue;
-    item.date = null;
-    item.evidenceRole = "city_note_candidate";
-    item.itemType = "note";
-    item.sourceSectionType = "city_reference";
+    item._canonicalRoleDecision = decision.classification;
+
+    if (decision.classification === "city_note") {
+      item.date = null;
+      item.evidenceRole = "city_note_candidate";
+      item.itemType = "note";
+      item.sourceSectionType = "city_reference";
+    } else {
+      item.evidenceRole = "atomic_candidate";
+      item.itemType = "activity";
+    }
   }
+
+  const groupingDecisions: CanonicalGroupingDecision[] = [];
 
   for (const grouping of resolution.groupings) {
     const uniqueIds = Array.from(new Set(grouping.candidateIds));
@@ -372,27 +430,47 @@ function applyResolution({
       continue;
     }
 
-    const childTitles = groupCandidates
+    const childCandidates = groupCandidates
       .filter((candidate) => candidate.candidateId !== parentCandidate?.candidateId)
-      .filter((candidate) => !candidate.hasTime && !candidate.hasBookingSignal)
-      .map((candidate) => candidate.title);
+    if (
+      childCandidates.some(
+        (candidate) => candidate.hasTime || candidate.hasBookingSignal
+      )
+    ) {
+      continue;
+    }
+    const childTitles = childCandidates.map((candidate) => candidate.title);
 
     if (childTitles.length === 0) {
       continue;
     }
 
-    const existingDescription = stringValue(parent, "description");
-    parent.description = [
-      existingDescription,
-      `Verified same-site visit within the ${grouping.parentTitle} complex. Includes ${childTitles.join(", ")}.`,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    parent.evidenceRole = "grouping_proposal";
-    parent._publicLookupClaim = grouping.claim;
+    const decisionId = `group_${createHash("sha256")
+      .update(JSON.stringify({
+        candidateIds: uniqueIds.slice().sort(),
+        claim: grouping.claim,
+        parentCandidateId: parentCandidate?.candidateId,
+        version: CANONICAL_RESOLVER_VERSION,
+      }))
+      .digest("hex")
+      .slice(0, 24)}`;
+    parent._canonicalGroupingDecisionIds = [
+      ...(Array.isArray(parent._canonicalGroupingDecisionIds)
+        ? parent._canonicalGroupingDecisionIds
+        : []),
+      decisionId,
+    ];
+    groupingDecisions.push({
+      candidateIds: uniqueIds,
+      claim: grouping.claim,
+      decisionId,
+      parentCandidateId: parentCandidate?.candidateId ?? uniqueIds[0],
+      parentTitle: grouping.parentTitle,
+      source: "canonical_resolver",
+    });
   }
 
-  return nextStages;
+  return { groupingDecisions, stages: nextStages };
 }
 
 export function applyCanonicalEvidenceResolution(
@@ -420,7 +498,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
   };
 
   if (!hasAmbiguousCandidateCluster(candidates)) {
-    return { metadata: emptyMetadata, stages, usage: null };
+    return { groupingDecisions: [], metadata: emptyMetadata, stages, usage: null };
   }
 
   const lookupKey = resolutionKey(candidates);
@@ -450,13 +528,10 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     });
   }
 
-  const acceptedClaims = resolution.groupings
-    .filter((grouping) => grouping.confidence === "high")
-    .map((grouping) => ({
-      candidateIds: grouping.candidateIds,
-      claim: grouping.claim,
-      parentTitle: grouping.parentTitle,
-    }));
+  const productionResolution = {
+    ...resolution,
+    groupings: sources.length > 0 ? resolution.groupings : [],
+  };
   const acceptedRoleDecisions = resolution.roleDecisions
     .filter((decision) => decision.confidence === "high")
     .map((decision) => ({
@@ -465,7 +540,15 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       reason: decision.reason,
     }));
 
+  const applied = applyCanonicalEvidenceResolution(stages, productionResolution);
+  const acceptedClaims = applied.groupingDecisions.map((grouping) => ({
+    candidateIds: grouping.candidateIds,
+    claim: grouping.claim,
+    parentTitle: grouping.parentTitle,
+  }));
+
   return {
+    groupingDecisions: applied.groupingDecisions,
     metadata: {
       ...emptyMetadata,
       cacheHit: Boolean(cached),
@@ -475,7 +558,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       roleDecisions: acceptedRoleDecisions,
       sources,
     },
-    stages: applyCanonicalEvidenceResolution(stages, resolution),
+    stages: applied.stages,
     usage,
   };
 }

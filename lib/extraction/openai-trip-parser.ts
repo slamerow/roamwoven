@@ -5,6 +5,7 @@ import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evide
 import {
   clusterExtractedEvidence,
   type CanonicalEvidencePiece,
+  type CanonicalGroupingDecision,
   type EvidenceObservation,
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
@@ -1338,6 +1339,7 @@ export async function extractTripDraftWithOpenAI({
     ...recoveryStages,
   ];
   let resolvedEvidenceStages = {
+    groupingDecisions: [] as CanonicalGroupingDecision[],
     metadata: null as unknown,
     stages: evidenceStages,
     usage: null as unknown,
@@ -1354,6 +1356,7 @@ export async function extractTripDraftWithOpenAI({
   }
 
   const evidence = clusterExtractedEvidence({
+    groupingDecisions: resolvedEvidenceStages.groupingDecisions,
     resolverMetadata: resolvedEvidenceStages.metadata,
     sourceTransportAnchors,
     stages: resolvedEvidenceStages.stages,

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   canonicalizeSourceTransportAnchors,
+  extractSourceTransportAnchorsFromMaterials,
   type SourceTransportAnchor,
 } from "@/lib/extraction/source-transport-anchors";
 import { cleanTravelerText } from "@/lib/extraction/traveler-text";
@@ -71,6 +73,28 @@ export default async function run() {
     assert.equal(canonical?.departureLocation, "Wien Hbf");
   });
 
+  await test("timed route headings cannot replace real train endpoints", () => {
+    const anchors = extractSourceTransportAnchorsFromMaterials([{
+      filename: "rail.txt",
+      sourceProvenance: "text_layer",
+      text: [
+        "Monday, January 21, 2019",
+        "10:42 Train To Budapest",
+        "10:42 Wien Hbf",
+        "13:19 Budapest Keleti",
+        "ÖBB D143",
+        "Duration 2:37",
+      ].join("\n"),
+      type: "file_text",
+    }]);
+    const train = anchors.find((anchor) => anchor.kind === "train");
+
+    assert.equal(train?.departureLocation, "Wien Hbf");
+    assert.equal(train?.departureTime, "10:42");
+    assert.equal(train?.arrivalLocation, "Budapest Keleti");
+    assert.equal(train?.arrivalTime, "13:19");
+  });
+
   await test("token-equivalent addresses and one dated generic fragment make one stay", () => {
     const draft = cluster(emptyStage({
       stays: [
@@ -96,6 +120,116 @@ export default async function run() {
     }));
 
     assert.equal(draft.stays.length, 1);
+  });
+
+  await test("one price-shaped room fragment attaches to the unique dated stay", () => {
+    const draft = cluster(emptyStage({
+      stays: [
+        {
+          checkIn: "2019-01-24",
+          checkOut: "2019-01-25",
+          name: "The RomeHello Hostel",
+        },
+        {
+          checkIn: "2019-01-24",
+          checkOut: "2019-01-25",
+          name: "Rome- $118(private room-ensuite)",
+        },
+      ],
+    }));
+
+    assert.deepEqual(draft.stays.map((stay) => stay.name), ["The RomeHello Hostel"]);
+  });
+
+  await test("same-city rental transport compiles only as an activity", () => {
+    const draft = cluster(emptyStage({
+      activities: [{
+        category: "arrival_departure",
+        date: "2019-01-17",
+        description: "Pick up and return the rental car in Prague.",
+        itemType: "activity",
+        title: "Prague rental car pickup",
+      }],
+      transport: [{
+        arrival: "Prague Airport",
+        arrivalDate: "2019-01-17",
+        date: "2019-01-17",
+        departure: "Prague Downtown",
+        departureDate: "2019-01-17",
+        title: "Prague rental car pickup",
+        type: "rental_car",
+      }],
+    }));
+    const records = createStructuredTripRecordsFromDraft({
+      draft,
+      fallbackTripName: "Rental boundary",
+      tripId: "rental-boundary",
+    });
+
+    assert.equal(records.transport.length, 0);
+    assert.deepEqual(records.items.map((item) => item.title), ["Prague rental car pickup"]);
+  });
+
+  await test("place-type words cannot misattach or duplicate one semantic tour question", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          category: "art_culture",
+          date: "2019-01-16",
+          itemType: "activity",
+          title: "St. Stephen's Cathedral",
+        },
+        {
+          category: "art_culture",
+          date: "2019-01-16",
+          description: "Includes St. Vitus Cathedral.",
+          itemType: "activity",
+          title: "Prague Castle",
+        },
+      ],
+      missingDetails: [
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "Need to decide which ticket to get.",
+          prompt: "Which Prague Castle ticket should be used?",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "ticketChoice",
+        },
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "St. Vitus Cathedral get tour?",
+          prompt: "Should St. Vitus Cathedral be self-guided or a tour?",
+          relatedTitle: "St. Vitus Cathedral",
+          subjectType: "item",
+          targetField: "visitMode",
+        },
+        {
+          answerType: "text",
+          confidence: "medium",
+          evidence: "Get tour?",
+          prompt: "Should St. Vitus Cathedral include a tour booking?",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "bookingStatus",
+        },
+      ],
+    }));
+    const records = createStructuredTripRecordsFromDraft({
+      draft,
+      fallbackTripName: "Question ownership",
+      tripId: "question-ownership",
+    });
+    const open = records.reviewQuestions.filter((question) => question.status === "open");
+    const stStephen = records.items.find((item) => /Stephen/.test(item.title));
+
+    assert.equal(open.length, 2);
+    assert.equal(
+      open.some((question) => question.subjectId === stStephen?.id),
+      false
+    );
   });
 
   await test("parenthetical price text cannot split an exact activity duplicate", () => {

@@ -835,7 +835,16 @@ export default async function run() {
   });
 
   await test("explicit same-site grouping creates one Call without swallowing unrelated places", () => {
+    const decisionId = "group_test_schonbrunn";
     const result = clusterExtractedEvidence({
+      groupingDecisions: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
+        claim: "The source block and venue evidence identify one palace-complex visit.",
+        decisionId,
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Schönbrunn Palace complex",
+        source: "canonical_resolver",
+      }],
       sourceTransportAnchors: [],
       stages: [
         stage(
@@ -847,6 +856,8 @@ export default async function run() {
                 date: "2019-01-19",
                 description:
                   "Same-site Schönbrunn visit including Schönbrunn gardens and the Apple Strudel Show.",
+                _canonicalGroupingDecisionIds: [decisionId],
+                _resolverCandidateId: "stage-1-item-1",
                 itemType: "activity",
                 title: "Schönbrunn Palace complex",
               },
@@ -854,6 +865,7 @@ export default async function run() {
                 category: "art_culture",
                 date: "2019-01-19",
                 description: "Walk the gardens.",
+                _resolverCandidateId: "stage-1-item-2",
                 itemType: "activity",
                 title: "Schönbrunn gardens",
               },
@@ -861,6 +873,7 @@ export default async function run() {
                 category: "tours_tickets",
                 date: "2019-01-19",
                 description: "Timed show inside the palace.",
+                _resolverCandidateId: "stage-1-item-3",
                 itemType: "activity",
                 title: "Apple Strudel Show",
               },
@@ -868,6 +881,7 @@ export default async function run() {
                 category: "art_culture",
                 date: "2019-01-19",
                 description: "Visit Hundertwasser House.",
+                _resolverCandidateId: "stage-1-item-4",
                 itemType: "activity",
                 title: "Hundertwasser House",
               },
@@ -889,6 +903,55 @@ export default async function run() {
     assert.equal(
       draft.missingDetails.filter((item) => /We grouped/i.test(item.prompt ?? "")).length,
       1
+    );
+  });
+
+  await test("model-only grouping language cannot merge or create a Call", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "clean-day-control",
+          emptyStage({
+            activities: [
+              {
+                category: "art_culture",
+                date: "2031-04-02",
+                description: "Vienna day including Albertina and Prater Ferris Wheel.",
+                evidenceRole: "grouping_proposal",
+                itemType: "activity",
+                title: "Vienna sights",
+              },
+              {
+                category: "art_culture",
+                date: "2031-04-02",
+                itemType: "activity",
+                title: "Albertina",
+              },
+              {
+                category: "art_culture",
+                date: "2031-04-02",
+                itemType: "activity",
+                title: "Prater Ferris Wheel",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "April 1-4, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<{ prompt?: string }>;
+    };
+
+    assert.deepEqual(
+      draft.activities.map((item) => item.title),
+      ["Albertina", "Prater Ferris Wheel"]
+    );
+    assert.equal(
+      draft.missingDetails.some((item) => /We grouped/i.test(item.prompt ?? "")),
+      false
     );
   });
 

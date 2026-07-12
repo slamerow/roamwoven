@@ -528,11 +528,22 @@ function normalizedTitleMatches(a: string | null, b: string | null) {
         ![
           "activity",
           "and",
+          "basilica",
           "card",
+          "castle",
+          "cathedral",
+          "church",
+          "cafe",
           "flight",
           "from",
           "guided",
+          "hostel",
+          "hotel",
+          "museum",
+          "palace",
+          "restaurant",
           "self",
+          "station",
           "the",
           "ticket",
           "to",
@@ -551,11 +562,22 @@ function normalizedTitleMatches(a: string | null, b: string | null) {
           ![
             "activity",
             "and",
+            "basilica",
             "card",
+            "castle",
+            "cathedral",
+            "church",
+            "cafe",
             "flight",
             "from",
             "guided",
+            "hostel",
+            "hotel",
+            "museum",
+            "palace",
+            "restaurant",
             "self",
+            "station",
             "the",
             "ticket",
             "to",
@@ -568,6 +590,51 @@ function normalizedTitleMatches(a: string | null, b: string | null) {
   );
 
   return leftTokens.some((token) => rightTokens.has(token));
+}
+
+const QUESTION_ENTITY_STOPWORDS = new Set([
+  "activity",
+  "basilica",
+  "booking",
+  "booked",
+  "castle",
+  "cathedral",
+  "choice",
+  "church",
+  "guided",
+  "include",
+  "january",
+  "museum",
+  "palace",
+  "self",
+  "should",
+  "ticket",
+  "tour",
+  "treated",
+  "used",
+  "visit",
+  "which",
+]);
+
+function questionEntityTokens(question: TripReviewQuestionRecord) {
+  return normalizeText(question.prompt)
+    .split(/\s+/)
+    .filter((token) => token.length >= 4)
+    .filter((token) => !/^\d/.test(token))
+    .filter((token) => !QUESTION_ENTITY_STOPWORDS.has(token));
+}
+
+function questionsShareSemanticEntity(
+  left: TripReviewQuestionRecord,
+  right: TripReviewQuestionRecord
+) {
+  const leftTokens = questionEntityTokens(left);
+  const rightTokens = questionEntityTokens(right);
+  const rightSet = new Set(rightTokens);
+  const overlap = new Set(leftTokens.filter((token) => rightSet.has(token))).size;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+
+  return overlap > 0 && union > 0 && overlap / union >= 0.67;
 }
 
 function normalizedTitleContains(a: string | null, b: string | null) {
@@ -1399,9 +1466,10 @@ export function createReviewQuestions({
       questions.findIndex(
         (candidate) =>
           candidate.status === question.status &&
-          candidate.subjectId === question.subjectId &&
           candidate.subjectType === question.subjectType &&
-          getQuestionClusterKey(candidate) === getQuestionClusterKey(question)
+          getQuestionClusterKey(candidate) === getQuestionClusterKey(question) &&
+          (candidate.subjectId === question.subjectId ||
+            questionsShareSemanticEntity(candidate, question))
       ) === index
     );
   });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  isIntercityRentalCarCandidate,
   isRedundantLocalAirportTransferCandidate,
   isTravelActionCandidate,
   shouldBeTravelRow,
@@ -56,6 +57,30 @@ test("travel boundary keeps rental pickups and scenic rides out of travel rows",
     }),
     false
   );
+});
+
+test("rental cars use pickup drop-off city and dates as the travel boundary", () => {
+  const localRental = {
+    arrivalDate: "2031-04-02",
+    arrivalLocation: "Prague Airport",
+    departureDate: "2031-04-02",
+    departureLocation: "Prague Downtown",
+    title: "Rental car pickup and return",
+    transportType: "rental_car",
+  };
+  const intercityRental = {
+    arrivalDate: "2031-04-05",
+    arrivalLocation: "Budapest Downtown",
+    departureDate: "2031-04-02",
+    departureLocation: "Vienna Airport",
+    title: "One-way rental car from Vienna to Budapest",
+    transportType: "rental_car",
+  };
+
+  assert.equal(isIntercityRentalCarCandidate(localRental), false);
+  assert.equal(shouldBeTravelRow(localRental), false);
+  assert.equal(isIntercityRentalCarCandidate(intercityRental), true);
+  assert.equal(shouldBeTravelRow(intercityRental), true);
 });
 
 test("travel boundary suppresses ordinary airport moves but not booked ones", () => {

@@ -9,9 +9,11 @@ export type TravelBoundaryTransportType =
   | "transfer";
 
 export type TravelBoundaryRecord = {
+  arrivalDate?: string | null;
   arrivalLocation?: string | null;
   category?: string | null;
   confirmationLabel?: string | null;
+  departureDate?: string | null;
   departureLocation?: string | null;
   description?: string | null;
   itemType?: string | null;
@@ -19,6 +21,54 @@ export type TravelBoundaryRecord = {
   title?: string | null;
   transportType?: string | null;
 };
+
+const RENTAL_LOCATION_STOPWORDS = new Set([
+  "airport",
+  "car",
+  "center",
+  "centre",
+  "city",
+  "downtown",
+  "dropoff",
+  "hire",
+  "location",
+  "office",
+  "pickup",
+  "rental",
+  "station",
+]);
+
+function rentalLocationTokens(value: string | null | undefined) {
+  return normalizeText(value)
+    .split(/\s+/)
+    .filter((token) => token.length > 2)
+    .filter((token) => !RENTAL_LOCATION_STOPWORDS.has(token));
+}
+
+export function isIntercityRentalCarCandidate(record: TravelBoundaryRecord) {
+  if (!isRentalCarPickupCandidate(record)) return false;
+
+  const departureTokens = rentalLocationTokens(record.departureLocation);
+  const arrivalTokens = rentalLocationTokens(record.arrivalLocation);
+  if (departureTokens.length === 0 || arrivalTokens.length === 0) return false;
+
+  if (departureTokens.some((token) => arrivalTokens.includes(token))) {
+    return false;
+  }
+
+  const text = travelBoundaryText(record);
+  const explicitIntercityRoute = Boolean(
+    /\b(intercity|one way|one-way|different city)\b/.test(text) ||
+      /\b(?:drive|rental car|car rental)\s+from\b.*\bto\b/.test(text)
+  );
+  const differentHandoffDates = Boolean(
+    record.departureDate &&
+      record.arrivalDate &&
+      record.departureDate !== record.arrivalDate
+  );
+
+  return explicitIntercityRoute || differentHandoffDates;
+}
 
 function normalizeText(value: string | null | undefined) {
   return (
@@ -164,7 +214,10 @@ export function isSeparateLocalMovementCandidate(record: TravelBoundaryRecord) {
 export function isTravelActionCandidate(record: TravelBoundaryRecord) {
   const text = travelBoundaryText(record);
 
-  if (isRentalCarPickupCandidate(record) || isScenicRideCandidate(record)) {
+  if (
+    (isRentalCarPickupCandidate(record) && !isIntercityRentalCarCandidate(record)) ||
+    isScenicRideCandidate(record)
+  ) {
     return false;
   }
 
@@ -195,7 +248,11 @@ export function isRedundantLocalAirportTransferCandidate(
 export function shouldBeTravelRow(record: TravelBoundaryRecord) {
   const kind = inferTravelBoundaryTransportKind(record);
 
-  if (isRentalCarPickupCandidate(record) || isScenicRideCandidate(record)) {
+  if (isRentalCarPickupCandidate(record)) {
+    return isIntercityRentalCarCandidate(record);
+  }
+
+  if (isScenicRideCandidate(record)) {
     return false;
   }
 

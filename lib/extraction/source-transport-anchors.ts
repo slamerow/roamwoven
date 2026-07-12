@@ -250,6 +250,7 @@ function likelyLocationLine(value: string) {
       !/\b(adult|booking|code|duration|flight|free|open|paid|paypal|price|status|ticket|total)\b/.test(
         text
       ) &&
+      !/^(?:bus|ferry|flight|train|transfer|travel)\s+(?:from|to)\b/.test(text) &&
       !/^\d{1,2}:\d{2}\s*h\b/.test(text) &&
       !/^(?:to\s+)?\d{1,2}\s+\d{2}(?:\s+(?:am|pm))?$/.test(text) &&
       !/(?:->|→)/.test(value)
@@ -546,6 +547,14 @@ function extractTimedLocations(block: SourceLine[]) {
     const startTime = extractStartTime(entry.line);
 
     if (!startTime) {
+      return;
+    }
+
+    if (
+      /^(?:bus|ferry|flight|train|transfer|travel)\s+(?:from|to)\b/i.test(
+        startTime.rest
+      )
+    ) {
       return;
     }
 
