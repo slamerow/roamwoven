@@ -1,6 +1,6 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
-import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
+import { finalizeCanonicalTripDraft } from "@/lib/extraction/canonical-trip-finalization";
 import {
   clusterExtractedEvidence,
   type CanonicalEvidencePiece,
@@ -1255,9 +1255,8 @@ export async function extractTripDraftWithOpenAI({
     },
   });
   const combinedDraft = evidence.draft;
-  const preAssemblyDraft = createDraftAuditSnapshot(combinedDraft);
-  const { debug: consolidation, draft } = consolidateTripDraft(combinedDraft);
-  const assembledDraft = createDraftAuditSnapshot(draft);
+  const { debug: finalization, draft } = finalizeCanonicalTripDraft(combinedDraft);
+  const canonicalDraft = createDraftAuditSnapshot(draft);
 
   return {
     draft,
@@ -1293,10 +1292,9 @@ export async function extractTripDraftWithOpenAI({
         name: error instanceof Error ? error.name : "UnknownError",
       })),
       audit: {
-        assembledDraft,
-        preAssemblyDraft,
+        canonicalDraft,
       },
-      consolidation,
+      finalization,
       evidence: evidence.summary,
       sourceAnchors: {
         transport: sourceTransportAnchors,

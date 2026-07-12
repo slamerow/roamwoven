@@ -351,7 +351,7 @@ export default async function run() {
     assert.equal(transports.length, 1);
     assert.equal(transports[0]?.date, "2019-01-18");
     assert.equal(transports[0]?.departure, "Praha Hlavni Nadrazi");
-    assert.equal(transports[0]?.departureTime, "9:20 AM");
+    assert.equal(transports[0]?.departureTime, "09:20");
     assert.equal(result.pieces.find((piece) => piece.kind === "transport")?.observationIds.length, 2);
   });
 
@@ -501,5 +501,435 @@ export default async function run() {
       missingDetails.map((detail) => detail.prompt),
       ["Should we buy the optional tower ticket?"]
     );
+  });
+
+  await test("production title and time variants become one canonical activity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "central-europe-lunch",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-16",
+                description: "Lunch at U Maliru at 1:00 PM.",
+                sourceFilename: "itinerary.pdf",
+                startTime: "1:00 PM",
+                title: "U Maliru lunch",
+              }),
+              activity({
+                date: "2019-01-16",
+                description: "Reservation for one; three-course degustation.",
+                sourceFilename: "ticket.pdf",
+                startTime: "2019-01-16T13:00:00",
+                title: "Lunch at U Malířů",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const activities = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+
+    assert.equal(activities.length, 1);
+    assert.equal(activities[0]?.startTime, "13:00");
+    assert.match(String(activities[0]?.description), /degustation/i);
+  });
+
+  await test("parenthetical aliases and repeated venue sightings stay one piece", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "budapest-evidence",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-21",
+                description: "Gellert Baths.",
+                sourceFilename: "plan.pdf",
+                title: "Gellert Baths",
+              }),
+              activity({
+                date: "2019-01-21",
+                description: "Bath houses, including Gellert Baths.",
+                sourceFilename: "plan.pdf",
+                title: "Bath houses",
+              }),
+              activity({
+                date: "2019-01-23",
+                description:
+                  "Gellert Bath House after the spa; return to the lobby for the cafe.",
+                sourceFilename: "day-plan.pdf",
+                title: "Gellert Bath House",
+              }),
+              activity({
+                date: "2019-01-21",
+                sourceFilename: "plan.pdf",
+                title: "Pinball Museum",
+              }),
+              activity({
+                date: "2019-01-23",
+                sourceFilename: "day-plan.pdf",
+                title: "Pinball Museum",
+              }),
+              activity({
+                date: "2019-01-21",
+                sourceFilename: "plan.pdf",
+                title: "Great Synagogue",
+              }),
+              activity({
+                date: "2019-01-21",
+                sourceFilename: "plan.pdf",
+                title: "Great Synagogue / Jewish History",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<{ prompt?: string }>;
+    };
+
+    assert.equal(draft.activities.filter((item) => /gellert|bath house/i.test(String(item.title))).length, 1);
+    assert.equal(draft.activities.filter((item) => /pinball/i.test(String(item.title))).length, 1);
+    assert.equal(draft.activities.filter((item) => /synagogue/i.test(String(item.title))).length, 1);
+    assert.equal(
+      draft.missingDetails.filter((item) => /Which day should/i.test(item.prompt ?? "")).length,
+      2
+    );
+  });
+
+  await test("separately booked visits to the same venue remain separate pieces", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "repeat-bookings",
+          emptyStage({
+            activities: [
+              {
+                ...activity({
+                  date: "2019-01-21",
+                  sourceFilename: "first-ticket.pdf",
+                  startTime: "3:00 PM",
+                  title: "Pinball Museum",
+                }),
+                confirmation: "PIN-ONE",
+              },
+              {
+                ...activity({
+                  date: "2019-01-23",
+                  sourceFilename: "second-ticket.pdf",
+                  startTime: "6:00 PM",
+                  title: "Pinball Museum",
+                }),
+                confirmation: "PIN-TWO",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const activities = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+
+    assert.equal(
+      activities.filter((item) => /pinball/i.test(String(item.title))).length,
+      2
+    );
+  });
+
+  await test("tickets and rental returns attach while stray access tasks are rejected", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "attachments",
+          emptyStage({
+            activities: [
+              {
+                category: "tours_tickets",
+                date: "2019-01-15",
+                description: "Klementinum guided tour at 2:30 PM.",
+                itemType: "activity",
+                startTime: "2:30 PM",
+                title: "Klementinum Guided Tour",
+              },
+              {
+                category: "tours_tickets",
+                date: "2019-01-15",
+                description: "Skip the line ticket.",
+                itemType: "activity",
+                startTime: "14:30",
+                title: "Skip the line ticket",
+              },
+              {
+                address: "Revoluční 1044/23",
+                category: "arrival_departure",
+                date: "2019-01-17",
+                description: "Pick up the rental car at 9 AM.",
+                itemType: "activity",
+                startTime: "9:00 AM",
+                title: "Pick up car for Kutna Hora",
+              },
+              {
+                address: "Revoluční 1044/23, 110 00 Praha 1",
+                category: "arrival_departure",
+                date: "2019-01-17",
+                description: "Return the car at the same location at 20:00.",
+                endTime: "20:00",
+                itemType: "activity",
+                title: "Car return",
+              },
+              {
+                category: "arrival_departure",
+                date: "2019-01-24",
+                description: "Key pickup from the lockbox.",
+                itemType: "activity",
+                title: "Collect apartment key",
+              },
+            ],
+            places: [
+              {
+                arriveDate: "2019-01-14",
+                city: "Prague",
+                leaveDate: "2019-01-18",
+              },
+              {
+                arriveDate: "2019-01-24",
+                city: "Rome",
+                leaveDate: "2019-01-25",
+              },
+            ],
+            stays: [
+              {
+                checkIn: "2019-01-24",
+                checkOut: "2019-01-25",
+                name: "The RomeHello Hostel",
+                stayType: "hostel",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const activities = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+    const klementinum = activities.find((item) => /Klementinum/i.test(String(item.title)));
+    const rental = activities.find((item) => /Pick up car/i.test(String(item.title)));
+
+    assert.ok(klementinum);
+    assert.match(String(klementinum.description), /Skip the line ticket/i);
+    assert.equal(activities.some((item) => /Skip the line ticket/i.test(String(item.title))), false);
+    assert.ok(rental);
+    assert.equal(rental.endTime, "20:00");
+    assert.equal(rental.address, "Revoluční 1044/23, 110 00 Praha 1");
+    assert.equal(activities.some((item) => /Car return/i.test(String(item.title))), false);
+    assert.equal(activities.some((item) => /Collect apartment key/i.test(String(item.title))), false);
+  });
+
+  await test("a different rental return location cannot replace the pickup address", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "rental-locations",
+          emptyStage({
+            activities: [
+              {
+                address: "Pickup Road 1",
+                category: "arrival_departure",
+                date: "2019-01-17",
+                description: "Pick up the rental car at 9 AM.",
+                itemType: "activity",
+                startTime: "9:00 AM",
+                title: "Pick up car for Kutna Hora",
+              },
+              {
+                address: "Return Road 99",
+                category: "arrival_departure",
+                date: "2019-01-17",
+                description: "Return the car at the airport depot at 8 PM.",
+                endTime: "8:00 PM",
+                itemType: "activity",
+                title: "Car return",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const rental = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities.find((item) => /Pick up car/i.test(String(item.title)));
+
+    assert.ok(rental);
+    assert.equal(rental.address, "Pickup Road 1");
+    assert.match(String(rental.description), /Return location: Return Road 99/i);
+  });
+
+  await test("out-of-range model dates are quarantined without extending canonical output", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "trip-range",
+          emptyStage({
+            places: [
+              {
+                arriveDate: "2019-01-13",
+                city: "Rome",
+                leaveDate: "2019-01-25",
+              },
+            ],
+            transport: [
+              {
+                arrival: "FCO",
+                arrivalTime: "10:15",
+                date: "2019-05-08",
+                departure: "JFK",
+                departureTime: "19:46",
+                number: "444",
+                title: "Flight JFK to FCO",
+                type: "flight",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+
+    assert.equal((result.draft as { transport: unknown[] }).transport.length, 0);
+    assert.ok(
+      result.pieces.some(
+        (piece) =>
+          piece.kind === "transport" &&
+          !piece.outputEligible &&
+          piece.mergeReasons.some((reason) => /outside established trip range/.test(reason))
+      )
+    );
+  });
+
+  await test("explicit same-site grouping creates one Call without swallowing unrelated places", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "vienna-grouping",
+          emptyStage({
+            activities: [
+              {
+                category: "art_culture",
+                date: "2019-01-19",
+                description:
+                  "Same-site Schönbrunn visit including Schönbrunn gardens and the Apple Strudel Show.",
+                itemType: "activity",
+                title: "Schönbrunn Palace complex",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-19",
+                description: "Walk the gardens.",
+                itemType: "activity",
+                title: "Schönbrunn gardens",
+              },
+              {
+                category: "tours_tickets",
+                date: "2019-01-19",
+                description: "Timed show inside the palace.",
+                itemType: "activity",
+                title: "Apple Strudel Show",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-19",
+                description: "Visit Hundertwasser House.",
+                itemType: "activity",
+                title: "Hundertwasser House",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<{ prompt?: string }>;
+    };
+
+    assert.deepEqual(
+      draft.activities.map((item) => item.title),
+      ["Schönbrunn Palace complex", "Hundertwasser House"]
+    );
+    assert.equal(
+      draft.missingDetails.filter((item) => /We grouped/i.test(item.prompt ?? "")).length,
+      1
+    );
+  });
+
+  await test("canonical notes create one collection per city across repeated city legs", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "rome-notes",
+          emptyStage({
+            activities: [
+              {
+                category: "food_dining",
+                city: "Rome",
+                description: "Pizza ideas.",
+                itemType: "note",
+                title: "Rome food ideas",
+              },
+              {
+                category: "shopping_tailor",
+                city: "Rome",
+                description: "Watch shop note.",
+                itemType: "note",
+                title: "Rome shopping ideas",
+              },
+            ],
+            places: [
+              {
+                arriveDate: "2019-01-13",
+                city: "Rome",
+                leaveDate: "2019-01-14",
+              },
+              {
+                arriveDate: "2019-01-24",
+                city: "Rome",
+                leaveDate: "2019-01-25",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const notes = (result.draft as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0]?.title, "Rome Notes & Tips");
+    assert.equal(notes[0]?.date, null);
+    assert.match(String(notes[0]?.description), /Pizza ideas/);
+    assert.match(String(notes[0]?.description), /Watch shop note/);
   });
 }

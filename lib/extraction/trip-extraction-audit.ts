@@ -7,8 +7,7 @@ import {
 import { createAuditDiagnostics } from "@/lib/extraction/trip-extraction-audit-diagnostics";
 import { createAuditLineageRows } from "@/lib/extraction/trip-extraction-audit-lineage";
 import {
-  compareRawAndAssembledTitles,
-  createAssemblySummary,
+  createCanonicalizationSummary,
   createDraftAuditSnapshot,
   createExtractionSummary,
 } from "@/lib/extraction/trip-extraction-audit-snapshot";
@@ -51,7 +50,7 @@ export function createTripExtractionAuditReport({
   );
 
   return {
-    assembly: createAssemblySummary(usage),
+    canonicalization: createCanonicalizationSummary(usage),
     diagnostics: createAuditDiagnostics({
       lineage,
       records,
@@ -62,7 +61,6 @@ export function createTripExtractionAuditReport({
     extraction: createExtractionSummary(usage),
     fingerprints: createTripExtractionFingerprints(records),
     lineage,
-    sourceComparison: usage ? compareRawAndAssembledTitles(usage) : null,
     sourceAnchors: {
       transport: sourceTransportAnchors,
     },

@@ -27,11 +27,6 @@ export function getStringFromKeys(record: DraftObject, keys: string[]) {
   return null;
 }
 
-export function getArrayCount(record: DraftObject, key: string) {
-  const value = record[key];
-  return Array.isArray(value) ? value.length : 0;
-}
-
 export function titleFrom(
   record: DraftObject,
   keys: string[],

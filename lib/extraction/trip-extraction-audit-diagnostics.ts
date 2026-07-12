@@ -15,10 +15,7 @@ import type {
   TripExtractionAuditLineageRow,
 } from "@/lib/extraction/trip-extraction-audit-types";
 import {
-  asArray,
   asRecord,
-  findOpenAIUsage,
-  getString,
   normalizeAuditIdentity,
 } from "@/lib/extraction/trip-extraction-audit-utils";
 import {
@@ -81,29 +78,6 @@ function finalTransportMatchesCandidate(
 
     return hasAuditTokenOverlap(candidateText, textForAudit(record));
   });
-}
-
-function classifyActivityTitle(value: string) {
-  const text = value.toLowerCase();
-  const classes: string[] = [];
-
-  if (/\b(breakfast|beer|cafe|dinner|food|lunch|restaurant)\b/.test(text)) {
-    classes.push("food");
-  }
-  if (/\b(castle|cathedral|church|palace|basilica)\b/.test(text)) {
-    classes.push("site");
-  }
-  if (/\b(kgb|museum|gallery|library)\b/.test(text)) {
-    classes.push("museum");
-  }
-  if (/\b(statue|bridge|square)\b/.test(text)) {
-    classes.push("landmark");
-  }
-  if (/\b(ticket|tour|guided)\b/.test(text)) {
-    classes.push("ticket");
-  }
-
-  return classes.length ? classes : ["other"];
 }
 
 function isActiveFinalRecord(record: AuditFinalRecordSummary) {
@@ -204,11 +178,11 @@ function isLikelyPlannedActivityBuriedInNotes(
   row: TripExtractionAuditLineageRow,
   notesText: string
 ) {
-  const candidate = row.raw;
+  const candidate = row.canonical;
 
   if (
     !candidate ||
-    row.status !== "removed_in_assembly" ||
+    row.status !== "missing_from_structured" ||
     row.finalRecords.length > 0 ||
     !candidate.date ||
     !isActivityCandidate(candidate) ||
@@ -423,7 +397,7 @@ export function createAuditDiagnostics({
   }
 
   const criticalCandidates = lineage
-    .map((row) => row.raw ?? row.assembled)
+    .map((row) => row.canonical)
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter(isCriticalTransportCandidate);
   const unresolvedCritical = criticalCandidates.filter(
@@ -589,7 +563,7 @@ export function createAuditDiagnostics({
         .slice(0, 10)
         .map((item) => `${item.date ?? "undated"} - ${item.title}`),
       severity: "p0",
-      title: "Day overview cards survived assembly",
+      title: "Day overview cards survived canonicalization",
     });
   }
 
@@ -608,67 +582,6 @@ export function createAuditDiagnostics({
         .map((row) => `${row.date ?? "undated"} - ${row.title}`),
       severity: "p1",
       title: "Planned activities were buried in city notes",
-    });
-  }
-
-  const consolidation = asRecord(findOpenAIUsage(usage).consolidation);
-  const wrongCityNoteMoves = asArray(consolidation.wrongCityPlacements)
-    .map(asRecord)
-    .filter((record) => getString(record, "action") === "moved_to_city_notes");
-
-  if (wrongCityNoteMoves.length > 0) {
-    diagnostics.push({
-      code: "wrong_city_note_contamination",
-      detail:
-        "Wrong-city items were moved into city notes instead of being re-anchored or held for review.",
-      evidence: wrongCityNoteMoves.slice(0, 10).map((record) =>
-        [
-          getString(record, "date") ?? "undated",
-          getString(record, "title") ?? "Untitled",
-          getString(record, "assignedCity") && getString(record, "explicitCity")
-            ? `${getString(record, "assignedCity")} -> ${getString(record, "explicitCity")}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" - ")
-      ),
-      severity: "p0",
-      title: "Wrong-city content entered city notes",
-    });
-  }
-
-  const groupedChildrenByParent = new Map<string, string[]>();
-
-  for (const item of asArray(consolidation.removedGroupedChildren)) {
-    const record = asRecord(item);
-    const parent = getString(record, "groupedUnder");
-    const removedTitle = getString(record, "removedTitle");
-
-    if (!parent || !removedTitle) {
-      continue;
-    }
-
-    const children = groupedChildrenByParent.get(parent) ?? [];
-
-    children.push(removedTitle);
-    groupedChildrenByParent.set(parent, children);
-  }
-
-  const riskyGroups = [...groupedChildrenByParent.entries()].filter(([, children]) => {
-    const classes = new Set(children.flatMap(classifyActivityTitle));
-
-    return children.length >= 3 && classes.size >= 3;
-  });
-
-  if (riskyGroups.length > 0) {
-    diagnostics.push({
-      code: "over_grouping_risk",
-      detail: "Grouped cards absorbed child stops from several different semantic classes.",
-      evidence: riskyGroups
-        .slice(0, 8)
-        .map(([parent, children]) => `${parent}: ${children.join(", ")}`),
-      severity: "p1",
-      title: "Possible over-grouping",
     });
   }
 

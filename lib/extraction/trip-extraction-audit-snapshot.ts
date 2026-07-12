@@ -8,7 +8,6 @@ import {
   asArray,
   asRecord,
   findOpenAIUsage,
-  getArrayCount,
   getString,
   getStringFromKeys,
   titleFrom,
@@ -104,25 +103,20 @@ export function createDraftAuditSnapshot(draft: unknown): DraftAuditSnapshot {
   };
 }
 
-export function createAssemblySummary(usage: unknown) {
+export function createCanonicalizationSummary(usage: unknown) {
   const openai = findOpenAIUsage(usage);
-  const consolidation = asRecord(openai.consolidation);
+  const evidence = asRecord(openai.evidence);
 
   return {
-    foldedLodgingNotes: getArrayCount(consolidation, "foldedLodgingNotes"),
-    mergedCityNotes: getArrayCount(consolidation, "mergedCityNotes"),
-    promotedTravelActivities: getArrayCount(
-      consolidation,
-      "promotedTravelActivities"
-    ),
-    removedDuplicateParents: getArrayCount(consolidation, "removedDuplicateParents"),
-    removedGroupedChildren: getArrayCount(consolidation, "removedGroupedChildren"),
-    suppressedDayOverviews: getArrayCount(consolidation, "suppressedDayOverviews"),
-    suppressedTransportActivities: getArrayCount(
-      consolidation,
-      "suppressedTransportActivities"
-    ),
-    wrongCityPlacements: getArrayCount(consolidation, "wrongCityPlacements"),
+    canonicalPieceCount: Number(evidence.canonicalPieceCount) || 0,
+    clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
+    contextObservationCount: Number(evidence.contextObservationCount) || 0,
+    observationCount: Number(evidence.observationCount) || 0,
+    rejectedObservationCount: Number(evidence.rejectedObservationCount) || 0,
+    sourceAnchorObservationCount:
+      Number(evidence.sourceAnchorObservationCount) || 0,
+    suppressedStandaloneAnchorCount:
+      Number(evidence.suppressedWeakAnchorCount) || 0,
   };
 }
 
@@ -152,22 +146,4 @@ export function getAuditSnapshotFromUsage(usage: unknown, key: string) {
   return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
     ? (snapshot as DraftAuditSnapshot)
     : null;
-}
-
-export function compareRawAndAssembledTitles(usage: unknown) {
-  const raw = getAuditSnapshotFromUsage(usage, "preAssemblyDraft");
-  const assembled = getAuditSnapshotFromUsage(usage, "assembledDraft");
-
-  if (!raw || !assembled) {
-    return null;
-  }
-
-  const rawTitles = new Set(raw.activities.map((item) => item.title));
-  const assembledTitles = new Set(assembled.activities.map((item) => item.title));
-
-  return {
-    assembledOnlyTitles: [...assembledTitles].filter((title) => !rawTitles.has(title)),
-    rawOnlyTitles: [...rawTitles].filter((title) => !assembledTitles.has(title)),
-    sharedTitles: [...assembledTitles].filter((title) => rawTitles.has(title)),
-  };
 }

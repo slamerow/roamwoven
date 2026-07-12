@@ -178,7 +178,7 @@ test("source anchors split merged PDF text into separate flight legs", () => {
   assert.equal(jfkToDca.arrivalTime, "21:50");
 });
 
-test("source anchors create a missing flight leg instead of merging into an adjacent leg", () => {
+test("canonical source anchors enrich existing flights but never create a missing leg", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
   ]);
@@ -219,14 +219,15 @@ test("source anchors create a missing flight leg instead of merging into an adja
     tripId: "return-flight-anchor-repair",
   });
 
-  assert.ok(
+  assert.equal(
     records.transport.some(
       (item) =>
         item.transportType === "flight" &&
         item.departureLocation === "FCO" &&
         item.arrivalLocation === "JFK"
     ),
-    "expected missing FCO to JFK flight to be created"
+    false,
+    "source-anchor diagnostics must not manufacture a missing FCO to JFK row"
   );
   assert.ok(
     records.transport.some(
@@ -247,12 +248,12 @@ test("source anchors create a missing flight leg instead of merging into an adja
 
   assert.equal(
     jan25ReturnRoutes.length,
-    2,
-    "expected exactly the two return-flight route legs on January 25"
+    1,
+    "expected only the model-produced JFK to DCA flight on January 25"
   );
 });
 
-test("source anchors split a generic same-day return flight into connecting legs", () => {
+test("canonical source anchors cannot split a generic flight into new connection rows", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,
   ]);
@@ -298,8 +299,8 @@ test("source anchors split a generic same-day return flight into connecting legs
   );
   assert.equal(
     jan25ReturnFlights.length,
-    2,
-    "expected the generic return row to repair into one leg, plus the missing connection"
+    1,
+    "expected one model-produced row after source-anchor enrichment"
   );
   assert.ok(
     jan25ReturnFlights.some(
@@ -310,14 +311,15 @@ test("source anchors split a generic same-day return flight into connecting legs
     ),
     "expected FCO to JFK to remain visible"
   );
-  assert.ok(
+  assert.equal(
     jan25ReturnFlights.some(
       (item) =>
         item.departureLocation === "JFK" &&
         item.arrivalLocation === "DCA" &&
         item.departureTime === "20:30"
     ),
-    "expected JFK to DCA to remain visible"
+    false,
+    "the unmatched connecting anchor must not create another traveler row"
   );
 });
 
@@ -408,6 +410,25 @@ test("ticket dates parse in day-month and numeric formats without crossing PDF p
     ),
     false
   );
+});
+
+test("flight duration decimals cannot become trip dates", () => {
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    {
+      filename: "flight.pdf",
+      sourceUploadId: "upload-flight-duration",
+      text: [
+        "Saturday, January 12th, 2019",
+        "Delta Flight 444 JFK -> FCO (8.5 hours) 30F 7:46 PM -> 10:15 AM",
+      ].join("\n"),
+      type: "pdf_text" as const,
+    },
+  ]);
+  const flight = anchors.find((anchor) => anchor.number === "444");
+
+  assert.ok(flight);
+  assert.equal(flight.date, "2019-01-12");
+  assert.equal(anchors.some((anchor) => anchor.date === "2019-05-08"), false);
 });
 
 test("source anchors repair transport and suppress already-answered time questions", () => {

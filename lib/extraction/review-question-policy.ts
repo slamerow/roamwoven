@@ -18,6 +18,10 @@ import {
   normalizeText,
 } from "@/lib/extraction/traveler-text";
 import { isDefaultPrivacyPolicyQuestion } from "@/lib/trip-privacy-policy";
+import {
+  hasTransportTimeEvidence,
+  isCriticalTransportRecord,
+} from "@/lib/trip-transport-policy";
 
 function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
@@ -153,6 +157,13 @@ function isObviousFactCall({
     /\b(explicit|explicitly|source says|source states|source lists|clearly states|directly states|\d+\s+night(s)?)\b/.test(
       text
     );
+
+  if (
+    normalizedTarget.includes("presentation") &&
+    /\b(grouped|combined|bundled)\b/.test(text)
+  ) {
+    return false;
+  }
 
   if (
     confidence !== "high" &&
@@ -904,12 +915,7 @@ export function createReviewQuestions({
       return false;
     }
 
-    if (
-      !/\b(grouped|combined|turned|bundled)\b/.test(text) ||
-      !/\b(bar crawl|crawl|dinner options?|explore|flexible|museum visit|option|options|outing|route|walk)\b/.test(
-        text
-      )
-    ) {
+    if (!/\b(grouped|combined|turned|bundled)\b/.test(text)) {
       return false;
     }
 
@@ -1201,6 +1207,69 @@ export function createReviewQuestions({
       (question) => `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`
     )
   );
+  const missingTransportDepartureQuestions = transport.flatMap(
+    (item, index): TripReviewQuestionRecord[] => {
+      const policyRecord = {
+        arrivalLocation: item.arrivalLocation,
+        arrivalTime: item.arrivalTime,
+        confirmationLabel: item.confirmationLabel,
+        departureLocation: item.departureLocation,
+        departureTime: item.departureTime,
+        description: item.description,
+        provider: item.provider,
+        routeLabel: item.routeLabel,
+        transportType: item.transportType,
+      };
+
+      if (
+        !isCriticalTransportRecord(policyRecord) ||
+        item.departureTime ||
+        hasTransportTimeEvidence(policyRecord)
+      ) {
+        return [];
+      }
+
+      const question: TripReviewQuestionRecord = {
+        answerType: "text",
+        answerValue: null,
+        createdAt: null,
+        evidence:
+          [
+            item.routeLabel,
+            item.description,
+            item.departureLocation,
+            item.arrivalLocation,
+            item.provider,
+          ]
+            .filter(Boolean)
+            .join(" ") || null,
+        guessedValue: null,
+        id: `${tripId}-transport-departure-question-${index + 1}`,
+        prompt:
+          item.transportType === "rental_car" ||
+          item.transportType === "transfer"
+            ? `What time is ${item.routeLabel}?`
+            : `What time does ${item.routeLabel} depart?`,
+        reason:
+          "Critical travel cards need a departure or pickup time for the Today timeline. You can leave it blank if this is not booked yet.",
+        resolvedAt: null,
+        sourceConfidence: "medium",
+        status: "open",
+        subjectId: item.id,
+        subjectType: "transport",
+        targetField: "departureTime",
+        tripId,
+      };
+      const key = `${question.subjectType}:${question.subjectId}:${getQuestionClusterKey(question)}`;
+
+      if (questionKeys.has(key)) {
+        return [];
+      }
+
+      questionKeys.add(key);
+      return [question];
+    }
+  );
   const hasRelatedOpenPlacementQuestion = (item: TripItemRecord) => {
     const title = normalizeText(item.title);
 
@@ -1337,6 +1406,7 @@ export function createReviewQuestions({
 
   return [
     ...draftQuestions,
+    ...missingTransportDepartureQuestions,
     ...inferredStayCheckOutQuestions,
     ...explicitTodoQuestions,
     ...missingItemDateQuestions,

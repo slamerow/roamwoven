@@ -11,8 +11,7 @@ import type {
   TripItemType,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
-import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
-import { CANONICAL_EVIDENCE_BOUNDARY_VERSION } from "@/lib/extraction/evidence-clustering";
+import { preparePersistedTripDraftForStructuredCompilation } from "@/lib/extraction/canonical-trip-finalization";
 import {
   type DraftObject,
   getArray,
@@ -26,10 +25,6 @@ import {
   cleanTravelerText,
   normalizeText,
 } from "@/lib/extraction/traveler-text";
-import {
-  applySourceTransportAnchorsToRecords,
-  getSourceTransportAnchorsFromDraft,
-} from "@/lib/extraction/source-transport-anchors";
 import {
   getStayAddressVisibility,
   shouldCreatePrivateDetailFromDraftSensitiveDetail,
@@ -781,92 +776,6 @@ function createItemRecords({
   });
 }
 
-function hasStayCheckInCard({
-  items,
-  stay,
-}: {
-  items: TripItemRecord[];
-  stay: TripStayRecord;
-}) {
-  const stayName = normalizeText(stay.name);
-  const lodgingArrivalPattern =
-    /\b(arrive|arrival|check in)\b/;
-  const lodgingPlacePattern =
-    /\b(airbnb|apartment|flat|hostel|hotel|inn|lodging|rental|stay)\b/;
-
-  return items.some((item) => {
-    if (item.date !== stay.checkInDate) {
-      return false;
-    }
-
-    const text = normalizeText(
-      [item.title, item.description, item.locationName].filter(Boolean).join(" ")
-    );
-
-    return (
-      lodgingArrivalPattern.test(text) &&
-      (!stayName ||
-        text.includes(stayName) ||
-        stayName.includes(text) ||
-        lodgingPlacePattern.test(text))
-    );
-  });
-}
-
-function createStayCheckInItemRecords({
-  items,
-  stays,
-  tripId,
-}: {
-  items: TripItemRecord[];
-  stays: TripStayRecord[];
-  tripId: string;
-}): TripItemRecord[] {
-  return stays.flatMap((stay, index): TripItemRecord[] => {
-    if (!stay.checkInDate || hasStayCheckInCard({ items, stay })) {
-      return [];
-    }
-
-    const title = `Check in to ${stay.name}`;
-    const descriptionParts = [
-      stay.checkInTime ? `Check-in time: ${stay.checkInTime}.` : null,
-      stay.publicLocationLabel ? `Stay area: ${stay.publicLocationLabel}.` : null,
-      stay.address && stay.addressVisibility === "public"
-        ? `Address: ${stay.address}.`
-        : null,
-      stay.address && stay.addressVisibility !== "public"
-        ? "Exact address is saved with protected stay details."
-        : null,
-    ];
-
-    return [
-      {
-        address: stay.addressVisibility === "public" ? stay.address : null,
-        categoryId: "arrival_departure",
-        date: stay.checkInDate,
-        description: descriptionParts.filter(Boolean).join(" ") || null,
-        endTime: null,
-        id: `${stay.id}-check-in-card`,
-        itemType: "admin",
-        latitude: null,
-        legId: stay.legId,
-        locationName: stay.name,
-        longitude: null,
-        parentItemId: null,
-        reviewRequired: false,
-        sortOrder: items.length + index,
-        sourceConfidence: stay.sourceConfidence,
-        startTime: stay.checkInTime,
-        status: "draft",
-        summary: null,
-        title,
-        tripId,
-        url: null,
-      },
-    ];
-  });
-}
-
 function createCategoryRecords({
   items,
   tripId,
@@ -1057,31 +966,19 @@ export function createStructuredTripRecordsFromDraft({
   fallbackTripName: string;
   tripId: string;
 }): StructuredTripRecords {
-  const consolidatedDraft = consolidateTripDraft(draft).draft;
-  const trip = createTripRecord({ draft: consolidatedDraft, fallbackTripName, tripId });
-  const legs = createLegRecords({ draft: consolidatedDraft, tripId });
-  const stays = createStayRecords({ draft: consolidatedDraft, legs, tripId });
-  const extractedTransport = createTransportRecords({
-    draft: consolidatedDraft,
+  const finalizedDraft = preparePersistedTripDraftForStructuredCompilation(draft);
+  const trip = createTripRecord({ draft: finalizedDraft, fallbackTripName, tripId });
+  const legs = createLegRecords({ draft: finalizedDraft, tripId });
+  const stays = createStayRecords({ draft: finalizedDraft, legs, tripId });
+  const transport = createTransportRecords({
+    draft: finalizedDraft,
     legs,
     tripId,
   });
-  const evidenceMetadata = getObject(consolidatedDraft, "_evidence");
-  const hasCanonicalEvidenceBoundary =
-    (getNumber(evidenceMetadata, "version") ?? 0) >=
-    CANONICAL_EVIDENCE_BOUNDARY_VERSION;
-  const transport = hasCanonicalEvidenceBoundary
-    ? extractedTransport
-    : applySourceTransportAnchorsToRecords({
-        anchors: getSourceTransportAnchorsFromDraft(consolidatedDraft),
-        legs,
-        transport: extractedTransport,
-        tripId,
-      });
-  const items = createItemRecords({ draft: consolidatedDraft, legs, tripId });
+  const items = createItemRecords({ draft: finalizedDraft, legs, tripId });
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({
-    draft: consolidatedDraft,
+    draft: finalizedDraft,
     stays,
     transport,
     tripId,
@@ -1098,7 +995,7 @@ export function createStructuredTripRecordsFromDraft({
     phrases: [],
     privateDetails,
     reviewQuestions: createReviewQuestions({
-      draft: consolidatedDraft,
+      draft: finalizedDraft,
       items,
       legs,
       stays,

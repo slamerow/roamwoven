@@ -20,6 +20,7 @@ export const MAKER_VISIBLE_GROUPING_KINDS: readonly GroupingKind[] = [
   "option_set",
   "planned_area",
   "route_or_tour",
+  "same_site",
 ];
 
 const makerVisibleGroupingKindSet = new Set<GroupingKind>(

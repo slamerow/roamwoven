@@ -7,15 +7,11 @@ function includesQuery(value: string | null | undefined, query: string) {
   return Boolean(value?.toLowerCase().includes(query));
 }
 
-function candidateDescription(
-  item: AuditLineageRow["raw"] | AuditLineageRow["assembled"] | null
-) {
+function candidateDescription(item: AuditLineageRow["canonical"] | null) {
   return item && "description" in item ? item.description : null;
 }
 
-function candidateEvidence(
-  item: AuditLineageRow["raw"] | AuditLineageRow["assembled"] | null
-) {
+function candidateEvidence(item: AuditLineageRow["canonical"] | null) {
   return item && "evidence" in item ? item.evidence : null;
 }
 
@@ -28,13 +24,9 @@ export function lineageMatchesQuery(row: AuditLineageRow, query: string) {
     row.title,
     row.date,
     row.status,
-    row.raw?.title,
-    candidateDescription(row.raw),
-    candidateEvidence(row.raw),
-    row.assembled?.title,
-    candidateDescription(row.assembled),
-    candidateEvidence(row.assembled),
-    ...row.assemblyActions.flatMap((action) => [action.action, action.detail]),
+    row.canonical?.title,
+    candidateDescription(row.canonical),
+    candidateEvidence(row.canonical),
     ...row.diagnostics,
     ...row.finalRecords.flatMap((record) => [
       record.title,
@@ -49,16 +41,13 @@ export function lineageMatchesQuery(row: AuditLineageRow, query: string) {
 
 export function isDiagnosticLineageRow(row: AuditLineageRow) {
   return (
-    row.status !== "survived" ||
-    row.assemblyActions.length > 0 ||
+    row.status !== "compiled" ||
     row.diagnostics.length > 0 ||
     row.finalRecords.length !== 1
   );
 }
 
-function candidateBits(
-  item: AuditLineageRow["raw"] | AuditLineageRow["assembled"]
-) {
+function candidateBits(item: AuditLineageRow["canonical"]) {
   if (!item) {
     return [];
   }
@@ -91,7 +80,7 @@ function candidateBits(
 function CandidateSummary({
   item,
 }: {
-  item: AuditLineageRow["raw"] | AuditLineageRow["assembled"];
+  item: AuditLineageRow["canonical"];
 }) {
   if (!item) {
     return <span className="text-ink/35">None</span>;
@@ -178,15 +167,13 @@ export function LineageTable({
     <div>
       <p className="mb-3 text-sm font-semibold text-ink/65">{title}</p>
       <div className="overflow-auto rounded-md border border-ink/10">
-        <table className="min-w-[72rem] border-collapse text-left text-sm">
+        <table className="min-w-[54rem] border-collapse text-left text-sm">
           <thead className="bg-paper text-xs font-semibold uppercase tracking-wide text-ink/45">
             <tr>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Date</th>
-              <th className="px-3 py-2">Raw</th>
-              <th className="px-3 py-2">Assembly</th>
-              <th className="px-3 py-2">Assembled</th>
-              <th className="px-3 py-2">Final</th>
+              <th className="px-3 py-2">Canonical piece</th>
+              <th className="px-3 py-2">Structured record</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ink/10">
@@ -202,28 +189,7 @@ export function LineageTable({
                 </td>
                 <td className="px-3 py-3 text-ink/55">{row.date ?? "None"}</td>
                 <td className="px-3 py-3 text-ink/70">
-                  <CandidateSummary item={row.raw} />
-                </td>
-                <td className="px-3 py-3 text-ink/70">
-                  {row.assemblyActions.length ? (
-                    <ul className="space-y-2">
-                      {row.assemblyActions.map((action, index) => (
-                        <li key={`${action.action}-${index}`}>
-                          <span className="font-semibold text-ink">
-                            {action.action}
-                          </span>
-                          <p className="text-xs leading-5 text-ink/55">
-                            {action.detail}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-ink/35">None</span>
-                  )}
-                </td>
-                <td className="px-3 py-3 text-ink/70">
-                  <CandidateSummary item={row.assembled} />
+                  <CandidateSummary item={row.canonical} />
                 </td>
                 <td className="px-3 py-3 text-ink/70">
                   <FinalRecordsSummary records={row.finalRecords} />

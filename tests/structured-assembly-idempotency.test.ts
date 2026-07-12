@@ -347,7 +347,7 @@ export default function run() {
     assert.ok(titles.includes("Great Market Hall"));
   });
 
-  test("return-day source-anchor repair is idempotent and keeps connecting flights separate", () => {
+  test("canonical source-anchor enrichment is idempotent without creating connection rows", () => {
     const draft = createJan25ReturnFlightAnchorDraft();
     const firstRecords = createStructuredTripRecordsFromDraft({
       draft: cloneDraft(draft),
@@ -368,10 +368,10 @@ export default function run() {
     assert.equal(first.hash, second.hash);
     assert.deepEqual(first.sectionHashes, second.sectionHashes);
     assert.deepEqual(first.counts, second.counts);
-    assert.equal(first.counts.transport, 2);
+    assert.equal(first.counts.transport, 1);
     assert.equal(first.counts.calls, 0);
     assert.equal(first.counts.openQuestions, 0);
-    assert.equal(jan25Flights.length, 2);
+    assert.equal(jan25Flights.length, 1);
     assert.ok(
       jan25Flights.some(
         (item) =>
@@ -382,7 +382,7 @@ export default function run() {
       ),
       "expected Delta 1043 FCO to JFK to remain a separate traveler transport row"
     );
-    assert.ok(
+    assert.equal(
       jan25Flights.some(
         (item) =>
           item.departureLocation === "JFK" &&
@@ -390,7 +390,72 @@ export default function run() {
           item.departureTime === "20:30" &&
           item.arrivalTime === "21:50"
       ),
-      "expected Delta 2934 JFK to DCA to remain a separate traveler transport row"
+      false,
+      "an unmatched source anchor cannot create the Delta 2934 connection row"
+    );
+  });
+
+  test("canonical system grouping survives assembly as one visible FYI Call", () => {
+    const clustered = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "same-site source",
+          source: "model_chunk",
+          stage: {
+            activities: [
+              {
+                category: "art_culture",
+                date: "2019-01-19",
+                description:
+                  "Same-site Schönbrunn visit including Schönbrunn gardens.",
+                itemType: "activity",
+                title: "Schönbrunn Palace complex",
+              },
+              {
+                category: "art_culture",
+                date: "2019-01-19",
+                description: "Walk through the gardens.",
+                itemType: "activity",
+                title: "Schönbrunn gardens",
+              },
+            ],
+            missingDetails: [],
+            places: [
+              {
+                arriveDate: "2019-01-18",
+                city: "Vienna",
+                leaveDate: "2019-01-21",
+              },
+            ],
+            sensitiveDetails: [],
+            stays: [],
+            transport: [],
+          },
+        },
+      ],
+      tripOverview: { title: "Central Europe" },
+    });
+    const records = createStructuredTripRecordsFromDraft({
+      draft: clustered.draft,
+      fallbackTripName: "Central Europe",
+      tripId: "canonical-grouping-call",
+    });
+    const call = records.reviewQuestions.find((question) =>
+      /We grouped Schönbrunn gardens into Schönbrunn Palace complex/.test(
+        question.prompt
+      )
+    );
+
+    assert.deepEqual(
+      records.items.map((item) => item.title),
+      ["Schönbrunn Palace complex"]
+    );
+    assert.ok(call);
+    assert.equal(call.status, "noted");
+    assert.equal(
+      records.reviewQuestions.filter((question) => question.status === "open").length,
+      0
     );
   });
 }

@@ -115,61 +115,17 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function countArrayField(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-
-  return Array.isArray(value) ? value.length : 0;
-}
-
-function summarizeAssemblyUsage(usage: unknown) {
+function summarizeFinalizationUsage(usage: unknown) {
   const usageRecord = asRecord(usage);
-  const consolidation = asRecord(usageRecord?.consolidation);
+  const finalization = asRecord(usageRecord?.finalization);
 
-  if (!consolidation) {
+  if (!finalization) {
     return null;
   }
 
-  const overproductionRetry = asRecord(consolidation.overproductionRetry);
-
   return {
-    foldedLodgingNotes: countArrayField(consolidation, "foldedLodgingNotes"),
-    mergedCityNotes: countArrayField(consolidation, "mergedCityNotes"),
-    normalizedOptionalActivities: countArrayField(
-      consolidation,
-      "normalizedOptionalActivities"
-    ),
-    normalizedRentalCarPickups: countArrayField(
-      consolidation,
-      "normalizedRentalCarPickups"
-    ),
-    overproductionRetry: overproductionRetry
-      ? {
-          averagePlansPerDay: overproductionRetry.averagePlansPerDay ?? null,
-          maxPlansPerDay: overproductionRetry.maxPlansPerDay ?? null,
-          triggered: overproductionRetry.triggered ?? null,
-        }
-      : null,
-    promotedTravelActivities: countArrayField(
-      consolidation,
-      "promotedTravelActivities"
-    ),
-    removedDuplicateParents: countArrayField(
-      consolidation,
-      "removedDuplicateParents"
-    ),
-    removedGroupedChildren: countArrayField(
-      consolidation,
-      "removedGroupedChildren"
-    ),
-    suppressedDayOverviews: countArrayField(
-      consolidation,
-      "suppressedDayOverviews"
-    ),
-    suppressedTransportActivities: countArrayField(
-      consolidation,
-      "suppressedTransportActivities"
-    ),
-    wrongCityPlacements: countArrayField(consolidation, "wrongCityPlacements"),
+    canonicalEvidenceVersion: finalization.canonicalEvidenceVersion ?? null,
+    status: finalization.status ?? null,
   };
 }
 
@@ -409,10 +365,10 @@ export async function POST(
       tripId,
     });
 
-    const assemblySummary = summarizeAssemblyUsage(result.usage);
+    const finalizationSummary = summarizeFinalizationUsage(result.usage);
 
     await recordTripProcessingEvent({
-      details: assemblySummary ?? {},
+      details: finalizationSummary ?? {},
       processingRunId: run.id,
       stage: "assembly",
       status: "completed",

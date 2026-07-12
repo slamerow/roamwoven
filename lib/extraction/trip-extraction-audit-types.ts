@@ -67,26 +67,13 @@ export type AuditFinalRecordSummary = {
   type: string | null;
 };
 
-export type AuditAssemblyAction = {
-  action: string;
-  detail: string;
-};
-
 export type TripExtractionAuditLineageRow = {
-  assemblyActions: AuditAssemblyAction[];
-  assembled: DraftLineageCandidate | null;
+  canonical: DraftLineageCandidate | null;
   date: string | null;
   diagnostics: string[];
   finalRecords: AuditFinalRecordSummary[];
   identityKey: string;
-  raw: DraftLineageCandidate | null;
-  status:
-    | "created_in_assembly"
-    | "final_only"
-    | "lost_after_assembly"
-    | "removed_in_assembly"
-    | "survived"
-    | "unmatched";
+  status: "compiled" | "final_only" | "missing_from_structured";
   title: string;
 };
 
@@ -102,10 +89,8 @@ export type TripExtractionAuditDiagnostic = {
     | "duplicate_same_venue_activity"
     | "loose_tip_promoted_to_activity"
     | "ocr_backfill_failed"
-    | "over_grouping_risk"
     | "planned_activity_buried_in_city_notes"
-    | "transport_description_contaminated"
-    | "wrong_city_note_contamination";
+    | "transport_description_contaminated";
   detail: string;
   evidence: string[];
   severity: "p0" | "p1" | "p2";
@@ -133,15 +118,14 @@ export type DraftAuditSnapshot = {
 };
 
 export type TripExtractionAuditReport = {
-  assembly: {
-    foldedLodgingNotes: number;
-    mergedCityNotes: number;
-    promotedTravelActivities: number;
-    removedDuplicateParents: number;
-    removedGroupedChildren: number;
-    suppressedDayOverviews: number;
-    suppressedTransportActivities: number;
-    wrongCityPlacements: number;
+  canonicalization: {
+    canonicalPieceCount: number;
+    clusteredObservationCount: number;
+    contextObservationCount: number;
+    observationCount: number;
+    rejectedObservationCount: number;
+    sourceAnchorObservationCount: number;
+    suppressedStandaloneAnchorCount: number;
   };
   diagnostics: TripExtractionAuditDiagnostic[];
   draft: DraftAuditSnapshot;
@@ -156,11 +140,6 @@ export type TripExtractionAuditReport = {
   };
   fingerprints: TripExtractionFingerprints;
   lineage: TripExtractionAuditLineageRow[];
-  sourceComparison: {
-    assembledOnlyTitles: string[];
-    rawOnlyTitles: string[];
-    sharedTitles: string[];
-  } | null;
   sourceAnchors: {
     transport: SourceTransportAnchor[];
   };

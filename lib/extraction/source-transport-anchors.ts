@@ -1,8 +1,4 @@
-import type {
-  TripLegRecord,
-  TripTransportRecord,
-  TripTransportType,
-} from "@/lib/generated-trip-model";
+import type { TripTransportType } from "@/lib/generated-trip-model";
 import type { TripExtractionMaterial } from "@/lib/extraction/openai-trip-parser";
 import {
   normalizeText,
@@ -273,7 +269,27 @@ function parseDateFromText(value: string, defaultYear: number | null) {
     value
   );
 
-  if (!monthFirst && !dayFirst && !numeric) {
+  const numericLooksLikeDuration = Boolean(
+    numeric &&
+      /^(?:\s*\)?\s*)(?:hours?|hrs?|h)\b/i.test(
+        value.slice((numeric.index ?? 0) + numeric[0].length)
+      )
+  );
+  const numericHasDateContext = Boolean(
+    numeric &&
+      (numeric[3] ||
+        /\b(?:date|datum)\s*:/i.test(numeric[0]) ||
+        /\b(?:date|datum|dated|departure|arrival|inbound|outbound|return|on)\b/i.test(
+          value.slice(Math.max(0, (numeric.index ?? 0) - 28), numeric.index)
+        ) ||
+        /^\s*(?:\w+day[,]?\s*)?\d{1,2}[./]\d{1,2}\s*$/i.test(value))
+  );
+
+  if (
+    !monthFirst &&
+    !dayFirst &&
+    (!numeric || numericLooksLikeDuration || !numericHasDateContext)
+  ) {
     return null;
   }
 
@@ -1097,16 +1113,6 @@ function isVagueTransportRouteLabel(normalized: string, type: string) {
   );
 }
 
-function shouldReplaceRouteLabelFromAnchor(
-  value: string | null | undefined,
-  transportType: string | null | undefined
-) {
-  const normalized = normalizeText(value);
-  const type = normalizeText(transportType);
-
-  return Boolean(normalized && type && isVagueTransportRouteLabel(normalized, type));
-}
-
 export function sourceTransportAnchorMatchesRecord(
   anchor: SourceTransportAnchor,
   record: {
@@ -1210,191 +1216,4 @@ export function sourceTransportAnchorMatchesRecord(
   }
 
   return !bothHaveSpecificRoutes && overlapScore(anchorText, recordText) >= 2;
-}
-
-function matchScore(anchor: SourceTransportAnchor, record: TripTransportRecord) {
-  if (!sourceTransportAnchorMatchesRecord(anchor, record)) {
-    return 0;
-  }
-
-  let score = 4;
-
-  if (anchor.date && record.date === anchor.date) {
-    score += 4;
-  }
-
-  if (anchor.departureTime && record.departureTime === anchor.departureTime) {
-    score += 2;
-  }
-
-  if (anchor.arrivalTime && record.arrivalTime === anchor.arrivalTime) {
-    score += 1;
-  }
-
-  score += overlapScore(anchor.routeLabel, record.routeLabel);
-  score += overlapScore(anchor.departureLocation, record.departureLocation);
-  score += overlapScore(anchor.arrivalLocation, record.arrivalLocation);
-
-  if (
-    overlapScore(routeTextForMatch(anchor), routeTextForMatch(record)) >= 1 &&
-    isGenericTransportRouteLabel(record.routeLabel, record.transportType)
-  ) {
-    score += 2;
-  }
-
-  return score;
-}
-
-function canCreateTransportFromAnchor(anchor: SourceTransportAnchor) {
-  return Boolean(
-    anchor.date &&
-      (anchor.departureTime ||
-        anchor.departureLocation ||
-        anchor.arrivalLocation ||
-        anchor.provider ||
-        anchor.number ||
-        anchor.confirmation)
-  );
-}
-
-function findLegForDate(legs: TripLegRecord[], date: string | null) {
-  if (!date) {
-    return null;
-  }
-
-  return (
-    legs.find(
-      (leg) =>
-        leg.arriveDate &&
-        leg.leaveDate &&
-        date >= leg.arriveDate &&
-        date < leg.leaveDate
-    ) ?? legs.find((leg) => leg.arriveDate === date) ?? null
-  );
-}
-
-function repairedTransport(
-  record: TripTransportRecord,
-  anchor: SourceTransportAnchor
-): TripTransportRecord {
-  return {
-    ...record,
-    arrivalLocation: record.arrivalLocation ?? anchor.arrivalLocation,
-    arrivalTime: record.arrivalTime ?? anchor.arrivalTime,
-    confirmationLabel: record.confirmationLabel ?? anchor.confirmation,
-    date: record.date ?? anchor.date,
-    departureLocation: record.departureLocation ?? anchor.departureLocation,
-    departureTime: record.departureTime ?? anchor.departureTime,
-    description: record.description,
-    provider: record.provider ?? anchor.provider,
-    reviewRequired: record.reviewRequired && !anchor.departureTime,
-    routeLabel:
-      shouldReplaceRouteLabelFromAnchor(record.routeLabel, record.transportType)
-        ? anchor.routeLabel
-        : record.routeLabel,
-  };
-}
-
-function recordAlreadyRepresentsAnchor(
-  records: TripTransportRecord[],
-  anchor: SourceTransportAnchor
-) {
-  return records.some((record) => sourceTransportAnchorMatchesRecord(anchor, record));
-}
-
-function createTransportFromAnchor({
-  anchor,
-  index,
-  legs,
-  tripId,
-}: {
-  anchor: SourceTransportAnchor;
-  index: number;
-  legs: TripLegRecord[];
-  tripId: string;
-}): TripTransportRecord {
-  const leg = findLegForDate(legs, anchor.date);
-
-  return {
-    arrivalLocation: anchor.arrivalLocation,
-    arrivalTime: anchor.arrivalTime,
-    bookingUrl: null,
-    bookingUrlVisibility: "traveler_password",
-    confirmationLabel: anchor.confirmation,
-    confirmationVisibility: anchor.confirmation ? "traveler_password" : "public",
-    date: anchor.date,
-    departureLocation: anchor.departureLocation,
-    departureTime: anchor.departureTime,
-    description: null,
-    fromLegId: null,
-    id: `${tripId}-transport-source-${anchor.anchorId || index + 1}`,
-    legId: leg?.id ?? null,
-    privateDetailIds: [],
-    provider: anchor.provider,
-    reviewRequired: !anchor.date || !anchor.departureTime,
-    routeLabel: anchor.routeLabel,
-    sourceConfidence: anchor.confidence,
-    status: "draft",
-    toLegId: null,
-    transportType: transportTypeForAnchor(anchor.kind),
-    tripId,
-  };
-}
-
-export function applySourceTransportAnchorsToRecords({
-  anchors,
-  legs,
-  transport,
-  tripId,
-}: {
-  anchors: SourceTransportAnchor[];
-  legs: TripLegRecord[];
-  transport: TripTransportRecord[];
-  tripId: string;
-}) {
-  const records = transport.map((record) => ({ ...record }));
-  const matchedRecordIndexes = new Set<number>();
-
-  anchors.forEach((anchor, index) => {
-    const scored = records
-      .map((record, recordIndex) =>
-        matchedRecordIndexes.has(recordIndex)
-          ? null
-          : {
-              recordIndex,
-              score: matchScore(anchor, record),
-            }
-      )
-      .filter((entry): entry is { recordIndex: number; score: number } =>
-        Boolean(entry)
-      )
-      .sort((a, b) => b.score - a.score);
-    const match = scored[0];
-
-    if (match && match.score > 0) {
-      records[match.recordIndex] = repairedTransport(
-        records[match.recordIndex],
-        anchor
-      );
-      matchedRecordIndexes.add(match.recordIndex);
-      return;
-    }
-
-    if (recordAlreadyRepresentsAnchor(records, anchor)) {
-      return;
-    }
-
-    if (canCreateTransportFromAnchor(anchor)) {
-      records.push(
-        createTransportFromAnchor({
-          anchor,
-          index,
-          legs,
-          tripId,
-        })
-      );
-    }
-  });
-
-  return records;
 }

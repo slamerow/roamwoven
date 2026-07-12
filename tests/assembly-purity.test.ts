@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { consolidateTripDraft } from "@/lib/extraction/consolidate-trip-draft";
+import {
+  finalizeCanonicalTripDraft,
+  NonCanonicalDraftError,
+  preparePersistedTripDraftForStructuredCompilation,
+} from "@/lib/extraction/canonical-trip-finalization";
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try {
@@ -12,52 +16,59 @@ async function test(name: string, fn: () => void | Promise<void>) {
 }
 
 export default async function run() {
-  await test("flight enrichment cannot absorb lodging directions or addresses", () => {
-    const result = consolidateTripDraft({
-      activities: [
-        {
-          address: "99 Hostel Street",
-          category: "arrival_departure",
-          date: "2030-05-03",
-          description:
-            "Directions to the hostel: take the tram, use the side entrance, and check in at reception.",
-          endTime: null,
-          itemType: "activity",
-          sourceFilename: "itinerary.pdf",
-          startTime: "12:20",
-          title: "Example Air Flight EA 2339",
-        },
-      ],
+  await test("canonical finalization cannot mutate traveler pieces", () => {
+    const activities = [
+      {
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Schönbrunn Palace complex.",
+        itemType: "activity",
+        title: "Schönbrunn Palace complex",
+      },
+      {
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Visit Hundertwasser House.",
+        itemType: "activity",
+        title: "Hundertwasser House",
+      },
+    ];
+    const result = finalizeCanonicalTripDraft({
+      _evidence: {
+        canonicalPieceIds: ["schonbrunn", "hundertwasser"],
+        observationIds: ["obs-1", "obs-2"],
+        version: 4,
+      },
+      activities,
       missingDetails: [],
       places: [],
       sensitiveDetails: [],
       stays: [],
-      transport: [
-        {
-          arrival: "Destination Airport",
-          arrivalTime: "14:10",
-          confirmation: "ABC123",
-          date: "2030-05-03",
-          departure: "Origin Airport",
-          departureTime: "12:20",
-          description: "Flight EA 2339.",
-          provider: "Example Air",
-          sourceFilename: "ticket.pdf",
-          title: "Example Air Flight EA 2339",
-          type: "flight",
-        },
-      ],
+      transport: [],
       tripOverview: {},
     });
-    const draft = result.draft as {
-      activities: unknown[];
-      transport: Array<{ description?: string | null }>;
-    };
-    const description = draft.transport[0]?.description ?? "";
+    const draft = result.draft as { activities: typeof activities };
 
-    assert.equal(draft.activities.length, 0);
-    assert.doesNotMatch(description, /hostel|tram|side entrance|reception/i);
-    assert.doesNotMatch(description, /99 Hostel Street/i);
-    assert.match(description, /Flight EA 2339/);
+    assert.deepEqual(draft.activities, activities);
+    assert.equal(result.debug.status, "finalized");
+  });
+
+  await test("strict finalization rejects noncanonical drafts", () => {
+    assert.throws(
+      () => finalizeCanonicalTripDraft({ activities: [] }),
+      NonCanonicalDraftError
+    );
+  });
+
+  await test("historical snapshots stay readable without legacy mutation", () => {
+    const historical = {
+      _assembly: { version: 3 },
+      activities: [{ title: "Stored historical activity" }],
+    };
+
+    assert.strictEqual(
+      preparePersistedTripDraftForStructuredCompilation(historical),
+      historical
+    );
   });
 }

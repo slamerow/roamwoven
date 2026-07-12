@@ -22,15 +22,17 @@ import {
 type AuditReport = NonNullable<TripExtractionAuditPayload["report"]>;
 type ProcessingEvent = TripExtractionAuditPayload["processingEvents"][number];
 
-const assemblyLabels: Array<[keyof AuditReport["assembly"], string]> = [
-  ["foldedLodgingNotes", "Stay-flow folds"],
-  ["mergedCityNotes", "City-note merges"],
-  ["promotedTravelActivities", "Travel activities promoted"],
-  ["removedDuplicateParents", "Duplicate parents removed"],
-  ["removedGroupedChildren", "Grouped children removed"],
-  ["suppressedDayOverviews", "Day overviews suppressed"],
-  ["suppressedTransportActivities", "Transport activities suppressed"],
-  ["wrongCityPlacements", "Wrong-city placements"],
+const canonicalizationLabels: Array<[
+  keyof AuditReport["canonicalization"],
+  string,
+]> = [
+  ["observationCount", "Observations"],
+  ["canonicalPieceCount", "Output pieces"],
+  ["clusteredObservationCount", "Clustered sightings"],
+  ["contextObservationCount", "Context only"],
+  ["rejectedObservationCount", "Rejected sightings"],
+  ["sourceAnchorObservationCount", "Source anchors"],
+  ["suppressedStandaloneAnchorCount", "Unmatched anchors"],
 ];
 
 function formatDateTime(value: string | null | undefined) {
@@ -122,39 +124,6 @@ function SmallMetric({ label, value }: { label: string; value: ReactNode }) {
     <div className="rounded-md bg-paper px-3 py-2">
       <p className="text-xs font-semibold text-ink/45">{label}</p>
       <p className="mt-1 text-lg font-semibold text-ink">{value}</p>
-    </div>
-  );
-}
-
-function TitleList({
-  emptyLabel = "None",
-  items,
-  title,
-}: {
-  emptyLabel?: string;
-  items: string[];
-  title: string;
-}) {
-  const visibleItems = items.slice(0, 16);
-  const remainingCount = items.length - visibleItems.length;
-
-  return (
-    <div className="rounded-md bg-paper p-4">
-      <p className="text-sm font-semibold text-ink">{title}</p>
-      {visibleItems.length ? (
-        <ul className="mt-3 space-y-2 text-sm leading-5 text-ink/70">
-          {visibleItems.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-          {remainingCount > 0 ? (
-            <li className="font-semibold text-ink/45">
-              {remainingCount} more
-            </li>
-          ) : null}
-        </ul>
-      ) : (
-        <p className="mt-3 text-sm text-ink/45">{emptyLabel}</p>
-      )}
     </div>
   );
 }
@@ -319,13 +288,13 @@ export default async function TripExtractionAuditPage({
               </div>
             </Section>
 
-            <Section icon={<GitCompareArrows size={18} />} title="Assembly">
+            <Section icon={<GitCompareArrows size={18} />} title="Canonicalization">
               <div className="grid gap-3 md:grid-cols-4">
-                {assemblyLabels.map(([key, label]) => (
+                {canonicalizationLabels.map(([key, label]) => (
                   <SmallMetric
                     key={key}
                     label={label}
-                    value={report.assembly[key]}
+                    value={report.canonicalization[key]}
                   />
                 ))}
               </div>
@@ -411,23 +380,6 @@ export default async function TripExtractionAuditPage({
                 rows={diagnosticLineageRows}
                 title={`Showing ${diagnosticLineageRows.length} non-boring lineage rows out of ${report.lineage.length}.`}
               />
-            </Section>
-
-            <Section title="Source comparison">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <TitleList
-                  items={report.sourceComparison?.rawOnlyTitles ?? []}
-                  title="Raw-only titles"
-                />
-                <TitleList
-                  items={report.sourceComparison?.assembledOnlyTitles ?? []}
-                  title="Assembled-only titles"
-                />
-                <TitleList
-                  items={report.sourceComparison?.sharedTitles ?? []}
-                  title="Shared titles"
-                />
-              </div>
             </Section>
 
             <Section title="Structured output">

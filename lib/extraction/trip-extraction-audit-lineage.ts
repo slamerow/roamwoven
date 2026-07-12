@@ -1,7 +1,6 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import { getAuditSnapshotFromUsage } from "@/lib/extraction/trip-extraction-audit-snapshot";
 import type {
-  AuditAssemblyAction,
   AuditFinalRecordSummary,
   DraftLineageCandidate,
   DraftStayLineageSummary,
@@ -9,22 +8,12 @@ import type {
   TripExtractionAuditLineageRow,
 } from "@/lib/extraction/trip-extraction-audit-types";
 import {
-  asArray,
-  asRecord,
-  findOpenAIUsage,
-  getString,
   normalizeAuditIdentity,
   textForAudit,
   truncate,
 } from "@/lib/extraction/trip-extraction-audit-utils";
 
-function lineageKey({
-  date,
-  title,
-}: {
-  date: string | null;
-  title: string;
-}) {
+function lineageKey({ date, title }: { date: string | null; title: string }) {
   return `${date ?? "undated"}::${normalizeAuditIdentity(title) || title.toLowerCase()}`;
 }
 
@@ -135,127 +124,6 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
   return [...items, ...transport, ...stays];
 }
 
-function addAction(
-  index: Map<string, AuditAssemblyAction[]>,
-  key: string,
-  action: AuditAssemblyAction
-) {
-  const actions = index.get(key) ?? [];
-
-  actions.push(action);
-  index.set(key, actions);
-}
-
-function createAssemblyActionIndex(usage: unknown) {
-  const openai = findOpenAIUsage(usage);
-  const consolidation = asRecord(openai.consolidation);
-  const index = new Map<string, AuditAssemblyAction[]>();
-
-  for (const item of asArray(consolidation.suppressedTransportActivities)) {
-    const record = asRecord(item);
-    const removedTitle = getString(record, "removedTitle") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title: removedTitle }), {
-      action: "suppressed_transport_activity",
-      detail: `Merged into ${getString(record, "matchedTransportTitle") ?? "transport"}.`,
-    });
-  }
-
-  for (const item of asArray(consolidation.promotedTravelActivities)) {
-    const record = asRecord(item);
-    const promotedTitle =
-      getString(record, "promotedTitle") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title: promotedTitle }), {
-      action: "promoted_travel_activity",
-      detail: `Promoted to ${getString(record, "transportTitle") ?? "transport"}.`,
-    });
-  }
-
-  for (const item of asArray(consolidation.foldedLodgingNotes)) {
-    const record = asRecord(item);
-    const title = getString(record, "title") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: null, title }), {
-      action: "folded_lodging_note",
-      detail: `Folded into ${getString(record, "stayTitle") ?? "stay"}.`,
-    });
-  }
-
-  for (const item of asArray(consolidation.removedDuplicateParents)) {
-    const record = asRecord(item);
-    const removedTitle = getString(record, "removedTitle") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title: removedTitle }), {
-      action: "removed_duplicate_parent",
-      detail: getString(record, "reason") ?? "Named child cards covered it.",
-    });
-  }
-
-  for (const item of asArray(consolidation.removedGroupedChildren)) {
-    const record = asRecord(item);
-    const removedTitle = getString(record, "removedTitle") ?? "Untitled activity";
-    const groupedUnder = getString(record, "groupedUnder") ?? "grouped activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title: removedTitle }), {
-      action: "grouped_child_removed",
-      detail: `Grouped under ${groupedUnder}.`,
-    });
-    addAction(index, lineageKey({ date: getString(record, "date"), title: groupedUnder }), {
-      action: "grouped_children_added",
-      detail: `Absorbed ${removedTitle}.`,
-    });
-  }
-
-  for (const item of asArray(consolidation.suppressedDayOverviews)) {
-    const record = asRecord(item);
-    const removedTitle = getString(record, "removedTitle") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title: removedTitle }), {
-      action: "suppressed_day_overview",
-      detail: "Generic day overview was suppressed.",
-    });
-  }
-
-  for (const item of asArray(consolidation.mergedCityNotes)) {
-    const record = asRecord(item);
-    const city = getString(record, "city") ?? "city";
-
-    for (const sourceTitle of asArray(record.sourceTitles)) {
-      if (typeof sourceTitle !== "string") {
-        continue;
-      }
-
-      addAction(index, lineageKey({ date: null, title: sourceTitle }), {
-        action: "merged_city_note",
-        detail: `Merged into ${city} city notes.`,
-      });
-    }
-  }
-
-  for (const item of asArray(consolidation.wrongCityPlacements)) {
-    const record = asRecord(item);
-    const title = getString(record, "title") ?? "Untitled activity";
-
-    addAction(index, lineageKey({ date: getString(record, "date"), title }), {
-      action: "wrong_city_guard",
-      detail: [
-        getString(record, "action") ?? "checked",
-        getString(record, "assignedCity")
-          ? `from ${getString(record, "assignedCity")}`
-          : null,
-        getString(record, "explicitCity")
-          ? `to ${getString(record, "explicitCity")}`
-          : "for explicit city",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    });
-  }
-
-  return index;
-}
-
 function addCandidate(
   map: Map<string, DraftLineageCandidate>,
   item: DraftLineageCandidate
@@ -278,96 +146,55 @@ export function createAuditLineageRows({
   records: StructuredTripRecords;
   usage?: unknown;
 }): TripExtractionAuditLineageRow[] {
-  const rawSnapshot = usage
-    ? getAuditSnapshotFromUsage(usage, "preAssemblyDraft")
+  const canonicalSnapshot = usage
+    ? getAuditSnapshotFromUsage(usage, "canonicalDraft")
     : null;
-  const assembledSnapshot = usage
-    ? getAuditSnapshotFromUsage(usage, "assembledDraft")
-    : null;
-  const raw = new Map<string, DraftLineageCandidate>();
-  const assembled = new Map<string, DraftLineageCandidate>();
-  const finalRecords = summarizeFinalAuditRecords(records);
+  const canonical = new Map<string, DraftLineageCandidate>();
   const finalByKey = new Map<string, AuditFinalRecordSummary[]>();
-  const actionIndex = usage ? createAssemblyActionIndex(usage) : new Map();
 
-  for (const item of rawSnapshot?.activities ?? []) addCandidate(raw, item);
-  for (const item of rawSnapshot?.transport ?? []) addCandidate(raw, item);
-  for (const item of rawSnapshot?.stays ?? []) {
-    addCandidate(raw, summarizeStayForLineage(item));
+  for (const item of canonicalSnapshot?.activities ?? []) {
+    addCandidate(canonical, item);
+  }
+  for (const item of canonicalSnapshot?.transport ?? []) {
+    addCandidate(canonical, item);
+  }
+  for (const item of canonicalSnapshot?.stays ?? []) {
+    addCandidate(canonical, summarizeStayForLineage(item));
   }
 
-  for (const item of assembledSnapshot?.activities ?? []) addCandidate(assembled, item);
-  for (const item of assembledSnapshot?.transport ?? []) addCandidate(assembled, item);
-  for (const item of assembledSnapshot?.stays ?? []) {
-    addCandidate(assembled, summarizeStayForLineage(item));
-  }
-
-  for (const item of finalRecords) {
+  for (const item of summarizeFinalAuditRecords(records)) {
     const key = lineageKey(item);
-    const existing = finalByKey.get(key) ?? [];
-
-    existing.push(item);
-    finalByKey.set(key, existing);
+    finalByKey.set(key, [...(finalByKey.get(key) ?? []), item]);
   }
 
-  const keys = new Set([
-    ...raw.keys(),
-    ...assembled.keys(),
-    ...finalByKey.keys(),
-    ...actionIndex.keys(),
-  ]);
+  const keys = new Set([...canonical.keys(), ...finalByKey.keys()]);
 
   return [...keys]
-    .map((key) => {
-      const rawItem = raw.get(key) ?? null;
-      const assembledItem = assembled.get(key) ?? null;
-      const finals = finalByKey.get(key) ?? [];
-      const title =
-        rawItem?.title ??
-        assembledItem?.title ??
-        finals[0]?.title ??
-        key.split("::").pop() ??
-        "Untitled";
-      const date = rawItem?.date ?? assembledItem?.date ?? finals[0]?.date ?? null;
-      const actions = actionIndex.get(key) ?? [];
-      const diagnostics: string[] = [];
-      let status: TripExtractionAuditLineageRow["status"] = "unmatched";
-
-      if (rawItem && assembledItem && finals.length > 0) {
-        status = "survived";
-      } else if (rawItem && !assembledItem) {
-        status = "removed_in_assembly";
-      } else if (rawItem && assembledItem && finals.length === 0) {
-        status = "lost_after_assembly";
-      } else if (!rawItem && assembledItem && finals.length === 0) {
-        status = "created_in_assembly";
-      } else if (!rawItem && !assembledItem && finals.length > 0) {
-        status = "final_only";
-      }
-
-      if (status !== "survived") {
-        diagnostics.push(status);
-      }
-
-      for (const action of actions) {
-        diagnostics.push(action.action);
-      }
+    .map((key): TripExtractionAuditLineageRow => {
+      const canonicalItem = canonical.get(key) ?? null;
+      const finalRecords = finalByKey.get(key) ?? [];
+      const status = canonicalItem
+        ? finalRecords.length > 0
+          ? "compiled"
+          : "missing_from_structured"
+        : "final_only";
 
       return {
-        assemblyActions: actions,
-        assembled: assembledItem,
-        date,
-        diagnostics,
-        finalRecords: finals,
+        canonical: canonicalItem,
+        date: canonicalItem?.date ?? finalRecords[0]?.date ?? null,
+        diagnostics: status === "compiled" ? [] : [status],
+        finalRecords,
         identityKey: key,
-        raw: rawItem,
         status,
-        title,
+        title:
+          canonicalItem?.title ??
+          finalRecords[0]?.title ??
+          key.split("::").pop() ??
+          "Untitled",
       };
     })
     .sort((a, b) => {
       const dateCompare = (a.date ?? "9999").localeCompare(b.date ?? "9999");
-
       return dateCompare || a.title.localeCompare(b.title);
     });
 }

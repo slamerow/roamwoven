@@ -107,12 +107,6 @@ function createNotices({
     notices.push(`The report run is ${reportRun.status}.`);
   }
 
-  if (report && !report.sourceComparison) {
-    notices.push(
-      "This run does not include pre-assembly audit snapshots. Fresh extractions should include them."
-    );
-  }
-
   if (report?.extraction.activityChunks?.failed) {
     notices.push(
       `${report.extraction.activityChunks.failed} activity extraction chunk failed.`

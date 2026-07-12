@@ -581,7 +581,7 @@ function createAuditSummary({
   const report = auditPayload.report;
   const lineageRows =
     report?.lineage
-      .filter((row) => row.status !== "survived")
+      .filter((row) => row.status !== "compiled")
       .slice(0, MAX_LINEAGE_ROWS) ?? [];
 
   return {
@@ -595,15 +595,12 @@ function createAuditSummary({
         severity: diagnostic.severity,
         title: diagnostic.title,
       })) ?? [],
+    canonicalization: report?.canonicalization ?? null,
     extraction: report?.extraction ?? null,
     fingerprints: report?.fingerprints ?? null,
     lineage: {
       includedRows: lineageRows.length,
       rows: lineageRows.map((row) => ({
-        assemblyActions: row.assemblyActions.map((action) => ({
-          action: action.action,
-          detail: redactSensitiveText(action.detail, includePrivate),
-        })),
         date: row.date,
         diagnostics: row.diagnostics.map((item) =>
           redactSensitiveText(item, includePrivate)
@@ -639,7 +636,6 @@ function createAuditSummary({
           evidence: redactSensitiveText(anchor.evidence, includePrivate),
         })) ?? [],
     },
-    sourceComparison: report?.sourceComparison ?? null,
     structured: report?.structured ?? null,
     warnings: report?.warnings ?? [],
   };

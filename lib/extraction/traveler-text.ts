@@ -8,6 +8,51 @@ export function normalizeText(value: string | null | undefined) {
     .trim() ?? "";
 }
 
+export function normalizeTripClockTime(
+  value: string | null | undefined
+) {
+  const raw = value?.trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const timeOnly = raw.match(
+    /^(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i
+  );
+  const isoDateTime = raw.match(
+    /^\d{4}-\d{2}-\d{2}[T\s](\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i
+  );
+  const match = timeOnly ?? isoDateTime;
+
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const suffix = timeOnly?.[3]?.toLowerCase();
+
+  if (
+    Number.isNaN(hour) ||
+    Number.isNaN(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  if (suffix === "pm" && hour < 12) {
+    hour += 12;
+  } else if (suffix === "am" && hour === 12) {
+    hour = 0;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 const TRIP_DATE_MONTHS: Record<string, number> = {
   apr: 4,
   april: 4,

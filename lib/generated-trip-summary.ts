@@ -13,7 +13,10 @@ import {
   getSoftTransportCompletenessIssues,
   getSourceBackedRequiredTransportIssues,
 } from "@/lib/trip-transport-policy";
-import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  normalizeText,
+  normalizeTripClockTime,
+} from "@/lib/extraction/traveler-text";
 
 export type GeneratedTripSummaryItem = {
   detail?: string;
@@ -245,7 +248,7 @@ function formatDestination(records: StructuredTripRecords) {
 }
 
 function formatTime(value: string | null) {
-  const time = value?.trim();
+  const time = normalizeTripClockTime(value) ?? value?.trim();
 
   if (!time) {
     return "";
@@ -278,7 +281,7 @@ function formatTime(value: string | null) {
 }
 
 function timeToMinutes(value: string | null) {
-  const time = value?.trim();
+  const time = normalizeTripClockTime(value);
 
   if (!time) {
     return null;
@@ -598,7 +601,9 @@ function createTransportEntry(
       .join(" · "),
     id: item.id,
     kind: "transport",
-    meta: item.transportType.replaceAll("_", " "),
+    meta: [formatTime(item.departureTime), item.transportType.replaceAll("_", " ")]
+      .filter(Boolean)
+      .join(" · "),
     needsReview,
     editFields: editFieldsForTransport(item),
     subjectId: item.id,
@@ -664,7 +669,10 @@ function createActivityEntry(
 
   return {
     canMoveToCityTip: item.itemType === "activity",
-    detail: item.description ?? item.locationName ?? item.address ?? undefined,
+    detail:
+      [item.address, item.description ?? item.locationName]
+        .filter(Boolean)
+        .join(" · ") || undefined,
     editFields: editFieldsForItem(item),
     id: item.id,
     kind: needsReview ? "review" : "activity",
@@ -741,6 +749,7 @@ function inferredActivityMinutes(item: StructuredTripRecords["items"][number]) {
 function sortEntriesForDay(
   entries: Array<{
     entry: GeneratedTripSummaryDayEntry;
+    sortOrder?: number;
     sortMinutes: number | null;
   }>
 ) {
@@ -762,7 +771,10 @@ function sortEntriesForDay(
       };
       const kindDelta = kindOrder[left.entry.kind] - kindOrder[right.entry.kind];
 
-      return kindDelta || left.index - right.index;
+      return (
+        kindDelta ||
+        (left.sortOrder ?? left.index) - (right.sortOrder ?? right.index)
+      );
     })
     .map((item) => item.entry);
 }
@@ -788,12 +800,48 @@ function createSummaryDays(
     (item) => !item.date && !isLegLevelTip(item)
   );
 
+  const constrainedActivityMinutes = (
+    item: StructuredTripRecords["items"][number],
+    dayTransport: StructuredTripRecords["transport"]
+  ) => {
+    const base = inferredActivityMinutes(item);
+    const incomingArrivalMinutes = dayTransport
+      .filter(
+        (transport) =>
+          Boolean(item.legId) && transport.legId === item.legId
+      )
+      .map((transport) => timeToMinutes(transport.arrivalTime))
+      .filter((value): value is number => value !== null)
+      .sort((left, right) => right - left)[0];
+
+    if (incomingArrivalMinutes === undefined) {
+      return base;
+    }
+
+    const text = normalizeText(
+      [item.title, item.description, item.categoryId].filter(Boolean).join(" ")
+    );
+    const isImmediateArrivalTask =
+      /\b(?:pick up|pickup|collect).{0,24}\b(?:card|pass|key)\b/.test(text);
+
+    if (isImmediateArrivalTask) {
+      return incomingArrivalMinutes + 1;
+    }
+
+    return Math.max(
+      base,
+      incomingArrivalMinutes + 15
+    );
+  };
+
   const days = records.days
     .filter((day) => day.date !== "needs-placement")
     .map((day) => {
+      const dayTransport = activeTransport.filter(
+        (item) => item.date === day.date
+      );
       const entries = sortEntriesForDay([
-        ...activeTransport
-          .filter((item) => item.date === day.date)
+        ...dayTransport
           .map((item) => ({
             entry: createTransportEntry(item, reviewSubjectKeys),
             sortMinutes: timeToMinutes(item.departureTime),
@@ -814,7 +862,8 @@ function createSummaryDays(
           .filter((item) => item.date === day.date)
           .map((item) => ({
             entry: createActivityEntry(item, categoryById, reviewSubjectKeys),
-            sortMinutes: inferredActivityMinutes(item),
+            sortMinutes: constrainedActivityMinutes(item, dayTransport),
+            sortOrder: item.sortOrder,
           })),
       ]);
 

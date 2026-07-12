@@ -2,19 +2,21 @@ import { createHash } from "node:crypto";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import {
+  normalizeTripClockTime,
   normalizeText,
   normalizeTripDate,
   tripDatesMatch,
 } from "@/lib/extraction/traveler-text";
 import {
   classifyDraftActivityCard,
+  getDraftActivityGroupingKind,
   isPlannedAreaActivityGroup,
   isSameSiteActivityGroup,
   isTourActivityGroup,
+  type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
 
-export const CANONICAL_EVIDENCE_BOUNDARY_VERSION = 2;
-export const EVIDENCE_CLUSTER_VERSION = 3;
+export const EVIDENCE_CLUSTER_VERSION = 4;
 
 export type EvidenceKind =
   | "activity"
@@ -74,6 +76,7 @@ export type EvidenceClusteringResult = {
     clusteredObservationCount: number;
     contextObservationCount: number;
     observationCount: number;
+    rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedWeakAnchorCount: number;
   };
@@ -99,7 +102,9 @@ const IDENTITY_STOP_WORDS = new Set([
   "flight",
   "for",
   "from",
+  "guided",
   "in",
+  "including",
   "lunch",
   "morning",
   "pickup",
@@ -112,6 +117,30 @@ const IDENTITY_STOP_WORDS = new Set([
   "trip",
   "up",
   "visit",
+]);
+
+const GENERIC_SINGLE_IDENTITY_TOKENS = new Set([
+  "activity",
+  "admission",
+  "bath",
+  "church",
+  "entry",
+  "house",
+  "museum",
+  "pass",
+  "ticket",
+  "tour",
+]);
+
+const DISTINCT_COMPONENT_TOKENS = new Set([
+  "chapel",
+  "garden",
+  "gallery",
+  "grounds",
+  "library",
+  "museum",
+  "tower",
+  "zoo",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -138,6 +167,16 @@ const DATE_FIELDS = new Set([
   "leaveDate",
 ]);
 
+const TIME_FIELDS = new Set([
+  "arrivalTime",
+  "checkInTime",
+  "checkOutTime",
+  "departureTime",
+  "endTime",
+  "startTime",
+  "time",
+]);
+
 function inferTripYear(...values: unknown[]) {
   for (const value of values) {
     const text = JSON.stringify(value) ?? "";
@@ -162,11 +201,19 @@ function normalizePayloadDates(
 ) {
   return Object.fromEntries(
     Object.entries(payload).map(([field, value]) => {
-      if (!DATE_FIELDS.has(field) || typeof value !== "string") {
+      if (typeof value !== "string") {
         return [field, value];
       }
 
-      return [field, normalizeTripDate(value, defaultYear) ?? value];
+      if (DATE_FIELDS.has(field)) {
+        return [field, normalizeTripDate(value, defaultYear) ?? value];
+      }
+
+      if (TIME_FIELDS.has(field)) {
+        return [field, normalizeTripClockTime(value) ?? value];
+      }
+
+      return [field, value];
     })
   );
 }
@@ -188,38 +235,9 @@ function normalizedComparable(value: unknown) {
 }
 
 function normalizedClockTime(value: unknown) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(value.trim());
-
-  if (!match) {
-    return normalizedComparable(value);
-  }
-
-  let hour = Number(match[1]);
-  const minute = Number(match[2] ?? "0");
-  const suffix = match[3]?.toLowerCase();
-
-  if (
-    Number.isNaN(hour) ||
-    Number.isNaN(minute) ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return normalizedComparable(value);
-  }
-
-  if (suffix === "pm" && hour < 12) {
-    hour += 12;
-  } else if (suffix === "am" && hour === 12) {
-    hour = 0;
-  }
-
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return typeof value === "string"
+    ? normalizeTripClockTime(value) ?? normalizedComparable(value)
+    : "";
 }
 
 const LOCATION_ALIASES: Record<string, string> = {
@@ -303,7 +321,43 @@ function locationQuality(value: unknown) {
 function identityTokens(value: unknown) {
   return normalizedComparable(value)
     .split(/\s+/)
+    .map((token) =>
+      token.length > 4 && token.endsWith("s") && !token.endsWith("ss")
+        ? token.slice(0, -1)
+        : token
+    )
     .filter((token) => token.length > 2 && !IDENTITY_STOP_WORDS.has(token));
+}
+
+function aliasIdentityTokens(record: Record<string, unknown>) {
+  const title = typeof record.title === "string" ? record.title : "";
+  const description =
+    typeof record.description === "string" ? record.description : "";
+  const titleTokens = identityTokens(title);
+  const genericTitle =
+    titleTokens.length > 0 &&
+    titleTokens.every((token) => GENERIC_SINGLE_IDENTITY_TOKENS.has(token));
+  const aliasDescription =
+    (/\b(?:also known as|aka)\b|[()/]/i.test(description) ||
+      (genericTitle && /\b(?:including|includes)\b/i.test(description))) &&
+    description.length <= 180
+      ? description
+      : "";
+
+  return identityTokens([title, aliasDescription].filter(Boolean).join(" "));
+}
+
+function tokenSetContains(container: string[], contained: string[]) {
+  const containerSet = new Set(container);
+  return contained.length > 0 && contained.every((token) => containerSet.has(token));
+}
+
+function distinctiveSingleIdentity(tokens: string[]) {
+  return (
+    tokens.length === 1 &&
+    tokens[0].length >= 5 &&
+    !GENERIC_SINGLE_IDENTITY_TOKENS.has(tokens[0])
+  );
 }
 
 function overlapCount(left: string[], right: string[]) {
@@ -361,12 +415,9 @@ function activityMatchReason(
   left: Record<string, unknown>,
   right: Record<string, unknown>
 ) {
-  if (!sameOrMissingDate(left, right)) {
-    return null;
-  }
-
   const leftTime = timeFrom(left);
   const rightTime = timeFrom(right);
+  const datesMatch = sameOrMissingDate(left, right);
 
   if (leftTime && rightTime && leftTime !== rightTime) {
     return null;
@@ -379,20 +430,64 @@ function activityMatchReason(
     return "shared booking identity";
   }
 
-  if (isRentalPickup(left) && isRentalPickup(right)) {
+  if (datesMatch && isRentalPickup(left) && isRentalPickup(right)) {
     return "same rental-car pickup";
   }
 
-  const leftTitle = identityTokens(left.title);
-  const rightTitle = identityTokens(right.title);
+  const leftTitle = aliasIdentityTokens(left);
+  const rightTitle = aliasIdentityTokens(right);
   const overlap = overlapCount(leftTitle, rightTitle);
   const leftTitleText = leftTitle.join(" ");
   const rightTitleText = rightTitle.join(" ");
   const unionSize = new Set([...leftTitle, ...rightTitle]).size;
   const titleSimilarity = unionSize > 0 ? overlap / unionSize : 0;
+  const smaller = leftTitle.length <= rightTitle.length ? leftTitle : rightTitle;
+  const larger = smaller === leftTitle ? rightTitle : leftTitle;
+  const containedIdentity = tokenSetContains(larger, smaller);
+  const containedExtras = larger.filter((token) => !new Set(smaller).has(token));
+  const containsDistinctComponent = containedExtras.some((token) =>
+    DISTINCT_COMPONENT_TOKENS.has(token)
+  );
+  const sameDistinctiveSingle =
+    leftTitleText === rightTitleText &&
+    distinctiveSingleIdentity(leftTitle) &&
+    distinctiveSingleIdentity(rightTitle);
+  const explicitSeparateVisit = Boolean(
+    !datesMatch &&
+      ((leftTime && rightTime) ||
+        (leftConfirmation &&
+          rightConfirmation &&
+          leftConfirmation !== rightConfirmation))
+  );
+
+  if (explicitSeparateVisit) {
+    return null;
+  }
 
   if (leftTitleText && leftTitleText === rightTitleText) {
-    return leftTime || rightTime ? "same named and timed plan" : "same named plan";
+    if (datesMatch) {
+      return leftTime || rightTime
+        ? "same named and timed plan"
+        : "same named plan";
+    }
+
+    return "repeated venue sighting across dates";
+  }
+
+  if (
+    containedIdentity &&
+    !containsDistinctComponent &&
+    (smaller.length >= 2 ||
+      (datesMatch && sameDistinctiveSingle) ||
+      (datesMatch && leftTime && leftTime === rightTime))
+  ) {
+    return datesMatch
+      ? "same venue alias"
+      : "repeated venue alias across dates";
+  }
+
+  if (!datesMatch) {
+    return null;
   }
 
   return overlap >= 2 && titleSimilarity >= 0.8
@@ -646,6 +741,54 @@ function uniqueDescription(left: unknown, right: unknown) {
   return `${leftText} ${rightText}`;
 }
 
+function evidenceSpecificity(record: Record<string, unknown>) {
+  const description =
+    typeof record.description === "string" ? record.description.trim() : "";
+
+  return (
+    (timeFrom(record) ? 40 : 0) +
+    (confirmationFrom(record) ? 40 : 0) +
+    (normalizedComparable(record.address) ? 20 : 0) +
+    Math.min(description.length, 240) / 12 +
+    identityTokens(record.title).length * 2
+  );
+}
+
+function recordCanonicalConflict({
+  conflicts,
+  existing,
+  field,
+  observation,
+  piece,
+  value,
+}: {
+  conflicts: CanonicalEvidenceConflict[];
+  existing: unknown;
+  field: string;
+  observation: EvidenceObservation;
+  piece: CanonicalEvidencePiece;
+  value: unknown;
+}) {
+  const existingConflict = conflicts.find((conflict) => conflict.field === field);
+  const values = Array.from(
+    new Set([String(existing), String(value), ...(existingConflict?.values ?? [])])
+  );
+  const observationIds = Array.from(
+    new Set([
+      ...piece.observationIds,
+      observation.id,
+      ...(existingConflict?.observationIds ?? []),
+    ])
+  );
+
+  if (existingConflict) {
+    existingConflict.values = values;
+    existingConflict.observationIds = observationIds;
+  } else {
+    conflicts.push({ field, observationIds, values });
+  }
+}
+
 function mergeObservationIntoPiece(
   piece: CanonicalEvidencePiece,
   observation: EvidenceObservation,
@@ -686,6 +829,20 @@ function mergeObservationIntoPiece(
       normalizedClockTime(existing) === normalizedClockTime(value)
     ) {
       next[field] = existing;
+    } else if (
+      field === "date" &&
+      valuesConflict(existing, value) &&
+      evidenceSpecificity(observation.payload) > evidenceSpecificity(next)
+    ) {
+      next[field] = value;
+      recordCanonicalConflict({
+        conflicts,
+        existing,
+        field,
+        observation,
+        piece,
+        value,
+      });
     } else if (existing === null || existing === undefined || existing === "") {
       next[field] = value;
     } else if (
@@ -697,24 +854,14 @@ function mergeObservationIntoPiece(
         normalizedLocation(existing) === normalizedLocation(value)
       )
     ) {
-      const existingConflict = conflicts.find((conflict) => conflict.field === field);
-      const values = Array.from(
-        new Set([String(existing), String(value), ...(existingConflict?.values ?? [])])
-      );
-      const observationIds = Array.from(
-        new Set([
-          ...piece.observationIds,
-          observation.id,
-          ...(existingConflict?.observationIds ?? []),
-        ])
-      );
-
-      if (existingConflict) {
-        existingConflict.values = values;
-        existingConflict.observationIds = observationIds;
-      } else {
-        conflicts.push({ field, observationIds, values });
-      }
+      recordCanonicalConflict({
+        conflicts,
+        existing,
+        field,
+        observation,
+        piece,
+        value,
+      });
     }
 
     piece.fieldSources[field] = Array.from(
@@ -731,22 +878,6 @@ function mergeObservationIntoPiece(
     kind: piece.kind,
     observations: [...piece.observationIds].sort(),
   })}`;
-}
-
-function isStrongStandaloneAnchor(record: Record<string, unknown>) {
-  const departure = routeEndpoint(record, "departure");
-  const arrival = routeEndpoint(record, "arrival");
-  const number = transportNumber(record);
-  const hasTime = Boolean(record.departureTime || record.arrivalTime);
-  const hasBooking = Boolean(record.confirmation);
-
-  return Boolean(
-    record.date &&
-      departure &&
-      arrival &&
-      hasTime &&
-      (number || hasBooking)
-  );
 }
 
 function hasSpecificTransportRoute(record: Record<string, unknown>) {
@@ -813,6 +944,572 @@ function createPiece(
   };
 }
 
+function suppressCanonicalPiece(
+  piece: CanonicalEvidencePiece,
+  reason: string
+) {
+  piece.outputEligible = false;
+  piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
+}
+
+function mergeCanonicalPieceInto({
+  reason,
+  source,
+  target,
+}: {
+  reason: string;
+  source: CanonicalEvidencePiece;
+  target: CanonicalEvidencePiece;
+}) {
+  target.observationIds = Array.from(
+    new Set([...target.observationIds, ...source.observationIds])
+  );
+  target.mergeReasons = Array.from(
+    new Set([...target.mergeReasons, ...source.mergeReasons, reason])
+  );
+
+  for (const [field, observationIds] of Object.entries(source.fieldSources)) {
+    target.fieldSources[field] = Array.from(
+      new Set([...(target.fieldSources[field] ?? []), ...observationIds])
+    );
+  }
+
+  target.conflicts = [
+    ...target.conflicts,
+    ...source.conflicts.filter(
+      (conflict) =>
+        !target.conflicts.some(
+          (existing) =>
+            existing.field === conflict.field &&
+            existing.values.join("|") === conflict.values.join("|")
+        )
+    ),
+  ];
+  target.confidence = target.conflicts.length === 0 ? "high" : "medium";
+  target.id = `piece_${stableHash({
+    kind: target.kind,
+    observations: [...target.observationIds].sort(),
+  })}`;
+  suppressCanonicalPiece(source, reason);
+}
+
+function activityText(record: Record<string, unknown>) {
+  return normalizeText(
+    [record.title, record.description, record.category]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function sameCanonicalDate(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  const leftDate = stringValue(left, "date");
+  const rightDate = stringValue(right, "date");
+  return Boolean(leftDate && rightDate && tripDatesMatch(leftDate, rightDate));
+}
+
+function attachGenericActivityAccessories(pieces: CanonicalEvidencePiece[]) {
+  const activities = pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  );
+
+  for (const accessory of activities) {
+    if (!accessory.outputEligible) {
+      continue;
+    }
+
+    const text = activityText(accessory.payload);
+
+    if (
+      !/\b(?:admission|entry|pass|skip the line|ticket|voucher)\b/.test(text) ||
+      /\b(?:museum|palace|castle|cathedral|church|synagogue|gallery|garden)\b/.test(
+        normalizeText(accessory.payload.title as string | undefined)
+      )
+    ) {
+      continue;
+    }
+
+    const time = timeFrom(accessory.payload);
+    const candidates = activities.filter((candidate) => {
+      if (
+        candidate === accessory ||
+        !candidate.outputEligible ||
+        !sameCanonicalDate(candidate.payload, accessory.payload) ||
+        /\b(?:admission|entry|pass|skip the line|ticket|voucher)\b/.test(
+          activityText(candidate.payload)
+        )
+      ) {
+        return false;
+      }
+
+      const candidateTime = timeFrom(candidate.payload);
+      return Boolean(time && candidateTime && time === candidateTime);
+    });
+
+    if (candidates.length !== 1) {
+      continue;
+    }
+
+    const target = candidates[0];
+    target.payload.description = uniqueDescription(
+      target.payload.description,
+      accessory.payload.description ?? accessory.payload.title
+    );
+    mergeCanonicalPieceInto({
+      reason: "supporting admission evidence attached to named activity",
+      source: accessory,
+      target,
+    });
+  }
+}
+
+function attachRentalCarReturns(pieces: CanonicalEvidencePiece[]) {
+  const activities = pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  );
+
+  for (const returnPiece of activities) {
+    if (!/\b(?:car|vehicle)\s+return\b|\breturn(?:ing)?\s+(?:the\s+)?(?:car|vehicle)\b/.test(
+      activityText(returnPiece.payload)
+    )) {
+      continue;
+    }
+
+    const pickups = activities.filter(
+      (candidate) =>
+        candidate !== returnPiece &&
+        candidate.outputEligible &&
+        isRentalPickup(candidate.payload) &&
+        sameCanonicalDate(candidate.payload, returnPiece.payload)
+    );
+
+    if (pickups.length !== 1) {
+      continue;
+    }
+
+    const pickup = pickups[0];
+    const returnTime =
+      returnPiece.payload.endTime ??
+      returnPiece.payload.startTime ??
+      returnPiece.payload.time ??
+      null;
+    const returnAddress = returnPiece.payload.address;
+    const pickupAddress = pickup.payload.address;
+    const normalizedReturnAddress = normalizedComparable(returnAddress);
+    const normalizedPickupAddress = normalizedComparable(pickupAddress);
+    const isSameReturnLocation = Boolean(
+      /\bsame (?:place|location|address)\b/.test(
+        activityText(returnPiece.payload)
+      ) ||
+        (normalizedReturnAddress &&
+          normalizedPickupAddress &&
+          (normalizedReturnAddress.includes(normalizedPickupAddress) ||
+            normalizedPickupAddress.includes(normalizedReturnAddress)))
+    );
+
+    if (!pickup.payload.endTime && returnTime) {
+      pickup.payload.endTime = returnTime;
+    }
+
+    if (
+      typeof returnAddress === "string" &&
+      isSameReturnLocation &&
+      (!pickup.payload.address ||
+        returnAddress.length > String(pickup.payload.address).length)
+    ) {
+      pickup.payload.address = returnAddress;
+    }
+
+    const returnLocationDetail =
+      typeof returnAddress === "string" && !isSameReturnLocation
+        ? `Return location: ${returnAddress}.`
+        : null;
+    pickup.payload.description = uniqueDescription(
+      pickup.payload.description,
+      uniqueDescription(
+        returnPiece.payload.description ??
+          (returnTime ? `Return the car by ${returnTime}.` : "Return the car."),
+        returnLocationDetail
+      )
+    );
+    mergeCanonicalPieceInto({
+      reason: "rental return details attached to pickup activity",
+      source: returnPiece,
+      target: pickup,
+    });
+  }
+}
+
+function suppressRepresentedTravelAndStayActivities(
+  pieces: CanonicalEvidencePiece[]
+) {
+  const activities = pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  );
+  const transports = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+  const stays = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
+
+  for (const activity of activities) {
+    const text = activityText(activity.payload);
+
+    if (/\b(?:flight|fly|train|bus|ferry|transfer)\b/.test(text)) {
+      const matches = transports.filter(
+        (transport) =>
+          sameCanonicalDate(activity.payload, transport.payload) &&
+          Boolean(activityMatchReason(activity.payload, transport.payload))
+      );
+
+      if (matches.length === 1) {
+        suppressCanonicalPiece(
+          activity,
+          "traveler movement represented by canonical transport"
+        );
+        continue;
+      }
+    }
+
+    if (!/\b(?:check in|check-in|check out|check-out|drop bags?|bag drop)\b/.test(text)) {
+      continue;
+    }
+
+    const sameDateStays = stays.filter((stay) => {
+      const checkIn = stringValue(stay.payload, "checkIn") ??
+        stringValue(stay.payload, "firstNightDate");
+      const activityDate = stringValue(activity.payload, "date");
+
+      return Boolean(
+        activityDate &&
+          checkIn &&
+          tripDatesMatch(activityDate, checkIn)
+      );
+    });
+    const matchingStays = sameDateStays.filter((stay) => {
+      const stayName = normalizeText(stringValue(stay.payload, "name"));
+
+      return !stayName || text.includes(stayName) || sameDateStays.length === 1;
+    });
+
+    if (matchingStays.length === 1) {
+      suppressCanonicalPiece(
+        activity,
+        "routine check-in or bag-drop evidence attached to stay"
+      );
+    }
+  }
+}
+
+function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
+  const stays = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
+
+  for (const activity of pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  )) {
+    const text = activityText(activity.payload);
+
+    if (!/\b(?:collect|pick up|pickup).{0,20}\b(?:apartment\s+)?key\b|\blockbox\b/.test(text)) {
+      continue;
+    }
+
+    const date = stringValue(activity.payload, "date");
+    const matchingPrivateStay = stays.find((stay) => {
+      const stayText = normalizeText(
+        [stay.payload.name, stay.payload.stayType].filter(Boolean).join(" ")
+      );
+      const checkIn = stringValue(stay.payload, "checkIn") ??
+        stringValue(stay.payload, "firstNightDate");
+
+      return Boolean(
+        date &&
+          checkIn &&
+          tripDatesMatch(date, checkIn) &&
+          /\b(?:airbnb|apartment|flat|home|rental)\b/.test(stayText)
+      );
+    });
+    const stayAddress = matchingPrivateStay?.payload.address;
+    const activityAddress = activity.payload.address;
+    const distinctPickupLocation = Boolean(
+      activityAddress &&
+        (!stayAddress ||
+          normalizedComparable(activityAddress) !== normalizedComparable(stayAddress))
+    );
+    const explicitSeparateAction = Boolean(
+      timeFrom(activity.payload) ||
+        distinctPickupLocation ||
+        /\b(?:meet|office|reception|host|elsewhere|remote)\b/.test(text)
+    );
+
+    if (!matchingPrivateStay || !explicitSeparateAction) {
+      suppressCanonicalPiece(
+        activity,
+        matchingPrivateStay
+          ? "routine access instructions attached to private stay"
+          : "access instructions had no compatible private stay"
+      );
+    }
+  }
+}
+
+function shiftIsoDate(value: string, days: number) {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function quarantineOutOfRangePieces(pieces: CanonicalEvidencePiece[]) {
+  const boundaryDates = pieces
+    .filter(
+      (piece) =>
+        piece.outputEligible && (piece.kind === "place" || piece.kind === "stay")
+    )
+    .flatMap((piece) =>
+      [
+        piece.payload.arriveDate,
+        piece.payload.arrivalDate,
+        piece.payload.leaveDate,
+        piece.payload.departureDate,
+        piece.payload.checkIn,
+        piece.payload.firstNightDate,
+        piece.payload.checkOut,
+      ].filter(
+        (value): value is string =>
+          typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      )
+    )
+    .sort();
+
+  if (boundaryDates.length < 2) {
+    return;
+  }
+
+  const earliest = shiftIsoDate(boundaryDates[0], -2);
+  const latest = shiftIsoDate(boundaryDates.at(-1) ?? boundaryDates[0], 2);
+
+  for (const piece of pieces) {
+    if (
+      !piece.outputEligible ||
+      (piece.kind !== "activity" && piece.kind !== "transport")
+    ) {
+      continue;
+    }
+
+    const date = stringValue(piece.payload, "date");
+
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date) && (date < earliest || date > latest)) {
+      suppressCanonicalPiece(
+        piece,
+        `quarantined outside established trip range ${earliest} to ${latest}`
+      );
+    }
+  }
+}
+
+function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
+  const places = pieces
+    .filter((piece) => piece.kind === "place" && piece.outputEligible)
+    .map((piece) => ({
+      arriveDate:
+        stringValue(piece.payload, "arriveDate") ??
+        stringValue(piece.payload, "arrivalDate"),
+      city: stringValue(piece.payload, "city"),
+      leaveDate:
+        stringValue(piece.payload, "leaveDate") ??
+        stringValue(piece.payload, "departureDate"),
+    }))
+    .filter((place) => Boolean(place.city));
+  const notes = pieces.filter(
+    (piece) => piece.kind === "note" && piece.outputEligible
+  );
+  const groups = new Map<string, CanonicalEvidencePiece[]>();
+
+  for (const note of notes) {
+    const explicitCity = stringValue(note.payload, "city");
+    const date = stringValue(note.payload, "date");
+    const text = normalizeText(
+      [note.payload.title, note.payload.description].filter(Boolean).join(" ")
+    );
+    const city =
+      explicitCity ??
+      places.find(
+        (place) =>
+          place.city && normalizeText(place.city) && text.includes(normalizeText(place.city))
+      )?.city ??
+      places.find(
+        (place) =>
+          date &&
+          place.arriveDate &&
+          date >= place.arriveDate &&
+          (!place.leaveDate || date < place.leaveDate)
+      )?.city ??
+      null;
+
+    if (!city) {
+      continue;
+    }
+
+    note.payload.city = city;
+    const key = normalizeText(city);
+    groups.set(key, [...(groups.get(key) ?? []), note]);
+  }
+
+  for (const group of groups.values()) {
+    const [target, ...rest] = group;
+    const city =
+      stringValue(target.payload, "city") ??
+      places.find((place) =>
+        normalizeText(
+          [target.payload.title, target.payload.description].filter(Boolean).join(" ")
+        ).includes(normalizeText(place.city))
+      )?.city ??
+      "City";
+
+    target.payload.title = `${city} Notes & Tips`;
+    target.payload.city = city;
+    target.payload.date = null;
+    target.payload.itemType = "note";
+
+    for (const note of rest) {
+      target.payload.description = uniqueDescription(
+        target.payload.description,
+        note.payload.description ?? note.payload.title
+      );
+      mergeCanonicalPieceInto({
+        reason: `canonical ${city} note collection`,
+        source: note,
+        target,
+      });
+    }
+  }
+}
+
+function createCanonicalGroupingCalls(pieces: CanonicalEvidencePiece[]) {
+  const calls: Array<Record<string, unknown>> = [];
+  const activities = pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  );
+
+  for (const parent of activities) {
+    if (!parent.outputEligible) {
+      continue;
+    }
+
+    const input = activityInput(parent.payload);
+
+    if (
+      !isSameSiteActivityGroup(input) &&
+      !isTourActivityGroup(input) &&
+      !isPlannedAreaActivityGroup(input)
+    ) {
+      continue;
+    }
+
+    const description = normalizeText(input.description);
+
+    if (!description) {
+      continue;
+    }
+
+    const children = activities.filter((child) => {
+      if (
+        child === parent ||
+        !child.outputEligible ||
+        !sameCanonicalDate(parent.payload, child.payload)
+      ) {
+        return false;
+      }
+
+      const childTitle = normalizeText(stringValue(child.payload, "title"));
+      return Boolean(childTitle && description.includes(childTitle));
+    });
+
+    if (children.length === 0) {
+      continue;
+    }
+
+    const childTitles = children.map(
+      (child) => stringValue(child.payload, "title") ?? "Untitled activity"
+    );
+    const groupingKind: GroupingKind = getDraftActivityGroupingKind(input);
+
+    for (const child of children) {
+      const childTitle = stringValue(child.payload, "title");
+      const childDescription = stringValue(child.payload, "description");
+      parent.payload.description = uniqueDescription(
+        parent.payload.description,
+        [childTitle, childDescription].filter(Boolean).join(": ")
+      );
+      mergeCanonicalPieceInto({
+        reason: `explicit ${groupingKind} composition`,
+        source: child,
+        target: parent,
+      });
+    }
+
+    calls.push({
+      answerType: "confirm",
+      assemblySource: "canonical_evidence",
+      confidence: "high",
+      evidence: `${childTitles.join(", ")} ${
+        childTitles.length === 1 ? "was" : "were"
+      } explicitly included under ${stringValue(parent.payload, "title") ?? "the grouped activity"}.`,
+      guessedValue: stringValue(parent.payload, "title"),
+      prompt: `We grouped ${childTitles.join(", ")} into ${
+        stringValue(parent.payload, "title") ?? "one activity"
+      }.`,
+      reason:
+        "The source explicitly presented these as one route, option set, or same-site visit, so the traveler app keeps one card with visible included stops.",
+      relatedTitle: stringValue(parent.payload, "title"),
+      subjectType: "item",
+      targetField: "presentation",
+    });
+  }
+
+  return calls;
+}
+
+function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
+  return pieces.flatMap((piece) => {
+    if (!piece.outputEligible || piece.kind !== "activity") {
+      return [];
+    }
+
+    const dateConflict = piece.conflicts.find(
+      (conflict) => conflict.field === "date" && conflict.values.length > 1
+    );
+
+    if (!dateConflict) {
+      return [];
+    }
+
+    const title = stringValue(piece.payload, "title") ?? "this activity";
+
+    return [{
+      answerType: "date",
+      confidence: "medium",
+      evidence: `Source evidence placed ${title} on ${dateConflict.values.join(" and ")}.`,
+      guessedValue: stringValue(piece.payload, "date"),
+      prompt: `Which day should ${title} appear on?`,
+      reason:
+        "Repeated source evidence describes one canonical activity but disagrees about its day, so Roamwoven kept one card and needs one placement decision.",
+      relatedTitle: title,
+      subjectType: "item",
+      targetField: "date",
+    }];
+  });
+}
+
 function activityKind(payload: Record<string, unknown>): EvidenceKind {
   const classification = classifyDraftActivityCard({
     category: stringValue(payload, "category"),
@@ -828,10 +1525,23 @@ function activityKind(payload: Record<string, unknown>): EvidenceKind {
     return "context";
   }
 
-  // Classification suggestions are intentionally not allowed to demote an
-  // observation here. Untimed planned sights and ambiguous recommendations
-  // need cluster context; only explicit note evidence crosses this boundary.
-  return stringValue(payload, "itemType") === "note" ? "note" : "activity";
+  if (
+    stringValue(payload, "itemType") === "note" ||
+    classification.isLooseTipActivity ||
+    (classification.isWeakDatedCityNoteCandidate &&
+      classification.hasWeakRecommendationMarker)
+  ) {
+    return "note";
+  }
+
+  if (
+    !stringValue(payload, "date") &&
+    !classification.hasStrongPlannedActivityLanguage
+  ) {
+    return "note";
+  }
+
+  return "activity";
 }
 
 function activityInput(payload: Record<string, unknown>) {
@@ -1129,10 +1839,7 @@ export function clusterExtractedEvidence({
       continue;
     }
 
-    if (
-      observation.source === "source_anchor" &&
-      !isStrongStandaloneAnchor(observation.payload)
-    ) {
+    if (observation.source === "source_anchor") {
       suppressedWeakAnchorCount += 1;
       pieces.push(createPiece(observation, false));
       continue;
@@ -1142,6 +1849,14 @@ export function clusterExtractedEvidence({
   }
 
   suppressRedundantTransportParents(pieces);
+  attachGenericActivityAccessories(pieces);
+  attachRentalCarReturns(pieces);
+  suppressRepresentedTravelAndStayActivities(pieces);
+  applyAccessTaskPolicy(pieces);
+  quarantineOutOfRangePieces(pieces);
+  mergeCanonicalCityNotes(pieces);
+  const canonicalGroupingCalls = createCanonicalGroupingCalls(pieces);
+  const canonicalConflictQuestions = createCanonicalConflictQuestions(pieces);
 
   const outputFor = (kind: EvidenceKind) =>
     pieces
@@ -1149,7 +1864,11 @@ export function clusterExtractedEvidence({
       .map((piece) => piece.payload);
   const activities = [...outputFor("activity"), ...outputFor("note")];
   const finalMissingDetails = unresolvedMissingDetails({
-    details: missingDetails,
+    details: [
+      ...missingDetails,
+      ...canonicalGroupingCalls,
+      ...canonicalConflictQuestions,
+    ],
     pieces,
     tripOverview,
   });
@@ -1185,6 +1904,11 @@ export function clusterExtractedEvidence({
         (observation) => observation.kind === "context"
       ).length,
       observationCount: observations.length,
+      rejectedObservationCount: new Set(
+        pieces
+          .filter((piece) => !piece.outputEligible)
+          .flatMap((piece) => piece.observationIds)
+      ).size,
       sourceAnchorObservationCount: sourceTransportAnchors.length,
       suppressedWeakAnchorCount,
     },
