@@ -222,12 +222,6 @@ export function classifyStayAddressSensitivity({
     return null;
   }
 
-  const context = normalizedText([name, stayType, publicLocationLabel]);
-
-  if (isCommercialStayContext(context)) {
-    return null;
-  }
-
   return privateResidenceClassification;
 }
 
@@ -237,7 +231,7 @@ export function getStayAddressVisibility(input: {
   publicLocationLabel?: string | null;
   stayType?: string | null;
 }): TripPrivateDetailVisibility {
-  return classifyStayAddressSensitivity(input) ? "traveler_password" : "public";
+  return input.address?.trim() ? "traveler_password" : "public";
 }
 
 function isPublicVenueAddressDetail({
@@ -286,7 +280,15 @@ export function shouldCreatePrivateDetailFromDraftSensitiveDetail({
     return false;
   }
 
-  if (classifySensitiveText(text)) {
+  const classification = classifySensitiveText(text);
+
+  if (classification?.kind === "booking_control") {
+    return /\b(airbnb|apartment|bus|ferry|flight|hostel|hotel|lodging|pnr|record locator|rental|stay|train|transport|travel)\b/.test(
+      text
+    );
+  }
+
+  if (classification) {
     return true;
   }
 
@@ -298,6 +300,28 @@ export function shouldCreatePrivateDetailFromDraftSensitiveDetail({
   }
 
   return false;
+}
+
+export function shouldProtectPublicItemText({
+  text,
+  title,
+}: {
+  text: string | null | undefined;
+  title: string | null | undefined;
+}) {
+  const classification = classifySensitiveText(text);
+
+  if (!classification) {
+    return false;
+  }
+
+  if (classification.kind !== "booking_control") {
+    return true;
+  }
+
+  return /\b(bus|ferry|flight|fly|train|transfer|transport|travel)\b/i.test(
+    title ?? ""
+  );
 }
 
 export function isDefaultPrivacyPolicyQuestion({

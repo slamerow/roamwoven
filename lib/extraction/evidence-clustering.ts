@@ -16,7 +16,7 @@ import {
   type GroupingKind,
 } from "@/lib/trip-card-taxonomy";
 
-export const EVIDENCE_CLUSTER_VERSION = 5;
+export const EVIDENCE_CLUSTER_VERSION = 6;
 
 export type EvidenceKind =
   | "activity"
@@ -64,6 +64,7 @@ export type EvidenceStageInput = {
   source: Exclude<EvidenceSource, "source_anchor">;
   sourceFilename?: string | null;
   sourceProvenance?: string | null;
+  sourceText?: string | null;
   sourceUploadId?: string | null;
   stage: unknown;
 };
@@ -308,6 +309,7 @@ function sourceStructureFromPayload(
 
 function publicPayload(payload: Record<string, unknown>) {
   const {
+    _publicLookupClaim,
     evidenceRole: _evidenceRole,
     sourceHeadingPath: _sourceHeadingPath,
     sourceSectionLabel: _sourceSectionLabel,
@@ -444,7 +446,7 @@ function aliasIdentityTokens(record: Record<string, unknown>) {
     titleTokens.length > 0 &&
     titleTokens.every((token) => GENERIC_SINGLE_IDENTITY_TOKENS.has(token));
   const aliasDescription =
-    (/\b(?:also known as|aka)\b|[()/]/i.test(description) ||
+    (/\b(?:also known as|aka)\b/i.test(description) ||
       (genericTitle && /\b(?:including|includes)\b/i.test(description))) &&
     description.length <= 180
       ? description
@@ -758,13 +760,32 @@ function stayMatchReason(
   const rightAddress = normalizedComparable(right.address);
   const leftName = normalizedComparable(left.name);
   const rightName = normalizedComparable(right.name);
+  const addressTokens = (value: string) =>
+    value.split(/\s+/).filter((token) => token.length > 1);
+  const leftAddressTokens = addressTokens(leftAddress);
+  const rightAddressTokens = addressTokens(rightAddress);
+  const addressOverlap = overlapCount(leftAddressTokens, rightAddressTokens);
+  const addressUnion = new Set([
+    ...leftAddressTokens,
+    ...rightAddressTokens,
+  ]).size;
+  const tokenSimilarAddress = Boolean(
+    leftAddress &&
+      rightAddress &&
+      addressUnion > 0 &&
+      addressOverlap / addressUnion >= 0.78 &&
+      leftAddressTokens.some(
+        (token) => /\d/.test(token) && rightAddressTokens.includes(token)
+      )
+  );
 
   if (
     leftAddress &&
     rightAddress &&
     (leftAddress === rightAddress ||
       leftAddress.includes(rightAddress) ||
-      rightAddress.includes(leftAddress))
+      rightAddress.includes(leftAddress) ||
+      tokenSimilarAddress)
   ) {
     return "same stay address";
   }
@@ -1479,11 +1500,41 @@ function suppressRepresentedTravelAndStayActivities(
     const text = activityText(activity.payload);
 
     if (/\b(?:flight|fly|train|bus|ferry|transfer)\b/.test(text)) {
-      const matches = transports.filter(
+      const movementKind = /\b(?:flight|fly)\b/.test(text)
+        ? "flight"
+        : /\btrain\b/.test(text)
+          ? "train"
+          : /\bbus\b/.test(text)
+            ? "bus"
+            : /\bferry\b/.test(text)
+              ? "ferry"
+              : null;
+      const sameDateKind = transports.filter(
         (transport) =>
           sameCanonicalDate(activity.payload, transport.payload) &&
-          Boolean(activityMatchReason(activity.payload, transport.payload))
+          (!movementKind || normalizedComparable(transport.payload.type) === movementKind)
       );
+      const activityTokens = identityTokens(
+        [activity.payload.title, activity.payload.description].filter(Boolean).join(" ")
+      );
+      const matches = sameDateKind.filter((transport) => {
+        const transportTokens = identityTokens(
+          [
+            transport.payload.title,
+            transport.payload.departure,
+            transport.payload.arrival,
+            transport.payload.number,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+
+        return (
+          Boolean(activityMatchReason(activity.payload, transport.payload)) ||
+          overlapCount(activityTokens, transportTokens) >= 1 ||
+          sameDateKind.length === 1
+        );
+      });
 
       if (matches.length === 1) {
         suppressCanonicalPiece(
@@ -1577,31 +1628,71 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
-function scrubProtectedValuesFromActivityDescriptions(
-  pieces: CanonicalEvidencePiece[]
-) {
-  for (const piece of pieces) {
-    if (!piece.outputEligible || piece.kind !== "activity") {
-      continue;
-    }
+function isGenericStayName(value: unknown) {
+  const title = normalizedComparable(value);
 
-    const description = stringValue(piece.payload, "description");
-
-    if (!description) {
-      continue;
-    }
-
-    const scrubbed = description
-      .replace(
-        /\b(wi-?fi(?: password)?|password|passcode|door code|gate code|lockbox code|access code)\s*[:#-]?\s*[^.;,]+/gi,
-        "$1 is saved with protected trip details"
+  return Boolean(
+    title &&
+      /^(?:[a-z]+\s+)?(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|stay)$/.test(
+        title
       )
-      .replace(
-        /\b(confirmation|booking(?: reference| number)?|reservation number|pnr)\s*[:#-]?\s*[a-z0-9][a-z0-9-]{2,}/gi,
-        "$1 is saved with protected trip details"
-      );
+  );
+}
 
-    piece.payload.description = scrubbed;
+function attachGenericStayFragments(pieces: CanonicalEvidencePiece[]) {
+  const stays = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
+
+  for (const generic of stays) {
+    if (
+      !generic.outputEligible ||
+      !isGenericStayName(generic.payload.name) ||
+      generic.payload.address ||
+      confirmationFrom(generic.payload)
+    ) {
+      continue;
+    }
+
+    const genericDate = stringValue(generic.payload, "checkIn") ??
+      stringValue(generic.payload, "firstNightDate");
+    const genericTokens = identityTokens(generic.payload.name);
+    const candidates = stays.filter((candidate) => {
+      if (
+        candidate === generic ||
+        !candidate.outputEligible ||
+        (isGenericStayName(candidate.payload.name) &&
+          !candidate.payload.address &&
+          !confirmationFrom(candidate.payload))
+      ) {
+        return false;
+      }
+
+      const checkIn = stringValue(candidate.payload, "checkIn") ??
+        stringValue(candidate.payload, "firstNightDate");
+      const checkOut = stringValue(candidate.payload, "checkOut");
+      const candidateTokens = identityTokens(candidate.payload.name);
+      const dateFits = Boolean(
+        genericDate &&
+          checkIn &&
+          (tripDatesMatch(genericDate, checkIn) ||
+            (checkOut && genericDate >= checkIn && genericDate < checkOut))
+      );
+      const cityTokenMatches = overlapCount(
+        genericTokens.filter((token) => !GENERIC_SINGLE_IDENTITY_TOKENS.has(token)),
+        candidateTokens
+      ) > 0;
+
+      return dateFits && (cityTokenMatches || genericTokens.length <= 1);
+    });
+
+    if (candidates.length === 1) {
+      mergeCanonicalPieceInto({
+        reason: "generic stay evidence attached to unique dated lodging",
+        source: generic,
+        target: candidates[0],
+      });
+    }
   }
 }
 
@@ -1798,6 +1889,7 @@ function createCanonicalGroupingCalls(pieces: CanonicalEvidencePiece[]) {
       (child) => stringValue(child.payload, "title") ?? "Untitled activity"
     );
     const groupingKind: GroupingKind = getDraftActivityGroupingKind(input);
+    const publicLookupClaim = stringValue(parent.payload, "_publicLookupClaim");
 
     for (const child of children) {
       const childTitle = stringValue(child.payload, "title");
@@ -1817,15 +1909,16 @@ function createCanonicalGroupingCalls(pieces: CanonicalEvidencePiece[]) {
       answerType: "confirm",
       assemblySource: "canonical_evidence",
       confidence: "high",
-      evidence: `${childTitles.join(", ")} ${
+      evidence: publicLookupClaim ?? `${childTitles.join(", ")} ${
         childTitles.length === 1 ? "was" : "were"
       } explicitly included under ${stringValue(parent.payload, "title") ?? "the grouped activity"}.`,
       guessedValue: stringValue(parent.payload, "title"),
       prompt: `We grouped ${childTitles.join(", ")} into ${
         stringValue(parent.payload, "title") ?? "one activity"
       }.`,
-      reason:
-        "The source explicitly presented these as one route, option set, or same-site visit, so the traveler app keeps one card with visible included stops.",
+      reason: publicLookupClaim
+        ? "Source structure and a bounded public venue lookup agreed this is one same-site visit, so the traveler app keeps one card with visible included stops."
+        : "The source explicitly presented these as one route, option set, or same-site visit, so the traveler app keeps one card with visible included stops.",
       relatedCanonicalPieceId: parent.id,
       relatedTitle: stringValue(parent.payload, "title"),
       subjectType: "item",
@@ -2165,6 +2258,17 @@ function unresolvedMissingDetails({
 
   return dedupeObjects(details).filter((value) => {
     const detail = asRecord(value);
+    const questionText = normalizeText(
+      [detail.prompt, detail.reason].filter(Boolean).join(" ")
+    );
+
+    if (
+      /\b(?:no question (?:is )?needed|does not need (?:a )?question|already identifiable|already resolved)\b/.test(
+        questionText
+      )
+    ) {
+      return false;
+    }
     const subjectType = normalizedComparable(detail.subjectType);
     const targetField = normalizedComparable(detail.targetField).replace(/\s+/g, "");
 
@@ -2218,10 +2322,12 @@ function unresolvedMissingDetails({
 }
 
 export function clusterExtractedEvidence({
+  resolverMetadata,
   sourceTransportAnchors,
   stages,
   tripOverview,
 }: {
+  resolverMetadata?: unknown;
   sourceTransportAnchors: SourceTransportAnchor[];
   stages: EvidenceStageInput[];
   tripOverview: unknown;
@@ -2328,12 +2434,12 @@ export function clusterExtractedEvidence({
   }
 
   suppressRedundantTransportParents(pieces);
+  attachGenericStayFragments(pieces);
   attachGenericActivityAccessories(pieces);
   attachGenericActivityPlaceholders(pieces);
   attachRentalCarReturns(pieces);
   suppressRepresentedTravelAndStayActivities(pieces);
   applyAccessTaskPolicy(pieces);
-  scrubProtectedValuesFromActivityDescriptions(pieces);
   recoverOutOfRangePieces(pieces);
   mergeCanonicalCityNotes(pieces);
   recoverMissingNamedEvidence({
@@ -2382,6 +2488,7 @@ export function clusterExtractedEvidence({
       ),
       canonicalPieceIds: pieces.map((piece) => piece.id),
       observationIds: observations.map((observation) => observation.id),
+      resolver: resolverMetadata ?? null,
       version: EVIDENCE_CLUSTER_VERSION,
     },
   };

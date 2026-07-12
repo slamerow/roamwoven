@@ -1,6 +1,7 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
 import { finalizeCanonicalTripDraft } from "@/lib/extraction/canonical-trip-finalization";
+import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evidence-resolver";
 import {
   clusterExtractedEvidence,
   type CanonicalEvidencePiece,
@@ -225,6 +226,7 @@ const tripDraftSchema = {
           checkInTime: { type: ["string", "null"] },
           checkOut: { type: ["string", "null"] },
           checkOutTime: { type: ["string", "null"] },
+          confirmation: { type: ["string", "null"] },
           firstNightDate: { type: ["string", "null"] },
           name: { type: "string" },
           nights: { type: ["number", "null"] },
@@ -236,6 +238,7 @@ const tripDraftSchema = {
           "checkInTime",
           "checkOut",
           "checkOutTime",
+          "confirmation",
           "firstNightDate",
           "name",
           "nights",
@@ -375,13 +378,13 @@ const systemPrompt = [
   "Traveler-facing text should use readable dates such as January 19th, not compact dates like 20190119. Do not repeat the year in every description when the trip is clearly contained to one year.",
   "Opaque identifier rule: confirmation numbers, ticket numbers, reservation codes, and booking references are identifiers, never dates. Preserve their characters exactly in sensitiveDetails and never rewrite an identifier as a calendar date.",
   "Repeated-sighting rule: repeated mentions of one visit, reservation, or stay are evidence for one canonical entity, but explicit visits on different dates, different bookings, or different addresses are distinct entities. Emit each explicit dated visit separately. Create one targeted missingDetails question only when the source truly conflicts about the placement of one visit.",
-  "Flag private addresses, door codes, confirmation numbers, personal notes, and host contact details as sensitiveDetails instead of exposing them casually.",
-  "Default sensitiveDetails should include exact private home addresses, exact rental or Airbnb addresses, door/gate/lockbox codes, Wi-Fi passwords, host phone numbers or emails, confirmation numbers, booking references, ticket numbers, passport/ID/payment details, and child/medical/personal safety notes.",
+  "Flag every exact lodging address, stay and travel booking-control identifier, door/access secret, personal note, and personal host contact as sensitiveDetails instead of exposing it casually.",
+  "Default sensitiveDetails should include every exact hotel, hostel, rental, Airbnb, and other lodging address; stay and travel confirmation numbers, booking references, PNRs, reservation codes, and travel ticket numbers; door/gate/lockbox/access codes; Wi-Fi passwords; personal host phone numbers or emails; passport/ID/payment details; and medical/personal safety notes. Activity, tour, attraction, and restaurant confirmation or ticket identifiers are public unless they are also access credentials or another universally protected secret.",
   "Hotel and hostel names, public landmarks, restaurants, shops, museums, commercial venue addresses, city names, and general day summaries are usually safe for follower mode unless paired with room numbers, access instructions, booking controls, or personal notes.",
   "Create missingDetails only for unresolved maker decisions that materially change the generated traveler app, such as explicit source todos, true conflicts, ambiguous placement, missing critical route/stay fields, or an unidentifiable booked/timed card. Do not use missingDetails for routine extraction, OCR/material diagnostics, duplicate suppression, privacy defaults, source-anchor repairs, source-backed facts, or high-confidence inferences already applied.",
   "Accuracy is paramount: never suppress a question if answering it would materially change the generated trip. Still, use a human review budget: most roughly week-long trips should average a small handful of meaningful questions and calls, not one per card or reservation. Do not force a fixed count; some clean trips need almost none, and messy trips can need more.",
   "Do not create missingDetails just to ask the maker to approve a high-confidence inference you already used in the structured records. Put that reasoning in the record/evidence instead.",
-  "Do not ask privacy yes/no questions when the detail is clearly sensitive. Put private rental or Airbnb addresses, access codes, confirmations, booking references, and private notes in sensitiveDetails and default them behind traveler-password visibility. Do not flag hotel or hostel addresses as sensitive just because they are exact addresses.",
+  "Do not ask privacy yes/no questions when the detail is clearly sensitive. Put every exact lodging address, access code, stay or travel booking-control identifier, and private note in sensitiveDetails and default it behind traveler-password visibility.",
   "Do not ask broad privacy-policy questions such as whether booking references, Airbnb access codes, Wi-Fi passwords, or private rental addresses should be stored as sensitive details. Apply the default privacy policy in sensitiveDetails. Only create a privacy question when the source is genuinely ambiguous about whether a place is private versus public.",
   "Use personal/private note sensitivity narrowly: host personal contact details, passport/ID/payment details, medical or safety notes, emergency contacts, family/private logistics, and explicitly private notes. Ordinary logistics like picking up a rental car, taking a train, or visiting a public business are not personal notes.",
   "When an unresolved maker decision is genuinely needed, fill guessedValue and evidence when the source supports a likely answer instead of asking a blank question. Do not create confirmation prompts for high-confidence facts or routine inferences already reflected in the structured records.",
@@ -1200,9 +1203,17 @@ export async function extractTripDraftWithOpenAI({
   }
 
   const config = getOpenAIConfig();
+  const completeSpineCharBudget = Math.min(
+    120000,
+    Math.max(
+      config.maxInputChars,
+      usableMaterials.reduce((sum, material) => sum + material.text.length, 0) +
+        usableMaterials.length * 240
+    )
+  );
   const spineMaterials = optimizeTripExtractionMaterials({
     materials: usableMaterials,
-    totalCharBudget: config.maxInputChars,
+    totalCharBudget: completeSpineCharBudget,
   });
   const sourceTransportAnchors =
     extractSourceTransportAnchorsFromMaterials(usableMaterials);
@@ -1210,6 +1221,7 @@ export async function extractTripDraftWithOpenAI({
   const input = [`Trip name: ${tripName}`, formattedMaterials].join("\n\n");
   const spineResult = await createOpenAIStructuredResponse({
     input,
+    maxInputChars: completeSpineCharBudget,
     schema: tripSpineSchema,
     schemaName: "roamwoven_trip_spine",
     system: spineSystemPrompt,
@@ -1259,6 +1271,7 @@ export async function extractTripDraftWithOpenAI({
         source: "model_chunk" as const,
         sourceFilename: material?.filename ?? null,
         sourceProvenance: material?.sourceProvenance ?? null,
+        sourceText: getChunkText(chunk),
         sourceUploadId: material?.sourceUploadId ?? null,
         stage: {
           activities: [
@@ -1317,15 +1330,33 @@ export async function extractTripDraftWithOpenAI({
         source: "model_chunk" as const,
         sourceFilename: material?.filename ?? null,
         sourceProvenance: material?.sourceProvenance ?? null,
+        sourceText: getChunkText(chunk),
         sourceUploadId: material?.sourceUploadId ?? null,
         stage: result.json,
       };
     }),
     ...recoveryStages,
   ];
-  const evidence = clusterExtractedEvidence({
-    sourceTransportAnchors,
+  let resolvedEvidenceStages = {
+    metadata: null as unknown,
     stages: evidenceStages,
+    usage: null as unknown,
+  };
+
+  try {
+    resolvedEvidenceStages = await resolveCanonicalEvidenceStages(evidenceStages);
+  } catch (error) {
+    console.error("trip_canonical_evidence_resolver_failed", {
+      message: error instanceof Error ? error.message : "Unknown error.",
+      name: error instanceof Error ? error.name : "UnknownError",
+      tripName,
+    });
+  }
+
+  const evidence = clusterExtractedEvidence({
+    resolverMetadata: resolvedEvidenceStages.metadata,
+    sourceTransportAnchors,
+    stages: resolvedEvidenceStages.stages,
     tripOverview: spineRecord.tripOverview ?? {
       confidence: "low",
       dateRange: null,
@@ -1363,6 +1394,10 @@ export async function extractTripDraftWithOpenAI({
         rescued,
         usage: result.usage ?? null,
       })),
+      canonicalResolver: {
+        metadata: resolvedEvidenceStages.metadata,
+        usage: resolvedEvidenceStages.usage,
+      },
       activityFailures: activityFailures.map(({ attempts, chunk, error }) => ({
         attempts,
         chunkId: chunk.id,
@@ -1379,6 +1414,17 @@ export async function extractTripDraftWithOpenAI({
         transport: sourceTransportAnchors,
       },
       spineMaterialBudget: spineMaterials.summary,
+      spineCoverage: {
+        activityChunkFailureCount: activityFailures.length,
+        completeStagedCoverage: activityFailures.length === 0,
+        sourceCharCount: usableMaterials.reduce(
+          (sum, material) => sum + material.text.length,
+          0
+        ),
+        spineCharBudget: completeSpineCharBudget,
+        spineTruncatedMaterialCount:
+          spineMaterials.summary.truncatedMaterialCount,
+      },
       spine: spineResult.usage,
       staged: true,
     },

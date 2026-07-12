@@ -71,7 +71,7 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
 
 function getReviewActivityItems(records: StructuredTripRecords) {
   return records.items.filter(
-    (item) => isActiveStatus(item.status) && !isCityTipItem(item)
+    (item) => isActiveStatus(item.status) && item.itemType === "activity"
   );
 }
 

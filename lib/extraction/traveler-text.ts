@@ -171,8 +171,16 @@ function ordinalSuffix(day: number) {
 }
 
 export function formatReadableDate(year: string, month: string, day: string) {
+  const yearNumber = Number(year);
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+
+  if (!validIsoDate(yearNumber, monthNumber, dayNumber)) {
+    return `${year}${month}${day}`;
+  }
+
   const parsed = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day))
+    Date.UTC(yearNumber, monthNumber - 1, dayNumber)
   );
 
   if (Number.isNaN(parsed.getTime())) {
@@ -183,9 +191,9 @@ export function formatReadableDate(year: string, month: string, day: string) {
     month: "long",
     timeZone: "UTC",
   }).format(parsed);
-  const dayNumber = parsed.getUTCDate();
+  const parsedDayNumber = parsed.getUTCDate();
 
-  return `${monthName} ${dayNumber}${ordinalSuffix(dayNumber)}, ${parsed.getUTCFullYear()}`;
+  return `${monthName} ${parsedDayNumber}${ordinalSuffix(parsedDayNumber)}, ${parsed.getUTCFullYear()}`;
 }
 
 export function formatReadableIsoDate(value: string | null) {

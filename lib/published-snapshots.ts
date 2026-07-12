@@ -4,14 +4,15 @@ import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   classifyAddressSensitivity,
   classifySensitiveText,
+  shouldProtectPublicItemText,
 } from "@/lib/trip-privacy-policy";
 import type {
   StructuredTripRecords,
   TripPrivateDetailRecord,
   TripItemRecord,
-  TripLegRecord,
   TripSourceConfidence,
   TripStayRecord,
+  TripTransportRecord,
 } from "@/lib/generated-trip-model";
 import type { TravelerAppViewModel } from "@/lib/traveler-view-model";
 import { getSupabaseConfig } from "@/lib/env";
@@ -38,6 +39,15 @@ export type PublishedTripSnapshot = {
   tripId: string;
   version: number;
 };
+
+export class PublicSnapshotPrivacyError extends Error {
+  constructor(public leaks: string[]) {
+    super(
+      `Public snapshot privacy validation failed: ${leaks.join(", ")}.`
+    );
+    this.name = "PublicSnapshotPrivacyError";
+  }
+}
 
 export type PublishedTripPrivateDetail = {
   detailId: string;
@@ -131,10 +141,22 @@ function getPrivateSubjectKeys(records: StructuredTripRecords) {
 
 function redactSensitiveItem(
   item: TripItemRecord,
-  privateSubjectKeys: Set<string>
+  privateSubjectKeys: Set<string>,
+  protectedLodgingAddresses: Set<string>
 ): TripItemRecord {
   const hasPrivateDetail = privateSubjectKeys.has(`item:${item.id}`);
-  const hasSensitiveDescription = Boolean(classifySensitiveText(item.description));
+  const normalizedAddress = normalizedLeakValue(item.address);
+  const descriptionText = normalizedLeakValue(item.description);
+  const repeatsProtectedLodgingAddress = Boolean(
+    (normalizedAddress && protectedLodgingAddresses.has(normalizedAddress)) ||
+      Array.from(protectedLodgingAddresses).some(
+        (address) => descriptionText && descriptionText.includes(address)
+      )
+  );
+  const hasSensitiveDescription = shouldProtectPublicItemText({
+    text: item.description,
+    title: item.title,
+  });
   const hasSensitiveAddress = Boolean(
     classifyAddressSensitivity({
       address: item.address,
@@ -144,43 +166,41 @@ function redactSensitiveItem(
 
   return {
     ...item,
-    address: hasPrivateDetail || hasSensitiveAddress ? null : item.address,
+    address:
+      hasPrivateDetail || hasSensitiveAddress || repeatsProtectedLodgingAddress
+        ? null
+        : item.address,
     description:
-      hasPrivateDetail || hasSensitiveDescription
+      hasPrivateDetail || hasSensitiveDescription || repeatsProtectedLodgingAddress
         ? "Protected detail. Enter the trip password to view this in traveler mode."
         : item.description,
   };
 }
 
-function redactSensitiveStay(stay: TripStayRecord): TripStayRecord {
-  const shouldRedactAddress =
-    stay.addressVisibility !== "public" ||
-    Boolean(
-      classifyAddressSensitivity({
-        address: stay.address,
-        context: `${stay.name} ${stay.publicLocationLabel ?? ""}`,
-      })
-    );
+function redactSensitiveTransport(
+  transport: TripTransportRecord
+): TripTransportRecord {
+  const hasSensitiveDescription = Boolean(
+    classifySensitiveText(transport.description)
+  );
 
   return {
-    ...stay,
-    address: shouldRedactAddress ? null : stay.address,
-    confirmationLabel:
-      stay.confirmationVisibility === "public" ? stay.confirmationLabel : null,
+    ...transport,
+    bookingUrl: null,
+    confirmationLabel: null,
+    description: hasSensitiveDescription
+      ? "Protected travel detail. Enter the trip password to view it."
+      : transport.description,
   };
 }
 
-function redactSensitiveLeg(
-  leg: TripLegRecord,
-  redactedStays: TripStayRecord[]
-): TripLegRecord {
-  const stay = redactedStays.find((item) => item.legId === leg.id);
-
-  if (!stay) {
-    return leg;
-  }
-
-  return leg;
+function redactSensitiveStay(stay: TripStayRecord): TripStayRecord {
+  return {
+    ...stay,
+    address: null,
+    bookingUrl: null,
+    confirmationLabel: null,
+  };
 }
 
 export function createPublishedPrivateDetails(
@@ -197,16 +217,93 @@ export function createPublicSnapshotRecords(
   records: StructuredTripRecords
 ): StructuredTripRecords {
   const privateSubjectKeys = getPrivateSubjectKeys(records);
+  const protectedLodgingAddresses = new Set(
+    records.stays
+      .map((stay) => stay.address)
+      .filter((address): address is string => looksLikeExactAddress(address))
+      .map(normalizedLeakValue)
+  );
   const stays = records.stays.map(redactSensitiveStay);
 
   return {
     ...records,
     items: records.items.map((item) =>
-      redactSensitiveItem(item, privateSubjectKeys)
+      redactSensitiveItem(item, privateSubjectKeys, protectedLodgingAddresses)
     ),
-    legs: records.legs.map((leg) => redactSensitiveLeg(leg, stays)),
+    legs: records.legs,
     stays,
+    transport: records.transport.map(redactSensitiveTransport),
   };
+}
+
+function normalizedLeakValue(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function looksLikeExactAddress(value: string | null | undefined) {
+  const text = value?.trim() ?? "";
+  return Boolean(
+    text.length >= 8 &&
+      (/\d|,/.test(text) ||
+        /\b(?:avenue|boulevard|floor|lane|platz|road|route|square|strasse|straße|street|via|way)\b/i.test(
+          text
+        ))
+  );
+}
+
+export function findPublicSnapshotPrivacyLeaks({
+  payload,
+  records,
+}: {
+  payload: PublishedTripSnapshotPayload;
+  records: StructuredTripRecords;
+}) {
+  const publicText = JSON.stringify(payload).toLowerCase();
+  const protectedValues = [
+    ...records.stays.flatMap((stay) => [
+      {
+        checkExact: looksLikeExactAddress(stay.address),
+        label: `stay address ${stay.id}`,
+        value: stay.address,
+      },
+      { checkExact: true, label: `stay confirmation ${stay.id}`, value: stay.confirmationLabel },
+      { checkExact: true, label: `stay booking URL ${stay.id}`, value: stay.bookingUrl },
+    ]),
+    ...records.transport.flatMap((transport) => [
+      {
+        checkExact: true,
+        label: `travel confirmation ${transport.id}`,
+        value: transport.confirmationLabel,
+      },
+      { checkExact: true, label: `travel booking URL ${transport.id}`, value: transport.bookingUrl },
+    ]),
+    ...records.privateDetails
+      .filter((detail) =>
+        detail.visibility === "traveler_password" ||
+        detail.visibility === "maker_only"
+      )
+      .map((detail) => ({
+        checkExact:
+          !detail.detailType.toLowerCase().includes("address") ||
+          looksLikeExactAddress(detail.value),
+        label: `private detail ${detail.id}`,
+        value: detail.value,
+      })),
+  ];
+  const exactLeaks = protectedValues
+    .filter(({ checkExact, value }) => checkExact && normalizedLeakValue(value).length >= 3)
+    .filter(({ value }) => publicText.includes(normalizedLeakValue(value)))
+    .map(({ label }) => label);
+  const universalSecretPatterns: Array<[string, RegExp]> = [
+    ["access credential", /\b(?:door|gate|lockbox|access|entry)\s*(?:code|pin)\b[^.]{0,80}/i],
+    ["Wi-Fi password", /\bwi-?fi\b[^.]{0,40}\b(?:password|passcode)\b/i],
+    ["passport or payment data", /\b(?:passport|credit card|card number|cvv|cvc)\b/i],
+  ];
+  const patternLeaks = universalSecretPatterns
+    .filter(([, pattern]) => pattern.test(publicText))
+    .map(([label]) => label);
+
+  return Array.from(new Set([...exactLeaks, ...patternLeaks]));
 }
 
 function createPublishedPrivateDetailPayload(records: StructuredTripRecords) {
@@ -227,7 +324,7 @@ export function createPublishedTripSnapshotPayload(
   const publicRecords = createPublicSnapshotRecords(records);
   const travelerApp = createTravelerAppViewModel(publicRecords);
 
-  return {
+  const payload = {
     createdFrom: "structured_trip_records",
     recordsSummary: {
       cardCount: travelerApp.cards.length,
@@ -238,7 +335,14 @@ export function createPublishedTripSnapshotPayload(
     },
     schemaVersion: 1,
     travelerApp,
-  };
+  } satisfies PublishedTripSnapshotPayload;
+  const leaks = findPublicSnapshotPrivacyLeaks({ payload, records });
+
+  if (leaks.length > 0) {
+    throw new PublicSnapshotPrivacyError(leaks);
+  }
+
+  return payload;
 }
 
 export async function publishTripSnapshot({

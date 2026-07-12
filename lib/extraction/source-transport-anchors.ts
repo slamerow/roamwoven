@@ -754,6 +754,32 @@ function filledAnchorScore(anchor: SourceTransportAnchor) {
   ].filter(Boolean).length;
 }
 
+function endpointQuality(value: string | null) {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return 0;
+  }
+
+  if (/\b(?:flight|train|bus|ferry|transfer|travel)\s+(?:to|from)\b/.test(normalized)) {
+    return 1;
+  }
+
+  if (/^[a-z]{3}$/.test(normalized)) {
+    return 6;
+  }
+
+  if (/\b(?:airport|bahnhof|hbf|station|terminal|nadrazi)\b/.test(normalized)) {
+    return 6;
+  }
+
+  return normalized.split(" ").length >= 2 ? 4 : 3;
+}
+
+function betterEndpoint(left: string | null, right: string | null) {
+  return endpointQuality(right) > endpointQuality(left) ? right : left;
+}
+
 function createAnchorFromBlock({
   block,
   currentDate,
@@ -945,7 +971,9 @@ function anchorsRepresentSameSegment(
     const normalized = normalizeText(value);
     return (
       !normalized ||
-      /^(?:bus|ferry|flight|train|transfer|travel)(?: to)?$/.test(normalized)
+      /^(?:bus|ferry|flight|train|transfer|travel)(?:\s+(?:to|from)(?:\s+.+)?)?$/.test(
+        normalized
+      )
     );
   };
 
@@ -990,13 +1018,21 @@ export function canonicalizeSourceTransportAnchors(
     const preferred =
       filledAnchorScore(anchor) > filledAnchorScore(match) ? anchor : match;
     const fallback = preferred === anchor ? match : anchor;
+    const departureLocation = betterEndpoint(
+      preferred.departureLocation,
+      fallback.departureLocation
+    );
+    const arrivalLocation = betterEndpoint(
+      preferred.arrivalLocation,
+      fallback.arrivalLocation
+    );
     const merged: SourceTransportAnchor = {
       ...preferred,
-      arrivalLocation: preferred.arrivalLocation ?? fallback.arrivalLocation,
+      arrivalLocation,
       arrivalTime: preferred.arrivalTime ?? fallback.arrivalTime,
       confirmation: preferred.confirmation ?? fallback.confirmation,
       date: preferred.date ?? fallback.date,
-      departureLocation: preferred.departureLocation ?? fallback.departureLocation,
+      departureLocation,
       departureTime: preferred.departureTime ?? fallback.departureTime,
       evidence: combineAnchorEvidence(preferred.evidence, fallback.evidence),
       number: preferred.number ?? fallback.number,
@@ -1007,6 +1043,12 @@ export function canonicalizeSourceTransportAnchors(
       ]),
       sourceFilename: preferred.sourceFilename ?? fallback.sourceFilename,
       sourceUploadId: preferred.sourceUploadId ?? fallback.sourceUploadId,
+      routeLabel: routeLabelFor({
+        arrivalLocation,
+        departureLocation,
+        fallbackTitle: null,
+        kind: preferred.kind,
+      }),
     };
 
     Object.assign(match, merged);

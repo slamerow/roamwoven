@@ -2146,7 +2146,7 @@ test("an unscoped lodging guess cannot overwrite every distinct stay name", () =
   );
 });
 
-test("commercial stay addresses remain public", () => {
+test("commercial stay addresses default protected", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -2179,8 +2179,9 @@ test("commercial stay addresses remain public", () => {
     tripId: "trip-hostel-address",
   });
 
-  assert.equal(records.stays[0]?.addressVisibility, "public");
-  assert.equal(records.privateDetails.length, 0);
+  assert.equal(records.stays[0]?.addressVisibility, "traveler_password");
+  assert.equal(records.privateDetails.length, 1);
+  assert.equal(records.privateDetails[0]?.detailType, "private_address");
 });
 
 test("private rental stay addresses remain protected", () => {
@@ -2227,7 +2228,7 @@ test("ambiguous non-commercial stay addresses default protected", () => {
       address: "1 Museum Way",
       name: "The Grand Hotel",
     }),
-    "public"
+    "traveler_password"
   );
 });
 
@@ -2410,7 +2411,7 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
-test("commercial stay address privacy prompts are dismissed", () => {
+test("commercial stay address privacy prompts are dismissed after protection", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -2460,7 +2461,7 @@ test("commercial stay address privacy prompts are dismissed", () => {
     tripId: "trip-hostel-privacy",
   });
 
-  assert.equal(records.stays[0]?.addressVisibility, "public");
+  assert.equal(records.stays[0]?.addressVisibility, "traveler_password");
   assert.equal(records.reviewQuestions[0]?.status, "dismissed");
   assert.equal(
     records.privateDetails.some((detail) => detail.label === "Vitae Hostel address"),

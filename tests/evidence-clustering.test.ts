@@ -1170,7 +1170,7 @@ export default async function run() {
     assert.equal(recovered?._recoveryRequired, true);
   });
 
-  await test("protected access values cannot survive in public activity text", () => {
+  await test("canonical evidence preserves private source text for the public projection", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -1195,7 +1195,6 @@ export default async function run() {
         ?.description
     );
 
-    assert.doesNotMatch(description, /secretword|1234/);
-    assert.match(description, /protected trip details/i);
+    assert.match(description, /secretword|1234/);
   });
 }

@@ -625,7 +625,7 @@ function createStayRecords({
       checkInTime: getString(stay, "checkInTime"),
       checkOutDate: checkOut,
       checkOutTime: getString(stay, "checkOutTime"),
-      confirmationLabel: null,
+      confirmationLabel: getString(stay, "confirmation"),
       confirmationVisibility: "traveler_password",
       id: `${tripId}-stay-${slugify(name)}-${index + 1}`,
       latitude: null,
@@ -820,13 +820,28 @@ function createPrivateDetailRecords({
       detailType: "private_address",
       id: `${stay.id}-address`,
       label: "Exact stay address",
-      reason: "Exact private rental and residence addresses should default behind traveler mode.",
+      reason: "Every exact lodging address stays behind traveler mode.",
       reviewRequired: false,
       sourceConfidence: "medium" as const,
       subjectId: stay.id,
       subjectType: "stay" as const,
       tripId,
       value: stay.address ?? "",
+      visibility: "traveler_password" as const,
+    }));
+  const stayConfirmationDetails = stays
+    .filter((stay) => stay.confirmationLabel)
+    .map((stay) => ({
+      detailType: "confirmation_number",
+      id: `${stay.id}-confirmation`,
+      label: "Stay confirmation",
+      reason: "Stay booking-control identifiers stay behind traveler mode.",
+      reviewRequired: false,
+      sourceConfidence: "medium" as const,
+      subjectId: stay.id,
+      subjectType: "stay" as const,
+      tripId,
+      value: stay.confirmationLabel ?? "",
       visibility: "traveler_password" as const,
     }));
 
@@ -879,7 +894,12 @@ function createPrivateDetailRecords({
     }];
   });
 
-  return [...stayDetails, ...transportDetails, ...sensitive];
+  return [
+    ...stayDetails,
+    ...stayConfirmationDetails,
+    ...transportDetails,
+    ...sensitive,
+  ];
 }
 
 function createDayRecords({

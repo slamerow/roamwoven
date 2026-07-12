@@ -397,6 +397,11 @@ export function createAuditDiagnostics({
   }
 
   const criticalCandidates = lineage
+    .filter(
+      (row) =>
+        row.outputEligible !== false &&
+        row.observations.some((observation) => observation.kind === "transport")
+    )
     .map((row) => row.canonical)
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter(isCriticalTransportCandidate);

@@ -40,7 +40,9 @@ type OpenAIResponseContent = {
 };
 
 type OpenAIResponseOutput = {
+  action?: unknown;
   content?: unknown;
+  type?: unknown;
 };
 
 type OpenAIResponseBody = {
@@ -60,7 +62,13 @@ export type OpenAIStructuredResponseResult = {
   json: unknown;
   model: string;
   rawText: string;
+  sources: Array<{ title: string | null; url: string }>;
   usage: unknown;
+};
+
+export type OpenAIStructuredWebSearchOptions = {
+  maxToolCalls?: number;
+  searchContextSize?: "low" | "medium";
 };
 
 export type OpenAIOcrInput = {
@@ -107,6 +115,41 @@ function getResponseText(body: OpenAIResponseBody) {
   return parts.join("").trim() || null;
 }
 
+function getWebSearchSources(body: OpenAIResponseBody) {
+  if (!Array.isArray(body.output)) {
+    return [];
+  }
+
+  const sources = (body.output as OpenAIResponseOutput[]).flatMap((output) => {
+    if (output.type !== "web_search_call") {
+      return [];
+    }
+
+    const action =
+      output.action && typeof output.action === "object" && !Array.isArray(output.action)
+        ? (output.action as { sources?: unknown })
+        : null;
+
+    return Array.isArray(action?.sources)
+      ? action.sources.flatMap((source) => {
+          if (!source || typeof source !== "object" || Array.isArray(source)) {
+            return [];
+          }
+
+          const record = source as { title?: unknown; url?: unknown };
+          return typeof record.url === "string"
+            ? [{
+                title: typeof record.title === "string" ? record.title : null,
+                url: record.url,
+              }]
+            : [];
+        })
+      : [];
+  });
+
+  return Array.from(new Map(sources.map((source) => [source.url, source])).values());
+}
+
 function isLikelyIncompleteJsonParseError(error: unknown) {
   const message =
     error instanceof Error ? error.message : "Unknown JSON parse error.";
@@ -126,6 +169,7 @@ async function requestStructuredResponse({
   schema,
   schemaName,
   system,
+  webSearch,
 }: {
   apiKey: string;
   input: string;
@@ -135,7 +179,19 @@ async function requestStructuredResponse({
   schema: Record<string, unknown>;
   schemaName: string;
   system: string;
+  webSearch?: OpenAIStructuredWebSearchOptions;
 }) {
+  const webSearchRequest = webSearch
+    ? {
+        include: ["web_search_call.action.sources"],
+        max_tool_calls: Math.max(1, Math.min(webSearch.maxToolCalls ?? 3, 3)),
+        tool_choice: "auto",
+        tools: [{
+          search_context_size: webSearch.searchContextSize ?? "low",
+          type: "web_search",
+        }],
+      }
+    : {};
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
@@ -165,6 +221,7 @@ async function requestStructuredResponse({
           type: "json_schema",
         },
       },
+      ...webSearchRequest,
     }),
   });
 
@@ -243,14 +300,18 @@ function parseStructuredResponseBody(body: OpenAIResponseBody) {
 
 export async function createOpenAIStructuredResponse({
   input,
+  maxInputChars,
   schema,
   schemaName,
   system,
+  webSearch,
 }: {
   input: string;
+  maxInputChars?: number;
   schema: Record<string, unknown>;
   schemaName: string;
   system: string;
+  webSearch?: OpenAIStructuredWebSearchOptions;
 }): Promise<OpenAIStructuredResponseResult> {
   const config = getOpenAIConfig();
 
@@ -270,15 +331,20 @@ export async function createOpenAIStructuredResponse({
     config.maxOutputTokens,
     MIN_STRUCTURED_OUTPUT_TOKENS
   );
+  const effectiveMaxInputChars = Math.max(
+    config.maxInputChars,
+    Math.min(maxInputChars ?? config.maxInputChars, 120000)
+  );
   const firstBody = await requestStructuredResponse({
     apiKey: config.apiKey,
     input,
-    maxInputChars: config.maxInputChars,
+    maxInputChars: effectiveMaxInputChars,
     maxOutputTokens: initialMaxOutputTokens,
     model: config.extractionModel,
     schema,
     schemaName,
     system,
+    webSearch,
   });
 
   let body = firstBody;
@@ -298,12 +364,13 @@ export async function createOpenAIStructuredResponse({
       body = await requestStructuredResponse({
         apiKey: config.apiKey,
         input,
-        maxInputChars: config.maxInputChars,
+        maxInputChars: effectiveMaxInputChars,
         maxOutputTokens: RETRY_STRUCTURED_OUTPUT_TOKENS,
         model: config.extractionModel,
         schema,
         schemaName,
         system,
+        webSearch,
       });
       parsed = parseStructuredResponseBody(body);
     } else {
@@ -315,6 +382,7 @@ export async function createOpenAIStructuredResponse({
     json: parsed.json,
     model: config.extractionModel,
     rawText: parsed.rawText,
+    sources: getWebSearchSources(body),
     usage: body.usage ?? null,
   };
 }
