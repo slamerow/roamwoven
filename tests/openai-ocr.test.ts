@@ -49,11 +49,14 @@ export default async function run() {
     }) as typeof fetch;
 
     try {
-      const result = await createOpenAIOcrText({
-        base64: Buffer.from("fake image").toString("base64"),
-        filename: "ticket.png",
-        mimeType: "image/png",
-      });
+      const result = await createOpenAIOcrText(
+        {
+          base64: Buffer.from("fake image").toString("base64"),
+          filename: "ticket.png",
+          mimeType: "image/png",
+        },
+        { focus: "transport" }
+      );
 
       assert.equal(result.text, "Flight BA 123 departs at 7 PM.");
       const capturedRequest = requestBody as Record<string, unknown> | null;
@@ -68,6 +71,7 @@ export default async function run() {
       );
       assert.equal(content[0]?.detail, "high");
       assert.equal(content[1]?.type, "input_text");
+      assert.match(String(content[1]?.text), /bounded verification pass/i);
       assert.equal(capturedRequest?.max_output_tokens, 14000);
     } finally {
       globalThis.fetch = originalFetch;

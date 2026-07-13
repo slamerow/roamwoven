@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export const OCR_PROMPT_VERSION = "page-coverage-v1";
+export const OCR_PROMPT_VERSION = "page-coverage-transport-v2";
 
 export type OcrBatchStatus = "completed" | "failed" | "incomplete" | "processing";
 

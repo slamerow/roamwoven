@@ -85,6 +85,7 @@ export type OpenAIOcrResult = {
 };
 
 export type OpenAIOcrOptions = {
+  focus?: "transport";
   maxOutputTokens?: number;
   originalPageNumbers?: number[];
 };
@@ -435,6 +436,14 @@ async function requestOcrText({
         "Use the original page number for N. If a page has no readable text, still include its header followed by [no readable text].",
       ].join(" ")
     : "";
+  const focusedInstruction = options.focus === "transport"
+    ? [
+        "This is a bounded verification pass for a page whose first OCR pass found incomplete transport evidence.",
+        "Return only visible flight, train, bus, ferry, or transfer timeline text, while keeping the required page headers.",
+        "For each visible transport card preserve exact route direction, origin, destination, departure time, arrival time, station or airport, operator, number, duration, and booking code.",
+        "Do not infer a missing value and do not rewrite station names. Use [not visible] when a field is not readable.",
+      ].join(" ")
+    : "";
   const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
@@ -451,6 +460,7 @@ async function requestOcrText({
                 "Extract all readable travel-planning text from this uploaded material.",
                 "Preserve confirmation codes, dates, times, airport/station names, hotel names, addresses, passenger/traveler names, reservation numbers, and cancellation/check-in instructions when visible.",
                 "Pay special attention to transport timeline cards and screenshot blocks: preserve route direction, departure and arrival stations or airports, train/flight numbers, operators, dates, durations, and departure/arrival times.",
+                focusedInstruction,
                 pageCoverageInstruction,
                 "Return plain text only. If a section is illegible, write [illegible] briefly rather than guessing.",
               ].filter(Boolean).join(" "),

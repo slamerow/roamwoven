@@ -19,6 +19,7 @@ import {
   createPdfPageBatcher,
   type PdfPageBatcher,
 } from "@/lib/extraction/pdf-page-batches";
+import { extractSourceTransportAnchorsFromMaterials } from "@/lib/extraction/source-transport-anchors";
 import type { TripUpload } from "@/lib/uploads";
 
 const OCR_PROVIDER = "openai-responses";
@@ -26,6 +27,8 @@ const MAX_OCR_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_OCR_PDF_SOURCE_BYTES = 50 * 1024 * 1024;
 const MAX_SINGLE_PAGE_INCOMPLETE_ATTEMPTS = 2;
 const OCR_PAGE_BATCH_CONCURRENCY = 3;
+const MAX_TRANSPORT_VERIFICATION_PAGES = 4;
+const TRANSPORT_VERIFICATION_CONCURRENCY = 2;
 
 export type TripOcrProcessingSummary = {
   batches: number;
@@ -131,6 +134,50 @@ export function getMissingOcrPageNumbers(text: string, pageNumbers: number[]) {
   return pageNumbers.filter((pageNumber) => !reportedPages.has(pageNumber));
 }
 
+function getOcrPageText(text: string, pageNumber: number) {
+  const header = new RegExp(
+    `===\\s*page\\s+${pageNumber}\\s*===([\\s\\S]*?)(?====\\s*page\\s+\\d+\\s*===|$)`,
+    "i"
+  );
+  return header.exec(text)?.[1]?.trim() ?? "";
+}
+
+export function findTransportOcrVerificationPages(
+  text: string,
+  pageNumbers: number[]
+) {
+  return pageNumbers.filter((pageNumber) => {
+    const pageText = getOcrPageText(text, pageNumber);
+    if (!/\b(?:flight|train|bus|ferry|transfer)\b/i.test(pageText)) {
+      return false;
+    }
+
+    const anchors = extractSourceTransportAnchorsFromMaterials([{
+      filename: `OCR page ${pageNumber}`,
+      sourceProvenance: "ocr",
+      text: pageText,
+      type: "pdf_text",
+    }]);
+    const critical = anchors.filter(
+      (anchor) => anchor.kind === "flight" || anchor.kind === "train"
+    );
+
+    if (critical.length === 0) {
+      return /\b\d{1,2}:\d{2}\b|\b(?:booking|confirmation|flight|train)\s+(?:code|number|#)/i.test(
+        pageText
+      );
+    }
+
+    return critical.some(
+      (anchor) =>
+        !anchor.departureLocation ||
+        !anchor.arrivalLocation ||
+        !anchor.departureTime ||
+        (anchor.kind === "train" && !anchor.arrivalTime)
+    );
+  });
+}
+
 function batchKey(pageNumbers: number[]) {
   return `${pageNumbers[0]}-${pageNumbers.at(-1)}`;
 }
@@ -224,6 +271,7 @@ async function processPdfOcr({
     ])
   );
   let retries = 0;
+  const transportVerificationPages = new Set<number>();
 
   const processBatch = async (
     pageNumbers: number[],
@@ -284,6 +332,72 @@ async function processPdfOcr({
         );
       }
 
+      const verificationPages = findTransportOcrVerificationPages(
+        result.text,
+        pageNumbers
+      )
+        .filter((pageNumber) => !transportVerificationPages.has(pageNumber))
+        .slice(
+          0,
+          Math.max(
+            0,
+            MAX_TRANSPORT_VERIFICATION_PAGES - transportVerificationPages.size
+          )
+        );
+      const verificationResults = await mapWithConcurrency(
+        verificationPages,
+        TRANSPORT_VERIFICATION_CONCURRENCY,
+        async (pageNumber) => {
+          transportVerificationPages.add(pageNumber);
+
+          try {
+            const focusedBatch = await batcher.createBatch([pageNumber]);
+            const focused = await createOpenAIOcrText(
+              {
+                base64: focusedBatch.base64,
+                filename: `${upload.originalFilename} page ${pageNumber} transport verification`,
+                mimeType: "application/pdf",
+              },
+              {
+                focus: "transport",
+                maxOutputTokens: Math.max(4000, Math.min(maxOutputTokens, 8000)),
+                originalPageNumbers: [pageNumber],
+              }
+            );
+
+            if (getMissingOcrPageNumbers(focused.text, [pageNumber]).length > 0) {
+              return null;
+            }
+
+            return focused;
+          } catch (error) {
+            console.warn("trip_transport_ocr_verification_failed", {
+              message: error instanceof Error ? error.message : "Unknown error.",
+              pageNumber,
+              tripId: record.tripId,
+              uploadId: upload.id,
+            });
+            return null;
+          }
+        }
+      );
+      const completedVerification = verificationResults.filter(
+        (candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)
+      );
+      const completedText = [
+        result.text,
+        ...completedVerification.map((candidate) => candidate.text),
+      ].join("\n\n");
+      const completedUsage = completedVerification.length > 0
+        ? {
+            primary: result.usage,
+            transportVerification: completedVerification.map((candidate) => ({
+              pageNumbers: candidate.pageNumbers,
+              usage: candidate.usage,
+            })),
+          }
+        : result.usage;
+
       const saved = await saveOcrBatchCheckpoint({
         attemptCount: attempt,
         materialExtractionId: record.id,
@@ -292,10 +406,10 @@ async function processPdfOcr({
         pageNumbers,
         sourceSha256,
         status: "completed",
-        textContent: result.text,
+        textContent: completedText,
         tripId: record.tripId,
         uploadId: upload.id,
-        usage: result.usage,
+        usage: completedUsage,
       });
       reusable.set(batchKey(pageNumbers), saved);
 
@@ -304,8 +418,8 @@ async function processPdfOcr({
           model: result.model,
           pageNumbers,
           reused: false,
-          text: result.text,
-          usage: result.usage,
+          text: completedText,
+          usage: completedUsage,
         },
       ];
     } catch (error) {

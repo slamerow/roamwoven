@@ -47,6 +47,22 @@ function upload(index: number): TripUpload {
 }
 
 export default async function run() {
+  await test("transport verification targets incomplete timeline pages only", () => {
+    const { findTransportOcrVerificationPages } = require("@/lib/extraction/ocr-processor");
+    const pages = [
+      "=== Page 1 ===",
+      "10:42 Train To Budapest Wien HBF Booking Code ABC123",
+      "=== Page 2 ===",
+      "09:20 Praha Hlavni Nadrazi",
+      "13:23 Wien Hauptbahnhof",
+      "Train to Vienna RJ 1033",
+      "=== Page 3 ===",
+      "Lunch at the market.",
+    ].join("\n");
+
+    assert.deepEqual(findTransportOcrVerificationPages(pages, [1, 2, 3]), [1]);
+  });
+
   await test("OCR processes every pending material across batches", async () => {
     const originalBatchSize = process.env.OPENAI_OCR_MAX_FILES_PER_RUN;
     const materialExtractions = require("@/lib/extraction/material-extractions");

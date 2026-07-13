@@ -255,7 +255,7 @@ export default async function run() {
     }
   });
 
-  await test("failed OCR preserves fallback text for debug but blocks extraction", async () => {
+  await test("failed OCR preserves usable fallback text for reviewable extraction", async () => {
     const originalCreateSupabaseServerClient =
       require("@/lib/supabase/server").createSupabaseServerClient;
 
@@ -300,14 +300,21 @@ export default async function run() {
       assert.equal(record.extractionMethod, "ocr");
       assert.equal(record.textContent, "Readable PDF text survives.");
       assert.equal(record.metadata.ocrFailedTextFallbackAvailable, true);
-      assert.equal(
+      assert.deepEqual(
         materialFromCheckpoint({
           filename: "image-rich.pdf",
           record,
           type: "pdf_text",
         }),
-        null
+        {
+          filename: "image-rich.pdf",
+          sourceProvenance: "text_layer",
+          sourceUploadId: "upload-1",
+          text: "Readable PDF text survives.",
+          type: "pdf_text",
+        }
       );
+      assert.equal(getMaterialOcrReadinessIssue([record]), null);
     } finally {
       require("@/lib/supabase/server").createSupabaseServerClient =
         originalCreateSupabaseServerClient;
@@ -349,7 +356,23 @@ export default async function run() {
     );
   });
 
-  await test("OCR failures block model extraction readiness", () => {
+  await test("OCR failures block only when no captured fallback is usable", () => {
+    assert.equal(
+      getMaterialOcrReadinessIssue([
+        checkpoint({
+          extractionMethod: "ocr",
+          failureClass: "ocr_no_embedded_image_text",
+          metadata: {
+            ocrFailedTextFallbackAvailable: true,
+            ocrProvider: "test-ocr",
+          },
+          status: "failed",
+          textContent: "Readable fallback text.",
+        }),
+      ]),
+      null
+    );
+
     assert.equal(
       getMaterialOcrReadinessIssue([
         checkpoint({
@@ -357,7 +380,7 @@ export default async function run() {
           failureClass: "ocr_no_embedded_image_text",
           metadata: { ocrProvider: "test-ocr" },
           status: "failed",
-          textContent: "Readable fallback text.",
+          textContent: null,
         }),
       ]),
       "ocr-failed"

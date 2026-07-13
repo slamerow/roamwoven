@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   applyCanonicalEvidenceResolution,
+  reconcileCanonicalEvidenceResolutions,
   type CanonicalEvidenceResolution,
 } from "@/lib/extraction/canonical-evidence-resolver";
 import {
@@ -188,5 +189,115 @@ export default async function run() {
     const draft = cluster(application);
 
     assert.deepEqual(draft.activities.map((item) => item.title), ["Museum evening"]);
+  });
+
+  await test("cross-chunk grouping uses shared source evidence and an atomic parent", () => {
+    const sourceText = [
+      "Schonbrunn Palace",
+      "Gloriette",
+      "Palm House",
+      "Apple Strudel Show",
+    ].join("\n");
+    const proposalStage = stage(["Schonbrunn cluster"], sourceText);
+    proposalStage.sourceUploadId = "shared-upload";
+    const proposal = (proposalStage.stage as {
+      activities: Array<Record<string, unknown>>;
+    }).activities[0];
+    proposal.evidenceRole = "grouping_proposal";
+    proposal.itemType = "note";
+    proposal.sourceSectionType = "city_reference";
+
+    const atomicStage = stage(
+      ["Schonbrunn Palace", "Gloriette", "Palm House", "Apple Strudel Show"],
+      sourceText
+    );
+    atomicStage.sourceUploadId = "shared-upload";
+    const application = applyCanonicalEvidenceResolution(
+      [proposalStage, atomicStage],
+      {
+        groupings: [{
+          candidateIds: [
+            "stage-1-item-1",
+            "stage-2-item-1",
+            "stage-2-item-2",
+            "stage-2-item-3",
+            "stage-2-item-4",
+          ],
+          claim: "The named stops are components of one palace-complex visit.",
+          confidence: "high",
+          parentCandidateId: "stage-1-item-1",
+          parentTitle: "Schonbrunn Palace",
+        }],
+        roleDecisions: noRoleDecisions,
+      }
+    );
+    const draft = cluster(application);
+
+    assert.deepEqual(draft.activities.map((item) => item.title), ["Schonbrunn Palace"]);
+    assert.equal(
+      draft.missingDetails.filter((detail) => /We grouped/i.test(detail.prompt ?? ""))
+        .length,
+      1
+    );
+    assert.deepEqual(application.groupingDecisions[0]?.candidateIds, [
+      "stage-2-item-1",
+      "stage-2-item-2",
+      "stage-2-item-3",
+      "stage-2-item-4",
+    ]);
+  });
+
+  await test("candidate count cannot silently dead-path a late grouping", () => {
+    const titles = Array.from({ length: 122 }, (_, index) => `Venue ${index + 1}`);
+    const input = stage(titles, titles.join("\n"));
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-121", "stage-1-item-122"],
+        claim: "The final two named components form one verified visit.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-121",
+        parentTitle: "Venue 121",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+
+    assert.equal(application.groupingDecisions.length, 1);
+  });
+
+  await test("conflicting resolver windows preserve separate items and original roles", () => {
+    const resolution = reconcileCanonicalEvidenceResolutions([
+      {
+        groupings: [{
+          candidateIds: ["a", "b"],
+          claim: "First possible grouping.",
+          confidence: "high",
+          parentCandidateId: "a",
+          parentTitle: "A",
+        }],
+        roleDecisions: [{
+          candidateId: "a",
+          classification: "city_note",
+          confidence: "high",
+          reason: "One window read this as a reference section.",
+        }],
+      },
+      {
+        groupings: [{
+          candidateIds: ["b", "c"],
+          claim: "Second overlapping grouping.",
+          confidence: "high",
+          parentCandidateId: "b",
+          parentTitle: "B",
+        }],
+        roleDecisions: [{
+          candidateId: "a",
+          classification: "keep_activity",
+          confidence: "high",
+          reason: "Another window read this as itinerary content.",
+        }],
+      },
+    ]);
+
+    assert.deepEqual(resolution, { groupings: [], roleDecisions: [] });
   });
 }

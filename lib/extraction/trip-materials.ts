@@ -510,7 +510,11 @@ export async function getTripExtractionMaterialsWithSummary(
       try {
         const existingCheckpoint = checkpointsByUploadId.get(upload.id);
 
-        if (existingCheckpoint?.status === "text_ready") {
+        if (
+          existingCheckpoint?.status === "text_ready" ||
+          (existingCheckpoint?.status === "failed" &&
+            existingCheckpoint.metadata.ocrFailedTextFallbackAvailable === true)
+        ) {
           const material = materialFromCheckpoint({
             filename: upload.originalFilename,
             record: existingCheckpoint,

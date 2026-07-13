@@ -6,8 +6,10 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 2;
-const MAX_RESOLVER_CANDIDATES = 120;
+const CANONICAL_RESOLVER_VERSION = 3;
+const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
+const MAX_RESOLVER_WINDOWS = 12;
+const RESOLVER_WINDOW_CONCURRENCY = 3;
 const resolverCache = new Map<
   string,
   {
@@ -29,6 +31,8 @@ type ResolverCandidate = {
   sectionLabel: string | null;
   sectionType: string | null;
   sourceBlock: number | null;
+  sourceBlockIds: string[];
+  sourceIdentity: string;
   sourceLine: number | null;
   sourcePrecedingLabel: string | null;
   stageIndex: number;
@@ -69,6 +73,7 @@ export type CanonicalEvidenceResolverMetadata = {
   resolvedAt: string | null;
   sources: Array<{ title: string | null; url: string }>;
   version: number;
+  windowCount: number;
 };
 
 const resolverSchema = {
@@ -153,6 +158,59 @@ function safePrecedingLabel(value: string | undefined) {
   return text;
 }
 
+function editDistanceAtMostOne(left: string, right: string) {
+  if (left === right) return true;
+  if (Math.abs(left.length - right.length) > 1) return false;
+  let edits = 0;
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex += 1;
+      rightIndex += 1;
+      continue;
+    }
+    edits += 1;
+    if (edits > 1) return false;
+    if (left.length > right.length) leftIndex += 1;
+    else if (right.length > left.length) rightIndex += 1;
+    else {
+      leftIndex += 1;
+      rightIndex += 1;
+    }
+  }
+
+  return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
+}
+
+function sourceLineMatchesTitle(title: string, line: string) {
+  const normalizedTitle = normalizeText(title);
+  const normalizedLine = normalizeText(line);
+  const exactMatch = Boolean(
+    normalizedTitle &&
+      normalizedLine &&
+      (normalizedLine.includes(normalizedTitle) ||
+        (normalizedTitle.includes(normalizedLine) && normalizedLine.length >= 5))
+  );
+  const titleTokens = normalizedTitle.split(/\s+/).filter(Boolean);
+  const lineTokens = normalizedLine.split(/\s+/).filter(Boolean);
+  const typoTolerantMatch = Boolean(
+    titleTokens.length >= 2 &&
+      titleTokens.every((titleToken) =>
+        lineTokens.some(
+          (lineToken) =>
+            lineToken === titleToken ||
+            (titleToken.length >= 5 &&
+              lineToken.length >= 5 &&
+              editDistanceAtMostOne(titleToken, lineToken))
+        )
+      )
+  );
+
+  return exactMatch || typoTolerantMatch;
+}
+
 function sourcePosition(title: string, sourceText: string | null | undefined) {
   if (!sourceText?.trim()) {
     return { block: null, line: null, precedingLabel: null };
@@ -170,55 +228,7 @@ function sourcePosition(title: string, sourceText: string | null | undefined) {
       continue;
     }
 
-    const normalizedLine = normalizeText(line);
-    const exactMatch = Boolean(
-      normalizedTitle &&
-        normalizedLine &&
-        (normalizedLine.includes(normalizedTitle) ||
-          (normalizedTitle.includes(normalizedLine) && normalizedLine.length >= 5))
-    );
-    const titleTokens = normalizedTitle.split(/\s+/).filter(Boolean);
-    const lineTokens = normalizedLine.split(/\s+/).filter(Boolean);
-    const editDistanceAtMostOne = (left: string, right: string) => {
-      if (left === right) return true;
-      if (Math.abs(left.length - right.length) > 1) return false;
-      let edits = 0;
-      let leftIndex = 0;
-      let rightIndex = 0;
-
-      while (leftIndex < left.length && rightIndex < right.length) {
-        if (left[leftIndex] === right[rightIndex]) {
-          leftIndex += 1;
-          rightIndex += 1;
-          continue;
-        }
-        edits += 1;
-        if (edits > 1) return false;
-        if (left.length > right.length) leftIndex += 1;
-        else if (right.length > left.length) rightIndex += 1;
-        else {
-          leftIndex += 1;
-          rightIndex += 1;
-        }
-      }
-
-      return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
-    };
-    const typoTolerantMatch = Boolean(
-      titleTokens.length >= 2 &&
-        titleTokens.every((titleToken) =>
-          lineTokens.some(
-            (lineToken) =>
-              lineToken === titleToken ||
-              (titleToken.length >= 5 &&
-                lineToken.length >= 5 &&
-                editDistanceAtMostOne(titleToken, lineToken))
-          )
-        )
-    );
-    const matches = exactMatch || typoTolerantMatch;
-
-    if (!matches) {
+    if (!sourceLineMatchesTitle(title, line)) {
       continue;
     }
 
@@ -240,7 +250,47 @@ function sourcePosition(title: string, sourceText: string | null | undefined) {
   return { block: null, line: null, precedingLabel: null };
 }
 
+type SourceBlockWitness = {
+  id: string;
+  lines: string[];
+  sourceIdentity: string;
+};
+
+function sourceIdentityFor(stage: EvidenceStageInput) {
+  return normalizeText(
+    stage.sourceUploadId ??
+      stage.sourceFilename ??
+      stage.sourceProvenance ??
+      stage.label
+  );
+}
+
+function buildSourceBlockWitnesses(stages: EvidenceStageInput[]) {
+  const witnesses = new Map<string, SourceBlockWitness>();
+
+  for (const stage of stages) {
+    const sourceIdentity = sourceIdentityFor(stage);
+    const blocks = (stage.sourceText ?? "")
+      .split(/(?:\r?\n\s*){2,}/)
+      .map((block) => block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
+      .filter((lines) => lines.length > 0);
+
+    for (const lines of blocks) {
+      const normalizedBlock = lines.map((line) => normalizeText(line)).join("\n");
+      const id = `source-block-${createHash("sha256")
+        .update(JSON.stringify({ normalizedBlock, sourceIdentity }))
+        .digest("hex")
+        .slice(0, 20)}`;
+      witnesses.set(id, { id, lines, sourceIdentity });
+    }
+  }
+
+  return [...witnesses.values()];
+}
+
 function buildCandidates(stages: EvidenceStageInput[]) {
+  const sourceBlocks = buildSourceBlockWitnesses(stages);
+
   return stages.flatMap((stageInput, stageIndex) => {
     const stage = asRecord(stageInput.stage);
     const activities = Array.isArray(stage.activities) ? stage.activities : [];
@@ -265,6 +315,15 @@ function buildCandidates(stages: EvidenceStageInput[]) {
           )
         : [];
       const description = stringValue(activity, "description") ?? "";
+      const sourceIdentity = sourceIdentityFor(stageInput);
+      const sourceBlockIds = sourceBlocks
+        .filter(
+          (block) =>
+            block.sourceIdentity === sourceIdentity &&
+            block.lines.some((line) => sourceLineMatchesTitle(title, line))
+        )
+        .map((block) => block.id)
+        .sort();
 
       return [{
         candidateId: `stage-${stageIndex + 1}-item-${itemIndex + 1}`,
@@ -282,6 +341,8 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         sectionLabel: stringValue(activity, "sourceSectionLabel"),
         sectionType: stringValue(activity, "sourceSectionType"),
         sourceBlock: position.block,
+        sourceBlockIds,
+        sourceIdentity,
         sourceLine: position.line,
         sourcePrecedingLabel: position.precedingLabel,
         stageIndex,
@@ -289,7 +350,7 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         title,
       } satisfies ResolverCandidate];
     });
-  }).slice(0, MAX_RESOLVER_CANDIDATES);
+  });
 }
 
 function hasAmbiguousCandidateCluster(candidates: ResolverCandidate[]) {
@@ -321,6 +382,196 @@ function resolutionKey(candidates: ResolverCandidate[]) {
   return createHash("sha256")
     .update(JSON.stringify({ candidates, version: CANONICAL_RESOLVER_VERSION }))
     .digest("hex");
+}
+
+function candidateWindowKey(candidate: ResolverCandidate) {
+  return [
+    candidate.sourceIdentity,
+    candidate.date ?? "undated",
+    normalizeText(candidate.city) || "unknown-city",
+  ].join("|");
+}
+
+function proposalScopeMatches(
+  proposal: ResolverCandidate,
+  candidate: ResolverCandidate
+) {
+  if (proposal.sourceIdentity !== candidate.sourceIdentity) return false;
+  if (proposal.date && candidate.date && proposal.date !== candidate.date) return false;
+  if (
+    proposal.city &&
+    candidate.city &&
+    normalizeText(proposal.city) !== normalizeText(candidate.city)
+  ) {
+    return false;
+  }
+
+  const sharesSourceBlock = proposal.sourceBlockIds.some((blockId) =>
+    candidate.sourceBlockIds.includes(blockId)
+  );
+  const proposalLabels = new Set(
+    [...proposal.headingPath, proposal.sectionLabel]
+      .map((value) => normalizeText(value))
+      .filter(Boolean)
+  );
+  const sharesHeading = [...candidate.headingPath, candidate.sectionLabel]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .some((value) => proposalLabels.has(value));
+
+  return sharesSourceBlock || sharesHeading || Boolean(proposal.date && candidate.date);
+}
+
+function buildResolutionWindows(candidates: ResolverCandidate[]) {
+  const windows = new Map<string, ResolverCandidate[]>();
+  const addWindow = (
+    key: string,
+    values: ResolverCandidate[],
+    priorityCandidateId?: string
+  ) => {
+    const unique = Array.from(
+      new Map(values.map((candidate) => [candidate.candidateId, candidate])).values()
+    )
+      .sort(
+        (left, right) =>
+          Number(right.candidateId === priorityCandidateId) -
+            Number(left.candidateId === priorityCandidateId) ||
+          left.stageIndex - right.stageIndex ||
+          left.itemIndex - right.itemIndex
+      )
+      .slice(0, MAX_RESOLVER_WINDOW_CANDIDATES);
+
+    if (unique.length > 0) windows.set(key, unique);
+  };
+
+  for (const proposal of candidates.filter(
+    (candidate) => candidate.evidenceRole === "grouping_proposal"
+  )) {
+    addWindow(
+      `grouping|${proposal.candidateId}`,
+      [proposal, ...candidates.filter((candidate) =>
+        candidate.candidateId !== proposal.candidateId &&
+        proposalScopeMatches(proposal, candidate)
+      )],
+      proposal.candidateId
+    );
+  }
+
+  const roleCandidates = candidates.filter(
+    (candidate) =>
+      candidate.sectionType === "city_reference" ||
+      candidate.evidenceRole === "city_note_candidate"
+  );
+  for (const key of new Set(roleCandidates.map(candidateWindowKey))) {
+    addWindow(
+      `role|${key}`,
+      candidates.filter((candidate) => candidateWindowKey(candidate) === key)
+    );
+  }
+
+  const duplicateGroups = new Map<string, ResolverCandidate[]>();
+  for (const candidate of candidates) {
+    const key = `${candidate.sourceIdentity}|${normalizeText(candidate.title)}`;
+    duplicateGroups.set(key, [...(duplicateGroups.get(key) ?? []), candidate]);
+  }
+  for (const [key, duplicates] of duplicateGroups) {
+    if (new Set(duplicates.map((candidate) => candidate.date)).size < 2) continue;
+    addWindow(`duplicate|${key}`, duplicates);
+  }
+
+  return [...windows.values()].slice(0, MAX_RESOLVER_WINDOWS);
+}
+
+function commonSourceBlockIds(candidates: ResolverCandidate[]) {
+  if (candidates.length === 0) return [];
+  return candidates[0].sourceBlockIds.filter((blockId) =>
+    candidates.every((candidate) => candidate.sourceBlockIds.includes(blockId))
+  );
+}
+
+function reconcileRoleDecisions(
+  decisions: CanonicalEvidenceResolution["roleDecisions"]
+) {
+  const highConfidence = decisions.filter((decision) => decision.confidence === "high");
+  const grouped = new Map<string, typeof highConfidence>();
+
+  for (const decision of highConfidence) {
+    grouped.set(decision.candidateId, [
+      ...(grouped.get(decision.candidateId) ?? []),
+      decision,
+    ]);
+  }
+
+  return [...grouped.values()].flatMap((candidateDecisions) =>
+    new Set(candidateDecisions.map((decision) => decision.classification)).size === 1
+      ? [candidateDecisions[0]]
+      : []
+  );
+}
+
+function reconcileGroupings(
+  groupings: CanonicalEvidenceResolution["groupings"]
+) {
+  const unique = new Map<string, CanonicalEvidenceResolution["groupings"][number]>();
+
+  for (const grouping of groupings) {
+    const key = Array.from(new Set(grouping.candidateIds)).sort().join("|");
+    if (!unique.has(key)) unique.set(key, grouping);
+  }
+
+  const entries = [...unique.entries()];
+  const conflictingKeys = new Set<string>();
+  for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
+    const [leftKey, left] = entries[leftIndex];
+    const leftIds = new Set(left.candidateIds);
+
+    for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
+      const [rightKey, right] = entries[rightIndex];
+      if (right.candidateIds.some((candidateId) => leftIds.has(candidateId))) {
+        conflictingKeys.add(leftKey);
+        conflictingKeys.add(rightKey);
+      }
+    }
+  }
+
+  return entries
+    .filter(([key]) => !conflictingKeys.has(key))
+    .map(([, grouping]) => grouping);
+}
+
+export function reconcileCanonicalEvidenceResolutions(
+  resolutions: CanonicalEvidenceResolution[]
+): CanonicalEvidenceResolution {
+  return {
+    groupings: reconcileGroupings(
+      resolutions.flatMap((resolution) => resolution.groupings)
+    ),
+    roleDecisions: reconcileRoleDecisions(
+      resolutions.flatMap((resolution) => resolution.roleDecisions)
+    ),
+  };
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>
+) {
+  const results: R[] = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, values.length));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(values[index]);
+      }
+    })
+  );
+
+  return results;
 }
 
 function parseResolution(value: unknown): CanonicalEvidenceResolution {
@@ -402,35 +653,38 @@ function applyResolution({
     const groupCandidates = uniqueIds
       .map((id) => candidateById.get(id))
       .filter((candidate): candidate is ResolverCandidate => Boolean(candidate));
-    const dates = new Set(groupCandidates.map((candidate) => candidate.date));
-    const blocks = new Set(
-      groupCandidates.map((candidate) =>
-        `${candidate.stageIndex}:${candidate.sourceBlock ?? "unknown"}`
-      )
+    const executionCandidates = groupCandidates.filter(
+      (candidate) => candidate.evidenceRole !== "grouping_proposal"
     );
+    const dates = new Set(executionCandidates.map((candidate) => candidate.date));
+    const sharedSourceBlocks = commonSourceBlockIds(executionCandidates);
 
     if (
       groupCandidates.length !== uniqueIds.length ||
-      groupCandidates.some(
-        (candidate) => candidate.sourceBlock === null || candidate.sourceLine === null
-      ) ||
+      executionCandidates.length < 2 ||
       dates.size !== 1 ||
-      blocks.size !== 1 ||
-      (grouping.parentCandidateId !== null &&
-        !uniqueIds.includes(grouping.parentCandidateId))
+      sharedSourceBlocks.length === 0
     ) {
       continue;
     }
 
-    const parentCandidate = grouping.parentCandidateId
+    const requestedParent = grouping.parentCandidateId
       ? candidateById.get(grouping.parentCandidateId)
-      : groupCandidates[0];
+      : null;
+    const parentCandidate =
+      (requestedParent?.evidenceRole !== "grouping_proposal"
+        ? requestedParent
+        : null) ??
+      executionCandidates.find(
+        (candidate) => normalizeText(candidate.title) === normalizeText(grouping.parentTitle)
+      ) ??
+      executionCandidates[0];
     const parent = parentCandidate ? itemFor(parentCandidate.candidateId) : null;
-    if (!parent || parent.startTime || parent.endTime) {
+    if (!parent) {
       continue;
     }
 
-    const childCandidates = groupCandidates
+    const childCandidates = executionCandidates
       .filter((candidate) => candidate.candidateId !== parentCandidate?.candidateId)
     if (
       childCandidates.some(
@@ -460,8 +714,11 @@ function applyResolution({
         : []),
       decisionId,
     ];
+    parent._canonicalRoleDecision = "keep_activity";
+    parent.evidenceRole = "atomic_candidate";
+    parent.itemType = "activity";
     groupingDecisions.push({
-      candidateIds: uniqueIds,
+      candidateIds: executionCandidates.map((candidate) => candidate.candidateId),
       claim: grouping.claim,
       decisionId,
       parentCandidateId: parentCandidate?.candidateId ?? uniqueIds[0],
@@ -486,6 +743,7 @@ export function applyCanonicalEvidenceResolution(
 
 export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[]) {
   const candidates = buildCandidates(stages);
+  const windows = buildResolutionWindows(candidates);
   const emptyMetadata: CanonicalEvidenceResolverMetadata = {
     cacheHit: false,
     candidateCount: candidates.length,
@@ -495,43 +753,59 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     roleDecisions: [],
     sources: [],
     version: CANONICAL_RESOLVER_VERSION,
+    windowCount: windows.length,
   };
 
-  if (!hasAmbiguousCandidateCluster(candidates)) {
+  if (windows.length === 0 || !hasAmbiguousCandidateCluster(candidates)) {
     return { groupingDecisions: [], metadata: emptyMetadata, stages, usage: null };
   }
 
-  const lookupKey = resolutionKey(candidates);
-  const cached = resolverCache.get(lookupKey);
-  let resolution: CanonicalEvidenceResolution;
-  let sources: Array<{ title: string | null; url: string }> = [];
-  let usage: unknown = null;
+  const windowResults = await mapWithConcurrency(
+    windows,
+    RESOLVER_WINDOW_CONCURRENCY,
+    async (windowCandidates) => {
+    const windowKey = resolutionKey(windowCandidates);
+    const cached = resolverCache.get(windowKey);
 
-  if (cached) {
-    resolution = cached.resolution;
-    sources = cached.sources;
-  } else {
+    if (cached) {
+      return { ...cached, cacheHit: true, lookupKey: windowKey, usage: null };
+    }
+
     const result = await createOpenAIStructuredResponse({
-      input: JSON.stringify({ candidates }),
+      input: JSON.stringify({ candidates: windowCandidates }),
       schema: resolverSchema,
       schemaName: "roamwoven_canonical_evidence_resolution",
       system: resolverSystemPrompt,
-      webSearch: { maxToolCalls: 3, searchContextSize: "low" },
+      webSearch: { maxToolCalls: 2, searchContextSize: "low" },
     });
-    resolution = parseResolution(result.json);
-    sources = result.sources;
-    usage = result.usage;
-    resolverCache.set(lookupKey, {
+    const resolution = parseResolution(result.json);
+    const resolvedAt = new Date().toISOString();
+    resolverCache.set(windowKey, {
       resolution,
-      resolvedAt: new Date().toISOString(),
-      sources,
+      resolvedAt,
+      sources: result.sources,
     });
-  }
+    return {
+      cacheHit: false,
+      lookupKey: windowKey,
+      resolution,
+      resolvedAt,
+      sources: result.sources,
+      usage: result.usage,
+    };
+  });
 
-  const productionResolution = {
-    ...resolution,
-    groupings: sources.length > 0 ? resolution.groupings : [],
-  };
+  const resolution = reconcileCanonicalEvidenceResolutions(
+    windowResults.map((result) => ({
+      groupings: result.sources.length > 0 ? result.resolution.groupings : [],
+      roleDecisions: result.resolution.roleDecisions,
+    }))
+  );
+  const sources = Array.from(
+    new Map(
+      windowResults.flatMap((result) => result.sources).map((source) => [source.url, source])
+    ).values()
+  );
   const acceptedRoleDecisions = resolution.roleDecisions
     .filter((decision) => decision.confidence === "high")
     .map((decision) => ({
@@ -540,7 +814,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       reason: decision.reason,
     }));
 
-  const applied = applyCanonicalEvidenceResolution(stages, productionResolution);
+  const applied = applyCanonicalEvidenceResolution(stages, resolution);
   const acceptedClaims = applied.groupingDecisions.map((grouping) => ({
     candidateIds: grouping.candidateIds,
     claim: grouping.claim,
@@ -551,14 +825,16 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     groupingDecisions: applied.groupingDecisions,
     metadata: {
       ...emptyMetadata,
-      cacheHit: Boolean(cached),
+      cacheHit: windowResults.every((result) => result.cacheHit),
       claims: acceptedClaims,
-      lookupKey,
-      resolvedAt: cached?.resolvedAt ?? new Date().toISOString(),
+      lookupKey: createHash("sha256")
+        .update(windowResults.map((result) => result.lookupKey).join("|"))
+        .digest("hex"),
+      resolvedAt: windowResults.map((result) => result.resolvedAt).sort().at(-1) ?? null,
       roleDecisions: acceptedRoleDecisions,
       sources,
     },
     stages: applied.stages,
-    usage,
+    usage: windowResults.map((result) => result.usage).filter(Boolean),
   };
 }

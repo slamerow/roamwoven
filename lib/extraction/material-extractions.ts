@@ -188,6 +188,14 @@ function isOcrRelatedFailure(record: MaterialExtractionRecord) {
   );
 }
 
+function hasUsableOcrFallback(record: MaterialExtractionRecord) {
+  return Boolean(
+    record.status === "failed" &&
+      record.textContent?.trim() &&
+      record.metadata.ocrFailedTextFallbackAvailable === true
+  );
+}
+
 export function getMaterialOcrReadinessIssue(
   records: MaterialExtractionRecord[]
 ): MaterialOcrReadinessIssue {
@@ -200,7 +208,11 @@ export function getMaterialOcrReadinessIssue(
     return "ocr-incomplete";
   }
 
-  return records.some(isOcrRelatedFailure) ? "ocr-failed" : null;
+  return records.some(
+    (record) => isOcrRelatedFailure(record) && !hasUsableOcrFallback(record)
+  )
+    ? "ocr-failed"
+    : null;
 }
 
 export function getMaterialExtractionReadinessIssue(
@@ -473,14 +485,19 @@ export function materialFromCheckpoint({
   record: MaterialExtractionRecord;
   type: TripExtractionMaterial["type"];
 }): TripExtractionMaterial | null {
-  if (record.status !== "text_ready" || !record.textContent?.trim()) {
+  if (
+    (record.status !== "text_ready" && !hasUsableOcrFallback(record)) ||
+    !record.textContent?.trim()
+  ) {
     return null;
   }
 
   return {
     filename,
     sourceProvenance:
-      record.extractionMethod === "manual_note"
+      record.metadata.ocrFailedTextFallbackAvailable === true
+        ? "text_layer"
+        : record.extractionMethod === "manual_note"
         ? "manual_note"
         : record.extractionMethod === "ocr"
           ? "ocr"
