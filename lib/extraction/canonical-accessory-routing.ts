@@ -152,10 +152,7 @@ function routeDatedNoteEvidence({
   const city = stringValue(note.payload, "city");
   const date = sourceStructuredDate(note.payload, tripYear);
   const sectionType = stringValue(note.payload, "sourceSectionType");
-
-  // Source hierarchy is authoritative. Only repair a dated itinerary block
-  // that the model mislabeled; never promote or strip a city-reference block.
-  if (!date || sectionType === "city_reference") return;
+  const preserveReferenceRole = sectionType === "city_reference";
 
   const compatibleStays = pieces.filter(
     (piece) =>
@@ -203,16 +200,47 @@ function routeDatedNoteEvidence({
       compatibleTransport.length === 1 &&
       /\b(?:arrival|arrive|departure|depart|flight|fly|train|transfer)\b/.test(text);
 
+    const directionTargets = compatibleTransport.filter((transport) =>
+      exactRecordMention(segment, [
+        transport.payload.arrival,
+        transport.payload.arrivalLocation,
+        transport.payload.departure,
+        transport.payload.departureLocation,
+      ])
+    );
+    if (
+      directionTargets.length === 1 &&
+      /\b(?:directions?|from the (?:airport|station)|metro|subway|tram|walk|take|transfer)\b/.test(
+        text
+      )
+    ) {
+      const target = directionTargets[0];
+      const existing = stringValue(target.payload, "description");
+      if (!existing || !normalizeText(existing).includes(text)) {
+        target.payload.description = [existing, segment].filter(Boolean).join(" ");
+      }
+      actions.addAction(target, {
+        absorbedTitles: [],
+        observationIds: [...note.observationIds],
+        reason: "explicit station or airport directions attached to inbound travel",
+        type: "attached",
+      });
+    }
+
     return !(
       stayMention ||
-      uniqueLodgingContext ||
+      (!preserveReferenceRole && uniqueLodgingContext) ||
       activityMention ||
       transportMention ||
-      uniqueMovementContext
+      (!preserveReferenceRole && uniqueMovementContext)
     );
   });
+  const dedupedRetained = retained.filter((segment, index) => {
+    const normalized = normalizeText(segment);
+    return retained.findIndex((candidate) => normalizeText(candidate) === normalized) === index;
+  });
 
-  if (retained.length === 0 && segments.length > 0) {
+  if (dedupedRetained.length === 0 && segments.length > 0) {
     actions.suppressPiece(
       note,
       "note evidence routed to canonical stay, activity, or travel records"
@@ -220,8 +248,8 @@ function routeDatedNoteEvidence({
     return;
   }
 
-  if (retained.length !== segments.length) {
-    note.payload.description = retained.join(" ");
+  if (dedupedRetained.length !== segments.length) {
+    note.payload.description = dedupedRetained.join(" ");
     actions.addAction(note, {
       absorbedTitles: [],
       observationIds: [...note.observationIds],
@@ -230,8 +258,12 @@ function routeDatedNoteEvidence({
     });
   }
 
-  const residualText = normalizeText(retained.join(" "));
-  const hasPlannedRemainder = retained.length > 0 && retained.every((segment) =>
+  // Source hierarchy owns role. City-reference material can be sanitized but
+  // cannot be promoted into a dated activity by content heuristics.
+  if (!date || preserveReferenceRole) return;
+
+  const residualText = normalizeText(dedupedRetained.join(" "));
+  const hasPlannedRemainder = dedupedRetained.length > 0 && dedupedRetained.every((segment) =>
     /\b(?:tour|explore|visit|work|eat|breakfast|lunch|dinner|wander|walk|spend|relax)\b/.test(
       normalizeText(segment)
     )

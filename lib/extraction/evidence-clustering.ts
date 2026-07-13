@@ -3,6 +3,12 @@ import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-an
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
 import {
+  canonicalCategoryId,
+  canonicalItemType,
+  canonicalTransportDescription,
+  canonicalTransportType,
+} from "@/lib/extraction/canonical-field-policy";
+import {
   normalizeTripClockTime,
   normalizeText,
   normalizeTripDate,
@@ -11,8 +17,18 @@ import {
 import {
   classifyDraftActivityCard,
 } from "@/lib/trip-card-taxonomy";
+import {
+  isRentalCarPickupCandidate,
+  isScenicRideCandidate,
+  shouldBeTravelRow,
+} from "@/lib/trip-travel-boundary-policy";
+import {
+  hasTransportTimeEvidence,
+  isCriticalTransportRecord,
+} from "@/lib/trip-transport-policy";
+import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 7;
+export const EVIDENCE_CLUSTER_VERSION = 8;
 
 export type EvidenceKind =
   | "activity"
@@ -92,6 +108,7 @@ export type EvidenceObservation = {
 export type CanonicalEvidenceConflict = {
   field: string;
   observationIds: string[];
+  requiresReview: boolean;
   values: string[];
 };
 
@@ -893,6 +910,51 @@ function matchReason(
   return null;
 }
 
+function crossSourceActivityConflictReason({
+  observation,
+  observations,
+  piece,
+}: {
+  observation: EvidenceObservation;
+  observations: EvidenceObservation[];
+  piece: CanonicalEvidencePiece;
+}) {
+  if (piece.kind !== "activity" || observation.kind !== "activity") return null;
+  const title = normalizedComparable(observation.payload.title);
+  const date = stringValue(observation.payload, "date");
+  const time = timeFrom(observation.payload);
+  const confirmation = confirmationFrom(observation.payload);
+  if (!title || !date || !time) return null;
+
+  const sourceIdentity =
+    observation.sourceUploadId ??
+    observation.sourceFilename ??
+    observation.sourceLabel;
+  const conflictingWitness = observations.find((candidate) => {
+    if (!piece.observationIds.includes(candidate.id)) return false;
+    const candidateSourceIdentity =
+      candidate.sourceUploadId ??
+      candidate.sourceFilename ??
+      candidate.sourceLabel;
+    const candidateConfirmation = confirmationFrom(candidate.payload);
+
+    return Boolean(
+      candidateSourceIdentity !== sourceIdentity &&
+        normalizedComparable(candidate.payload.title) === title &&
+        stringValue(candidate.payload, "date") === date &&
+        timeFrom(candidate.payload) &&
+        timeFrom(candidate.payload) !== time &&
+        (!confirmation ||
+          !candidateConfirmation ||
+          confirmation === candidateConfirmation)
+    );
+  });
+
+  return conflictingWitness
+    ? "same dated activity identity across conflicting sources"
+    : null;
+}
+
 function titleQuality(value: unknown) {
   const title = typeof value === "string" ? value.trim() : "";
   const genericPenalty = /^(activity|stay|transport|travel|train|flight|note)$/i.test(
@@ -943,12 +1005,20 @@ function evidenceValueRank(
   value: unknown
 ) {
   const provenance = normalizeText(observation.sourceProvenance);
-  let rank =
-    observation.source === "source_anchor"
+  const sourceHierarchyRank =
+    observation.sourceStructure.sectionType === "booking_detail"
+      ? 4
+      : observation.sourceStructure.sectionType === "dated_itinerary"
+        ? 3
+        : observation.sourceStructure.sectionType === "city_reference"
+          ? 1
+          : 2;
+  let rank = sourceHierarchyRank * 10_000 +
+    (observation.source === "source_anchor"
       ? 180
       : observation.source === "model_chunk"
         ? 150
-        : 100;
+        : 100);
 
   if (provenance.includes("manual note")) rank += 60;
   if (provenance.includes("text layer")) rank += 50;
@@ -959,6 +1029,10 @@ function evidenceValueRank(
   }
 
   return rank;
+}
+
+function evidenceAuthority(rank: number) {
+  return Math.floor(rank / 10_000);
 }
 
 function endpointEvidenceScore({
@@ -994,6 +1068,7 @@ function recordCanonicalConflict({
   field,
   observation,
   piece,
+  requiresReview,
   value,
 }: {
   conflicts: CanonicalEvidenceConflict[];
@@ -1001,6 +1076,7 @@ function recordCanonicalConflict({
   field: string;
   observation: EvidenceObservation;
   piece: CanonicalEvidencePiece;
+  requiresReview: boolean;
   value: unknown;
 }) {
   const existingConflict = conflicts.find((conflict) => conflict.field === field);
@@ -1018,8 +1094,9 @@ function recordCanonicalConflict({
   if (existingConflict) {
     existingConflict.values = values;
     existingConflict.observationIds = observationIds;
+    existingConflict.requiresReview ||= requiresReview;
   } else {
-    conflicts.push({ field, observationIds, values });
+    conflicts.push({ field, observationIds, requiresReview, values });
   }
 }
 
@@ -1039,12 +1116,15 @@ function mergeObservationIntoPiece(
     const existing = next[field];
     const incomingRank = evidenceValueRank(observation, field, value);
     const existingRank = piece.fieldWinnerRanks[field] ?? 0;
+    const sameAuthority =
+      evidenceAuthority(incomingRank) === evidenceAuthority(existingRank);
 
     if (field === "description") {
       next[field] = uniqueDescription(existing, value);
     } else if (field === "title") {
       if (
-        titleQuality(value) > titleQuality(existing) &&
+        (evidenceAuthority(incomingRank) > evidenceAuthority(existingRank) ||
+          (sameAuthority && titleQuality(value) > titleQuality(existing))) &&
         (observation.source !== "source_anchor" || isGenericTitle(existing))
       ) {
         next[field] = value;
@@ -1078,6 +1158,7 @@ function mergeObservationIntoPiece(
         field,
         observation,
         piece,
+        requiresReview: sameAuthority,
         value,
       });
       addCanonicalAction(piece, {
@@ -1108,6 +1189,7 @@ function mergeObservationIntoPiece(
         field,
         observation,
         piece,
+        requiresReview: sameAuthority,
         value,
       });
       addCanonicalAction(piece, {
@@ -1119,7 +1201,8 @@ function mergeObservationIntoPiece(
     } else if (
       field === "date" &&
       valuesConflict(existing, value) &&
-      evidenceSpecificity(observation.payload) > evidenceSpecificity(next)
+      (incomingRank > existingRank ||
+        (sameAuthority && evidenceSpecificity(observation.payload) > evidenceSpecificity(next)))
     ) {
       next[field] = value;
       piece.fieldWinnerRanks[field] = incomingRank;
@@ -1129,7 +1212,42 @@ function mergeObservationIntoPiece(
         field,
         observation,
         piece,
+        requiresReview: sameAuthority,
         value,
+      });
+    } else if (
+      valuesConflict(existing, value) &&
+      ![
+        "arrival",
+        "arrivalLocation",
+        "arrivalTime",
+        "date",
+        "departure",
+        "departureLocation",
+        "departureTime",
+        "endTime",
+        "startTime",
+        "time",
+        "title",
+      ].includes(field) &&
+      evidenceAuthority(incomingRank) > evidenceAuthority(existingRank)
+    ) {
+      next[field] = value;
+      piece.fieldWinnerRanks[field] = incomingRank;
+      recordCanonicalConflict({
+        conflicts,
+        existing,
+        field,
+        observation,
+        piece,
+        requiresReview: false,
+        value,
+      });
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [observation.id],
+        reason: `Selected higher-authority ${field} evidence from ${observation.sourceLabel}.`,
+        type: "field_selected",
       });
     } else if (existing === null || existing === undefined || existing === "") {
       next[field] = value;
@@ -1149,6 +1267,7 @@ function mergeObservationIntoPiece(
         field,
         observation,
         piece,
+        requiresReview: sameAuthority,
         value,
       });
     }
@@ -1176,7 +1295,13 @@ function mergeObservationIntoPiece(
     reason,
     type: "merged",
   });
-  piece.confidence = conflicts.length === 0 ? "high" : "medium";
+  piece.confidence = conflicts.some((conflict) => conflict.requiresReview)
+    ? "medium"
+    : "high";
+  refreshCanonicalPieceId(piece);
+}
+
+function refreshCanonicalPieceId(piece: CanonicalEvidencePiece) {
   piece.id = `piece_${stableHash({
     kind: piece.kind,
     observations: [...piece.observationIds].sort(),
@@ -1313,7 +1438,9 @@ function mergeCanonicalPieceInto({
         )
     ),
   ];
-  target.confidence = target.conflicts.length === 0 ? "high" : "medium";
+  target.confidence = target.conflicts.some((conflict) => conflict.requiresReview)
+    ? "medium"
+    : "high";
   addCanonicalAction(target, {
     absorbedTitles: [
       stringValue(source.payload, "title") ??
@@ -1325,11 +1452,259 @@ function mergeCanonicalPieceInto({
     reason,
     type: actionType,
   });
-  target.id = `piece_${stableHash({
-    kind: target.kind,
-    observations: [...target.observationIds].sort(),
-  })}`;
+  refreshCanonicalPieceId(target);
   suppressCanonicalPiece(source, reason);
+}
+
+function travelBoundaryRecord(piece: CanonicalEvidencePiece) {
+  return {
+    arrivalDate:
+      stringValue(piece.payload, "arrivalDate") ??
+      stringValue(piece.payload, "dropOffDate") ??
+      stringValue(piece.payload, "endDate"),
+    arrivalLocation:
+      stringValue(piece.payload, "arrival") ??
+      stringValue(piece.payload, "arrivalLocation") ??
+      stringValue(piece.payload, "dropOffLocation"),
+    category: stringValue(piece.payload, "category"),
+    confirmationLabel: confirmationFrom(piece.payload),
+    departureDate:
+      stringValue(piece.payload, "departureDate") ??
+      stringValue(piece.payload, "pickupDate") ??
+      stringValue(piece.payload, "startDate") ??
+      stringValue(piece.payload, "date"),
+    departureLocation:
+      stringValue(piece.payload, "departure") ??
+      stringValue(piece.payload, "departureLocation") ??
+      stringValue(piece.payload, "pickupLocation") ??
+      stringValue(piece.payload, "address"),
+    description: stringValue(piece.payload, "description"),
+    itemType: stringValue(piece.payload, "itemType"),
+    provider: stringValue(piece.payload, "provider"),
+    title:
+      stringValue(piece.payload, "title") ?? stringValue(piece.payload, "name"),
+    transportType: stringValue(piece.payload, "type"),
+  };
+}
+
+function convertCanonicalTransportToActivity(
+  piece: CanonicalEvidencePiece,
+  reason: string
+) {
+  const scenicRide = isScenicRideCandidate(travelBoundaryRecord(piece));
+  piece.kind = "activity";
+  piece.role = "atomic_candidate";
+  piece.payload = {
+    ...piece.payload,
+    address:
+      piece.payload.address ??
+      piece.payload.pickupLocation ??
+      piece.payload.departureLocation ??
+      piece.payload.departure ??
+      null,
+    category: scenicRide ? "scenic_ride" : "arrival_departure",
+    date:
+      piece.payload.date ??
+      piece.payload.pickupDate ??
+      piece.payload.departureDate ??
+      piece.payload.startDate ??
+      null,
+    endTime:
+      piece.payload.endTime ??
+      piece.payload.dropOffTime ??
+      piece.payload.arrivalTime ??
+      null,
+    evidenceRole: "atomic_candidate",
+    itemType: "activity",
+    startTime:
+      piece.payload.startTime ??
+      piece.payload.pickupTime ??
+      piece.payload.departureTime ??
+      piece.payload.time ??
+      null,
+  };
+  refreshCanonicalPieceId(piece);
+  addCanonicalAction(piece, {
+    absorbedTitles: [],
+    observationIds: [...piece.observationIds],
+    reason,
+    type: "recovered",
+  });
+}
+
+function convertCanonicalActivityToTransport(
+  piece: CanonicalEvidencePiece,
+  reason: string
+) {
+  piece.kind = "transport";
+  piece.role = "atomic_candidate";
+  piece.payload = {
+    ...piece.payload,
+    arrival:
+      piece.payload.arrival ??
+      piece.payload.arrivalLocation ??
+      piece.payload.dropOffLocation ??
+      null,
+    arrivalTime:
+      piece.payload.arrivalTime ??
+      piece.payload.dropOffTime ??
+      piece.payload.endTime ??
+      null,
+    date:
+      piece.payload.date ??
+      piece.payload.pickupDate ??
+      piece.payload.departureDate ??
+      null,
+    departure:
+      piece.payload.departure ??
+      piece.payload.departureLocation ??
+      piece.payload.pickupLocation ??
+      piece.payload.address ??
+      null,
+    departureTime:
+      piece.payload.departureTime ??
+      piece.payload.pickupTime ??
+      piece.payload.startTime ??
+      null,
+    evidenceRole: "atomic_candidate",
+    type: canonicalTransportType(stringValue(piece.payload, "type")),
+  };
+  refreshCanonicalPieceId(piece);
+  addCanonicalAction(piece, {
+    absorbedTitles: [],
+    observationIds: [...piece.observationIds],
+    reason,
+    type: "recovered",
+  });
+}
+
+function routeCanonicalTravelBoundaries(pieces: CanonicalEvidencePiece[]) {
+  for (const piece of pieces.filter((candidate) => candidate.outputEligible)) {
+    const record = travelBoundaryRecord(piece);
+
+    if (piece.kind === "transport") {
+      piece.payload.type = canonicalTransportType(stringValue(piece.payload, "type"));
+
+      if (!shouldBeTravelRow(record)) {
+        convertCanonicalTransportToActivity(
+          piece,
+          "canonical travel boundary routed local movement to an activity"
+        );
+      }
+      continue;
+    }
+
+    if (
+      piece.kind === "activity" &&
+      isRentalCarPickupCandidate(record) &&
+      shouldBeTravelRow(record)
+    ) {
+      convertCanonicalActivityToTransport(
+        piece,
+        "canonical travel boundary routed intercity rental movement to travel"
+      );
+    }
+  }
+}
+
+function mergeReclassifiedCanonicalPieces(pieces: CanonicalEvidencePiece[]) {
+  for (const source of pieces) {
+    if (!source.outputEligible) continue;
+    const target = pieces.find(
+      (candidate) =>
+        candidate !== source &&
+        candidate.outputEligible &&
+        candidate.kind === source.kind &&
+        Boolean(matchReason(candidate.kind, candidate.payload, source.payload))
+    );
+    if (!target) continue;
+
+    for (const [field, value] of Object.entries(source.payload)) {
+      if (value === null || value === undefined || value === "") continue;
+      if (field === "description") {
+        target.payload.description = uniqueDescription(
+          target.payload.description,
+          value
+        );
+      } else if (
+        target.payload[field] === null ||
+        target.payload[field] === undefined ||
+        target.payload[field] === ""
+      ) {
+        target.payload[field] = value;
+      }
+    }
+    mergeCanonicalPieceInto({
+      reason: "reclassified evidence merged into its canonical entity",
+      source,
+      target,
+    });
+  }
+}
+
+function attachArrivalOnlyTransportPieces(pieces: CanonicalEvidencePiece[]) {
+  const transports = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+
+  for (const arrivalOnly of transports) {
+    if (!arrivalOnly.outputEligible || hasSpecificTransportRoute(arrivalOnly.payload)) {
+      continue;
+    }
+
+    const text = normalizeText(
+      [arrivalOnly.payload.title, arrivalOnly.payload.description]
+        .filter(Boolean)
+        .join(" ")
+    );
+    if (!/\b(arriv|arrival|land|landing|reach)\b/.test(text)) continue;
+
+    const arrivalDate = stringValue(arrivalOnly.payload, "date");
+    const arrivalTime = normalizedClockTime(
+      arrivalOnly.payload.arrivalTime ?? arrivalOnly.payload.time
+    );
+    const candidates = transports.filter((candidate) => {
+      if (
+        candidate === arrivalOnly ||
+        !candidate.outputEligible ||
+        !hasSpecificTransportRoute(candidate.payload)
+      ) {
+        return false;
+      }
+
+      const candidateDate = stringValue(candidate.payload, "date");
+      const dateFits = Boolean(
+        arrivalDate &&
+          candidateDate &&
+          (tripDatesMatch(arrivalDate, candidateDate) ||
+            shiftIsoDate(candidateDate, 1) === arrivalDate)
+      );
+      if (!dateFits) return false;
+
+      const candidateArrivalTime = normalizedClockTime(candidate.payload.arrivalTime);
+      const timeFits = Boolean(
+        arrivalTime && candidateArrivalTime && arrivalTime === candidateArrivalTime
+      );
+      const destination = normalizeText(
+        routeEndpoint(candidate.payload, "arrival")
+      );
+      const destinationFits = Boolean(destination && text.includes(destination));
+
+      return timeFits || destinationFits;
+    });
+
+    if (candidates.length !== 1) continue;
+    const target = candidates[0];
+    target.payload.description = uniqueDescription(
+      target.payload.description,
+      arrivalOnly.payload.description ?? arrivalOnly.payload.title
+    );
+    mergeCanonicalPieceInto({
+      reason: "arrival-only evidence attached to the matching inbound travel segment",
+      source: arrivalOnly,
+      target,
+    });
+  }
 }
 
 function activityText(record: Record<string, unknown>) {
@@ -1726,7 +2101,7 @@ function isGenericStayName(value: unknown) {
 
   return Boolean(
     title &&
-      /^(?:[a-z]+\s+)?(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|stay)$/.test(
+      /^(?:accommodation|airbnb|airbnb apartment|apartment|hostel|hotel|lodging|private lodging|private rental|rental|stay|[a-z]+ (?:airbnb|apartment|lodging|rental|stay))$/.test(
         title
       )
   );
@@ -1740,10 +2115,13 @@ function isWeakStayFragmentName(value: unknown) {
   return Boolean(
     normalized &&
       normalized.split(/\s+/).length <= 9 &&
-      /(?:[$€£]\s*\d|\b\d{2,4}\s*(?:usd|eur|gbp)\b)/i.test(raw) &&
       /\b(?:double|ensuite|night|nights|private|room|shared|single)\b/.test(
         normalized
-      )
+      ) &&
+      (/(?:[$€£]\s*\d|\b\d{2,4}\s*(?:usd|eur|gbp)\b)/i.test(raw) ||
+        /\b(?:private|shared|single|double)\s+(?:room|bathroom)|\broom\s+(?:ensuite|en suite)\b/.test(
+          normalized
+        ))
   );
 }
 
@@ -1757,9 +2135,18 @@ function attachGenericStayFragments(pieces: CanonicalEvidencePiece[]) {
       .map((piece) => normalizedComparable(piece.payload.city))
       .filter(Boolean)
   );
-  const isWeakFragment = (piece: CanonicalEvidencePiece) =>
-    isWeakStayFragmentName(piece.payload.name) ||
-    placeCities.has(normalizedComparable(piece.payload.name));
+  const isWeakFragment = (piece: CanonicalEvidencePiece) => {
+    const name = normalizedComparable(piece.payload.name);
+    const cityTypeName = Array.from(placeCities).some(
+      (city) =>
+        name === city ||
+        (name.startsWith(`${city} `) &&
+          /^(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|stay)$/.test(
+            name.slice(city.length).trim()
+          ))
+    );
+    return isWeakStayFragmentName(piece.payload.name) || cityTypeName;
+  };
 
   for (const generic of stays) {
     if (
@@ -1816,6 +2203,357 @@ function attachGenericStayFragments(pieces: CanonicalEvidencePiece[]) {
         target: candidates[0],
       });
     }
+  }
+}
+
+function isBooleanLikeStayName(value: unknown) {
+  return /^(?:yes|no|true|false|correct|confirmed)$/i.test(
+    typeof value === "string" ? value.trim() : ""
+  );
+}
+
+function finalizeCanonicalPlaceFields(pieces: CanonicalEvidencePiece[]) {
+  const places = pieces
+    .filter((piece) => piece.kind === "place" && piece.outputEligible)
+    .sort((left, right) =>
+      String(left.payload.arriveDate ?? left.payload.arrivalDate ?? "").localeCompare(
+        String(right.payload.arriveDate ?? right.payload.arrivalDate ?? "")
+      )
+    );
+
+  places.forEach((place, index) => {
+    const arriveDate = stringValue(place.payload, "arriveDate") ??
+      stringValue(place.payload, "arrivalDate");
+    const leaveDate = stringValue(place.payload, "leaveDate") ??
+      stringValue(place.payload, "departureDate");
+    const nextArrival = stringValue(places[index + 1]?.payload ?? {}, "arriveDate") ??
+      stringValue(places[index + 1]?.payload ?? {}, "arrivalDate");
+
+    if (!leaveDate && arriveDate && nextArrival && nextArrival > arriveDate) {
+      place.payload.leaveDate = nextArrival;
+      addCanonicalAction(place, {
+        absorbedTitles: [],
+        observationIds: [...place.observationIds],
+        reason: "next canonical leg arrival establishes the preceding leg boundary",
+        type: "recovered",
+      });
+    }
+  });
+}
+
+function applyCanonicalGuessedStayNames(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  const genericNameTokens = new Set([
+    "accommodation",
+    "airbnb",
+    "apartment",
+    "hostel",
+    "hotel",
+    "lodging",
+    "rental",
+    "stay",
+    "the",
+  ]);
+
+  for (const value of details) {
+    const detail = asRecord(value);
+    const subjectType = normalizedComparable(detail.subjectType);
+    const targetField = normalizedComparable(detail.targetField).replace(/\s+/g, "");
+    const guessedName = stringValue(detail, "guessedValue");
+
+    if (
+      subjectType !== "stay" ||
+      !/(?:name|title)/.test(targetField) ||
+      !guessedName ||
+      isGenericStayName(guessedName) ||
+      isBooleanLikeStayName(guessedName)
+    ) {
+      continue;
+    }
+
+    const piece = pieceForMissingDetail(detail, pieces);
+    if (
+      !piece ||
+      piece.kind !== "stay" ||
+      !isGenericStayName(piece.payload.name)
+    ) {
+      continue;
+    }
+
+    const evidence = normalizeText(
+      [detail.evidence, detail.reason, detail.prompt]
+        .filter((candidate): candidate is string => typeof candidate === "string")
+        .join(" ")
+    );
+    const distinctiveTokens = identityTokens(guessedName).filter(
+      (token) => token.length >= 3 && !genericNameTokens.has(token)
+    );
+
+    if (
+      distinctiveTokens.length === 0 ||
+      !distinctiveTokens.every((token) => evidence.includes(token))
+    ) {
+      continue;
+    }
+
+    const originalName = stringValue(piece.payload, "name") ?? "Stay";
+    piece.payload.name = guessedName;
+    detail.relatedCanonicalPieceId = piece.id;
+    addCanonicalAction(piece, {
+      absorbedTitles: [originalName],
+      observationIds: [...piece.observationIds],
+      reason: "uniquely scoped source-backed lodging name resolved canonically",
+      type: "recovered",
+    });
+  }
+}
+
+function applyCanonicalGuessedStayDates(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[],
+  tripYear: number | null
+) {
+  for (const value of details) {
+    const detail = asRecord(value);
+    if (normalizedComparable(detail.subjectType) !== "stay") continue;
+
+    const targetField = normalizedComparable(detail.targetField).replace(/\s+/g, "");
+    const field = /(?:checkout|enddate)/.test(targetField)
+      ? "checkOut"
+      : /(?:checkin|firstnight|startdate)/.test(targetField)
+        ? "checkIn"
+        : null;
+    const guessedDate = normalizeTripDate(
+      stringValue(detail, "guessedValue"),
+      tripYear
+    );
+    const piece = field ? pieceForMissingDetail(detail, pieces) : null;
+
+    if (
+      !field ||
+      !guessedDate ||
+      !piece ||
+      piece.kind !== "stay" ||
+      stringValue(piece.payload, field)
+    ) {
+      continue;
+    }
+
+    piece.payload[field] = guessedDate;
+    detail.relatedCanonicalPieceId = piece.id;
+    addCanonicalAction(piece, {
+      absorbedTitles: [],
+      observationIds: [...piece.observationIds],
+      reason: `uniquely scoped provisional stay ${field} applied canonically`,
+      type: "recovered",
+    });
+  }
+}
+
+function stayCity(
+  stay: CanonicalEvidencePiece,
+  places: CanonicalEvidencePiece[]
+) {
+  const explicitCity = stringValue(stay.payload, "city");
+  if (explicitCity) return explicitCity;
+  const checkIn =
+    stringValue(stay.payload, "checkIn") ??
+    stringValue(stay.payload, "firstNightDate");
+
+  return places.find((place) => {
+    const arriveDate =
+      stringValue(place.payload, "arriveDate") ??
+      stringValue(place.payload, "arrivalDate");
+    const leaveDate =
+      stringValue(place.payload, "leaveDate") ??
+      stringValue(place.payload, "departureDate");
+    return Boolean(
+      checkIn &&
+        arriveDate &&
+        checkIn >= arriveDate &&
+        (!leaveDate || checkIn < leaveDate)
+    );
+  })?.payload.city as string | undefined ?? null;
+}
+
+function genericStayTypeName(value: unknown) {
+  const normalized = normalizedComparable(value);
+  if (/\b(?:airbnb|apartment|flat|private rental|vacation rental|vrbo)\b/.test(normalized)) {
+    return "Airbnb";
+  }
+  if (/\bhostel\b/.test(normalized)) return "Hostel";
+  if (/\bhotel\b/.test(normalized)) return "Hotel";
+  return "Stay";
+}
+
+function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
+  const places = pieces.filter(
+    (piece) => piece.kind === "place" && piece.outputEligible
+  );
+  const stays = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
+  const genericByCity = new Map<string, CanonicalEvidencePiece[]>();
+
+  for (const stay of stays) {
+    const rawName = stringValue(stay.payload, "name") ?? "Stay";
+    const namedAirbnb = rawName.match(/^airbnb\s*\/\s*(.+)$/i)?.[1]?.trim();
+    if (namedAirbnb) {
+      stay.payload.name = namedAirbnb;
+    }
+
+    const name = stringValue(stay.payload, "name") ?? rawName;
+    const city = stayCity(stay, places);
+    if (city) stay.payload.city = city;
+    const normalizedName = normalizeText(name);
+    const normalizedCity = normalizeText(city);
+    const cityTypeGeneric = Boolean(
+      normalizedCity &&
+        new RegExp(
+          `^${normalizedCity} (?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|stay)$`
+        ).test(normalizedName)
+    );
+    const generic =
+      isGenericStayName(name) || isBooleanLikeStayName(name) || cityTypeGeneric;
+    if (generic) {
+      const key = normalizeText(city) || "unknown";
+      genericByCity.set(key, [...(genericByCity.get(key) ?? []), stay]);
+    }
+
+    const nightsValue = stay.payload.nights;
+    const nights =
+      typeof nightsValue === "number"
+        ? nightsValue
+        : typeof nightsValue === "string"
+          ? Number(nightsValue)
+          : null;
+    const checkIn =
+      stringValue(stay.payload, "checkIn") ??
+      stringValue(stay.payload, "firstNightDate");
+    const checkOut = stringValue(stay.payload, "checkOut");
+    if (!checkIn && checkOut && nights && nights > 0) {
+      stay.payload.checkIn = shiftIsoDate(checkOut, -nights);
+    } else if (checkIn) {
+      stay.payload.checkIn = checkIn;
+    }
+    if (!checkOut && checkIn && nights && nights > 0) {
+      stay.payload.checkOut = shiftIsoDate(checkIn, nights);
+    }
+  }
+
+  for (const stay of stays) {
+    const checkIn = stringValue(stay.payload, "checkIn") ??
+      stringValue(stay.payload, "firstNightDate");
+    if (!checkIn || stringValue(stay.payload, "checkOut")) continue;
+
+    const matchingPlaces = places.filter((place) => {
+      const arriveDate = stringValue(place.payload, "arriveDate") ??
+        stringValue(place.payload, "arrivalDate");
+      const leaveDate = stringValue(place.payload, "leaveDate") ??
+        stringValue(place.payload, "departureDate");
+      return Boolean(
+        arriveDate &&
+          leaveDate &&
+          checkIn >= arriveDate &&
+          checkIn < leaveDate
+      );
+    });
+    const place = matchingPlaces.length === 1 ? matchingPlaces[0] : null;
+    const placeCity = normalizeText(stringValue(place?.payload ?? {}, "city"));
+    const compatibleStays = stays.filter((candidate) =>
+      normalizeText(stayCity(candidate, places)) === placeCity
+    );
+    const leaveDate = stringValue(place?.payload ?? {}, "leaveDate") ??
+      stringValue(place?.payload ?? {}, "departureDate");
+
+    if (place && leaveDate && compatibleStays.length === 1) {
+      stay.payload.checkOut = leaveDate;
+      addCanonicalAction(stay, {
+        absorbedTitles: [],
+        observationIds: [...stay.observationIds],
+        reason: "single canonical stay inherits its leg departure boundary",
+        type: "recovered",
+      });
+    }
+  }
+
+  for (const group of genericByCity.values()) {
+    for (const stay of group) {
+      const city = stringValue(stay.payload, "city") ?? "Trip";
+      const typeName = genericStayTypeName(stay.payload.name);
+      const checkIn = stringValue(stay.payload, "checkIn");
+      const checkOut = stringValue(stay.payload, "checkOut");
+      stay.payload.name = group.length === 1
+        ? `${city} ${typeName}`
+        : `${city} ${typeName}${
+            checkIn ? ` · ${checkIn}${checkOut ? `–${checkOut}` : ""}` : ""
+          }`;
+      addCanonicalAction(stay, {
+        absorbedTitles: [],
+        observationIds: [...stay.observationIds],
+        reason: "canonical unnamed-stay naming policy applied",
+        type: "recovered",
+      });
+    }
+  }
+}
+
+function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
+  for (const piece of pieces.filter((candidate) => candidate.outputEligible)) {
+    if (piece.kind === "transport") {
+      piece.payload.title =
+        stringValue(piece.payload, "title") ??
+        stringValue(piece.payload, "routeLabel") ??
+        "Transport";
+      piece.payload.date =
+        stringValue(piece.payload, "date") ??
+        stringValue(piece.payload, "departureDate") ??
+        stringValue(piece.payload, "pickupDate") ??
+        stringValue(piece.payload, "startDate");
+      piece.payload.departure =
+        stringValue(piece.payload, "departure") ??
+        stringValue(piece.payload, "departureLocation") ??
+        stringValue(piece.payload, "pickupLocation");
+      piece.payload.arrival =
+        stringValue(piece.payload, "arrival") ??
+        stringValue(piece.payload, "arrivalLocation") ??
+        stringValue(piece.payload, "dropOffLocation");
+      piece.payload.departureTime =
+        stringValue(piece.payload, "departureTime") ??
+        stringValue(piece.payload, "startTime") ??
+        stringValue(piece.payload, "time");
+      piece.payload.arrivalTime =
+        stringValue(piece.payload, "arrivalTime") ??
+        stringValue(piece.payload, "endTime");
+      piece.payload.confirmation =
+        stringValue(piece.payload, "confirmation") ??
+        stringValue(piece.payload, "confirmationLabel");
+      piece.payload.description = canonicalTransportDescription(
+        stringValue(piece.payload, "description")
+      );
+      piece.payload.type = canonicalTransportType(stringValue(piece.payload, "type"));
+      continue;
+    }
+
+    if (piece.kind !== "activity" && piece.kind !== "note") continue;
+    const title = stringValue(piece.payload, "title");
+    const description = stringValue(piece.payload, "description");
+    const itemType = piece.kind === "note"
+      ? "note"
+      : canonicalItemType({
+          description,
+          title,
+          value: stringValue(piece.payload, "itemType"),
+        });
+    piece.payload.itemType = itemType;
+    piece.payload.category = canonicalCategoryId({
+      category: stringValue(piece.payload, "category"),
+      description,
+      itemType,
+      title,
+    });
   }
 }
 
@@ -2067,6 +2805,7 @@ function createCanonicalGroupingCalls(
     if (childTitles.length === 0) continue;
 
     calls.push({
+      _canonicalReviewDisposition: "call",
       answerType: "confirm",
       assemblySource: "canonical_evidence",
       confidence: "high",
@@ -2090,32 +2829,59 @@ function createCanonicalGroupingCalls(
 
 function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
   return pieces.flatMap((piece) => {
-    if (!piece.outputEligible || piece.kind !== "activity") {
+    if (!piece.outputEligible) {
       return [];
     }
 
-    const dateConflict = piece.conflicts.find(
-      (conflict) => conflict.field === "date" && conflict.values.length > 1
+    const materialFields =
+      piece.kind === "activity"
+        ? new Set(["date", "endTime", "startTime"])
+        : piece.kind === "stay"
+          ? new Set(["checkIn", "checkOut", "name"])
+          : piece.kind === "transport"
+            ? new Set([
+                "arrival",
+                "arrivalTime",
+                "date",
+                "departure",
+                "departureTime",
+              ])
+            : piece.kind === "place"
+              ? new Set(["arriveDate", "city", "leaveDate"])
+              : new Set<string>();
+    const conflict = piece.conflicts.find(
+      (candidate) =>
+        candidate.requiresReview &&
+        materialFields.has(candidate.field) &&
+        candidate.values.length > 1
     );
 
-    if (!dateConflict) {
+    if (!conflict) {
       return [];
     }
 
-    const title = stringValue(piece.payload, "title") ?? "this activity";
+    const title =
+      stringValue(piece.payload, "title") ??
+      stringValue(piece.payload, "name") ??
+      stringValue(piece.payload, "city") ??
+      `this ${piece.kind}`;
+    const subjectType =
+      piece.kind === "activity" ? "item" :
+        piece.kind === "place" ? "leg" : piece.kind;
 
     return [{
-      answerType: "date",
+      _canonicalReviewDisposition: "question",
+      answerType: conflict.field.toLowerCase().includes("date") ? "date" : "text",
       confidence: "medium",
-      evidence: `Source evidence placed ${title} on ${dateConflict.values.join(" and ")}.`,
-      guessedValue: stringValue(piece.payload, "date"),
-      prompt: `Which day should ${title} appear on?`,
+      evidence: `Equally authoritative source evidence gives ${conflict.values.join(" and ")} for ${title}.`,
+      guessedValue: stringValue(piece.payload, conflict.field),
+      prompt: `Which ${conflict.field} should Roamwoven use for ${title}?`,
       reason:
-        "Repeated source evidence describes one canonical activity but disagrees about its day, so Roamwoven kept one card and needs one placement decision.",
+        "Equally authoritative source evidence conflicts, so Roamwoven preserved one canonical record and needs one material decision.",
       relatedCanonicalPieceId: piece.id,
       relatedTitle: title,
-      subjectType: "item",
-      targetField: "date",
+      subjectType,
+      targetField: conflict.field,
     }];
   });
 }
@@ -2316,10 +3082,72 @@ function dedupeObjects(items: unknown[]) {
   });
 }
 
+function reviewDetailText(detail: Record<string, unknown>) {
+  return [
+    detail.prompt,
+    detail.reason,
+    detail.evidence,
+    detail.guessedValue,
+    detail.relatedTitle,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+function bookingIdentityTokens(value: string) {
+  return Array.from(
+    value.matchAll(
+      /\b(?:booking|confirmation|pnr|record locator|reservation)(?:\s+(?:code|id|number|reference))?\s*[:#-]?\s*([a-z0-9][a-z0-9-]{3,})\b/gi
+    ),
+    (match) => normalizeText(match[1]).replace(/\s+/g, "")
+  );
+}
+
 function pieceForMissingDetail(
   detail: Record<string, unknown>,
   pieces: CanonicalEvidencePiece[]
 ) {
+  const relatedCanonicalPieceId = stringValue(detail, "relatedCanonicalPieceId");
+  if (relatedCanonicalPieceId) {
+    const canonicalMatch = pieces.find(
+      (piece) => piece.outputEligible && piece.id === relatedCanonicalPieceId
+    );
+    if (canonicalMatch) return canonicalMatch;
+  }
+
+  const detailText = reviewDetailText(detail);
+  const normalizedDetailText = normalizeText(detailText);
+  const detailBookingTokens = bookingIdentityTokens(detailText);
+  if (detailBookingTokens.length > 0) {
+    const bookingMatches = pieces.filter((piece) => {
+      if (!piece.outputEligible) return false;
+      const pieceText = [
+        piece.payload.confirmation,
+        piece.payload.confirmationLabel,
+        piece.payload.description,
+        piece.payload.reservation,
+        piece.payload.reservationNumber,
+      ]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ");
+      const pieceTokens = new Set([
+        ...bookingIdentityTokens(pieceText),
+        ...[confirmationFrom(piece.payload)]
+          .filter((value): value is string => Boolean(value))
+          .map((value) => normalizeText(value).replace(/\s+/g, "")),
+      ]);
+      return detailBookingTokens.some((token) => pieceTokens.has(token));
+    });
+    if (bookingMatches.length === 1) return bookingMatches[0];
+  }
+
+  const addressMatches = pieces.filter((piece) => {
+    if (!piece.outputEligible) return false;
+    const address = normalizeText(stringValue(piece.payload, "address"));
+    return Boolean(address.length >= 8 && normalizedDetailText.includes(address));
+  });
+  if (addressMatches.length === 1) return addressMatches[0];
+
   const relatedTitle = identityTokens(detail.relatedTitle);
   const subjectType = normalizedComparable(detail.subjectType);
   const expectedKind =
@@ -2334,10 +3162,23 @@ function pieceForMissingDetail(
 
   const candidates = pieces
       .filter(
-        (piece) => piece.outputEligible && (!expectedKind || piece.kind === expectedKind)
+        (piece) =>
+          piece.outputEligible &&
+          (!expectedKind ||
+            piece.kind === expectedKind ||
+            (expectedKind === "transport" &&
+              piece.kind === "activity" &&
+              isRentalPickup(piece.payload)))
       )
       .map((piece) => ({
-        overlap: overlapCount(relatedTitle, identityTokens(piece.payload.title ?? piece.payload.name)),
+        overlap: overlapCount(
+          relatedTitle,
+          identityTokens(
+            [piece.payload.title, piece.payload.name, piece.payload.description]
+              .filter(Boolean)
+              .join(" ")
+          )
+        ),
         piece,
       }))
       .filter((candidate) => candidate.overlap > 0)
@@ -2453,6 +3294,18 @@ function unresolvedMissingDetails({
 }) {
   const overview = asRecord(tripOverview);
   const tripYear = inferTripYear(overview, ...pieces.map((piece) => piece.payload));
+  const hasCanonicalTripDate = pieces.some((piece) =>
+    piece.outputEligible &&
+    [
+      piece.payload.date,
+      piece.payload.arriveDate,
+      piece.payload.arrivalDate,
+      piece.payload.checkIn,
+      piece.payload.departureDate,
+    ].some(
+      (date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    )
+  );
 
   return dedupeObjects(details).filter((value) => {
     const detail = asRecord(value);
@@ -2467,10 +3320,27 @@ function unresolvedMissingDetails({
     ) {
       return false;
     }
+    if (
+      normalizedComparable(detail.confidence) === "high" &&
+      /\b(?:no maker decision|routine assembly|routine stay context)\b/.test(
+        questionText
+      )
+    ) {
+      return false;
+    }
     const subjectType = normalizedComparable(detail.subjectType);
     const targetField = normalizedComparable(detail.targetField).replace(/\s+/g, "");
 
-    if (subjectType === "stay" && /(?:name|lodging|booking)/.test(targetField)) {
+    if (
+      (subjectType === "day" || subjectType === "item") &&
+      /^(?:itemtype|keep|presentation|visibility)$/.test(targetField) &&
+      !stringValue(detail, "resolverDecisionId") &&
+      stringValue(detail, "_canonicalReviewDisposition") !== "call"
+    ) {
+      return false;
+    }
+
+    if (subjectType === "stay" && /(?:name|title|lodging|booking)/.test(targetField)) {
       const detailText = [detail.prompt, detail.reason, detail.evidence, detail.relatedTitle]
         .filter((value): value is string => typeof value === "string")
         .join(" ");
@@ -2509,9 +3379,48 @@ function unresolvedMissingDetails({
     if (
       subjectType === "trip" &&
       /(?:date|daterange|startdate|enddate)/.test(targetField) &&
-      (overview.dateRange || overview.startDate || overview.endDate)
+      (overview.dateRange ||
+        overview.startDate ||
+        overview.endDate ||
+        (normalizedComparable(detail.confidence) === "high" && hasCanonicalTripDate))
     ) {
       return false;
+    }
+
+    if (
+      (subjectType === "stay" || subjectType === "trip") &&
+      /(?:privacy|sensitive|visibility)/.test(targetField)
+    ) {
+      return false;
+    }
+
+    if (
+      subjectType === "transport" &&
+      /(?:operator|provider)/.test(targetField)
+    ) {
+      return false;
+    }
+
+    if (subjectType === "stay" && /night/.test(targetField)) {
+      const guessedNights = Number(
+        /\b(\d{1,2})\s*nights?\b/i.exec(
+          stringValue(detail, "guessedValue") ?? ""
+        )?.[1]
+      );
+      const matchingStays = pieces.filter((candidate) => {
+        if (!candidate.outputEligible || candidate.kind !== "stay") return false;
+        const nightsValue = candidate.payload.nights;
+        const nights = typeof nightsValue === "number"
+          ? nightsValue
+          : typeof nightsValue === "string"
+            ? Number(nightsValue)
+            : Number.NaN;
+        return Number.isFinite(guessedNights) && nights === guessedNights;
+      });
+
+      if (matchingStays.length === 1) {
+        return false;
+      }
     }
 
     const piece = pieceForMissingDetail(detail, pieces);
@@ -2526,6 +3435,40 @@ function unresolvedMissingDetails({
       piece.kind === "activity" &&
       piece.outputEligible &&
       !stringValue(detail, "resolverDecisionId")
+    ) {
+      return false;
+    }
+
+    if (
+      subjectType === "item" &&
+      targetField === "description" &&
+      piece.kind === "activity"
+    ) {
+      const detailText = normalizeText(reviewDetailText(detail));
+      const pieceText = activityText(piece.payload);
+      if (
+        /\b(?:bag drop|drop bags?|check in|check-in)\b/.test(detailText) &&
+        /\b(?:bag drop|drop bags?|check in|check-in)\b/.test(pieceText)
+      ) {
+        return false;
+      }
+    }
+
+    if (
+      subjectType === "transport" &&
+      piece.kind === "activity" &&
+      isRentalPickup(piece.payload) &&
+      /(?:address|arrival|departure|location|pickup)/.test(targetField) &&
+      piece.payload.address
+    ) {
+      return false;
+    }
+
+    if (
+      subjectType === "item" &&
+      /^(?:address|name|title)$/.test(targetField) &&
+      piece.kind === "activity" &&
+      !isGenericTitle(piece.payload.title)
     ) {
       return false;
     }
@@ -2551,9 +3494,66 @@ function unresolvedMissingDetails({
     }
 
     if (
-      /(?:placement|date|city|leg)/.test(targetField) &&
-      (payload.date || payload.city)
+      subjectType === "transport" &&
+      ((/^(?:arrival|arrivallocation|destination|dropoff|dropofflocation)$/.test(targetField) &&
+        (payload.arrival || payload.arrivalLocation || payload.dropOffLocation)) ||
+        (/^(?:departure|departurelocation|origin|pickup|pickuplocation)$/.test(targetField) &&
+          (payload.departure || payload.departureLocation || payload.pickupLocation)))
     ) {
+      return false;
+    }
+
+    if (
+      subjectType === "stay" &&
+      piece.kind === "stay" &&
+      /(?:checkin|checkout|date|night|placement)/.test(targetField) &&
+      (payload.checkIn || payload.firstNightDate) &&
+      payload.checkOut
+    ) {
+      const guessedDate = normalizeTripDate(
+        stringValue(detail, "guessedValue"),
+        tripYear
+      );
+      const resolvedDate = /(?:checkout|enddate)/.test(targetField)
+        ? stringValue(payload, "checkOut")
+        : stringValue(payload, "checkIn") ?? stringValue(payload, "firstNightDate");
+      const asksForConfirmation = /\?|\b(?:confirm|does not state|is it|really|unclear|uncertain)\b/.test(
+        normalizeText([detail.prompt, detail.reason].filter(Boolean).join(" "))
+      );
+
+      if (
+        guessedDate &&
+        resolvedDate &&
+        tripDatesMatch(guessedDate, resolvedDate) &&
+        asksForConfirmation
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    if (/(?:placement|date)/.test(targetField) && payload.date) {
+      const guessedDate = normalizeTripDate(
+        stringValue(detail, "guessedValue"),
+        tripYear
+      );
+      const asksForConfirmation = /\?|\b(?:ambiguous|confirm|does not state|is it|really|unclear|uncertain)\b/.test(
+        normalizeText([detail.prompt, detail.reason].filter(Boolean).join(" "))
+      );
+
+      if (
+        guessedDate &&
+        tripDatesMatch(guessedDate, String(payload.date)) &&
+        asksForConfirmation
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    if (/(?:city|leg)/.test(targetField) && payload.city) {
       return false;
     }
 
@@ -2561,6 +3561,192 @@ function unresolvedMissingDetails({
       return false;
     }
 
+    return true;
+  });
+}
+
+function hasCanonicalExplicitTodo(payload: Record<string, unknown>) {
+  const text = [stringValue(payload, "title"), stringValue(payload, "description")]
+    .filter(Boolean)
+    .join(" ");
+
+  return /\b(need to decide|needs? to decide|still need to|to be decided|to decide|pick a time|choose (?:a |the |which )?(?:ticket|time|tour|option)|which ticket|book this|book later|reserve later|confirm later|decide later|not booked yet|ticket to get)\b/i.test(
+    text
+  ) || (/\btbd\b/i.test(text) && /\b(ticket|time|book|booking|reserve|reservation|option|tour)\b/i.test(text));
+}
+
+function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
+  return pieces.flatMap((piece) => {
+    if (!piece.outputEligible) return [];
+
+    const title = stringValue(piece.payload, "title") ?? "this item";
+    const description = stringValue(piece.payload, "description");
+
+    if (piece.kind === "activity" && hasCanonicalExplicitTodo(piece.payload)) {
+      const text = `${title} ${description ?? ""}`;
+      const ticketDecision = /\bticket\b/i.test(text);
+      const timeDecision = /\b(time|start)\b/i.test(text);
+      const bookingDecision = /\b(book|reserve|reservation)\b/i.test(text);
+
+      return [{
+        _canonicalReviewDisposition: "question",
+        answerType: timeDecision && !ticketDecision ? "time" : "text",
+        confidence: "medium",
+        evidence: description,
+        guessedValue: null,
+        prompt: ticketDecision
+          ? `Which ticket or tour option should be listed for ${title}?`
+          : timeDecision
+            ? `Have you picked a time for ${title}?`
+            : bookingDecision
+              ? `Have you booked ${title} yet?`
+              : `Have you decided the remaining detail for ${title}?`,
+        reason: "The source marks this activity detail as undecided, so this needs your choice.",
+        relatedCanonicalPieceId: piece.id,
+        relatedTitle: title,
+        subjectType: "item",
+        targetField: timeDecision && !ticketDecision ? "startTime" : "description",
+      }];
+    }
+
+    if (piece.kind === "activity" && !piece.payload.date) {
+      return [{
+        _canonicalReviewDisposition: "question",
+        answerType: "date",
+        confidence: "medium",
+        evidence: description,
+        guessedValue: null,
+        prompt: `Which day should ${title} appear on?`,
+        reason: "This card is source-backed but does not have a clear date, so Roamwoven needs one placement decision.",
+        relatedCanonicalPieceId: piece.id,
+        relatedTitle: title,
+        subjectType: "item",
+        targetField: "date",
+      }];
+    }
+
+    if (piece.kind !== "transport") return [];
+
+    const policyRecord = {
+      arrivalLocation: stringValue(piece.payload, "arrival"),
+      arrivalTime: stringValue(piece.payload, "arrivalTime"),
+      confirmationLabel: stringValue(piece.payload, "confirmation"),
+      departureLocation: stringValue(piece.payload, "departure"),
+      departureTime: stringValue(piece.payload, "departureTime"),
+      description,
+      provider: stringValue(piece.payload, "provider"),
+      routeLabel: title,
+      transportType: stringValue(piece.payload, "type"),
+    };
+
+    if (
+      !isCriticalTransportRecord(policyRecord) ||
+      policyRecord.departureTime ||
+      hasTransportTimeEvidence(policyRecord)
+    ) {
+      return [];
+    }
+
+    return [{
+      _canonicalReviewDisposition: "question",
+      answerType: "time",
+      confidence: "medium",
+      evidence: [
+        title,
+        description,
+        policyRecord.departureLocation,
+        policyRecord.arrivalLocation,
+        policyRecord.provider,
+      ].filter(Boolean).join(" "),
+      guessedValue: null,
+      prompt:
+        policyRecord.transportType === "rental_car" ||
+        policyRecord.transportType === "transfer"
+          ? `What time is ${title}?`
+          : `What time does ${title} depart?`,
+      reason: "Critical travel cards need a departure or pickup time for the Today timeline. You can leave it blank if this is not booked yet.",
+      relatedCanonicalPieceId: piece.id,
+      relatedTitle: title,
+      subjectType: "transport",
+      targetField: "departureTime",
+    }];
+  });
+}
+
+function canonicalReviewSubjectType(piece: CanonicalEvidencePiece) {
+  if (piece.kind === "activity" || piece.kind === "note") return "item";
+  if (piece.kind === "place") return "leg";
+  if (piece.kind === "stay" || piece.kind === "transport") return piece.kind;
+  return "trip";
+}
+
+function scrubReviewEvidence(value: unknown) {
+  if (typeof value !== "string") return value;
+
+  return value
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[private contact removed]")
+    .replace(/\+?\d[\d\s().-]{8,}\d/g, "[private contact removed]")
+    .replace(
+      /\b(?:customer|traveler|guest)\s*:\s*[^.\n]+(?:\.|$)/gi,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalizeReviewDetails(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  const canonical: Record<string, unknown>[] = details.map((value) => {
+    const detail = asRecord(value);
+    const piece = pieceForMissingDetail(detail, pieces);
+    const reviewText = normalizeText(reviewDetailText(detail));
+    const internalTrace =
+      /\b(source anchor|source anchors|source-anchor|source backed repair|repaired from source|repaired using source|audit diagnostic|lineage|ocr|qa bundle|duplicate suppression|routine assembly)\b/.test(
+        reviewText
+      );
+    const disposition =
+      internalTrace
+        ? "dismissed"
+        : stringValue(detail, "_canonicalReviewDisposition") === "call" ||
+      stringValue(detail, "resolverDecisionId")
+        ? "call"
+        : "question";
+
+    return {
+      ...detail,
+      _canonicalReviewDisposition: disposition,
+      evidence: scrubReviewEvidence(detail.evidence),
+      relatedCanonicalPieceId:
+        piece?.id ?? stringValue(detail, "relatedCanonicalPieceId"),
+      subjectType: piece
+        ? canonicalReviewSubjectType(piece)
+        : detail.subjectType ?? "trip",
+    };
+  });
+  const seen = new Set<string>();
+
+  return canonical.filter((detail) => {
+    const text = normalizeText(
+      [detail.targetField, detail.prompt, detail.reason].filter(Boolean).join(" ")
+    );
+    const semanticTarget =
+      /\b(ticket|ticket choice|ticket type)\b/.test(text) ? "ticket" :
+        /\b(tour|guided|self guided|visit mode|booking status)\b/.test(text)
+          ? "visit-mode" :
+          /\b(check in|checkin)\b/.test(text) ? "check-in" :
+            /\b(check out|checkout)\b/.test(text) ? "check-out" :
+              /\b(date|day|placement)\b/.test(text) ? "date" :
+                /\b(name|title)\b/.test(text) ? "name" :
+                  normalizeText(String(detail.targetField ?? "general"));
+    const key = [
+      detail._canonicalReviewDisposition,
+      detail.relatedCanonicalPieceId ?? detail.subjectType,
+      semanticTarget,
+    ].join(":");
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -2655,17 +3841,20 @@ export function clusterExtractedEvidence({
       continue;
     }
 
+    let matchedReason: string | null = null;
     const match = pieces.find((piece) => {
       if (piece.kind !== observation.kind || !piece.outputEligible) return false;
-      return Boolean(matchReason(piece.kind, piece.payload, observation.payload));
+      matchedReason =
+        matchReason(piece.kind, piece.payload, observation.payload) ??
+        crossSourceActivityConflictReason({ observation, observations, piece });
+      return Boolean(matchedReason);
     });
 
     if (match) {
       mergeObservationIntoPiece(
         match,
         observation,
-        matchReason(match.kind, match.payload, observation.payload) ??
-          "compatible evidence"
+        matchedReason ?? "compatible evidence"
       );
       continue;
     }
@@ -2679,8 +3868,15 @@ export function clusterExtractedEvidence({
     pieces.push(createPiece(observation));
   }
 
+  attachArrivalOnlyTransportPieces(pieces);
+  routeCanonicalTravelBoundaries(pieces);
+  mergeReclassifiedCanonicalPieces(pieces);
   suppressRedundantTransportParents(pieces);
+  finalizeCanonicalPlaceFields(pieces);
   attachGenericStayFragments(pieces);
+  applyCanonicalGuessedStayNames(missingDetails, pieces);
+  applyCanonicalGuessedStayDates(missingDetails, pieces, tripYear);
+  finalizeCanonicalStayFields(pieces);
   attachGenericActivityAccessories(pieces);
   attachGenericActivityPlaceholders(pieces);
   attachRentalCarReturns(pieces);
@@ -2707,11 +3903,13 @@ export function clusterExtractedEvidence({
     tripYear,
   });
   mergeCanonicalCityNotes(pieces);
+  finalizeCanonicalOutputFields(pieces);
   const canonicalGroupingCalls = createCanonicalGroupingCalls(
     groupingDecisions,
     pieces
   );
   const canonicalConflictQuestions = createCanonicalConflictQuestions(pieces);
+  const canonicalOwnedQuestions = createCanonicalOwnedQuestions(pieces);
 
   const outputFor = (kind: EvidenceKind) =>
     pieces
@@ -2721,22 +3919,37 @@ export function clusterExtractedEvidence({
         _canonicalPieceId: piece.id,
       }));
   const activities = [...outputFor("activity"), ...outputFor("note")];
-  const finalMissingDetails = unresolvedMissingDetails({
-    details: [
-      ...missingDetails,
-      ...canonicalGroupingCalls,
-      ...canonicalConflictQuestions,
-    ],
-    pieces,
+  const places = outputFor("place");
+  const stays = outputFor("stay");
+  const transport = outputFor("transport");
+  const canonicalSpineQuestions = createCanonicalTripSpineReviewDetails({
+    activities,
+    places,
+    stays,
+    transport,
     tripOverview,
   });
+  const finalMissingDetails = canonicalizeReviewDetails(
+    unresolvedMissingDetails({
+      details: [
+        ...missingDetails,
+        ...canonicalGroupingCalls,
+        ...canonicalConflictQuestions,
+        ...canonicalOwnedQuestions,
+        ...canonicalSpineQuestions,
+      ],
+      pieces,
+      tripOverview,
+    }),
+    pieces
+  );
   const draft = {
     activities,
     missingDetails: finalMissingDetails,
-    places: outputFor("place"),
+    places,
     sensitiveDetails: dedupeObjects(sensitiveDetails),
-    stays: outputFor("stay"),
-    transport: outputFor("transport"),
+    stays,
+    transport,
     tripOverview,
     [SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY]: {
       transport: sourceTransportAnchors,

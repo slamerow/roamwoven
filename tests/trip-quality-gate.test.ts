@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 import {
   assessTripDraftQuality,
   attachTripQualityAssessment,
 } from "@/lib/extraction/trip-quality-assessment";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
-import { prepareTripDraftForReview } from "@/lib/extraction/trip-spine-validation";
 
 export default function run() {
   const draft = {
@@ -72,29 +71,5 @@ export default function run() {
   assert.deepEqual(
     (reviewableDraft as Record<string, unknown>).transport,
     []
-  );
-
-  const sparseDraft = prepareTripDraftForReview({
-    activities: [],
-    missingDetails: [],
-    places: [],
-    stays: [],
-    transport: [],
-    tripOverview: {},
-  });
-  const sparseRecords = createStructuredTripRecordsFromDraft({
-    draft: sparseDraft,
-    fallbackTripName: "Untitled trip",
-    tripId: "sparse-review-trip",
-  });
-
-  assert.equal(
-    (sparseDraft._processingReview as { disposition?: string }).disposition,
-    "needs_review"
-  );
-  assert.ok(
-    sparseRecords.reviewQuestions.some(
-      (question) => question.prompt === "What dates should this trip cover?"
-    )
   );
 }

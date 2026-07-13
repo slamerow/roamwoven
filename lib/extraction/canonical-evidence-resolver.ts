@@ -6,7 +6,7 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 3;
+const CANONICAL_RESOLVER_VERSION = 4;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
 const MAX_RESOLVER_WINDOWS = 12;
 const RESOLVER_WINDOW_CONCURRENCY = 3;
@@ -74,6 +74,15 @@ export type CanonicalEvidenceResolverMetadata = {
   sources: Array<{ title: string | null; url: string }>;
   version: number;
   windowCount: number;
+};
+
+export type CanonicalEvidenceResolverPlan = {
+  candidateCount: number;
+  requiresLookup: boolean;
+  windows: Array<{
+    candidateIds: string[];
+    titles: string[];
+  }>;
 };
 
 const resolverSchema = {
@@ -366,7 +375,7 @@ function hasAmbiguousCandidateCluster(candidates: ResolverCandidate[]) {
   }
 
   return candidates.some((candidate) => candidate.evidenceRole === "grouping_proposal") ||
-    Array.from(groups.values()).some((group) => group.length >= 3) ||
+    Array.from(groups.values()).some((group) => group.length >= 2) ||
     candidates.some(
       (candidate, index) =>
         candidates.findIndex(
@@ -457,6 +466,33 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
     );
   }
 
+  const structuralGroups = new Map<string, ResolverCandidate[]>();
+  for (const candidate of candidates) {
+    if (
+      candidate.evidenceRole === "grouping_proposal" ||
+      candidate.sectionType === "city_reference"
+    ) {
+      continue;
+    }
+
+    for (const sourceBlockId of candidate.sourceBlockIds) {
+      const key = [
+        candidate.sourceIdentity,
+        candidate.date ?? "undated",
+        normalizeText(candidate.city) || "unknown-city",
+        sourceBlockId,
+      ].join("|");
+      structuralGroups.set(key, [
+        ...(structuralGroups.get(key) ?? []),
+        candidate,
+      ]);
+    }
+  }
+  for (const [key, group] of structuralGroups) {
+    if (group.length < 2) continue;
+    addWindow(`structure|${key}`, group);
+  }
+
   const roleCandidates = candidates.filter(
     (candidate) =>
       candidate.sectionType === "city_reference" ||
@@ -480,6 +516,23 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
   }
 
   return [...windows.values()].slice(0, MAX_RESOLVER_WINDOWS);
+}
+
+export function inspectCanonicalEvidenceResolutionPlan(
+  stages: EvidenceStageInput[]
+): CanonicalEvidenceResolverPlan {
+  const candidates = buildCandidates(stages);
+  const windows = buildResolutionWindows(candidates);
+
+  return {
+    candidateCount: candidates.length,
+    requiresLookup:
+      windows.length > 0 && hasAmbiguousCandidateCluster(candidates),
+    windows: windows.map((window) => ({
+      candidateIds: window.map((candidate) => candidate.candidateId),
+      titles: window.map((candidate) => candidate.title),
+    })),
+  };
 }
 
 function commonSourceBlockIds(candidates: ResolverCandidate[]) {

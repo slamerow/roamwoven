@@ -1,8 +1,8 @@
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
   getLatestTripDraftSnapshot,
   type TripDraftSnapshot,
 } from "@/lib/extraction/processing-runs";
+import { readStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { applyReviewDecisions } from "@/lib/generated-trip-decisions";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import { listTripReviewDecisions } from "@/lib/review-decisions";
@@ -38,11 +38,10 @@ export async function getAppliedTripRecords({
     };
   }
 
-  const records = createStructuredTripRecordsFromDraft({
-    draft: latestDraft.draftJson,
-    fallbackTripName,
-    tripId,
-  });
+  const records = readStructuredTripSnapshot(latestDraft.draftJson);
+  if (!records) {
+    return { latestDraft, records: null };
+  }
   const reviewDecisions = await listTripReviewDecisions(tripId);
 
   return {

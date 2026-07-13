@@ -1,7 +1,7 @@
 import { type DraftObject } from "@/lib/extraction/draft-value";
 import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
 
-const CANONICAL_FINALIZATION_VERSION = 1;
+const CANONICAL_FINALIZATION_VERSION = 2;
 const CANONICAL_FINALIZATION_KEY = "_canonicalFinalization";
 
 export type CanonicalFinalizationDebug = {
@@ -34,7 +34,8 @@ function canonicalEvidenceVersion(record: DraftObject) {
 function existingFinalization(record: DraftObject) {
   const finalization = asRecord(record[CANONICAL_FINALIZATION_KEY]);
 
-  return finalization.version === CANONICAL_FINALIZATION_VERSION
+  return finalization.version === CANONICAL_FINALIZATION_VERSION &&
+    canonicalEvidenceVersion(record) === EVIDENCE_CLUSTER_VERSION
     ? finalization
     : null;
 }
@@ -76,19 +77,4 @@ export function finalizeCanonicalTripDraft(draft: unknown): {
       },
     },
   };
-}
-
-export function preparePersistedTripDraftForStructuredCompilation(draft: unknown) {
-  const record = asRecord(draft);
-
-  if (
-    existingFinalization(record) ||
-    canonicalEvidenceVersion(record) === EVIDENCE_CLUSTER_VERSION
-  ) {
-    return finalizeCanonicalTripDraft(draft).draft;
-  }
-
-  // Historical snapshots are immutable inputs. They remain viewable as stored,
-  // but they never reactivate the deleted legacy assembly transformations.
-  return draft;
 }

@@ -11,236 +11,111 @@ import type {
   TripItemType,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
-import { preparePersistedTripDraftForStructuredCompilation } from "@/lib/extraction/canonical-trip-finalization";
+import {
+  finalizeCanonicalTripDraft,
+} from "@/lib/extraction/canonical-trip-finalization";
 import {
   type DraftObject,
   getArray,
-  getNumber,
   getObject,
   getString,
-  getStringFromKeys,
 } from "@/lib/extraction/draft-value";
 import { createReviewQuestions } from "@/lib/extraction/review-question-policy";
-import {
-  cleanTravelerText,
-  normalizeText,
-} from "@/lib/extraction/traveler-text";
 import {
   getStayAddressVisibility,
   shouldCreatePrivateDetailFromDraftSensitiveDetail,
 } from "@/lib/trip-privacy-policy";
 import {
-  canonicalizeTripCategoryId,
   getTripCategoryEmoji,
   getTripCategoryLabel,
+  TRIP_CATEGORY_IDS,
 } from "@/lib/trip-categories";
-import {
-  isRentalCarPickupCandidate,
-  isRedundantLocalAirportTransferCandidate,
-  shouldBeTravelRow,
-} from "@/lib/trip-travel-boundary-policy";
 
-function slugify(value: string) {
-  const slug = value
+function canonicalRecordId({
+  item,
+  kind,
+  tripId,
+}: {
+  item: DraftObject;
+  kind: "item" | "leg" | "stay" | "transport";
+  tripId: string;
+}) {
+  const canonicalPieceId = getString(item, "_canonicalPieceId");
+  if (!canonicalPieceId) {
+    throw new CanonicalProjectionInvariantError([
+      `${kind} is missing its canonical piece identity`,
+    ]);
+  }
+  return `${tripId}-${kind}-${canonicalPieceId}`;
+}
+
+const CANONICAL_TRANSPORT_TYPES = new Set<TripTransportType>([
+  "flight",
+  "train",
+  "ferry",
+  "rental_car",
+  "transfer",
+  "bus",
+  "drive",
+  "other",
+]);
+const CANONICAL_ITEM_TYPES = new Set<TripItemType>([
+  "activity",
+  "note",
+  "admin",
+  "rest_day",
+  "social",
+  "placeholder",
+]);
+const CANONICAL_CATEGORY_IDS = new Set<string>(TRIP_CATEGORY_IDS);
+
+function recordKey(value: string) {
+  return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-  return slug || "record";
+    .replace(/(^-|-$)/g, "") || "record";
 }
 
-function normalizeTransportType(value: string | null): TripTransportType {
-  if (
-    value === "flight" ||
-    value === "train" ||
-    value === "ferry" ||
-    value === "rental_car" ||
-    value === "bus" ||
-    value === "drive"
-  ) {
-    return value;
-  }
-
-  if (value === "car") {
-    return "rental_car";
-  }
-
-  if (value === "transfer") {
-    return "transfer";
-  }
-
-  return "other";
-}
-
-function cleanTransportDescription(
-  value: string | null,
-  transportType: TripTransportType = "other"
+function requiredCanonicalString(
+  item: DraftObject,
+  key: string,
+  label: string
 ) {
-  const description = cleanTravelerText(value);
-
-  if (!description) {
-    return null;
+  const value = getString(item, key);
+  if (!value) {
+    throw new CanonicalProjectionInvariantError([`${label} is missing`]);
   }
-
-  const segments = description
-    .split(/(?<=[.!?])\s+|;\s+/)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  if (segments.length <= 1) {
-    return description;
-  }
-
-  const transportDetailPattern =
-    /\b(arrival|arrive|arrives|bag|bags|boarding|bus|car|check[-\s]?in|coach|confirmation|depart|departs|departure|driver|drop[-\s]?off|duration|ferry|flight|gate|land|lands|leave|leaves|luggage|operator|pickup|pick[-\s]?up|platform|provider|rail|reservation|route|seat|station|terminal|ticket|train|transfer|voucher)\b/i;
-  const destinationPlanPattern =
-    /\b(after arrival|bar|breakfast|cafe|café|cathedral|church|city plans?|dinner|food|gallery|lunch|museum|palace|plans? for|restaurant|shopping|sightseeing|tour|visit|walk|walking)\b/i;
-  const lodgingDirectionPattern =
-    /\b(hostel|hotel|airbnb|apartment|check[-\s]?in|buzzer|door code|lockbox|metro|subway|tram|directions?|walk to the stay)\b/i;
-  const kept = segments.filter(
-    (segment) => {
-      if (
-        (transportType === "flight" || transportType === "train") &&
-        lodgingDirectionPattern.test(segment)
-      ) {
-        return false;
-      }
-
-      return (
-        transportDetailPattern.test(segment) ||
-        !destinationPlanPattern.test(segment)
-      );
-    }
-  );
-
-  return kept.length > 0 ? kept.join(" ") : description;
+  return value;
 }
 
-function normalizeItemType(value: string | null, title: string, description: string | null): TripItemType {
-  if (
-    value === "activity" ||
-    value === "note" ||
-    value === "admin" ||
-    value === "rest_day" ||
-    value === "social" ||
-    value === "placeholder"
-  ) {
-    return value;
+function exactCanonicalTransportType(item: DraftObject) {
+  const value = getString(item, "type") as TripTransportType | null;
+  if (!value || !CANONICAL_TRANSPORT_TYPES.has(value)) {
+    throw new CanonicalProjectionInvariantError([
+      `transport type ${JSON.stringify(value)} is not canonical`,
+    ]);
   }
-
-  const text = `${title} ${description ?? ""}`.toLowerCase();
-
-  if (
-    /\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery)\b/.test(
-      text
-    )
-  ) {
-    return "activity";
-  }
-
-  if (/\b(tbd|to confirm|placeholder)\b/.test(text)) {
-    return "placeholder";
-  }
-
-  return "activity";
+  return value;
 }
 
-function normalizeCategoryId({
-  category,
-  description,
-  itemType,
-  title,
-}: {
-  category: string | null;
-  description: string | null;
-  itemType: TripItemType;
-  title: string;
-}) {
-  const canonicalCategory = canonicalizeTripCategoryId(category);
-
-  if (canonicalCategory) {
-    return canonicalCategory;
+function exactCanonicalItemType(item: DraftObject) {
+  const value = getString(item, "itemType") as TripItemType | null;
+  if (!value || !CANONICAL_ITEM_TYPES.has(value)) {
+    throw new CanonicalProjectionInvariantError([
+      `item type ${JSON.stringify(value)} is not canonical`,
+    ]);
   }
+  return value;
+}
 
-  const text = `${title} ${description ?? ""}`.toLowerCase();
-
-  if (/\b(check[-\s]?in|check[-\s]?out|drop bags?|bag drop|arrival|departure|airport|station|flight|land|lands|pickup|pick[-\s]?up|drop[-\s]?off|rental car)\b/.test(text)) {
-    return "arrival_departure";
+function exactCanonicalCategoryId(item: DraftObject) {
+  const value = getString(item, "category");
+  if (!value || !CANONICAL_CATEGORY_IDS.has(value)) {
+    throw new CanonicalProjectionInvariantError([
+      `category ${JSON.stringify(value)} is not canonical`,
+    ]);
   }
-
-  if (itemType === "rest_day") {
-    return "rest_day";
-  }
-
-  if (itemType === "social" || /\b(friend|family|meetup|meet up|visit with)\b/.test(text)) {
-    return "social";
-  }
-
-  if (/\b(cooking class|cookery|food tour|market tour|tasting class)\b/.test(text)) {
-    return "food_class";
-  }
-
-  if (/\b(restaurant|dinner|lunch|brunch|breakfast|cafe|café|bar|tapas|winery|brewery|beer hall|food hall|market|meal)\b/.test(text)) {
-    return "food_dining";
-  }
-
-  if (/\b(pottery|calligraphy|batik|silk|workshop|craft class|art class|hands[-\s]?on)\b/.test(text)) {
-    return "art_class";
-  }
-
-  if (/\b(temple|shrine|church|cathedral|basilica|mosque|synagogue|religious|st vitus|st\. vitus)\b/.test(text)) {
-    return "temple_shrine";
-  }
-
-  if (/\b(ticket|tickets|tour|guided|entry|reservation|pass|timed|time travel|walking tour|catacombs|castle|palace)\b/.test(text)) {
-    return "tours_tickets";
-  }
-
-  if (/\b(museum|gallery|exhibit|exhibition|library|monument|statue|landmark|art|culture|historic|history|communism|kgb|belvedere|albertina|mumok|kafka)\b/.test(text)) {
-    return "art_culture";
-  }
-
-  if (/\b(zoo|wildlife|sanctuary|aquarium|animal|elephant|whale shark|whale|dolphin)\b/.test(text)) {
-    return "animal_experience";
-  }
-
-  if (/\b(beach|swim|snorkel|pool|water|boat|kayak|surf|reef)\b/.test(text)) {
-    return "beach_water";
-  }
-
-  if (/\b(hike|park|garden|trail|mountain|nature|outdoors|viewpoint|scenic spot|gloriette|palm house)\b/.test(text)) {
-    return "nature_outdoors";
-  }
-
-  if (/\b(shop|shopping|market|tailor|tailoring|souvenir|mall|boutique)\b/.test(text)) {
-    return "shopping_tailor";
-  }
-
-  if (/\b(spa|massage|sauna|yoga|wellness|relaxation|baths?)\b/.test(text)) {
-    return "wellness_relaxation";
-  }
-
-  if (/\b(playground|kid|kids|child|children|family[-\s]?friendly|toddler|wren)\b/.test(text)) {
-    return "kid_activity";
-  }
-
-  if (/\b(show|concert|theater|theatre|performance|ferris wheel|nightlife|club|cocktail|hemingway bar)\b/.test(text)) {
-    return "nightlife_entertainment";
-  }
-
-  if (/\b(train ride|boat ride|scenic ride|road trip|drive|ferry|cruise|panorama train)\b/.test(text)) {
-    return "scenic_ride";
-  }
-
-  if (/\b(laundry|grocery|groceries|pack|packing|sim card|pharmacy|errand|admin)\b/.test(text)) {
-    return "admin_logistics";
-  }
-
-  if (itemType === "admin" || itemType === "note" || itemType === "placeholder") {
-    return "admin_logistics";
-  }
-
-  return "art_culture";
+  return value;
 }
 
 function isIsoDate(value: string | null): value is string {
@@ -251,173 +126,6 @@ function addDays(value: string, days: number) {
   const date = new Date(`${value}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
-}
-
-function subtractDays(value: string, days: number) {
-  return addDays(value, -days);
-}
-
-function findLegForText(
-  legs: TripLegRecord[],
-  title: string,
-  description: string | null
-) {
-  const text = normalizeText([title, description].filter(Boolean).join(" "));
-
-  if (!text) {
-    return null;
-  }
-
-  return (
-    legs.find((leg) =>
-      [leg.displayName, leg.city, leg.country]
-        .filter(Boolean)
-        .some((value) => {
-          const normalized = normalizeText(value ?? null);
-          return Boolean(normalized) && text.includes(normalized);
-        })
-    ) ?? null
-  );
-}
-
-function isGenericStayName(value: string) {
-  const normalized = normalizeText(value);
-  return (
-    /^stay \d+$/.test(normalized) ||
-    /^[a-z]+ stay$/.test(normalized) ||
-    normalized.includes("hostel stay") ||
-    normalized.includes("lodging")
-  );
-}
-
-function getStayNameGuess({
-  draft,
-  fallbackName,
-}: {
-  draft: unknown;
-  fallbackName: string;
-}) {
-  const normalizedFallback = normalizeText(fallbackName);
-  const candidates = getArray(draft, "missingDetails")
-    .map((item) =>
-      item && typeof item === "object" && !Array.isArray(item)
-        ? (item as DraftObject)
-        : null
-    )
-    .filter((item): item is DraftObject => Boolean(item))
-    .filter((item) => {
-      const subjectType = getString(item, "subjectType");
-      const targetField = normalizeText(getString(item, "targetField"));
-      const guessedValue = getString(item, "guessedValue");
-      const text = normalizeText(
-        [
-          getString(item, "prompt"),
-          getString(item, "reason"),
-          getString(item, "evidence"),
-          getString(item, "relatedTitle"),
-        ]
-          .filter(Boolean)
-          .join(" ")
-      );
-
-      return (
-        Boolean(guessedValue) &&
-        (subjectType === "stay" ||
-          text.includes("lodging") ||
-          text.includes("hostel") ||
-          text.includes("hotel") ||
-          text.includes("check in")) &&
-        (targetField.includes("title") ||
-          targetField.includes("name") ||
-          text.includes("lodging title") ||
-          text.includes("correct lodging"))
-      );
-    });
-
-  const matchingCandidate = candidates.find((item) => {
-    const relatedTitle = normalizeText(getString(item, "relatedTitle"));
-    const prompt = normalizeText(getString(item, "prompt"));
-    const reason = normalizeText(getString(item, "reason"));
-
-    return (
-      Boolean(normalizedFallback) &&
-      ((Boolean(relatedTitle) &&
-        (relatedTitle.includes(normalizedFallback) ||
-          normalizedFallback.includes(relatedTitle))) ||
-        prompt.includes(normalizedFallback) ||
-        reason.includes(normalizedFallback))
-    );
-  });
-
-  return (
-    getString(matchingCandidate ?? null, "guessedValue") ??
-    (isGenericStayName(fallbackName) && candidates.length === 1
-      ? getString(candidates[0], "guessedValue")
-    : null)
-  );
-}
-
-function getStayDateGuess({
-  dateKind,
-  draft,
-  stayName,
-}: {
-  dateKind: "checkIn" | "checkOut";
-  draft: unknown;
-  stayName: string;
-}) {
-  const normalizedName = normalizeText(stayName);
-  const targetPatterns =
-    dateKind === "checkIn"
-      ? ["checkin", "check in", "check-in", "checkindate", "start"]
-      : ["checkout", "check out", "check-out", "checkoutdate", "leave"];
-  const candidates = getArray(draft, "missingDetails")
-    .map((item) =>
-      item && typeof item === "object" && !Array.isArray(item)
-        ? (item as DraftObject)
-        : null
-    )
-    .filter((item): item is DraftObject => Boolean(item))
-    .filter((item) => {
-      const subjectType = getString(item, "subjectType");
-      const guessedValue = getString(item, "guessedValue");
-      const targetField = normalizeText(getString(item, "targetField"));
-      const text = normalizeText(
-        [
-          getString(item, "prompt"),
-          getString(item, "reason"),
-          getString(item, "evidence"),
-          getString(item, "relatedTitle"),
-        ]
-          .filter(Boolean)
-          .join(" ")
-      );
-
-      return (
-        subjectType === "stay" &&
-        isIsoDate(guessedValue) &&
-        targetPatterns.some(
-          (pattern) => targetField.includes(pattern) || text.includes(pattern)
-        )
-      );
-    });
-
-  const matchingCandidate = candidates.find((item) => {
-    const relatedTitle = normalizeText(getString(item, "relatedTitle"));
-    const prompt = normalizeText(getString(item, "prompt"));
-    const reason = normalizeText(getString(item, "reason"));
-
-    return (
-      Boolean(normalizedName) &&
-      ((Boolean(relatedTitle) &&
-        (relatedTitle.includes(normalizedName) ||
-          normalizedName.includes(relatedTitle))) ||
-        prompt.includes(normalizedName) ||
-        reason.includes(normalizedName))
-    );
-  });
-
-  return getString(matchingCandidate ?? null, "guessedValue");
 }
 
 function datesBetweenExclusiveEnd(startDate: string | null, endDate: string | null) {
@@ -513,29 +221,22 @@ function createLegRecords({
     const place = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const nextPlace = places[index + 1];
-    const nextPlaceObject =
-      nextPlace && typeof nextPlace === "object" && !Array.isArray(nextPlace)
-        ? (nextPlace as DraftObject)
-        : null;
-    const city = getString(place, "city") ?? `Stop ${index + 1}`;
+    const city = requiredCanonicalString(place, "city", `place[${index}].city`);
     const country = getString(place, "country");
-    const key = slugify([city, country].filter(Boolean).join("-"));
+    const key = recordKey([city, country].filter(Boolean).join("-"));
     const arriveDate = getString(place, "arriveDate");
-    const explicitLeaveDate = getString(place, "leaveDate");
-    const nextArriveDate = getString(nextPlaceObject, "arriveDate");
-    const leaveDate =
-      explicitLeaveDate ??
-      (arriveDate && nextArriveDate && nextArriveDate > arriveDate
-        ? nextArriveDate
-        : null);
+    const leaveDate = getString(place, "leaveDate");
 
     return {
       arriveDate,
       city,
       country,
       displayName: city,
-      id: `${tripId}-leg-${key}-${index + 1}`,
+      id: canonicalRecordId({
+        item: place,
+        kind: "leg",
+        tripId,
+      }),
       language: null,
       latitude: null,
       leaveDate,
@@ -569,6 +270,23 @@ function findLegForDate(legs: TripLegRecord[], date: string | null) {
   );
 }
 
+function findLegForCanonicalCity(
+  legs: TripLegRecord[],
+  city: string | null
+) {
+  if (!city) {
+    return null;
+  }
+
+  const normalizedCity = city.trim().toLocaleLowerCase();
+
+  return (
+    legs.find(
+      (leg) => leg.city.trim().toLocaleLowerCase() === normalizedCity
+    ) ?? null
+  );
+}
+
 function createStayRecords({
   draft,
   legs,
@@ -582,36 +300,10 @@ function createStayRecords({
     const stay = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const fallbackName = getString(stay, "name") ?? `Stay ${index + 1}`;
-    const name =
-      getStayNameGuess({ draft, fallbackName }) ?? fallbackName;
-    const nights = getNumber(stay, "nights");
-    const rawCheckOut = getString(stay, "checkOut");
-    const guessedCheckIn = getStayDateGuess({
-      dateKind: "checkIn",
-      draft,
-      stayName: name,
-    });
-    const guessedCheckOut = getStayDateGuess({
-      dateKind: "checkOut",
-      draft,
-      stayName: name,
-    });
-    const checkIn =
-      getString(stay, "checkIn") ??
-      getString(stay, "firstNightDate") ??
-      (rawCheckOut && nights && nights > 0 ? subtractDays(rawCheckOut, nights) : null) ??
-      guessedCheckIn;
+    const name = requiredCanonicalString(stay, "name", `stay[${index}].name`);
+    const checkIn = getString(stay, "checkIn") ?? getString(stay, "firstNightDate");
     const leg = findLegForDate(legs, checkIn);
-    const inferredCheckOut =
-      checkIn && leg?.leaveDate && leg.leaveDate > checkIn
-        ? leg.leaveDate
-        : null;
-    const checkOut =
-      rawCheckOut ??
-      (checkIn && nights && nights > 0 ? addDays(checkIn, nights) : null) ??
-      guessedCheckOut ??
-      inferredCheckOut;
+    const checkOut = getString(stay, "checkOut");
     const address = getString(stay, "address");
     const stayType = getString(stay, "stayType");
 
@@ -631,7 +323,11 @@ function createStayRecords({
       checkOutTime: getString(stay, "checkOutTime"),
       confirmationLabel: getString(stay, "confirmation"),
       confirmationVisibility: "traveler_password",
-      id: `${tripId}-stay-${slugify(name)}-${index + 1}`,
+      id: canonicalRecordId({
+        item: stay,
+        kind: "stay",
+        tripId,
+      }),
       latitude: null,
       legId: leg?.id ?? null,
       longitude: null,
@@ -656,77 +352,28 @@ function createTransportRecords({
   legs: TripLegRecord[];
   tripId: string;
 }): TripTransportRecord[] {
-  const transportItems = getArray(draft, "transport").filter((item) => {
-    const transport = item && typeof item === "object" && !Array.isArray(item)
-      ? (item as DraftObject)
-      : {};
-
-    const boundaryRecord = {
-      arrivalDate: getStringFromKeys(transport, [
-        "arrivalDate",
-        "dropOffDate",
-        "endDate",
-      ]),
-      arrivalLocation: getStringFromKeys(transport, [
-        "arrival",
-        "arrivalLocation",
-        "dropOffLocation",
-      ]),
-      confirmationLabel: getString(transport, "confirmation"),
-      departureDate: getStringFromKeys(transport, [
-        "departureDate",
-        "pickupDate",
-        "startDate",
-        "date",
-      ]),
-      departureLocation: getStringFromKeys(transport, [
-        "departure",
-        "departureLocation",
-        "pickupLocation",
-      ]),
-      description: getString(transport, "description"),
-      provider: getString(transport, "provider"),
-      title: getString(transport, "title"),
-      transportType: getString(transport, "type"),
-    };
-
-    return (
-      !isRentalCarPickupCandidate(boundaryRecord) ||
-      shouldBeTravelRow(boundaryRecord)
-    );
-  });
+  const transportItems = getArray(draft, "transport");
 
   return transportItems.map((item, index) => {
     const transport = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const title =
-      cleanTravelerText(getString(transport, "title")) ?? `Transport ${index + 1}`;
+    const title = requiredCanonicalString(
+      transport,
+      "title",
+      `transport[${index}].title`
+    );
     const date = getString(transport, "date");
     const leg = findLegForDate(legs, date);
-    const transportType = normalizeTransportType(getString(transport, "type"));
-    const description = cleanTransportDescription(
-      getString(transport, "description"),
-      transportType
-    );
+    const transportType = exactCanonicalTransportType(transport);
+    const description = getString(transport, "description");
     const departure = getString(transport, "departure");
     const arrival = getString(transport, "arrival");
     const provider = getString(transport, "provider");
     const confirmation = getString(transport, "confirmation");
-    const redundantLocalAirportTransfer =
-      isRedundantLocalAirportTransferCandidate({
-        arrivalLocation: arrival,
-        confirmationLabel: confirmation,
-        departureLocation: departure,
-        description,
-        provider,
-        title,
-        transportType,
-      });
-
     return {
       arrivalLocation: arrival,
-      arrivalTime: getStringFromKeys(transport, ["arrivalTime", "endTime"]),
+      arrivalTime: getString(transport, "arrivalTime"),
       bookingUrl: null,
       bookingUrlVisibility: "traveler_password",
       confirmationLabel: confirmation,
@@ -735,21 +382,21 @@ function createTransportRecords({
         : "public",
       date,
       departureLocation: departure,
-      departureTime: getStringFromKeys(transport, [
-        "departureTime",
-        "startTime",
-        "time",
-      ]),
+      departureTime: getString(transport, "departureTime"),
       description,
       fromLegId: null,
-      id: `${tripId}-transport-${slugify(title)}-${index + 1}`,
+      id: canonicalRecordId({
+        item: transport,
+        kind: "transport",
+        tripId,
+      }),
       legId: leg?.id ?? null,
       privateDetailIds: [],
       provider,
-      reviewRequired: redundantLocalAirportTransfer ? false : !date,
+      reviewRequired: !date,
       routeLabel: title,
       sourceConfidence: "medium",
-      status: redundantLocalAirportTransfer ? "ignored" : "draft",
+      status: "draft",
       toLegId: null,
       transportType,
       tripId,
@@ -770,30 +417,23 @@ function createItemRecords({
     const activity = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
       : {};
-    const title =
-      cleanTravelerText(getString(activity, "title")) ?? `Activity ${index + 1}`;
-    const description = cleanTravelerText(getString(activity, "description"));
-    const date = getString(activity, "date");
-    const originalItemType = normalizeItemType(
-      getString(activity, "itemType"),
-      title,
-      description
+    const title = requiredCanonicalString(
+      activity,
+      "title",
+      `activity[${index}].title`
     );
-    const itemType = originalItemType;
+    const description = getString(activity, "description");
+    const date = getString(activity, "date");
+    const itemType = exactCanonicalItemType(activity);
     const startTime = getString(activity, "startTime");
     const endTime = getString(activity, "endTime");
-    const sourceCategory = getString(activity, "category");
     const recoveryRequired = activity._recoveryRequired === true;
     const candidateLeg =
-      findLegForDate(legs, date) ?? findLegForText(legs, title, description);
+      findLegForDate(legs, date) ??
+      findLegForCanonicalCity(legs, getString(activity, "city"));
     const finalDate = date;
     const leg = candidateLeg;
-    const categoryId = normalizeCategoryId({
-      category: sourceCategory,
-      description,
-      itemType,
-      title,
-    });
+    const categoryId = exactCanonicalCategoryId(activity);
 
     return {
       address: getString(activity, "address"),
@@ -801,7 +441,11 @@ function createItemRecords({
       date: finalDate,
       description,
       endTime,
-      id: `${tripId}-item-${slugify(title)}-${index + 1}`,
+      id: canonicalRecordId({
+        item: activity,
+        kind: "item",
+        tripId,
+      }),
       itemType,
       latitude: null,
       legId: leg?.id ?? null,
@@ -1026,6 +670,99 @@ function createWeatherHooks({
   });
 }
 
+export class CanonicalProjectionInvariantError extends Error {
+  constructor(violations: string[]) {
+    super(`Canonical projection changed semantic data: ${violations.join("; ")}`);
+    this.name = "CanonicalProjectionInvariantError";
+  }
+}
+
+function assertCanonicalProjectionInvariant({
+  draft,
+  records,
+}: {
+  draft: unknown;
+  records: StructuredTripRecords;
+}) {
+  const violations: string[] = [];
+  const assertCount = (collection: string, actual: number) => {
+    const expected = getArray(draft, collection).length;
+    if (expected !== actual) {
+      violations.push(`${collection} count ${expected} became ${actual}`);
+    }
+  };
+  assertCount("activities", records.items.length);
+  assertCount("places", records.legs.length);
+  assertCount("stays", records.stays.length);
+  assertCount("transport", records.transport.length);
+  assertCount("missingDetails", records.reviewQuestions.length);
+
+  const sourceObjects = (collection: string) =>
+    getArray(draft, collection).map((value) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as DraftObject)
+        : {}
+    );
+  const expect = (
+    label: string,
+    expected: string | null,
+    actual: string | null
+  ) => {
+    if (expected !== actual) {
+      violations.push(`${label} ${JSON.stringify(expected)} became ${JSON.stringify(actual)}`);
+    }
+  };
+
+  sourceObjects("places").forEach((source, index) => {
+    const record = records.legs[index];
+    if (!record) return;
+    expect(`place[${index}].city`, getString(source, "city"), record.city);
+    expect(`place[${index}].arriveDate`, getString(source, "arriveDate"), record.arriveDate);
+    expect(`place[${index}].leaveDate`, getString(source, "leaveDate"), record.leaveDate);
+  });
+  sourceObjects("stays").forEach((source, index) => {
+    const record = records.stays[index];
+    if (!record) return;
+    expect(`stay[${index}].name`, getString(source, "name"), record.name);
+    expect(
+      `stay[${index}].checkIn`,
+      getString(source, "checkIn") ?? getString(source, "firstNightDate"),
+      record.checkInDate
+    );
+    expect(`stay[${index}].checkOut`, getString(source, "checkOut"), record.checkOutDate);
+    expect(`stay[${index}].address`, getString(source, "address"), record.address);
+  });
+  sourceObjects("transport").forEach((source, index) => {
+    const record = records.transport[index];
+    if (!record) return;
+    expect(`transport[${index}].title`, getString(source, "title"), record.routeLabel);
+    expect(`transport[${index}].date`, getString(source, "date"), record.date);
+    expect(`transport[${index}].type`, getString(source, "type"), record.transportType);
+    expect(
+      `transport[${index}].description`,
+      getString(source, "description"),
+      record.description
+    );
+  });
+  sourceObjects("activities").forEach((source, index) => {
+    const record = records.items[index];
+    if (!record) return;
+    expect(`activity[${index}].title`, getString(source, "title"), record.title);
+    expect(`activity[${index}].date`, getString(source, "date"), record.date);
+    expect(`activity[${index}].itemType`, getString(source, "itemType"), record.itemType);
+    expect(`activity[${index}].category`, getString(source, "category"), record.categoryId);
+    expect(
+      `activity[${index}].description`,
+      getString(source, "description"),
+      record.description
+    );
+  });
+
+  if (violations.length > 0) {
+    throw new CanonicalProjectionInvariantError(violations);
+  }
+}
+
 export function createStructuredTripRecordsFromDraft({
   draft,
   fallbackTripName,
@@ -1035,7 +772,7 @@ export function createStructuredTripRecordsFromDraft({
   fallbackTripName: string;
   tripId: string;
 }): StructuredTripRecords {
-  const finalizedDraft = preparePersistedTripDraftForStructuredCompilation(draft);
+  const finalizedDraft = finalizeCanonicalTripDraft(draft).draft;
   const trip = createTripRecord({ draft: finalizedDraft, fallbackTripName, tripId });
   const legs = createLegRecords({ draft: finalizedDraft, tripId });
   const stays = createStayRecords({ draft: finalizedDraft, legs, tripId });
@@ -1055,7 +792,7 @@ export function createStructuredTripRecordsFromDraft({
   const days = createDayRecords({ items, legs, transport, tripId });
   const weatherHooks = createWeatherHooks({ days, legs, tripId });
 
-  return {
+  const records: StructuredTripRecords = {
     categories,
     days,
     items,
@@ -1076,4 +813,8 @@ export function createStructuredTripRecordsFromDraft({
     trip,
     weatherHooks,
   };
+
+  assertCanonicalProjectionInvariant({ draft: finalizedDraft, records });
+
+  return records;
 }

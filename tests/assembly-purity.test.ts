@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   finalizeCanonicalTripDraft,
   NonCanonicalDraftError,
-  preparePersistedTripDraftForStructuredCompilation,
 } from "@/lib/extraction/canonical-trip-finalization";
 import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
 
@@ -61,15 +60,14 @@ export default async function run() {
     );
   });
 
-  await test("historical snapshots stay readable without legacy mutation", () => {
-    const historical = {
-      _assembly: { version: 3 },
-      activities: [{ title: "Stored historical activity" }],
-    };
-
-    assert.strictEqual(
-      preparePersistedTripDraftForStructuredCompilation(historical),
-      historical
+  await test("stale finalization markers cannot enter the fresh canonical path", () => {
+    assert.throws(
+      () =>
+        finalizeCanonicalTripDraft({
+        _canonicalFinalization: { version: 1 },
+        _evidence: { version: EVIDENCE_CLUSTER_VERSION - 1 },
+        }),
+      NonCanonicalDraftError
     );
   });
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 import { evaluateTripExtractionCoverage } from "@/lib/extraction/extraction-qa";
 import {
   centralEuropeFirstHalfExpectations,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,

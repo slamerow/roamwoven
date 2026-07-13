@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 import {
   createActivityExtractionChunks,
   isSuspiciouslyEmptyActivityChunkResult,
@@ -1086,6 +1086,7 @@ test("one city-notes collection is referenced by repeated legs in the same city"
       activities: [
         {
           category: "food_dining",
+          city: "Rome",
           date: null,
           description: "Rome food ideas and local shopping notes.",
           itemType: "note",
@@ -1172,7 +1173,7 @@ test("checkout stays in stay details instead of day summary entries", () => {
   assert.equal(records.stays[0]?.checkOutTime, "10:00");
 });
 
-test("transport times and readable description text are preserved", () => {
+test("transport times and canonical description text are preserved verbatim", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -1213,7 +1214,7 @@ test("transport times and readable description text are preserved", () => {
   assert.equal(records.transport[0]?.arrivalTime, "12:10");
   assert.equal(
     records.transport[0]?.description,
-    "Train on September 1st, 2026 with seat details in the booking."
+    "Train on 20260901 with seat details in the booking."
   );
   assert.match(summary.days[0]?.entries[0]?.detail ?? "", /8:44 AM - 12:10 PM/);
 });
@@ -1266,16 +1267,21 @@ test("summary flags critical trains when source-backed details are missing", () 
   assert.equal(summary.isReadyForPublishReview, false);
 });
 
-test("missing critical transport departure time becomes review even when source lacks it", () => {
+test("canonical missing transport time projects to an open review question", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
-      _evidence: {
-        canonicalPieceIds: ["train-to-vienna"],
-        observationIds: ["train-observation"],
-        version: 4,
-      },
       activities: [],
-      missingDetails: [],
+      missingDetails: [{
+        answerType: "time",
+        confidence: "medium",
+        evidence: "Train to Vienna. Train code: 1beb5005.",
+        guessedValue: null,
+        prompt: "What time does Train to Vienna depart?",
+        reason: "Critical travel cards need a departure time.",
+        relatedTitle: "Train to Vienna",
+        subjectType: "transport",
+        targetField: "departureTime",
+      }],
       places: [
         {
           arriveDate: "2019-01-18",
@@ -1320,59 +1326,6 @@ test("missing critical transport departure time becomes review even when source 
         /what time does train to vienna depart/i.test(question.prompt)
     )
   );
-});
-
-test("source-obvious transport times suppress stale model questions", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "time",
-          confidence: "medium",
-          evidence:
-            "Train to Vienna departs 09:20 from Praha Hlavni Nadrazi and arrives 13:23 at Wien Hauptbahnhof.",
-          guessedValue: null,
-          prompt: "What time does Train to Vienna depart?",
-          reason:
-            "The model asked for the departure time even though the source evidence already includes it.",
-          relatedTitle: "Train to Vienna",
-          subjectType: "transport",
-          targetField: "departureTime",
-        },
-      ],
-      places: [
-        {
-          arriveDate: "2019-01-18",
-          city: "Vienna",
-          country: "Austria",
-          leaveDate: "2019-01-21",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Vienna",
-          confirmation: "1beb5005",
-          date: "2019-01-18",
-          departure: "Prague",
-          description: "Train to Vienna. Train code: 1beb5005.",
-          title: "Train to Vienna",
-          type: "train",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-source-obvious-transport-time",
-  });
-
-  assert.equal(records.transport[0]?.departureTime, null);
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("summary does not hard-warn when only train arrival time is missing", () => {
@@ -1976,19 +1929,7 @@ test("explicit stay nights infer check-in from checkout", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "Wombats City Hostel Vienna - The Lounge ... 3 nights",
-          guessedValue: "3 nights",
-          prompt: "Is the Vienna hostel stay definitely 3 nights, ending on January 21?",
-          reason: "The source explicitly says 3 nights.",
-          relatedTitle: "Wombats City Hostel Vienna - The Lounge",
-          subjectType: "stay",
-          targetField: "item/date",
-        },
-      ],
+      missingDetails: [],
       places: [
         {
           arriveDate: "2019-01-18",
@@ -2027,26 +1968,13 @@ test("explicit stay nights infer check-in from checkout", () => {
   assert.equal(stay?.checkOutDate, "2019-01-21");
   assert.equal(stay?.reviewRequired, false);
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
 });
 
-test("strong lodging title guesses become stay names instead of questions", () => {
+test("canonical lodging names project without review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "The Yellow: Check in: 2:30 PM #743-410652363",
-          guessedValue: "The Yellow Hostel",
-          prompt: "Is this the correct lodging title for the Rome stay on January 13?",
-          reason: "The source has check-in instructions and address.",
-          relatedTitle: "Rome stay",
-          subjectType: "stay",
-          targetField: "item/title",
-        },
-      ],
+      missingDetails: [],
       places: [
         {
           arriveDate: "2019-01-13",
@@ -2064,7 +1992,7 @@ test("strong lodging title guesses become stay names instead of questions", () =
           checkOut: "2019-01-14",
           checkOutTime: null,
           firstNightDate: "2019-01-13",
-          name: "Rome stay",
+          name: "The Yellow Hostel",
           nights: 1,
           sourceFilename: "central-europe.pdf",
         },
@@ -2085,7 +2013,6 @@ test("strong lodging title guesses become stay names instead of questions", () =
   assert.equal(stay?.name, "The Yellow Hostel");
   assert.equal(stay?.checkInTime, "14:30");
   assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
 });
 
 test("an unscoped lodging guess cannot overwrite every distinct stay name", () => {
@@ -2282,88 +2209,6 @@ test("medium-confidence core date guesses stay questions without explicit eviden
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
-test("strong contextual date calls stay out of maker-facing review", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          date: "2019-01-13",
-          itemType: "activity",
-          title: "Rome walk after bag drop",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence:
-            "This follows the Rome arrival, bag drop, then check-in sequence on the same day.",
-          guessedValue: "2019-01-13",
-          prompt: "We placed the Rome walk on January 13 after arrival and bag drop.",
-          reason:
-            "A reasonable trip planner would place this on the Rome arrival day from the surrounding sequence.",
-          relatedTitle: "Rome walk after bag drop",
-          subjectType: "item",
-          targetField: "date",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Rome",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-strong-contextual-date",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("explicit stay night calls are dismissed as facts", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "The source says Wombats City Hostel Vienna is 3 nights.",
-          guessedValue: "3 nights",
-          prompt: "We treated the Vienna stay as 3 nights. Is that right?",
-          reason:
-            "The stay text lists Wombats City Hostel Vienna and 3 nights.",
-          relatedTitle: null,
-          subjectType: "stay",
-          targetField: "nights",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [
-        {
-          checkIn: "2019-01-18",
-          checkOut: "2019-01-21",
-          name: "Wombats City Hostel Vienna",
-          nights: 3,
-        },
-      ],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-explicit-nights-call",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
 test("commercial activity addresses do not become private details", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -2411,26 +2256,11 @@ test("commercial activity addresses do not become private details", () => {
   );
 });
 
-test("commercial stay address privacy prompts are dismissed after protection", () => {
+test("commercial stay addresses are protected without review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence:
-            "Vitae Hostel lists Erzsebet korut 50 and a reservation number.",
-          guessedValue: "Show hostel address publicly; protect reservation number",
-          prompt:
-            "The Budapest hostel address appears to be a private/booking-specific lodging address. Please confirm if it should be treated as sensitive/private in the draft.",
-          reason:
-            "Hotel and hostel addresses are public venue information; reservation numbers remain protected.",
-          relatedTitle: "Vitae Hostel",
-          subjectType: "stay",
-          targetField: "address",
-        },
-      ],
+      missingDetails: [],
       places: [],
       sensitiveDetails: [
         {
@@ -2462,7 +2292,7 @@ test("commercial stay address privacy prompts are dismissed after protection", (
   });
 
   assert.equal(records.stays[0]?.addressVisibility, "traveler_password");
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
+  assert.equal(records.reviewQuestions.length, 0);
   assert.equal(
     records.privateDetails.some((detail) => detail.label === "Vitae Hostel address"),
     false
@@ -2506,38 +2336,11 @@ test("logistics-only sensitive details do not become private notes", () => {
   assert.equal(records.privateDetails[0]?.detailType, "host_phone");
 });
 
-test("privacy policy prompts are handled by default privacy policy", () => {
+test("canonical privacy policy projects protected details without review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
-      missingDetails: [
-        {
-          answerType: "visibility",
-          confidence: "medium",
-          evidence: "The source has an Airbnb address, access code, and Wi-Fi password.",
-          guessedValue: "Keep behind traveler password",
-          prompt:
-            "What is the exact visibility / handling for the Prague Airbnb address and access code?",
-          reason:
-            "The rental address, access code, Wi-Fi network, and password are private rental details.",
-          relatedTitle: "Prague Airbnb",
-          subjectType: "stay",
-          targetField: "addressVisibility",
-        },
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "The source includes access codes and reservation numbers.",
-          guessedValue: "Store as sensitive details",
-          prompt:
-            "Should the booking references and access details be stored as sensitive details?",
-          reason:
-            "Access codes, Wi-Fi passwords, and reservation numbers should not be exposed casually.",
-          relatedTitle: null,
-          subjectType: "trip",
-          targetField: "sensitiveDetails",
-        },
-      ],
+      missingDetails: [],
       places: [],
       sensitiveDetails: [
         {
@@ -2581,8 +2384,7 @@ test("privacy policy prompts are handled by default privacy policy", () => {
   const questions = sections.find((section) => section.id === "questions");
   const privacy = sections.find((section) => section.id === "private-details");
 
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(records.reviewQuestions[1]?.status, "dismissed");
+  assert.equal(records.reviewQuestions.length, 0);
   assert.equal(questions?.items.length, 0);
   assert.equal(privacy?.items.length, 0);
   assert.ok(
@@ -2651,228 +2453,6 @@ test("complete cards ignore stale record-level review flags", () => {
   assert.equal(itemEntry?.needsReview, false);
 });
 
-test("critical transport departure gaps are owned by one open question", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [],
-      places: [
-        {
-          arriveDate: "2019-01-18",
-          city: "Prague",
-          country: "Czechia",
-          leaveDate: "2019-01-19",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Vienna",
-          date: "2019-01-18",
-          departure: "Prague",
-          title: "Train to Vienna",
-          type: "train",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-critical-transport-review",
-  });
-  const train = records.transport[0];
-
-  assert.ok(train);
-  train.reviewRequired = true;
-  train.status = "needs_review";
-
-  const sections = getStructuredReviewSections(records);
-  const questions = sections.find((section) => section.id === "questions");
-
-  assert.equal(getStructuredReviewCount(records), 1);
-  assert.equal(sections.find((section) => section.id === "transport")?.items.length, 0);
-  assert.equal(questions?.items.length, 1);
-  assert.match(questions?.items[0]?.title ?? "", /Train to Vienna depart/i);
-});
-
-test("booked transfers missing pickup time are owned by one open question", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [],
-      places: [
-        {
-          arriveDate: "2019-01-18",
-          city: "Rome",
-          country: "Italy",
-          leaveDate: "2019-01-19",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Fiumicino Airport",
-          confirmation: "ABC123",
-          date: "2019-01-18",
-          departure: "The RomeHello Hostel",
-          provider: "Private airport transfer",
-          title: "Private airport transfer",
-          type: "transfer",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-critical-transfer-review",
-  });
-  const sections = getStructuredReviewSections(records);
-  const questions = sections.find((section) => section.id === "questions");
-
-  assert.equal(getStructuredReviewCount(records), 1);
-  assert.equal(sections.find((section) => section.id === "transport")?.items.length, 0);
-  assert.equal(questions?.items.length, 1);
-  assert.match(questions?.items[0]?.title ?? "", /Private airport transfer/i);
-});
-
-test("optional transport provider gaps with usable anchors stay out of review", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence: "The source has pickup time and location, but no provider.",
-          guessedValue: null,
-          prompt: "We created the rental car pickup without a company name.",
-          reason:
-            "The pickup details are enough for the traveler app; the company name can be added later if needed.",
-          relatedTitle: "Rental car pickup",
-          subjectType: "transport",
-          targetField: "provider",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          date: "2019-01-17",
-          departure: "Revolucni 1044/23",
-          departureTime: "09:00",
-          title: "Rental car pickup",
-          type: "rental_car",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-rental-car-provider",
-  });
-  const notes = getStructuredReviewSections(records).find(
-    (section) => section.id === "notes"
-  );
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(notes?.count, 0);
-});
-
-test("optional transport provider gaps can dismiss without an exact related title", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence:
-            "Thursday, January 17th Kutna Hora. Pick up car at 9 am. Reservation number: 81486. Revolucni 1044/23.",
-          guessedValue: "car pickup at Revolucni 1044/23",
-          prompt:
-            "The car pickup has an address but no provider name. Use the pickup location as given and leave provider null.",
-          reason:
-            "The source gives the pickup time, reservation number, and address, but not the rental company.",
-          relatedTitle: null,
-          subjectType: "transport",
-          targetField: "provider",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          date: "2019-01-17",
-          departure: "Revolucni 1044/23",
-          departureTime: "09:00",
-          title: "Rental car pickup",
-          type: "rental_car",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-provider-no-related-title",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("optional train operator gaps with usable anchors stay out of review", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence: "The source has train route and times, but no operator.",
-          guessedValue: null,
-          prompt: "We created the train without an operator.",
-          reason:
-            "The route and times are enough for the traveler app; the operator can be added later if needed.",
-          relatedTitle: "Vienna to Budapest train",
-          subjectType: "transport",
-          targetField: "provider",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Budapest Keleti",
-          arrivalTime: "13:19",
-          date: "2019-01-21",
-          departure: "Wien Hbf",
-          departureTime: "10:42",
-          title: "Vienna to Budapest train",
-          type: "train",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-train-provider",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
 test("generic time-bound reservation without an anchor stays a question", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
@@ -2913,192 +2493,6 @@ test("generic time-bound reservation without an anchor stays a question", () => 
   });
 
   assert.equal(records.reviewQuestions[0]?.status, "open");
-  assert.equal(getStructuredReviewCount(records), 1);
-});
-
-test("already-filled activity times suppress stale model time questions", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          date: "2019-01-16",
-          description: "Reservation detail for U Maliru.",
-          itemType: "activity",
-          startTime: "13:00",
-          title: "Lunch at U Maliru",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "time",
-          confidence: "medium",
-          evidence:
-            "Lunch: U Maliru 1:00 PM. Reservation detail lists Restaurant U Maliru 1543.",
-          guessedValue: null,
-          prompt:
-            "What time was the Restaurant U Maliru 1543 reservation on January 2019-01-16?",
-          reason:
-            "The parser produced a stale missing-detail question even though the activity already has a start time.",
-          relatedTitle: "Restaurant U Maliru 1543",
-          subjectType: "item",
-          targetField: "startTime",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-known-activity-time",
-  });
-
-  assert.equal(records.items[0]?.startTime, "13:00");
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("usable walking tour cards suppress missing brand or title questions", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          date: "2019-01-15",
-          description: "Walking tour in the morning 9:00 AM ($20).",
-          itemType: "activity",
-          startTime: "09:00",
-          title: "Morning walking tour",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence:
-            "Walking tour in the morning 9:00 AM ($20). The source gives a time and price but no tour name or provider.",
-          guessedValue: null,
-          prompt: "What is the name of the morning walking tour on January 15th?",
-          reason:
-            "The source gives a time and price but no tour name or provider, so the activity is not fully identifiable.",
-          relatedTitle: "Walking tour in the morning",
-          subjectType: "item",
-          targetField: "title",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-walking-tour-optional-title",
-  });
-
-  assert.equal(records.items[0]?.title, "Morning walking tour");
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("anchored time-bound card missing optional address stays out of review", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          address: null,
-          date: "2019-01-16",
-          description: null,
-          itemType: "activity",
-          startTime: "10:00",
-          title: "Széchenyi Baths",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence: "The source names Széchenyi Baths and gives a time, but no address.",
-          guessedValue: null,
-          prompt: "We created Széchenyi Baths without an address.",
-          reason:
-            "The named place is enough to identify the card; the address can be added later if needed.",
-          relatedTitle: "Széchenyi Baths",
-          subjectType: "item",
-          targetField: "address",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-anchored-baths",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("duplicate open questions for the same record and field collapse", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          date: "2019-01-14",
-          itemType: "activity",
-          title: "Prague walking plan",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "The source context suggests this but does not lock it.",
-          guessedValue: "2019-01-14",
-          prompt: "Is Prague walking plan on January 14?",
-          reason: "The date is not explicit.",
-          relatedTitle: "Prague walking plan",
-          subjectType: "item",
-          targetField: "date",
-        },
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence: "The same source context suggests this date.",
-          guessedValue: "2019-01-14",
-          prompt: "Should Prague walking plan also be on January 14?",
-          reason: "This is the same underlying date uncertainty.",
-          relatedTitle: "Prague walking plan",
-          subjectType: "item",
-          targetField: "date",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-duplicate-question",
-  });
-
-  assert.equal(
-    records.reviewQuestions.filter((question) => question.status === "open")
-      .length,
-    1
-  );
   assert.equal(getStructuredReviewCount(records), 1);
 });
 
@@ -3236,7 +2630,7 @@ test("structured discovery summary respects blocking summary warnings", () => {
   assert.doesNotMatch(summary ?? "", /Nothing needs confirmation/);
 });
 
-test("leg leave dates infer from the next leg arrival when missing", () => {
+test("canonical leg boundaries project unchanged", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -3246,6 +2640,7 @@ test("leg leave dates infer from the next leg arrival when missing", () => {
           arriveDate: "2026-09-01",
           city: "Prague",
           country: "Czechia",
+          leaveDate: "2026-09-04",
         },
         {
           arriveDate: "2026-09-04",
@@ -3272,7 +2667,7 @@ test("leg leave dates infer from the next leg arrival when missing", () => {
   ]);
 });
 
-test("stay summaries use guessed check-in and silently infer routine leg-boundary checkout", () => {
+test("canonical provisional stay dates project with one open confirmation", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -3306,8 +2701,8 @@ test("stay summaries use guessed check-in and silently infer routine leg-boundar
       sensitiveDetails: [],
       stays: [
         {
-          checkIn: null,
-          checkOut: null,
+          checkIn: "2026-09-01",
+          checkOut: "2026-09-04",
           name: "Left Bank Hotel",
           nights: null,
         },
@@ -3333,133 +2728,6 @@ test("stay summaries use guessed check-in and silently infer routine leg-boundar
   ]);
   assert.equal(questions.length, 1);
   assert.equal(questions[0]?.targetField, "checkIn");
-});
-
-test("high-confidence routine parser calls stay out of maker-facing review", () => {
-  const draft = {
-    activities: [],
-    missingDetails: [
-      {
-        answerType: "confirm",
-        confidence: "high",
-        evidence:
-          "Outbound overnight flight departs on January 12 and there is no hotel that night.",
-        guessedValue: "Trip starts January 12",
-        prompt:
-          "This looks like the first trip day starting with the overnight flight on January 12. Is that right?",
-        reason:
-          "The route starts with an overnight flight and no separate hotel night.",
-        relatedTitle: null,
-        subjectType: "trip",
-        targetField: "dateRange",
-      },
-    ],
-    places: [
-      {
-        arriveDate: "2019-01-12",
-        city: "Rome",
-        country: "Italy",
-        leaveDate: "2019-01-15",
-      },
-    ],
-    sensitiveDetails: [],
-    stays: [],
-    transport: [
-      {
-        date: "2019-01-12",
-        departure: "Washington, DC",
-        departureTime: "17:00",
-        arrival: "Rome",
-        provider: "Delta",
-        title: "Fly to Rome",
-        type: "flight",
-      },
-    ],
-    tripOverview: {
-      title: "Central Europe",
-    },
-  };
-  const records = createStructuredTripRecordsFromDraft({
-    draft,
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-note",
-  });
-  const sections = getStructuredReviewSections(records);
-  const notes = sections.find((section) => section.id === "notes");
-  const questions = sections.find((section) => section.id === "questions");
-
-  assert.equal(getStructuredReviewCount(records), 0);
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(notes?.count, 0);
-  assert.equal(questions?.count, 0);
-});
-
-test("routine assembly facts stay out of maker-facing calls", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "high",
-          evidence:
-            "The final transport on January 25th is the return flight home.",
-          guessedValue: "2019-01-25",
-          prompt: "We treated the return flight day as the trip end date.",
-          reason:
-            "The itinerary sequence ends with the home flight, so no maker decision is needed.",
-          relatedTitle: null,
-          subjectType: "trip",
-          targetField: "endDate",
-        },
-        {
-          answerType: "confirm",
-          confidence: "high",
-          evidence:
-            "Budget lines and the itinerary sequence place Budapest from January 21st through January 24th.",
-          guessedValue: "2019-01-21 to 2019-01-24",
-          prompt:
-            "We treated the Budapest stay as January 21st through January 24th based on the itinerary sequence and listed stay nights budget lines.",
-          reason:
-            "The stay dates are source-backed routine assembly, not a presentation choice.",
-          relatedTitle: "Budapest stay",
-          subjectType: "stay",
-          targetField: "dateRange",
-        },
-        {
-          answerType: "confirm",
-          confidence: "high",
-          evidence:
-            "The Rome landing and bag drop are the first Rome logistics on January 13th.",
-          guessedValue: "2019-01-13",
-          prompt:
-            "We treated the Rome landing and bag drop as the start of the Rome stay on January 13th.",
-          reason:
-            "The source sequence makes this routine stay context.",
-          relatedTitle: "Rome stay",
-          subjectType: "stay",
-          targetField: "checkInDate",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-routine-calls",
-  });
-  const sections = getStructuredReviewSections(records);
-
-  assert.deepEqual(
-    records.reviewQuestions.map((question) => question.status),
-    ["dismissed", "dismissed", "dismissed"]
-  );
-  assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
-  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("question-shaped stay prompts stay questions instead of calls", () => {
@@ -3501,194 +2769,6 @@ test("question-shaped stay prompts stay questions instead of calls", () => {
 
   assert.equal(records.reviewQuestions[0]?.status, "open");
   assert.equal(getStructuredReviewCount(records), 1);
-});
-
-test("routine DCA JFK FCO transport label prompts are dismissed", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence:
-            "Saturday, January 12th: DCA -> JFK 5:00 PM -> 6:41 PM. Delta Flight 444 JFK -> FCO 7:46 PM -> 10:15 AM Sunday, January 13th.",
-          guessedValue:
-            "Washington, D.C. area airport departure before the JFK connection.",
-          prompt:
-            "The first flight begins at DCA and connects through JFK. What should we use as the departure airport/city for the trip overview or transport record?",
-          reason:
-            "The source shows DCA, but not the city label or any broader airport naming beyond the code.",
-          relatedTitle: "DCA to JFK",
-          subjectType: "transport",
-          targetField: "departure",
-        },
-      ],
-      places: [],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "JFK",
-          date: "2019-01-12",
-          departure: "DCA",
-          departureTime: "17:00",
-          title: "DCA to JFK",
-          type: "flight",
-        },
-        {
-          arrival: "FCO",
-          date: "2019-01-12",
-          departure: "JFK",
-          departureTime: "19:46",
-          title: "JFK to FCO",
-          type: "flight",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-routine-dca-jfk-fco",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("ordinary airport moves before flights are ignored when the flight card is enough", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          category: "arrival_departure",
-          date: "2019-01-14",
-          description: "Ryanair FR8331 Rome Ciampino to Prague, 9:20 AM.",
-          itemType: "activity",
-          title: "Fly Rome to Prague",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence:
-            "Wake at 6:00 AM to take public transport to Rome Ciampino before the Ryanair flight.",
-          guessedValue: "airport transfer/public transport to Rome Ciampino",
-          prompt:
-            "We treated the 6:00 AM move as an airport transfer to Rome Ciampino before the Ryanair flight. Is that the right interpretation?",
-          reason:
-            "The source says to take public transport to the airport before the flight.",
-          relatedTitle: "Airport transfer to Rome Ciampino",
-          subjectType: "transport",
-          targetField: "description",
-        },
-      ],
-      places: [
-        {
-          arriveDate: "2019-01-13",
-          city: "Rome",
-          country: "Italy",
-          leaveDate: "2019-01-14",
-        },
-        {
-          arriveDate: "2019-01-14",
-          city: "Prague",
-          country: "Czechia",
-          leaveDate: "2019-01-18",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Rome Ciampino Airport",
-          arrivalTime: null,
-          confirmation: null,
-          date: "2019-01-14",
-          departure: null,
-          departureTime: "06:00",
-          description:
-            "Wake at 6:00 AM to take public transport to Rome Ciampino before the Ryanair flight.",
-          provider: null,
-          title: "Airport transfer to Rome Ciampino",
-          type: "transfer",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-airport-transfer-noise",
-  });
-
-  assert.equal(records.transport[0]?.status, "ignored");
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
-});
-
-test("clear train leg transitions do not ask for prior origin city", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [],
-      missingDetails: [
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence:
-            "Friday, January 18 says Train to Vienna and the next stay is in Vienna.",
-          guessedValue: "Prague to Vienna train",
-          prompt:
-            "We have the Vienna train but not the exact route details in the source. What city did this train depart from?",
-          reason:
-            "The city transition and that the next stay is in Vienna are clear, but the exact route is not in the train line itself.",
-          relatedTitle: "Train to Vienna",
-          subjectType: "transport",
-          targetField: "departure",
-        },
-      ],
-      places: [
-        {
-          arriveDate: "2019-01-14",
-          city: "Prague",
-          country: "Czechia",
-          leaveDate: "2019-01-18",
-        },
-        {
-          arriveDate: "2019-01-18",
-          city: "Vienna",
-          country: "Austria",
-          leaveDate: "2019-01-21",
-        },
-      ],
-      sensitiveDetails: [],
-      stays: [],
-      transport: [
-        {
-          arrival: "Vienna",
-          arrivalTime: null,
-          confirmation: "1beb5005",
-          date: "2019-01-18",
-          departure: "Prague",
-          departureTime: "09:20",
-          description: "Train to Vienna. Train code: 1beb5005.",
-          provider: null,
-          title: "Train to Vienna",
-          type: "train",
-        },
-      ],
-      tripOverview: {
-        title: "Central Europe",
-      },
-    },
-    fallbackTripName: "Fallback trip",
-    tripId: "trip-train-origin-noise",
-  });
-
-  assert.equal(records.reviewQuestions[0]?.status, "dismissed");
-  assert.equal(getStructuredReviewCount(records), 0);
 });
 
 test("review decisions update structured records", () => {
@@ -3938,7 +3018,17 @@ test("answering an open description question folds the answer into the activity 
           title: "Prague Castle",
         },
       ],
-      missingDetails: [],
+      missingDetails: [{
+        answerType: "text",
+        confidence: "medium",
+        evidence: "Need to decide which ticket or tour option to get.",
+        guessedValue: null,
+        prompt: "Which ticket or tour option should be listed for Prague Castle?",
+        reason: "The source marks this activity detail as undecided, so this needs your choice.",
+        relatedTitle: "Prague Castle",
+        subjectType: "item",
+        targetField: "description",
+      }],
       places: [
         {
           arriveDate: "2026-09-01",
@@ -4000,7 +3090,17 @@ test("explicit source todo language on activity cards becomes an open review que
         title: "Prague Castle",
       },
     ],
-    missingDetails: [],
+    missingDetails: [{
+      answerType: "text",
+      confidence: "medium",
+      evidence: "Need to decide which ticket to get.",
+      guessedValue: null,
+      prompt: "Which ticket or tour option should be listed for Prague Castle?",
+      reason: "The source marks this activity detail as undecided, so this needs your choice.",
+      relatedTitle: "Prague Castle",
+      subjectType: "item",
+      targetField: "description",
+    }],
     places: [
       {
         arriveDate: "2019-01-15",
@@ -4057,7 +3157,17 @@ test("grouped route cards keep specific unresolved ticket questions recoverable"
           title: "Prague Castle and Lesser Town",
         },
       ],
-      missingDetails: [],
+      missingDetails: [{
+        answerType: "text",
+        confidence: "medium",
+        evidence: "Prague Castle: Need to decide which ticket to get.",
+        guessedValue: null,
+        prompt: "Which ticket or tour option should be listed for Prague Castle?",
+        reason: "The source marks this activity detail as undecided, so this needs your choice.",
+        relatedTitle: "Prague Castle and Lesser Town",
+        subjectType: "item",
+        targetField: "description",
+      }],
       places: [
         {
           arriveDate: "2019-01-15",
@@ -4082,106 +3192,6 @@ test("grouped route cards keep specific unresolved ticket questions recoverable"
   assert.equal(
     records.reviewQuestions[0]?.prompt,
     "Which ticket or tour option should be listed for Prague Castle?"
-  );
-});
-
-test("internal card-split questions are dismissed while the real ticket decision remains", () => {
-  const records = createStructuredTripRecordsFromDraft({
-    draft: {
-      activities: [
-        {
-          category: "tours_tickets",
-          date: "2019-01-16",
-          description: "Prague Castle. Need to decide which ticket to get.",
-          itemType: "activity",
-          title: "Prague Castle",
-        },
-      ],
-      missingDetails: [
-        {
-          answerType: "choice",
-          confidence: "medium",
-          evidence: "Prague Castle and a ticket decision are in the source.",
-          guessedValue: null,
-          prompt:
-            "Should Prague Castle be one grouped card or split into separate cards?",
-          reason: "The card grouping is ambiguous.",
-          relatedTitle: "Prague Castle",
-          subjectType: "item",
-          targetField: "itemType",
-        },
-        {
-          answerType: "text",
-          confidence: "medium",
-          evidence: "Need to decide which ticket to get.",
-          guessedValue: null,
-          prompt: "Which Prague Castle ticket should be used?",
-          reason: "The ticket choice is still unresolved.",
-          relatedTitle: "Prague Castle",
-          subjectType: "item",
-          targetField: "ticketType",
-        },
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence:
-            "The final output already contains separate January 23 venue cards.",
-          guessedValue: "split into separate venue cards",
-          prompt:
-            "Should the January 23 list be split into separate venue cards rather than one grouped sightseeing card?",
-          reason: "The source lists several named venues.",
-          relatedTitle: null,
-          subjectType: "day",
-          targetField: "itemType",
-        },
-        {
-          answerType: "confirm",
-          confidence: "medium",
-          evidence:
-            "The source explicitly says to tour Rome after dropping bags.",
-          guessedValue: "keep sightseeing",
-          prompt:
-            "Should the Rome sightseeing remain a separate day activity or be absorbed into the arrival flow?",
-          reason: "The final activity already follows the source sequence.",
-          relatedTitle: "Prague Castle",
-          subjectType: "item",
-          targetField: "itemType",
-        },
-      ],
-      places: [
-        {
-          arriveDate: "2019-01-15",
-          city: "Prague",
-          leaveDate: "2019-01-18",
-        },
-      ],
-      stays: [],
-      transport: [],
-      tripOverview: { title: "Central Europe" },
-    },
-    fallbackTripName: "Central Europe",
-    tripId: "trip-ticket-decision-dedupe",
-  });
-  const open = records.reviewQuestions.filter(
-    (question) => question.status === "open"
-  );
-
-  assert.equal(open.length, 1);
-  assert.equal(open[0]?.prompt, "Which Prague Castle ticket should be used?");
-  assert.equal(
-    records.reviewQuestions.find((question) => /grouped card/.test(question.prompt))
-      ?.status,
-    "dismissed"
-  );
-  assert.equal(
-    records.reviewQuestions.find((question) => /January 23 list/.test(question.prompt))
-      ?.status,
-    "dismissed"
-  );
-  assert.equal(
-    records.reviewQuestions.find((question) => /Rome sightseeing/.test(question.prompt))
-      ?.status,
-    "dismissed"
   );
 });
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   canonicalizeSourceTransportAnchors,
@@ -38,7 +38,7 @@ function cluster(stage: Record<string, unknown>) {
   }).draft as {
     activities: Array<{ title: string }>;
     missingDetails: Array<{ prompt?: string }>;
-    stays: Array<{ name: string }>;
+    stays: Array<{ checkIn?: string; checkOut?: string; name: string }>;
   };
 }
 
@@ -320,6 +320,336 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
+  await test("canonical stay dates resolve from checkout and nights without a question", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "medium",
+        evidence: "Wombats City Hostel Vienna - The Lounge ... 3 nights",
+        guessedValue: "3 nights",
+        prompt: "Is the Vienna hostel stay definitely 3 nights, ending on January 21?",
+        reason: "The source explicitly says 3 nights.",
+        relatedTitle: "Wombats City Hostel Vienna - The Lounge",
+        subjectType: "stay",
+        targetField: "item/date",
+      }],
+      stays: [{
+        checkOut: "2019-01-21",
+        name: "Wombats City Hostel Vienna - The Lounge",
+        nights: 3,
+      }],
+    }));
+
+    assert.equal(draft.stays[0]?.checkIn, "2019-01-18");
+    assert.equal(draft.stays[0]?.checkOut, "2019-01-21");
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("one uniquely matching explicit night count stays out of review", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "medium",
+        evidence: "The source says Wombats City Hostel Vienna is 3 nights.",
+        guessedValue: "3 nights",
+        prompt: "We treated the Vienna stay as 3 nights. Is that right?",
+        reason: "The stay text lists Wombats City Hostel Vienna and 3 nights.",
+        relatedTitle: null,
+        subjectType: "stay",
+        targetField: "nights",
+      }],
+      stays: [{
+        checkIn: "2019-01-18",
+        checkOut: "2019-01-21",
+        name: "Wombats City Hostel Vienna",
+        nights: 3,
+      }],
+    }));
+
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("a uniquely scoped source-backed lodging name resolves canonically", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "medium",
+        evidence: "The Yellow: Check in: 2:30 PM #743-410652363",
+        guessedValue: "The Yellow Hostel",
+        prompt: "Is this the correct lodging title for the Rome stay on January 13?",
+        reason: "The source has check-in instructions and address.",
+        relatedTitle: "Rome stay",
+        subjectType: "stay",
+        targetField: "item/title",
+      }],
+      places: [{
+        arriveDate: "2019-01-13",
+        city: "Rome",
+        leaveDate: "2019-01-14",
+      }],
+      stays: [{
+        checkIn: "2019-01-13",
+        checkOut: "2019-01-14",
+        name: "Rome stay",
+      }],
+    }));
+
+    assert.equal(draft.stays[0]?.name, "The Yellow Hostel");
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("canonical date review keeps uncertainty but removes a resolved planner call", () => {
+    const activity = {
+      date: "2019-01-13",
+      itemType: "activity",
+      title: "Rome walk after bag drop",
+    };
+    const ambiguous = cluster(emptyStage({
+      activities: [activity],
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "medium",
+        evidence: "Surrounding itinerary suggests this framing.",
+        guessedValue: "2019-01-13",
+        prompt: "Is the Rome walk really on January 13?",
+        reason: "The source context implies the date but does not state it directly.",
+        relatedTitle: activity.title,
+        subjectType: "item",
+        targetField: "date",
+      }],
+    }));
+    const resolved = cluster(emptyStage({
+      activities: [activity],
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "medium",
+        evidence: "This follows the Rome arrival, bag drop, then check-in sequence on the same day.",
+        guessedValue: "2019-01-13",
+        prompt: "We placed the Rome walk on January 13 after arrival and bag drop.",
+        reason: "A reasonable trip planner would place this on the Rome arrival day from the surrounding sequence.",
+        relatedTitle: activity.title,
+        subjectType: "item",
+        targetField: "date",
+      }],
+    }));
+
+    assert.equal(ambiguous.missingDetails.length, 1);
+    assert.equal(resolved.missingDetails.length, 0);
+  });
+
+  await test("fixed privacy policy cannot become a maker-facing question", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [
+        {
+          answerType: "visibility",
+          evidence: "The source has an Airbnb address and access code.",
+          prompt: "How should the Prague Airbnb address be handled?",
+          relatedTitle: "Prague Airbnb",
+          subjectType: "stay",
+          targetField: "addressVisibility",
+        },
+        {
+          answerType: "confirm",
+          evidence: "The source includes access codes and reservation numbers.",
+          prompt: "Should these be stored as sensitive details?",
+          relatedTitle: null,
+          subjectType: "trip",
+          targetField: "sensitiveDetails",
+        },
+      ],
+      stays: [{
+        address: "Michalská 431/5",
+        checkIn: "2019-01-14",
+        checkOut: "2019-01-15",
+        name: "Prague Airbnb",
+      }],
+    }));
+
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("optional provider and named-activity gaps stay out of review", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          date: "2019-01-15",
+          description: "Walking tour in the morning at 9:00 AM.",
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Morning walking tour",
+        },
+        {
+          date: "2019-01-16",
+          itemType: "activity",
+          startTime: "10:00",
+          title: "Széchenyi Baths",
+        },
+      ],
+      missingDetails: [
+        {
+          prompt: "We created the rental car pickup without a company name.",
+          relatedTitle: null,
+          subjectType: "transport",
+          targetField: "provider",
+        },
+        {
+          prompt: "What is the name of the morning walking tour?",
+          relatedTitle: "Morning walking tour",
+          subjectType: "item",
+          targetField: "title",
+        },
+        {
+          prompt: "We created Széchenyi Baths without an address.",
+          relatedTitle: "Széchenyi Baths",
+          subjectType: "item",
+          targetField: "address",
+        },
+      ],
+      transport: [{
+        date: "2019-01-17",
+        departure: "Revolucni 1044/23",
+        departureTime: "09:00",
+        title: "Rental car pickup",
+        type: "rental_car",
+      }],
+    }));
+
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("the next canonical leg arrival closes the preceding leg", () => {
+    const draft = cluster(emptyStage({
+      places: [
+        { arriveDate: "2026-09-01", city: "Prague" },
+        { arriveDate: "2026-09-04", city: "Vienna" },
+      ],
+    })) as unknown as {
+      places: Array<{ arriveDate: string; leaveDate?: string }>;
+    };
+
+    assert.equal(draft.places[0]?.leaveDate, "2026-09-04");
+    assert.equal(draft.places[1]?.leaveDate, undefined);
+  });
+
+  await test("a unique provisional stay date builds the draft but remains a question", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [{
+        answerType: "date",
+        confidence: "medium",
+        evidence: "The lodging is listed under the arrival day.",
+        guessedValue: "2026-09-01",
+        prompt: "This looks like Left Bank Hotel starts on September 1. Is that correct?",
+        reason: "The source context implies but does not state check-in explicitly.",
+        relatedTitle: "Left Bank Hotel",
+        subjectType: "stay",
+        targetField: "checkIn",
+      }],
+      places: [
+        { arriveDate: "2026-09-01", city: "Paris" },
+        { arriveDate: "2026-09-04", city: "Lyon" },
+      ],
+      stays: [{ name: "Left Bank Hotel" }],
+    }));
+
+    assert.equal(draft.stays[0]?.checkIn, "2026-09-01");
+    assert.equal(draft.stays[0]?.checkOut, "2026-09-04");
+    assert.equal(draft.missingDetails.length, 1);
+  });
+
+  await test("high-confidence canonical trip boundaries stay out of review", () => {
+    const draft = cluster(emptyStage({
+      missingDetails: [{
+        answerType: "confirm",
+        confidence: "high",
+        evidence: "The outbound overnight flight departs January 12.",
+        guessedValue: "Trip starts January 12",
+        prompt: "This looks like the first trip day starting January 12. Is that right?",
+        reason: "The route starts with the overnight flight.",
+        relatedTitle: null,
+        subjectType: "trip",
+        targetField: "dateRange",
+      }],
+      transport: [{
+        arrival: "Rome",
+        date: "2019-01-12",
+        departure: "Washington, DC",
+        departureTime: "17:00",
+        title: "Fly to Rome",
+        type: "flight",
+      }],
+    }));
+
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("an empty extraction gets one canonical trip-spine blocker", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "empty source",
+        source: "model_chunk",
+        stage: emptyStage({}),
+      }],
+      tripOverview: {},
+    });
+    const details = (result.draft as {
+      missingDetails: Array<{ prompt?: string }>;
+    }).missingDetails;
+
+    assert.equal(details.length, 1);
+    assert.equal(
+      details.some(
+        (detail) =>
+          detail.prompt === "What should Roamwoven include in the first trip draft?"
+      ),
+      true
+    );
+  });
+
+  await test("source todo creates one question while presentation questions disappear", () => {
+    const draft = cluster(emptyStage({
+      activities: [{
+        category: "tours_tickets",
+        date: "2019-01-16",
+        description: "Prague Castle. Need to decide which ticket to get.",
+        itemType: "activity",
+        title: "Prague Castle",
+      }],
+      missingDetails: [
+        {
+          answerType: "text",
+          evidence: "Need to decide which ticket to get.",
+          prompt: "Which Prague Castle ticket should be used?",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "ticketType",
+        },
+        {
+          answerType: "choice",
+          evidence: "Prague Castle is in the source.",
+          prompt: "Should Prague Castle be grouped or split?",
+          relatedTitle: "Prague Castle",
+          subjectType: "item",
+          targetField: "itemType",
+        },
+        {
+          answerType: "confirm",
+          evidence: "Several venues are in the source.",
+          prompt: "Should the day be split into venue cards?",
+          relatedTitle: null,
+          subjectType: "day",
+          targetField: "itemType",
+        },
+      ],
+    }));
+
+    assert.equal(draft.missingDetails.length, 1);
+    assert.equal(
+      draft.missingDetails[0]?.prompt,
+      "Which Prague Castle ticket should be used?"
+    );
+  });
+
   await test("dated mixed evidence routes to records before city-note merging", () => {
     const draft = cluster(emptyStage({
       activities: [
@@ -574,6 +904,27 @@ export default async function run() {
 
     assert.equal(draft.activities.length, 0);
     assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("canonical factory owns the missing critical transport time question", () => {
+    const draft = cluster(emptyStage({
+      transport: [{
+        arrival: "Vienna",
+        confirmation: "1beb5005",
+        date: "2019-01-18",
+        departure: "Prague",
+        description: "Train to Vienna. Train code: 1beb5005.",
+        title: "Train to Vienna",
+        type: "train",
+      }],
+    }));
+
+    assert.equal(
+      draft.missingDetails.some((detail) =>
+        /what time does train to vienna depart/i.test(detail.prompt ?? "")
+      ),
+      true
+    );
   });
 
   await test("opaque eight-digit ticket identifiers are never formatted as dates", () => {

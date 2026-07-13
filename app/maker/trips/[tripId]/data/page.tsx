@@ -28,7 +28,7 @@ import {
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import { canSeedInitialExtraction } from "@/lib/extraction/material-capabilities";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { readStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import {
   formatStructuredDiscoverySummary,
   getStructuredReviewCount,
@@ -39,6 +39,7 @@ import {
   type StructuredReviewSection,
 } from "@/lib/generated-trip-review";
 import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
+import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import {
   applyReviewDecisions,
   type TripReviewDecision,
@@ -191,7 +192,7 @@ function formatCompactDisplayDate(value: string | null) {
     .replace(/^([A-Za-z]{3}) /, "$1. ");
 }
 
-function formatDisplayDateRange(records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null) {
+function formatDisplayDateRange(records: StructuredTripRecords | null) {
   if (!records) {
     return null;
   }
@@ -244,7 +245,7 @@ function formatScannedSummary(draft: unknown) {
 }
 
 function formatStructuredScannedSummary(
-  records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null
+  records: StructuredTripRecords | null
 ) {
   return getStructuredScannedParts(records);
 }
@@ -300,7 +301,7 @@ function getReviewItems(draft: unknown) {
 }
 
 function getStructuredReviewItems(
-  records: ReturnType<typeof createStructuredTripRecordsFromDraft> | null
+  records: StructuredTripRecords | null
 ) {
   if (!records) {
     return [];
@@ -1136,13 +1137,7 @@ function RealTripFirstPass({
   const extractionErrorMessage = getExtractionErrorMessage(error);
   const completedWithReview = extractionStatus === "completed-with-review";
   const draft = latestDraft?.draftJson ?? null;
-  const structuredDraft = draft
-    ? createStructuredTripRecordsFromDraft({
-        draft,
-        fallbackTripName: tripName,
-        tripId,
-      })
-    : null;
+  const structuredDraft = draft ? readStructuredTripSnapshot(draft) : null;
   const reviewedStructuredDraft = structuredDraft
     ? applyReviewDecisions(structuredDraft, reviewDecisions)
     : null;

@@ -6,6 +6,7 @@ import {
 } from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
   assessTripDraftQuality,
@@ -20,7 +21,6 @@ import {
   getLatestTripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import { recordTripProcessingEvent } from "@/lib/extraction/processing-events";
-import { prepareTripDraftForReview } from "@/lib/extraction/trip-spine-validation";
 import {
   createTripExtractionMaterialsIdempotencyKey,
   getTripExtractionMaterialsWithSummary,
@@ -378,21 +378,20 @@ export async function POST(
       tripId,
     });
 
-    const reviewableDraft = prepareTripDraftForReview(result.draft);
     const qualityRecords = createStructuredTripRecordsFromDraft({
-      draft: reviewableDraft,
+      draft: result.draft,
       fallbackTripName: trip.name,
       tripId,
     });
     const qualityAssessment = assessTripDraftQuality({
-      draft: reviewableDraft,
+      draft: result.draft,
       evidenceArtifacts: result.evidenceArtifacts,
       records: qualityRecords,
       usage: result.usage,
     });
     const completedDraft = attachTripQualityAssessment({
       assessment: qualityAssessment,
-      draft: reviewableDraft,
+      draft: result.draft,
     });
     await recordTripProcessingEvent({
       details: {
@@ -408,8 +407,13 @@ export async function POST(
       tripId,
     });
 
+    const persistedDraft = attachStructuredTripSnapshot({
+      draft: completedDraft,
+      records: qualityRecords,
+    });
+
     await completeTripProcessingRun({
-      draftJson: completedDraft,
+      draftJson: persistedDraft,
       model: result.model,
       runId: run.id,
       tripId,
