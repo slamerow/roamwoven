@@ -6,9 +6,9 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 4;
+const CANONICAL_RESOLVER_VERSION = 5;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
-const MAX_RESOLVER_WINDOWS = 12;
+const MAX_RESOLVER_WINDOWS = 30;
 const RESOLVER_WINDOW_CONCURRENCY = 3;
 const resolverCache = new Map<
   string,
@@ -23,8 +23,12 @@ type ResolverCandidate = {
   candidateId: string;
   city: string | null;
   date: string | null;
+  dayActivityCount: number;
   evidenceRole: string | null;
+  fixedActivityCount: number;
   hasBookingSignal: boolean;
+  hasPlanSignal: boolean;
+  hasRecommendationSignal: boolean;
   hasTime: boolean;
   headingPath: string[];
   itemIndex: number;
@@ -132,9 +136,11 @@ const resolverSystemPrompt = [
   "You are the bounded canonical source-structure and public venue relationship resolver for a travel itinerary.",
   "The input intentionally contains only public venue names and structural metadata. Never search for or infer private booking data, addresses, confirmation codes, traveler names, or access details.",
   "Source hierarchy is authoritative. Classify an item as city_note only when the structural fields show it belongs to a city-reference, ideas, recommendations, or notes block rather than an actual itinerary block. Public venue knowledge must not turn a reference item into an itinerary item.",
+  "A date is supporting evidence, not proof of traveler intent. Use section labels, headings, list context, explicit plan language, fixed anchors, and the rest of that day's plan together. Day activity counts are soft context only; never classify by a numeric cap.",
+  "A time, reservation, ticket, booking, or explicit planned action overrides nearby loose recommendation text and should remain an activity unless it is clearly accessory evidence for another canonical record.",
   "A repeated venue on different dates stays distinct when both sightings are actual itinerary visits. If one is a weak untimed sighting under a city-reference block and another is a concrete itinerary visit, classify only the weak reference sighting as city_note.",
   "Propose a grouping only when the source positions put the candidates in one contiguous source block and public sources confirm they are components of one official site, complex, route, tour, or included pass. Proximity in the same city is not enough.",
-  "Never group candidates on different dates. Never absorb a separately timed or separately booked candidate. Never group a generic clean itinerary merely because several activities share a day.",
+  "Never group candidates on different dates. A verified continuous visit may contain exactly one timed or booked anchor; preserve that anchor on the grouped card. Never group two independently timed or booked candidates, and never group a generic clean itinerary merely because several activities share a day.",
   "Use web search only as a tie-breaker for public venue relationships. Return high confidence only when both the source structure and public evidence agree. If inconclusive, return no grouping and keep activities separate.",
   "Keep claims short and factual. Return only candidate IDs supplied in the input.",
 ].join(" ");
@@ -299,8 +305,7 @@ function buildSourceBlockWitnesses(stages: EvidenceStageInput[]) {
 
 function buildCandidates(stages: EvidenceStageInput[]) {
   const sourceBlocks = buildSourceBlockWitnesses(stages);
-
-  return stages.flatMap((stageInput, stageIndex) => {
+  const candidates = stages.flatMap((stageInput, stageIndex) => {
     const stage = asRecord(stageInput.stage);
     const activities = Array.isArray(stage.activities) ? stage.activities : [];
 
@@ -324,6 +329,13 @@ function buildCandidates(stages: EvidenceStageInput[]) {
           )
         : [];
       const description = stringValue(activity, "description") ?? "";
+      const structuralText = [
+        title,
+        description,
+        stringValue(activity, "sourceSectionLabel"),
+        ...headingPath,
+        position.precedingLabel,
+      ].filter(Boolean).join(" ");
       const sourceIdentity = sourceIdentityFor(stageInput);
       const sourceBlockIds = sourceBlocks
         .filter(
@@ -338,9 +350,17 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         candidateId: `stage-${stageIndex + 1}-item-${itemIndex + 1}`,
         city: stringValue(activity, "city"),
         date: stringValue(activity, "date"),
+        dayActivityCount: 0,
         evidenceRole: stringValue(activity, "evidenceRole"),
+        fixedActivityCount: 0,
         hasBookingSignal: /\b(?:booking|confirmation|paid|reservation|ticket|timed|voucher)\b/i.test(
           description
+        ),
+        hasPlanSignal: /\b(?:booked|continue|dinner|explore|guided|lunch|plan(?:ned)? to|reservation|reserved|stop|tour|visit|walk|we will|we'll)\b/i.test(
+          structuralText
+        ),
+        hasRecommendationSignal: /\b(?:ideas?|if time|maybe|notes?|possible|recommendations?|things to check out|where to eat)\b/i.test(
+          structuralText
         ),
         hasTime: Boolean(
           stringValue(activity, "startTime") || stringValue(activity, "endTime")
@@ -359,6 +379,23 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         title,
       } satisfies ResolverCandidate];
     });
+  });
+
+  const dayGroups = new Map<string, ResolverCandidate[]>();
+  for (const candidate of candidates) {
+    const key = candidateWindowKey(candidate);
+    dayGroups.set(key, [...(dayGroups.get(key) ?? []), candidate]);
+  }
+
+  return candidates.map((candidate) => {
+    const day = dayGroups.get(candidateWindowKey(candidate)) ?? [];
+    return {
+      ...candidate,
+      dayActivityCount: day.length,
+      fixedActivityCount: day.filter(
+        (item) => item.hasTime || item.hasBookingSignal || item.hasPlanSignal
+      ).length,
+    };
   });
 }
 
@@ -466,6 +503,24 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
     );
   }
 
+  const roleCandidates = candidates.filter(
+    (candidate) =>
+      candidate.sectionType === "city_reference" ||
+      candidate.evidenceRole === "city_note_candidate" ||
+      candidate.hasRecommendationSignal ||
+      (!candidate.hasTime &&
+        !candidate.hasBookingSignal &&
+        !candidate.hasPlanSignal &&
+        candidate.dayActivityCount >= 8 &&
+        candidate.fixedActivityCount >= 2)
+  );
+  for (const key of new Set(roleCandidates.map(candidateWindowKey))) {
+    addWindow(
+      `role|${key}`,
+      candidates.filter((candidate) => candidateWindowKey(candidate) === key)
+    );
+  }
+
   const structuralGroups = new Map<string, ResolverCandidate[]>();
   for (const candidate of candidates) {
     if (
@@ -493,18 +548,6 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
     addWindow(`structure|${key}`, group);
   }
 
-  const roleCandidates = candidates.filter(
-    (candidate) =>
-      candidate.sectionType === "city_reference" ||
-      candidate.evidenceRole === "city_note_candidate"
-  );
-  for (const key of new Set(roleCandidates.map(candidateWindowKey))) {
-    addWindow(
-      `role|${key}`,
-      candidates.filter((candidate) => candidateWindowKey(candidate) === key)
-    );
-  }
-
   const duplicateGroups = new Map<string, ResolverCandidate[]>();
   for (const candidate of candidates) {
     const key = `${candidate.sourceIdentity}|${normalizeText(candidate.title)}`;
@@ -515,7 +558,15 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
     addWindow(`duplicate|${key}`, duplicates);
   }
 
-  return [...windows.values()].slice(0, MAX_RESOLVER_WINDOWS);
+  const seen = new Set<string>();
+  return [...windows.values()]
+    .filter((window) => {
+      const key = window.map((candidate) => candidate.candidateId).sort().join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_RESOLVER_WINDOWS);
 }
 
 export function inspectCanonicalEvidenceResolutionPlan(
@@ -572,24 +623,54 @@ function reconcileGroupings(
     if (!unique.has(key)) unique.set(key, grouping);
   }
 
-  const entries = [...unique.entries()];
-  const conflictingKeys = new Set<string>();
-  for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
-    const [leftKey, left] = entries[leftIndex];
-    const leftIds = new Set(left.candidateIds);
+  const remaining = [...unique.values()];
+  const components: typeof remaining[] = [];
 
-    for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
-      const [rightKey, right] = entries[rightIndex];
-      if (right.candidateIds.some((candidateId) => leftIds.has(candidateId))) {
-        conflictingKeys.add(leftKey);
-        conflictingKeys.add(rightKey);
+  while (remaining.length > 0) {
+    const component = [remaining.shift()!];
+    const ids = new Set(component[0].candidateIds);
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (let index = remaining.length - 1; index >= 0; index -= 1) {
+        const candidate = remaining[index];
+        if (!candidate.candidateIds.some((id) => ids.has(id))) continue;
+        component.push(candidate);
+        candidate.candidateIds.forEach((id) => ids.add(id));
+        remaining.splice(index, 1);
+        expanded = true;
       }
     }
+    components.push(component);
   }
 
-  return entries
-    .filter(([key]) => !conflictingKeys.has(key))
-    .map(([, grouping]) => grouping);
+  return components.flatMap((component) => {
+    if (component.length === 1) return component;
+    const parentKeys = new Set(
+      component.map((grouping) =>
+        grouping.parentCandidateId ?? normalizeText(grouping.parentTitle)
+      )
+    );
+    const nested = component.every((left) =>
+      component.every((right) => {
+        const leftIds = new Set(left.candidateIds);
+        const rightIds = new Set(right.candidateIds);
+        return (
+          left.candidateIds.every((id) => rightIds.has(id)) ||
+          right.candidateIds.every((id) => leftIds.has(id))
+        );
+      })
+    );
+
+    if (parentKeys.size !== 1 || !nested) return [];
+    return [component.sort(
+      (left, right) =>
+        right.candidateIds.length - left.candidateIds.length ||
+        left.candidateIds.slice().sort().join("|").localeCompare(
+          right.candidateIds.slice().sort().join("|")
+        )
+    )[0]];
+  });
 }
 
 export function reconcileCanonicalEvidenceResolutions(
@@ -737,13 +818,12 @@ function applyResolution({
       continue;
     }
 
+    const fixedCandidates = executionCandidates.filter(
+      (candidate) => candidate.hasTime || candidate.hasBookingSignal
+    );
     const childCandidates = executionCandidates
-      .filter((candidate) => candidate.candidateId !== parentCandidate?.candidateId)
-    if (
-      childCandidates.some(
-        (candidate) => candidate.hasTime || candidate.hasBookingSignal
-      )
-    ) {
+      .filter((candidate) => candidate.candidateId !== parentCandidate?.candidateId);
+    if (fixedCandidates.length > 1) {
       continue;
     }
     const childTitles = childCandidates.map((candidate) => candidate.title);

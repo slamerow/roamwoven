@@ -573,6 +573,60 @@ function patchDescriptionAnswer(
   return `${existingDescription}\n\n${answer}`;
 }
 
+function applyMissingStayAnswer({
+  question,
+  records,
+  value,
+}: {
+  question: TripReviewQuestionRecord;
+  records: StructuredTripRecords;
+  value: string;
+}) {
+  if (
+    question.subjectType !== "leg" ||
+    question.targetField !== "lodging" ||
+    !question.subjectId
+  ) {
+    return null;
+  }
+
+  const leg = records.legs.find((candidate) => candidate.id === question.subjectId);
+  if (!leg) return records;
+
+  const id = `${question.id}:stay`;
+  const stay: TripStayRecord = {
+    accessDetailsVisibility: "traveler_password",
+    address: null,
+    addressVisibility: "traveler_password",
+    bookingUrl: null,
+    checkInDate: leg.arriveDate,
+    checkInTime: null,
+    checkOutDate: leg.leaveDate,
+    checkOutTime: null,
+    confirmationLabel: null,
+    confirmationVisibility: "traveler_password",
+    id,
+    latitude: null,
+    legId: leg.id,
+    longitude: null,
+    name: value,
+    privateDetailIds: [],
+    publicLocationLabel: leg.displayName,
+    reviewRequired: false,
+    sourceConfidence: "high",
+    status: "confirmed",
+    stayType: null,
+    tripId: records.trip.id,
+  };
+
+  return {
+    ...records,
+    stays: records.stays.some((candidate) => candidate.id === id)
+      ? records.stays.map((candidate) => candidate.id === id ? stay : candidate)
+      : [...records.stays, stay],
+  };
+}
+
 function patchAnswerTarget({
   decision,
   question,
@@ -589,6 +643,10 @@ function patchAnswerTarget({
     subjectType: question.subjectType,
     targetField: question.targetField,
   });
+  const missingStayRecords = value
+    ? applyMissingStayAnswer({ question, records, value })
+    : null;
+  if (missingStayRecords) return missingStayRecords;
 
   if (
     !value ||

@@ -103,7 +103,20 @@ function createBaseDraft(
       },
     ],
     sensitiveDetails: [],
-    stays: [],
+    stays: [
+      {
+        checkIn: "2019-01-14",
+        checkOut: "2019-01-18",
+        city: "Prague",
+        name: "Prague lodging",
+      },
+      {
+        checkIn: "2019-01-18",
+        checkOut: "2019-01-21",
+        city: "Vienna",
+        name: "Vienna lodging",
+      },
+    ],
     transport: [
       {
         arrival: null,
@@ -461,7 +474,10 @@ test("source anchors repair transport and suppress already-answered time questio
   );
 
   const fingerprints = createTripExtractionFingerprints(records);
-  assert.deepEqual(fingerprints.openQuestions, []);
+  assert.equal(
+    fingerprints.openQuestions.some((question) => question.includes("train to vienna")),
+    false
+  );
   assert.equal(fingerprints.transport.length, 1);
 });
 

@@ -90,7 +90,20 @@ function createJan25ReturnFlightAnchorDraft() {
       },
     ],
     sensitiveDetails: [],
-    stays: [],
+    stays: [
+      {
+        checkIn: "2019-01-21",
+        checkOut: "2019-01-24",
+        city: "Budapest",
+        name: "Budapest lodging",
+      },
+      {
+        checkIn: "2019-01-24",
+        checkOut: "2019-01-25",
+        city: "Rome",
+        name: "Rome lodging",
+      },
+    ],
     transport: [
       {
         arrival: null,
@@ -442,7 +455,12 @@ export default function run() {
               },
             ],
             sensitiveDetails: [],
-            stays: [],
+            stays: [{
+              checkIn: "2019-01-18",
+              checkOut: "2019-01-21",
+              city: "Vienna",
+              name: "Vienna lodging",
+            }],
             transport: [],
           },
         },

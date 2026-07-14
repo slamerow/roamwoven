@@ -36,9 +36,15 @@ function cluster(stage: Record<string, unknown>) {
     stages: [{ label: "regression", source: "model_chunk", stage }],
     tripOverview: { dateRange: "January 12-25, 2019" },
   }).draft as {
-    activities: Array<{ title: string }>;
+    activities: Array<{
+      description?: string | null;
+      itemType?: string;
+      title: string;
+    }>;
     missingDetails: Array<{ prompt?: string }>;
+    places: Array<{ city: string }>;
     stays: Array<{ checkIn?: string; checkOut?: string; name: string }>;
+    transport: Array<{ title: string }>;
   };
 }
 
@@ -701,10 +707,11 @@ export default async function run() {
       }],
     }));
     const titles = draft.activities.map((item) => item.title);
-
     assert.ok(titles.includes("Watches In Rome"));
-    assert.ok(titles.includes("Rome afternoon / evening plans"));
-    assert.equal(titles.some((title) => /Notes & Tips/.test(title)), false);
+    assert.equal(titles.some((title) => /afternoon \/ evening plans/i.test(title)), false);
+    assert.ok(titles.includes("Rome Notes & Tips"));
+    const note = draft.activities.find((item) => item.title === "Rome Notes & Tips");
+    assert.equal(/RomeHello|Via Torino|Watches In Rome/i.test(note?.description ?? ""), false);
   });
 
   await test("an explicit city-reference section remains a city note", () => {
@@ -725,6 +732,98 @@ export default async function run() {
     }));
 
     assert.deepEqual(draft.activities.map((item) => item.title), ["Vienna Notes & Tips"]);
+  });
+
+  await test("concrete activities and lodging details are removed from city notes", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          category: "food_dining",
+          city: "Budapest",
+          date: "2019-01-22",
+          description: "Dinner reservation at 8 PM.",
+          evidenceRole: "atomic_candidate",
+          itemType: "activity",
+          startTime: "20:00",
+          title: "Borkonyha Winekitchen dinner",
+        },
+        {
+          category: "food_dining",
+          city: "Budapest",
+          date: null,
+          description: "Food ideas; Borkhonya at 8 PM; Sleeping at Vitae Hostel; $15 private room; ruin bars",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Budapest food ideas",
+        },
+      ],
+      places: [{ arriveDate: "2019-01-21", city: "Budapest", leaveDate: "2019-01-24" }],
+      stays: [{
+        checkIn: "2019-01-21",
+        checkOut: "2019-01-24",
+        name: "Vitae Hostel",
+      }],
+    }));
+    const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
+    assert.ok(draft.activities.some((item) => item.title === "Borkonyha Winekitchen dinner"));
+    assert.ok(/ruin bars/i.test(note?.description ?? ""));
+    assert.equal(/Borkhonya|Vitae|private room|\$15/i.test(note?.description ?? ""), false);
+  });
+
+  await test("accessory flight evidence cannot become a second activity card", () => {
+    const draft = cluster(emptyStage({
+      activities: [{
+        category: "arrival_departure",
+        city: "Rome",
+        date: "2019-01-25",
+        description: "Delta Flight 444 departs FCO at 2:45 PM.",
+        evidenceRole: "accessory_detail",
+        itemType: "activity",
+        startTime: "14:45",
+        title: "Delta Flight 444",
+      }],
+      transport: [{
+        arrival: "JFK",
+        arrivalTime: "18:45",
+        date: "2019-01-25",
+        departure: "FCO",
+        departureTime: "14:45",
+        title: "Delta Flight 444 FCO to JFK",
+        type: "flight",
+      }],
+    }));
+
+    assert.equal(draft.activities.length, 0);
+    assert.equal(draft.transport.length, 1);
+  });
+
+  await test("unbooked day-trip rail attaches to the day-trip activity", () => {
+    const draft = cluster(emptyStage({
+      activities: [{
+        category: "art_culture",
+        city: "Kutna Hora",
+        date: "2019-01-17",
+        description: "Visit Kutna Hora and return to Prague.",
+        itemType: "activity",
+        title: "Kutna Hora day trip",
+      }],
+      places: [{ arriveDate: "2019-01-14", city: "Prague", leaveDate: "2019-01-18" }],
+      transport: [{
+        arrival: "Kutna Hora",
+        arrivalTime: "09:45",
+        date: "2019-01-17",
+        departure: "Prague",
+        departureTime: "08:00",
+        description: "Take the train to Kutna Hora and return at 18:00.",
+        title: "Train to Kutna Hora",
+        type: "train",
+      }],
+    }));
+
+    assert.equal(draft.transport.length, 0);
+    assert.deepEqual(draft.activities.map((item) => item.title), ["Kutna Hora day trip"]);
+    assert.ok(/train/i.test(draft.activities[0]?.description ?? ""));
   });
 
   await test("a description fragment exactly naming another activity cannot bleed", () => {

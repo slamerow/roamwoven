@@ -11,6 +11,7 @@ import {
   CanonicalProjectionInvariantError,
   createStructuredTripRecordsFromDraft,
 } from "@/lib/extraction/draft-to-structured-trip";
+import { applyReviewDecision } from "@/lib/generated-trip-decisions";
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try {
@@ -238,6 +239,32 @@ export default async function run() {
     assert.equal(twoPartPlan.requiresLookup, true);
   });
 
+  await test("dense ambiguous day context reaches the bounded resolver without imposing a cap", () => {
+    const titles = [
+      "Booked museum entry",
+      "Dinner reservation",
+      ...Array.from({ length: 10 }, (_, index) => `Possible venue ${index + 1}`),
+    ];
+    const activities = titles.map((title, index) =>
+      activity({
+        city: "Vienna",
+        date: "2034-04-05",
+        startTime: index < 2 ? (index === 0 ? "10:00" : "20:00") : null,
+        title,
+      })
+    );
+    const plan = inspectCanonicalEvidenceResolutionPlan([
+      stage({
+        label: "dense-ambiguous-day",
+        sourceText: titles.join("\n"),
+        value: emptyStage({ activities }),
+      }),
+    ]);
+
+    assert.equal(plan.requiresLookup, true);
+    assert.ok(plan.windows.some((window) => window.titles.length === titles.length));
+  });
+
   await test("same-city and intercity rentals resolve on the canonical side", () => {
     const { records } = clusterAndCompile([
       stage({
@@ -355,6 +382,107 @@ export default async function run() {
     assert.ok(records.stays.every((stay) => stay.name.startsWith("Lisbon Airbnb")));
     assert.ok(records.stays.every((stay) => !/Rua Alpha|Rua Beta/i.test(stay.name)));
     assert.ok(records.stays.every((stay) => stay.addressVisibility === "traveler_password"));
+  });
+
+  await test("home endpoints are not legs while overnight destinations remain legs", () => {
+    const { records } = clusterAndCompile([
+      stage({
+        label: "home-boundaries",
+        value: emptyStage({
+          activities: [
+            activity({ city: "Rome", date: "2037-11-02", title: "Roman Forum" }),
+            activity({ city: "Paris", date: "2037-11-05", title: "Louvre Museum" }),
+          ],
+          places: [
+            { arriveDate: "2037-11-01", city: "Washington", leaveDate: "2037-11-02" },
+            { arriveDate: "2037-11-02", city: "Rome", leaveDate: "2037-11-04" },
+            { arriveDate: "2037-11-04", city: "Paris", leaveDate: "2037-11-07" },
+            { arriveDate: "2037-11-07", city: "Washington", leaveDate: null },
+          ],
+          stays: [
+            { checkIn: "2037-11-02", checkOut: "2037-11-04", name: "Hotel Roma" },
+            { checkIn: "2037-11-04", checkOut: "2037-11-07", name: "Hotel Paris" },
+          ],
+          transport: [
+            {
+              arrival: "Rome",
+              date: "2037-11-01",
+              departure: "Washington",
+              departureTime: "18:00",
+              title: "Flight to Rome",
+              type: "flight",
+            },
+            {
+              arrival: "Washington",
+              date: "2037-11-07",
+              departure: "Paris",
+              departureTime: "10:00",
+              title: "Flight home to Washington",
+              type: "flight",
+            },
+          ],
+        }),
+      }),
+    ], "home-boundaries");
+
+    assert.deepEqual(records.legs.map((leg) => leg.city), ["Rome", "Paris"]);
+  });
+
+  await test("an overnight destination without lodging remains a leg and asks once", () => {
+    const { records } = clusterAndCompile([
+      stage({
+        label: "missing-paris-stay",
+        value: emptyStage({
+          activities: [activity({ city: "Paris", date: "2038-04-03", title: "Musee d'Orsay" })],
+          places: [{ arriveDate: "2038-04-02", city: "Paris", leaveDate: "2038-04-05" }],
+          transport: [{
+            arrival: "Paris",
+            date: "2038-04-02",
+            departure: "Boston",
+            departureTime: "19:00",
+            title: "Flight to Paris",
+            type: "flight",
+          }],
+        }),
+      }),
+    ], "missing-paris-stay");
+
+    assert.deepEqual(records.legs.map((leg) => leg.city), ["Paris"]);
+    assert.equal(
+      records.reviewQuestions.filter((question) =>
+        question.prompt === "Where are you staying in Paris?"
+      ).length,
+      1
+    );
+    const question = records.reviewQuestions.find((candidate) =>
+      candidate.prompt === "Where are you staying in Paris?"
+    );
+    assert.ok(question);
+    const answered = applyReviewDecision(records, {
+      action: "answer_question",
+      answerValue: "Hotel du Louvre",
+      createdAt: "2038-01-01T00:00:00.000Z",
+      id: "decision-paris-stay",
+      subjectId: question.id,
+      subjectType: "review_question",
+      tripId: "missing-paris-stay",
+    });
+    assert.deepEqual(
+      answered.stays.map((stay) => ({
+        checkIn: stay.checkInDate,
+        checkOut: stay.checkOutDate,
+        legId: stay.legId,
+        name: stay.name,
+        visibility: stay.addressVisibility,
+      })),
+      [{
+        checkIn: "2038-04-02",
+        checkOut: "2038-04-05",
+        legId: records.legs[0]?.id,
+        name: "Hotel du Louvre",
+        visibility: "traveler_password",
+      }]
+    );
   });
 
   await test("fresh canonical records without stable identity fail closed", () => {

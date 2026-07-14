@@ -89,7 +89,67 @@ function exactRecordMention(segment: string, values: unknown[]) {
   const text = normalizeText(segment);
   return values.some((value) => {
     const normalized = normalizedComparable(value);
-    return normalized.length >= 5 && text.includes(normalized);
+    if (!normalized) return false;
+    if (normalized.length >= 5 && text.includes(normalized)) return true;
+
+    const stopWords = new Set([
+      "activity",
+      "cafe",
+      "dinner",
+      "flight",
+      "hotel",
+      "hostel",
+      "house",
+      "lunch",
+      "museum",
+      "palace",
+      "restaurant",
+      "stay",
+      "the",
+      "tour",
+      "train",
+      "visit",
+    ]);
+    const valueTokens = normalized
+      .split(/\s+/)
+      .filter((token) => token.length >= 5 && !stopWords.has(token));
+    if (valueTokens.length === 0) return false;
+    const segmentTokens = text.split(/\s+/);
+    const withinTypoDistance = (left: string, right: string) => {
+      const limit = Math.min(left.length, right.length) >= 8 ? 2 : 1;
+      if (Math.abs(left.length - right.length) > limit) return false;
+      const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+      for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+        const current = [leftIndex];
+        let rowMinimum = leftIndex;
+        for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+          const value = Math.min(
+            current[rightIndex - 1] + 1,
+            previous[rightIndex] + 1,
+            previous[rightIndex - 1] + Number(
+              left[leftIndex - 1] !== right[rightIndex - 1]
+            )
+          );
+          current.push(value);
+          rowMinimum = Math.min(rowMinimum, value);
+        }
+        if (rowMinimum > limit) return false;
+        previous.splice(0, previous.length, ...current);
+      }
+
+      return previous[right.length] <= limit;
+    };
+
+    const matchedTokens = valueTokens.filter((valueToken) =>
+      segmentTokens.some((segmentToken) =>
+        segmentToken === valueToken || withinTypoDistance(segmentToken, valueToken)
+      )
+    );
+    return Boolean(
+      matchedTokens.length >= Math.min(2, valueTokens.length) ||
+        matchedTokens.some((token) => token.length >= 7)
+    );
   });
 }
 
@@ -151,8 +211,6 @@ function routeDatedNoteEvidence({
 }) {
   const city = stringValue(note.payload, "city");
   const date = sourceStructuredDate(note.payload, tripYear);
-  const sectionType = stringValue(note.payload, "sourceSectionType");
-  const preserveReferenceRole = sectionType === "city_reference";
 
   const compatibleStays = pieces.filter(
     (piece) =>
@@ -229,10 +287,10 @@ function routeDatedNoteEvidence({
 
     return !(
       stayMention ||
-      (!preserveReferenceRole && uniqueLodgingContext) ||
+      uniqueLodgingContext ||
       activityMention ||
       transportMention ||
-      (!preserveReferenceRole && uniqueMovementContext)
+      uniqueMovementContext
     );
   });
   const dedupedRetained = retained.filter((segment, index) => {
@@ -258,45 +316,9 @@ function routeDatedNoteEvidence({
     });
   }
 
-  // Source hierarchy owns role. City-reference material can be sanitized but
-  // cannot be promoted into a dated activity by content heuristics.
-  if (!date || preserveReferenceRole) return;
-
-  const residualText = normalizeText(dedupedRetained.join(" "));
-  const hasPlannedRemainder = dedupedRetained.length > 0 && dedupedRetained.every((segment) =>
-    /\b(?:tour|explore|visit|work|eat|breakfast|lunch|dinner|wander|walk|spend|relax)\b/.test(
-      normalizeText(segment)
-    )
-  );
-
-  if (
-    !hasPlannedRemainder ||
-    /\b(?:ideas?|recommendations?|maybe|if time|could visit|things to check out)\b/.test(
-      residualText
-    )
-  ) {
-    return;
-  }
-
-  const dayparts = ["morning", "afternoon", "evening"].filter((daypart) =>
-    residualText.includes(daypart)
-  );
-  note.kind = "activity";
-  note.role = "atomic_candidate";
-  note.payload.category = stringValue(note.payload, "category") ?? "art_culture";
-  note.payload.date = date;
-  note.payload.evidenceRole = "atomic_candidate";
-  note.payload.itemType = "activity";
-  note.payload.sourceSectionType = "dated_itinerary";
-  note.payload.title = `${city ?? "Flexible"}${
-    dayparts.length > 0 ? ` ${dayparts.join(" / ")}` : " flexible"
-  } plans`;
-  actions.addAction(note, {
-    absorbedTitles: [],
-    observationIds: [...note.observationIds],
-    reason: "dated planned content routed from note evidence to one flexible activity",
-    type: "recovered",
-  });
+  // Notes are never promoted into a broad activity here. If source evidence
+  // contains a concrete plan, atomic extraction or the canonical role decision
+  // must own it. This layer may sanitize and attach evidence only.
 }
 
 export function routeCanonicalAccessoryEvidence({

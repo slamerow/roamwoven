@@ -64,7 +64,11 @@ function cluster({
     stages,
     tripOverview: { dateRange: "April 1-4, 2031" },
   }).draft as {
-    activities: Array<{ title: string }>;
+    activities: Array<{
+      itemType?: string | null;
+      startTime?: string | null;
+      title: string;
+    }>;
     missingDetails: Array<{ prompt?: string }>;
   };
 }
@@ -149,11 +153,37 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
-  await test("a separately timed child rejects the whole proposed grouping", () => {
+  await test("one timed child anchors a verified continuous grouping", () => {
     const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
     const input = stage(titles, titles.join("\n"));
     const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
     stagedActivities[1].startTime = "14:30";
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
+        claim: "The stops are in one historic district.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Old Town walking tour",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+    const draft = cluster(application);
+
+    assert.deepEqual(draft.activities.map((item) => item.title), [titles[0]]);
+    assert.equal(draft.activities[0]?.startTime, "14:30");
+    assert.equal(
+      draft.missingDetails.filter((detail) => /We grouped/i.test(detail.prompt ?? "")).length,
+      1
+    );
+  });
+
+  await test("two independently timed stops reject a proposed grouping", () => {
+    const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
+    const input = stage(titles, titles.join("\n"));
+    const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
+    stagedActivities[1].startTime = "14:30";
+    stagedActivities[2].startTime = "16:00";
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
@@ -189,6 +219,26 @@ export default async function run() {
     const draft = cluster(application);
 
     assert.deepEqual(draft.activities.map((item) => item.title), ["Museum evening"]);
+  });
+
+  await test("downstream timing cannot override a canonical city-note decision", () => {
+    const input = stage(["Museum opening time"], "Museum opening time");
+    const stagedActivity = (input.stage as { activities: Array<Record<string, unknown>> })
+      .activities[0];
+    stagedActivity.startTime = "18:00";
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [],
+      roleDecisions: [{
+        candidateId: "stage-1-item-1",
+        classification: "city_note",
+        confidence: "high",
+        reason: "The source places this opening-time reference under city notes.",
+      }],
+    });
+    const draft = cluster(application);
+
+    assert.equal(draft.activities.length, 1);
+    assert.equal(draft.activities[0]?.itemType, "note");
   });
 
   await test("cross-chunk grouping uses shared source evidence and an atomic parent", () => {
@@ -299,5 +349,32 @@ export default async function run() {
     ]);
 
     assert.deepEqual(resolution, { groupings: [], roleDecisions: [] });
+  });
+
+  await test("nested resolver windows keep the more complete compatible grouping", () => {
+    const resolution = reconcileCanonicalEvidenceResolutions([
+      {
+        groupings: [{
+          candidateIds: ["a", "b"],
+          claim: "Verified palace visit.",
+          confidence: "high",
+          parentCandidateId: "a",
+          parentTitle: "Palace",
+        }],
+        roleDecisions: [],
+      },
+      {
+        groupings: [{
+          candidateIds: ["a", "b", "c"],
+          claim: "Verified palace visit with gardens.",
+          confidence: "high",
+          parentCandidateId: "a",
+          parentTitle: "Palace",
+        }],
+        roleDecisions: [],
+      },
+    ]);
+
+    assert.deepEqual(resolution.groupings[0]?.candidateIds, ["a", "b", "c"]);
   });
 }
