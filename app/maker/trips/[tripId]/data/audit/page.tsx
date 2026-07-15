@@ -30,6 +30,8 @@ const canonicalizationLabels: Array<[
   ["canonicalPieceCount", "Output pieces"],
   ["clusteredObservationCount", "Clustered sightings"],
   ["contextObservationCount", "Context only"],
+  ["identityRecoveryStatus", "Identity recovery"],
+  ["identityRepairCount", "Identity repairs"],
   ["rejectedObservationCount", "Rejected sightings"],
   ["sourceAnchorObservationCount", "Source anchors"],
   ["suppressedStandaloneAnchorCount", "Unmatched anchors"],

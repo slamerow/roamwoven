@@ -5,7 +5,11 @@ import {
   isTripAllowedForOpenAIExtraction,
 } from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
-import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import {
+  assembleCanonicalTripDraft,
+  CanonicalAssemblyRecoveryError,
+  prepareCanonicalEvidencePieces,
+} from "@/lib/extraction/canonical-trip-assembly";
 import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
@@ -119,6 +123,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function summarizeFinalizationUsage(usage: unknown) {
   const usageRecord = asRecord(usage);
   const finalization = asRecord(usageRecord?.finalization);
+  const identityRecovery = asRecord(usageRecord?.identityRecovery);
 
   if (!finalization) {
     return null;
@@ -129,6 +134,11 @@ function summarizeFinalizationUsage(usage: unknown) {
     canonicalEvidenceVersion: finalization.canonicalEvidenceVersion ?? null,
     canonicalIdentityVersion: finalization.canonicalIdentityVersion ?? null,
     canonicalReviewCount: finalization.canonicalReviewCount ?? null,
+    identityRecoveryActions: Array.isArray(identityRecovery?.actions)
+      ? identityRecovery.actions
+      : [],
+    identityRecoveryAttempted: identityRecovery?.attempted === true,
+    identityRecoveryStatus: identityRecovery?.status ?? "not_needed",
     status: finalization.status ?? null,
   };
 }
@@ -305,6 +315,7 @@ export async function POST(
   });
   let run: Awaited<ReturnType<typeof createTripProcessingRun>> | null = null;
   let extractionUsage: unknown = null;
+  let failureStage = "run";
   const representedSourceUploadIds =
     getTripExtractionMaterialSourceUploadIds(materials);
 
@@ -330,6 +341,7 @@ export async function POST(
       status: "started",
       tripId,
     });
+    failureStage = "model_extraction";
     await recordTripProcessingEvent({
       details: {
         materialDedupe: preparedMaterials.dedupeSummary,
@@ -356,9 +368,35 @@ export async function POST(
       tripId,
     });
 
+    failureStage = "canonical_validation";
+    await recordTripProcessingEvent({
+      details: {},
+      processingRunId: run.id,
+      stage: "canonical_validation",
+      status: "started",
+      tripId,
+    });
+    const preparedEvidence = prepareCanonicalEvidencePieces(
+      result.evidenceArtifacts.pieces
+    );
+    await recordTripProcessingEvent({
+      details: {
+        recoveryActions: preparedEvidence.recoveryActions,
+        status:
+          preparedEvidence.recoveryActions.length > 0
+            ? "repaired"
+            : "not_needed",
+      },
+      processingRunId: run.id,
+      stage: "canonical_validation",
+      status: "completed",
+      tripId,
+    });
+
+    failureStage = "evidence_cluster";
     const evidenceSummary = await persistEvidenceArtifacts({
       observations: result.evidenceArtifacts.observations,
-      pieces: result.evidenceArtifacts.pieces,
+      pieces: preparedEvidence.pieces,
       processingRunId: run.id,
       tripId,
     });
@@ -370,8 +408,32 @@ export async function POST(
       tripId,
     });
 
-    const finalizationSummary = summarizeFinalizationUsage(result.usage);
-
+    failureStage = "assembly";
+    await recordTripProcessingEvent({
+      details: {},
+      processingRunId: run.id,
+      stage: "assembly",
+      status: "started",
+      tripId,
+    });
+    const assembly = assembleCanonicalTripDraft({
+      draft: result.draft,
+      evidencePieces: preparedEvidence.pieces,
+      fallbackTripName: trip.name,
+      priorRecoveryActions: preparedEvidence.recoveryActions,
+      tripId,
+    });
+    const assemblyUsage = {
+      ...(asRecord(result.usage) ?? {}),
+      evidence: {
+        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
+        canonicalPieceCount: preparedEvidence.pieces.length,
+      },
+      finalization: assembly.finalization,
+      identityRecovery: assembly.recovery,
+    };
+    extractionUsage = assemblyUsage;
+    const finalizationSummary = summarizeFinalizationUsage(assemblyUsage);
     await recordTripProcessingEvent({
       details: finalizationSummary ?? {},
       processingRunId: run.id,
@@ -380,20 +442,19 @@ export async function POST(
       tripId,
     });
 
-    const qualityRecords = createStructuredTripRecordsFromDraft({
-      draft: result.draft,
-      fallbackTripName: trip.name,
-      tripId,
-    });
+    failureStage = "quality_assessment";
     const qualityAssessment = assessTripDraftQuality({
-      draft: result.draft,
-      evidenceArtifacts: result.evidenceArtifacts,
-      records: qualityRecords,
-      usage: result.usage,
+      draft: assembly.draft,
+      evidenceArtifacts: {
+        observations: result.evidenceArtifacts.observations,
+        pieces: preparedEvidence.pieces,
+      },
+      records: assembly.records,
+      usage: assemblyUsage,
     });
     const completedDraft = attachTripQualityAssessment({
       assessment: qualityAssessment,
-      draft: result.draft,
+      draft: assembly.draft,
     });
     const qualityAssessmentSnapshot =
       createTripQualityAssessmentSnapshot(qualityAssessment);
@@ -411,9 +472,10 @@ export async function POST(
 
     const persistedDraft = attachStructuredTripSnapshot({
       draft: completedDraft,
-      records: qualityRecords,
+      records: assembly.records,
     });
 
+    failureStage = "persistence";
     await completeTripProcessingRun({
       draftJson: persistedDraft,
       model: result.model,
@@ -422,12 +484,12 @@ export async function POST(
       usage: {
         materialBudget: withRunInputEstimate(
           optimizedMaterials.summary,
-          result.usage
+          assemblyUsage
         ),
         materialCheckpoints: materialCheckpointSummary,
         materialDedupe: preparedMaterials.dedupeSummary,
         ocr: ocrSummary,
-        openai: result.usage,
+        openai: assemblyUsage,
         qualityAssessment: qualityAssessmentSnapshot,
       },
     });
@@ -460,10 +522,13 @@ export async function POST(
       runId: run?.id ?? null,
       tripId,
     });
-    const errorCode = "extraction-failed";
+    const errorCode =
+      error instanceof CanonicalAssemblyRecoveryError
+        ? "assembly-recovery-required"
+        : "extraction-failed";
 
     if (run) {
-      const failureDetails =
+      const baseFailureDetails =
         error && typeof error === "object" && "details" in error
           ? {
               materialBudget: withRunInputEstimate(
@@ -473,7 +538,9 @@ export async function POST(
               materialCheckpoints: materialCheckpointSummary,
               materialDedupe: preparedMaterials.dedupeSummary,
               ocr: ocrSummary,
-              openaiError: (error as { details?: unknown }).details,
+              ...(error instanceof CanonicalAssemblyRecoveryError
+                ? { assemblyRecovery: error.details }
+                : { openaiError: (error as { details?: unknown }).details }),
             }
           : {
               materialBudget: withRunInputEstimate(
@@ -484,12 +551,17 @@ export async function POST(
               materialDedupe: preparedMaterials.dedupeSummary,
               ocr: ocrSummary,
             };
+      const failureDetails = {
+        ...baseFailureDetails,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        stage: failureStage,
+      };
 
       await recordTripProcessingEvent({
         details: failureDetails,
         errorMessage: message,
         processingRunId: run.id,
-        stage: "extraction",
+        stage: failureStage,
         status: "failed",
         tripId,
       });

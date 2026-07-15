@@ -120,6 +120,12 @@ export function createTripExtractionAuditNotices({
     );
   }
 
+  if (report?.canonicalization.identityRecoveryStatus === "repaired") {
+    notices.push(
+      `Canonical identity was repaired backstage with ${report.canonicalization.identityRepairCount} deterministic repair action${report.canonicalization.identityRepairCount === 1 ? "" : "s"}.`
+    );
+  }
+
   return notices;
 }
 

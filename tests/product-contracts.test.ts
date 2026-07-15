@@ -72,6 +72,7 @@ export default function run() {
     "RW-QUE-001",
     "RW-PRI-001",
     "RW-PUB-001",
+    "RW-OPS-001",
   ]) {
     assert.ok(ids.includes(required), `missing required contract ${required}`);
   }

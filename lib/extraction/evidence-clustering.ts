@@ -337,7 +337,9 @@ function sourceStructureFromPayload(
   };
 }
 
-function publicPayload(payload: Record<string, unknown>) {
+export function canonicalPiecePublicPayload(
+  payload: Record<string, unknown>
+) {
   const {
     _canonicalGroupingDecisionIds,
     _canonicalRoleDecision,
@@ -4210,7 +4212,7 @@ function canonicalReviewSemanticTarget(detail: Record<string, unknown>) {
   return normalizeText(String(detail.targetField ?? "general"));
 }
 
-function canonicalizeReviewDetails(
+export function canonicalizeCanonicalReviewDetails(
   details: unknown[],
   pieces: CanonicalEvidencePiece[]
 ) {
@@ -4451,7 +4453,7 @@ export function clusterExtractedEvidence({
     pieces
       .filter((piece) => piece.outputEligible && piece.kind === kind)
       .map((piece) => ({
-        ...publicPayload(piece.payload),
+        ...canonicalPiecePublicPayload(piece.payload),
         _canonicalId: piece.id,
         _canonicalPieceId: piece.id,
       }));
@@ -4466,7 +4468,7 @@ export function clusterExtractedEvidence({
     transport,
     tripOverview,
   });
-  const finalMissingDetails = canonicalizeReviewDetails(
+  const finalMissingDetails = canonicalizeCanonicalReviewDetails(
     unresolvedMissingDetails({
       details: [
         ...missingDetails,

@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 5
+Ledger version: 6
 
 Ledger date: 2026-07-15
 
@@ -116,10 +116,13 @@ path is bypassed.
   diagnostics, hard and quiet warnings, open Questions, processing disposition,
   stored quality metadata, and top-level audit notices. Semantic Questions and
   warnings no longer block the publish route; only missing structured records
-  remain a technical publishing failure. The remaining gap is the automatic
+  remain a technical publishing failure. Canonical identity defects now run
+  through one deterministic artifact-backed repair and recompile pass before a
+  named technical recovery state. The remaining gap is the automatic semantic
   repair and deduplication pass for abnormal Question or canonical-card counts.
 - Tests: `tests/trip-quality-gate.test.ts`,
-  `tests/trip-publish-policy.test.ts`, `tests/generated-trip-model.test.ts`
+  `tests/trip-publish-policy.test.ts`, `tests/generated-trip-model.test.ts`,
+  `tests/extraction-route-recovery.test.ts`
 
 ## RW-CAN-001 — Canonical finalization is the semantic boundary
 
@@ -147,12 +150,16 @@ path is bypassed.
   transport carry canonical identity directly; Questions and private details
   carry their canonical subject; projection invariants and audit lineage join by
   identity instead of array position or title/date matching. Structured snapshot
-  version 2 requires the new identity fields. The remaining gap is reconciliation
-  of maker-created entities and saved decisions across the future rebuild and
-  merge/split lifecycle, plus first-class grouping relationships.
+  version 2 requires the new identity fields. The extraction route now assembles
+  from persisted evidence artifacts, repairs safe identity/manifest drift once,
+  recompiles before completion, and records repair telemetry without creating a
+  maker Question. The remaining gap is reconciliation of maker-created entities
+  and saved decisions across the future rebuild and merge/split lifecycle, plus
+  first-class grouping relationships.
 - Tests: `tests/assembly-purity.test.ts`,
   `tests/canonical-identity.test.ts`,
   `tests/canonical-factory-boundary.test.ts`,
+  `tests/extraction-route-recovery.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`
 
 ## RW-SRC-001 — Source precedence is centralized
@@ -375,6 +382,33 @@ path is bypassed.
   use the active published snapshot.
 - Tests: `tests/published-snapshots.test.ts`,
   `tests/structured-trip-snapshot.test.ts`
+
+## RW-OPS-001 — Detectors require a complete dark-factory outcome
+
+- Status: `LOCKED`
+- Decision date: `2026-07-15`
+- Enforcement: `PARTIAL`
+- Contract: A new ingestion, extraction, canonicalization, assembly, privacy,
+  review, or publishing validator is not push-ready merely because it detects a
+  defect. Its actual route-level behavior must map the defect to bounded
+  deterministic repair, a retained last-good draft, a usable
+  evidence-preserving fallback, or a named calm technical recovery state when
+  no valid draft can exist. A processing stage is completed only after its
+  persisted boundary validates. Successful backstage repair is recorded in
+  internal events, usage, QA bundles, and audit notices without becoming a maker
+  Question or exposing machinery in the premium customer experience. Every new
+  terminal path requires behavioral route-level coverage before code is called
+  safe to push.
+- Evidence: Repository preflight now requires route-outcome tracing for new
+  validators and terminal paths. Canonical evidence is preflighted before its
+  database uniqueness boundary, exact duplicates are repaired before
+  persistence, and conflicting identities enter the named recovery state.
+  Canonical assembly records `started` before validation and `completed` only
+  after repair, finalization, and structured compilation succeed;
+  unrecoverable identity conflicts cannot save a draft snapshot. Other existing
+  pipeline validators have not yet received the same exhaustive route audit.
+- Tests: `tests/extraction-route-recovery.test.ts`,
+  `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`
 
 ## RW-OPEN-001 — Question response controls in the assembly pass
 

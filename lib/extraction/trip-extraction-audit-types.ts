@@ -142,6 +142,8 @@ export type TripExtractionAuditReport = {
     canonicalPieceCount: number;
     clusteredObservationCount: number;
     contextObservationCount: number;
+    identityRepairCount: number;
+    identityRecoveryStatus: "not_needed" | "repaired";
     observationCount: number;
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;

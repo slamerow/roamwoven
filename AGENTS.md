@@ -36,6 +36,20 @@ assembly, privacy, review Calls or Questions, or publishing:
   contract as fully enforced.
 - Runtime fixes should close the relevant gaps and update the coverage state.
 
+## Dark-factory deployment readiness
+
+- A new validator, invariant, `throw`, retry, or quarantine path is not
+  push-ready until its actual route-level outcome is traced and tested.
+- Every such path must terminate in one of: bounded deterministic repair,
+  retained last-good state, usable evidence-preserving fallback, or a named
+  technical recovery state when no valid draft can exist.
+- A processing stage may be recorded as completed only after its output passes
+  the validation required by the next persisted boundary.
+- Successful internal repair belongs in support telemetry and audit tooling, not
+  in maker Questions or customer-facing extraction mechanics.
+- Final handoffs must distinguish a committed checkpoint from code that is safe
+  to push or deploy.
+
 ## Collaboration boundary
 
 For customer-visible or product-sensitive behavior, provide Assumptions before

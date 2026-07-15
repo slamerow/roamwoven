@@ -1,6 +1,5 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import { getOpenAIConfig } from "@/lib/env";
-import { finalizeCanonicalTripDraft } from "@/lib/extraction/canonical-trip-finalization";
 import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evidence-resolver";
 import {
   clusterExtractedEvidence,
@@ -1371,11 +1370,10 @@ export async function extractTripDraftWithOpenAI({
     },
   });
   const combinedDraft = evidence.draft;
-  const { debug: finalization, draft } = finalizeCanonicalTripDraft(combinedDraft);
-  const canonicalDraft = createDraftAuditSnapshot(draft);
+  const canonicalDraft = createDraftAuditSnapshot(combinedDraft);
 
   return {
-    draft,
+    draft: combinedDraft,
     evidenceArtifacts: {
       observations: evidence.observations,
       pieces: evidence.pieces,
@@ -1414,7 +1412,6 @@ export async function extractTripDraftWithOpenAI({
       audit: {
         canonicalDraft,
       },
-      finalization,
       evidence: evidence.summary,
       sourceAnchors: {
         transport: sourceTransportAnchors,

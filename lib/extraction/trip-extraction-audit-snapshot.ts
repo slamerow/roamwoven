@@ -106,11 +106,20 @@ export function createDraftAuditSnapshot(draft: unknown): DraftAuditSnapshot {
 export function createCanonicalizationSummary(usage: unknown) {
   const openai = findOpenAIUsage(usage);
   const evidence = asRecord(openai.evidence);
+  const identityRecovery = asRecord(openai.identityRecovery);
+  const identityRecoveryStatus =
+    identityRecovery.status === "repaired"
+      ? ("repaired" as const)
+      : ("not_needed" as const);
 
   return {
     canonicalPieceCount: Number(evidence.canonicalPieceCount) || 0,
     clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
     contextObservationCount: Number(evidence.contextObservationCount) || 0,
+    identityRepairCount: Array.isArray(identityRecovery.actions)
+      ? identityRecovery.actions.length
+      : 0,
+    identityRecoveryStatus,
     observationCount: Number(evidence.observationCount) || 0,
     rejectedObservationCount: Number(evidence.rejectedObservationCount) || 0,
     sourceAnchorObservationCount:

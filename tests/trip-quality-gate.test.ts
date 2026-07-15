@@ -138,4 +138,41 @@ export default function run() {
     "Semantic audit found 2 P0 issues and 1 P1 issue.",
     "Structured review found 6 hard warnings.",
   ]);
+
+  const repairedReport = {
+    ...assessment.report,
+    canonicalization: {
+      ...assessment.report.canonicalization,
+      identityRepairCount: 3,
+      identityRecoveryStatus: "repaired" as const,
+    },
+    diagnostics: [],
+    structured: {
+      ...assessment.report.structured,
+      hardWarnings: 0,
+      openQuestions: 0,
+      quietWarnings: 0,
+    },
+    warnings: [],
+  };
+  const repairedAssessment = assessTripAuditReport(repairedReport);
+  const repairedNotices = createTripExtractionAuditNotices({
+    hasRecords: true,
+    latestRun: null,
+    report: repairedReport,
+    reportRun: null,
+    snapshot: {
+      createdAt: "2026-07-15T00:00:00.000Z",
+      id: "snapshot-repaired",
+      processingRunId: "run-repaired",
+      source: "extraction",
+    },
+  });
+
+  assert.equal(repairedAssessment.disposition, "clean");
+  assert.ok(
+    repairedNotices.includes(
+      "Canonical identity was repaired backstage with 3 deterministic repair actions."
+    )
+  );
 }

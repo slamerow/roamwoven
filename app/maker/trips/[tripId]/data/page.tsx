@@ -1084,6 +1084,10 @@ function getExtractionErrorMessage(error?: string) {
     return "This earlier run stopped at a quality check before its draft was saved. Review remains open as the recovery surface; retry once to create a draft under the new non-blocking review policy.";
   }
 
+  if (error === "assembly-recovery-required") {
+    return "Roamwoven kept your source materials but could not safely assemble this draft during its automatic recovery check. Nothing was published. Retry once; if it repeats, support can recover the run without asking you to upload everything again.";
+  }
+
   return "Parsing failed. Review the failure detail below before retrying.";
 }
 
@@ -1105,6 +1109,14 @@ function getFriendlyRunFailureMessage(errorMessage: string | null) {
 
   if (errorMessage.includes("unresolved P0 extraction diagnostics")) {
     return "This earlier build stopped at a quality check. Retry once to create a reviewable draft; future quality findings will continue into Review instead of stopping the build.";
+  }
+
+  if (
+    errorMessage.includes(
+      "could not safely recover the canonical assembly"
+    )
+  ) {
+    return "Roamwoven kept your source materials but could not safely assemble the draft during its automatic recovery check. Retry once; if it repeats, support can recover the run without a new upload.";
   }
 
   return "Roamwoven could not finish this draft. Try again, and contact support if it happens twice.";

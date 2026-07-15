@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import {
   CanonicalIdentityInvariantError,
 } from "@/lib/extraction/canonical-identity";
+import {
+  assembleCanonicalTripDraft,
+  CanonicalAssemblyRecoveryError,
+} from "@/lib/extraction/canonical-trip-assembly";
 import { finalizeCanonicalTripDraft } from "@/lib/extraction/canonical-trip-finalization";
 import {
   clusterExtractedEvidence,
@@ -76,6 +80,114 @@ function identityFixture(reverseActivities = false) {
 }
 
 export default async function run() {
+  await test("assembly repairs malformed identity backstage before compilation", () => {
+    const evidence = identityFixture();
+    const draft = clone(evidence.draft) as Record<string, unknown>;
+    const activities = draft.activities as Array<Record<string, unknown>>;
+    activities.push(clone(activities[0]));
+    const manifest = draft._evidence as Record<string, unknown>;
+    manifest.canonicalEntityIds = [
+      ...(manifest.canonicalEntityIds as string[]),
+      activities[0]._canonicalId as string,
+    ];
+
+    const assembly = assembleCanonicalTripDraft({
+      draft,
+      evidencePieces: evidence.pieces,
+      fallbackTripName: "Identity test",
+      tripId: "identity-recovery",
+    });
+
+    assert.equal(assembly.recovery.status, "repaired");
+    assert.equal(assembly.recovery.attempted, true);
+    assert.ok(
+      assembly.recovery.actions.includes(
+        "rebuilt_canonical_outputs_from_evidence"
+      )
+    );
+    assert.equal(assembly.records.items.length, 2);
+    assert.equal(
+      new Set(assembly.records.items.map((item) => item.canonicalId)).size,
+      2
+    );
+  });
+
+  await test("assembly regenerates a missing review identity without maker intervention", () => {
+    const evidence = identityFixture();
+    const draft = clone(evidence.draft) as Record<string, unknown>;
+    const detail = (draft.missingDetails as Array<Record<string, unknown>>)[0];
+    delete detail._canonicalReviewId;
+
+    const assembly = assembleCanonicalTripDraft({
+      draft,
+      evidencePieces: evidence.pieces,
+      fallbackTripName: "Identity test",
+      tripId: "identity-review-recovery",
+    });
+    const question = assembly.records.reviewQuestions[0];
+    const museum = assembly.records.items.find(
+      (item) => item.title === "Beta Museum"
+    );
+
+    assert.equal(assembly.recovery.status, "repaired");
+    assert.ok(question);
+    assert.ok(museum);
+    assert.equal(question.subjectCanonicalId, museum.canonicalId);
+  });
+
+  await test("assembly quarantines conflicting artifact identity after bounded repair", () => {
+    const evidence = identityFixture();
+    const piece = evidence.pieces.find(
+      (candidate) => candidate.outputEligible && candidate.kind === "activity"
+    );
+    assert.ok(piece);
+    const conflictingPiece = {
+      ...clone(piece),
+      payload: {
+        ...clone(piece.payload),
+        title: "Conflicting activity",
+      },
+    };
+
+    assert.throws(
+      () => assembleCanonicalTripDraft({
+        draft: evidence.draft,
+        evidencePieces: [...evidence.pieces, conflictingPiece],
+        fallbackTripName: "Identity test",
+        tripId: "identity-conflict-recovery",
+      }),
+      (error: unknown) =>
+        error instanceof CanonicalAssemblyRecoveryError &&
+        error.details.stage === "repair"
+    );
+  });
+
+  await test("assembly preserves lineage by quarantining non-identical duplicate artifacts", () => {
+    const evidence = identityFixture();
+    const piece = evidence.pieces.find(
+      (candidate) => candidate.outputEligible && candidate.kind === "activity"
+    );
+    assert.ok(piece);
+    const conflictingLineagePiece = clone(piece);
+    conflictingLineagePiece.observationIds = [
+      ...conflictingLineagePiece.observationIds,
+      "observation-not-present-on-original",
+    ];
+
+    assert.throws(
+      () =>
+        assembleCanonicalTripDraft({
+          draft: evidence.draft,
+          evidencePieces: [...evidence.pieces, conflictingLineagePiece],
+          fallbackTripName: "Identity test",
+          tripId: "identity-lineage-conflict",
+        }),
+      (error: unknown) =>
+        error instanceof CanonicalAssemblyRecoveryError &&
+        error.details.stage === "repair"
+    );
+  });
+
   await test("canonical identity does not depend on model output order", () => {
     const forward = createStructuredTripRecordsFromDraft({
       draft: identityFixture().draft,
