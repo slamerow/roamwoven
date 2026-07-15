@@ -834,7 +834,7 @@ export default async function run() {
     );
   });
 
-  await test("explicit same-site grouping creates one Call without swallowing unrelated places", () => {
+  await test("explicit same-site grouping preserves ordered children and independently timed stops", () => {
     const decisionId = "group_test_schonbrunn";
     const result = clusterExtractedEvidence({
       groupingDecisions: [{
@@ -896,12 +896,31 @@ export default async function run() {
       missingDetails: Array<{ prompt?: string }>;
     };
 
+    const roots = draft.activities.filter(
+      (item) => !item._canonicalParentPieceId
+    );
+    const children = draft.activities.filter(
+      (item) => item._canonicalParentPieceId
+    );
     assert.deepEqual(
-      draft.activities.map((item) => item.title),
-      ["Schönbrunn Palace complex", "Hundertwasser House"]
+      roots.map((item) => item.title).sort(),
+      [
+        "Apple Strudel Show",
+        "Hundertwasser House",
+        "Schönbrunn Palace complex",
+      ].sort()
+    );
+    assert.deepEqual(
+      children.map((item) => item.title),
+      ["Schönbrunn Palace complex", "Schönbrunn gardens"]
     );
     assert.equal(
-      draft.missingDetails.filter((item) => /We grouped/i.test(item.prompt ?? "")).length,
+      String(roots.find((item) => item.title === "Schönbrunn Palace complex")?.description ?? "")
+        .includes("Walk the gardens"),
+      false
+    );
+    assert.equal(
+      draft.missingDetails.filter((item) => /one activity card/i.test(item.prompt ?? "")).length,
       1
     );
   });
@@ -950,8 +969,68 @@ export default async function run() {
       ["Albertina", "Prater Ferris Wheel"]
     );
     assert.equal(
-      draft.missingDetails.some((item) => /We grouped/i.test(item.prompt ?? "")),
+      draft.missingDetails.some((item) => /one activity card/i.test(item.prompt ?? "")),
       false
+    );
+  });
+
+  await test("a booked same-site parent keeps its booking while owning untimed stops", () => {
+    const decisionId = "group_booked_parent";
+    const result = clusterExtractedEvidence({
+      groupingDecisions: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
+        claim: "The booking covers one same-site palace-complex visit.",
+        decisionId,
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "River Palace visit",
+        source: "canonical_resolver",
+      }],
+      sourceTransportAnchors: [],
+      stages: [stage("booked parent", emptyStage({
+        activities: [
+          {
+            ...activity({
+              date: "2031-04-02",
+              description: "Booked palace-complex visit covering the grounds.",
+              sourceFilename: "booking.pdf",
+              startTime: "09:30",
+              title: "River Palace",
+            }),
+            confirmation: "PALACE123",
+            _resolverCandidateId: "stage-1-item-1",
+          },
+          {
+            ...activity({
+              date: "2031-04-02",
+              sourceFilename: "itinerary.txt",
+              title: "River Palace gardens",
+            }),
+            _resolverCandidateId: "stage-1-item-2",
+          },
+          {
+            ...activity({
+              date: "2031-04-02",
+              sourceFilename: "itinerary.txt",
+              title: "River Palace gallery",
+            }),
+            _resolverCandidateId: "stage-1-item-3",
+          },
+        ],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const parent = draft.activities.find((item) => item.title === "River Palace");
+    const children = draft.activities.filter((item) => item._canonicalParentPieceId);
+
+    assert.equal(parent?._canonicalParentPieceId, undefined);
+    assert.equal(parent?.startTime, "09:30");
+    assert.equal(parent?.confirmation, "PALACE123");
+    assert.deepEqual(
+      children.map((item) => item.title),
+      ["River Palace gardens", "River Palace gallery"]
     );
   });
 
@@ -1259,5 +1338,208 @@ export default async function run() {
     );
 
     assert.match(description, /secretword|1234/);
+  });
+
+  await test("an undated committed activity gets one provisional city date and one date question", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "Rome plans",
+        source: "model_chunk",
+        sourceText: "Rome\nWe definitely want to visit the Borghese Gallery.",
+        stage: emptyStage({
+          activities: [{
+            category: "art_culture",
+            city: "Rome",
+            date: null,
+            description: "We definitely want to visit this while in Rome.",
+            evidenceRole: "atomic_candidate",
+            itemType: "activity",
+            sourceSectionType: "unknown",
+            title: "Borghese Gallery",
+          }],
+          places: [{
+            arriveDate: "2031-04-01",
+            city: "Rome",
+            leaveDate: "2031-04-05",
+          }],
+        }),
+      }],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const activity = draft.activities.find(
+      (item) => item.title === "Borghese Gallery"
+    );
+    const question = draft.missingDetails.find(
+      (item) => item.relatedTitle === "Borghese Gallery"
+    );
+
+    assert.equal(activity?.date, "2031-04-02");
+    assert.equal(question?.answerType, "date");
+    assert.equal(question?.guessedValue, "2031-04-02");
+    assert.equal(question?.answerMin, "2031-04-01");
+    assert.equal(question?.answerMax, "2031-04-05");
+    assert.equal(question?.prompt, "Which day does Borghese Gallery happen?");
+  });
+
+  await test("a fixed alternative slot becomes one single-choice question", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("museum choice", emptyStage({
+        activities: [activity({
+          date: "2031-04-02",
+          description: "Choose one museum for the morning slot.",
+          sourceFilename: "itinerary.txt",
+          title: "Morning: Museum X or Museum Y",
+        })],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const question = draft.missingDetails.find(
+      (item) => item.targetField === "title"
+    );
+
+    assert.equal(draft.activities.length, 1);
+    assert.equal(question?.answerType, "single_choice");
+    assert.deepEqual(question?.answerOptions, [
+      { label: "Museum X", value: "Museum X" },
+      { label: "Museum Y", value: "Museum Y" },
+    ]);
+  });
+
+  await test("a timed generic meal stays visible and asks for only the venue", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("lunch slot", emptyStage({
+        activities: [activity({
+          date: "2031-04-02",
+          sourceFilename: "itinerary.txt",
+          startTime: "13:00",
+          title: "Lunch",
+        })],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.activities.length, 1);
+    assert.equal(draft.missingDetails[0]?.targetField, "locationName");
+    assert.equal(
+      draft.missingDetails[0]?.prompt,
+      "Do you have a specific lunch place for 1:00 PM, or should we keep it nearby?"
+    );
+  });
+
+  await test("isolated generic meals and ambiguous bare terms stay out of the app with lineage", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("loose notes", emptyStage({
+        activities: [
+          {
+            category: "food_dining",
+            city: null,
+            date: null,
+            description: null,
+            evidenceRole: "atomic_candidate",
+            itemType: "activity",
+            sourceSectionType: "unknown",
+            title: "Lunch",
+          },
+          {
+            category: "food_dining",
+            city: null,
+            date: null,
+            description: null,
+            evidenceRole: "city_note_candidate",
+            itemType: "note",
+            sourceSectionType: "unknown",
+            title: "Borkonya",
+          },
+        ],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    });
+    const draft = result.draft as {
+      _evidence: { dispositions: Array<Record<string, unknown>> };
+      activities: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.activities.length, 0);
+    assert.equal(draft._evidence.dispositions.length, result.observations.length);
+    assert.equal(
+      new Set(
+        draft._evidence.dispositions.map((item) => item.observationId)
+      ).size,
+      result.observations.length
+    );
+    assert.ok(
+      draft._evidence.dispositions.some(
+        (item) => item.reasonCode === "needs_identity_enrichment"
+      )
+    );
+  });
+
+  await test("explicit cancellations and replacements become concise Calls", () => {
+    const cancelled = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("cancellation", emptyStage({
+        activities: [
+          activity({
+            date: "2031-04-02",
+            description: "This museum booking was cancelled.",
+            sourceFilename: "update.txt",
+            title: "Museum booking",
+          }),
+          activity({
+            date: "2031-04-02",
+            description: "Walk through the old town.",
+            sourceFilename: "itinerary.txt",
+            title: "Old Town walk",
+          }),
+        ],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    }).draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    assert.deepEqual(
+      cancelled.activities.map((item) => item.title),
+      ["Old Town walk"]
+    );
+    assert.equal(cancelled.missingDetails.length, 1);
+    assert.equal(cancelled.missingDetails[0]?._canonicalReviewDisposition, "call");
+    assert.match(String(cancelled.missingDetails[0]?.prompt), /left out Museum booking/i);
+
+    const updated = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("replacement", emptyStage({
+        activities: [activity({
+          date: "2031-04-02",
+          description: "Updated time: the museum now starts at 3 PM.",
+          sourceFilename: "update.txt",
+          startTime: "15:00",
+          title: "Museum booking",
+        })],
+      }))],
+      tripOverview: { dateRange: "April 1-5, 2031" },
+    }).draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    assert.equal(updated.activities.length, 1);
+    assert.equal(updated.missingDetails.length, 1);
+    assert.match(String(updated.missingDetails[0]?.prompt), /updated source details/i);
   });
 }

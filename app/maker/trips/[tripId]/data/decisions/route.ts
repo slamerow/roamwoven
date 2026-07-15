@@ -209,14 +209,15 @@ export async function POST(
       if (subjectType !== "review_question") {
         return respond({ error: "decision-invalid" });
       }
+      const answerValue = String(formData.get("answerValue") ?? "").trim();
+      if (!answerValue) {
+        return respond({ error: "decision-invalid" });
+      }
 
       await saveTripReviewDecision({
         action,
-        answerValue:
-          String(formData.get("answerValue") ?? "").trim() ||
-          "Marked answered in review.",
+        answerValue,
         note,
-        resolvedAction: "confirm",
         subjectId,
         subjectType,
         tripId,

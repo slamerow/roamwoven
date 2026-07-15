@@ -27,6 +27,8 @@ const canonicalizationLabels: Array<[
   string,
 ]> = [
   ["observationCount", "Observations"],
+  ["dispositionCount", "Dispositioned"],
+  ["undisposedObservationCount", "Undisposed"],
   ["canonicalPieceCount", "Output pieces"],
   ["clusteredObservationCount", "Clustered sightings"],
   ["contextObservationCount", "Context only"],
@@ -387,8 +389,12 @@ export default async function TripExtractionAuditPage({
             <Section title="Structured output">
               <div className="grid gap-3 md:grid-cols-4">
                 <SmallMetric
-                  label="Activities"
+                  label="Activity cards"
                   value={report.structured.activeActivities}
+                />
+                <SmallMetric
+                  label="Grouped stops"
+                  value={report.structured.groupedStops}
                 />
                 <SmallMetric label="Notes" value={report.structured.activeNotes} />
                 <SmallMetric label="Stays" value={report.structured.stays} />

@@ -453,6 +453,7 @@ function createItemRecords({
     const finalDate = date;
     const leg = candidateLeg;
     const categoryId = exactCanonicalCategoryId(activity);
+    const parentCanonicalId = getString(activity, "_canonicalParentPieceId");
 
     return {
       address: getString(activity, "address"),
@@ -471,7 +472,9 @@ function createItemRecords({
       legId: leg?.id ?? null,
       locationName: null,
       longitude: null,
-      parentItemId: null,
+      parentItemId: parentCanonicalId
+        ? `${tripId}-item-${parentCanonicalId}`
+        : null,
       reviewRequired:
         itemType === "note" ? false : recoveryRequired || !finalDate,
       sortOrder: index,
@@ -805,8 +808,26 @@ function assertCanonicalProjectionInvariant({
         getString(source, "description"),
         record.description
       );
+      const parentCanonicalId = getString(source, "_canonicalParentPieceId");
+      expect(
+        `activity[${index}].parentItemId`,
+        parentCanonicalId ? `${records.trip.id}-item-${parentCanonicalId}` : null,
+        record.parentItemId
+      );
     }
   );
+
+  const itemIds = new Set(records.items.map((item) => item.id));
+  records.items.forEach((item) => {
+    if (item.parentItemId && !itemIds.has(item.parentItemId)) {
+      violations.push(
+        `item ${item.id} targets missing parent ${item.parentItemId}`
+      );
+    }
+    if (item.parentItemId === item.id) {
+      violations.push(`item ${item.id} cannot parent itself`);
+    }
+  });
 
   const reviewByCanonicalId = new Map(
     records.reviewQuestions.map((question) => [question.canonicalId, question])

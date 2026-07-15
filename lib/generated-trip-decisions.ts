@@ -644,10 +644,41 @@ function patchAnswerTarget({
     subjectType: question.subjectType,
     targetField: question.targetField,
   });
+  const allowedOptions = question.answerOptions ?? [];
+  const optionConstrained =
+    question.answerType === "choice" ||
+    question.answerType === "single_choice";
+  const validOption =
+    !optionConstrained ||
+    (allowedOptions.length > 0 &&
+      allowedOptions.some((option) => option.value === value));
+  const validDate =
+    question.answerType !== "date" ||
+    Boolean(
+      value &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+        (!question.answerMin || value >= question.answerMin) &&
+        (!question.answerMax || value <= question.answerMax)
+    );
+  const validYesNo =
+    question.answerType !== "yes_no" ||
+    value === "Yes" ||
+    value === "No";
+  const validTime =
+    question.answerType !== "time" ||
+    Boolean(value && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value));
+
+  if (!validOption || !validDate || !validYesNo || !validTime) {
+    return { applied: false, records };
+  }
+
   const missingStayRecords = value
     ? applyMissingStayAnswer({ question, records, value })
     : null;
-  if (missingStayRecords) return missingStayRecords;
+  if (missingStayRecords) {
+    const legExists = records.legs.some((leg) => leg.id === question.subjectId);
+    return { applied: legExists, records: missingStayRecords };
+  }
 
   if (
     !value ||
@@ -655,7 +686,21 @@ function patchAnswerTarget({
     !question.subjectId ||
     !canPatchTargetField(question.subjectType, targetField)
   ) {
-    return records;
+    return { applied: false, records };
+  }
+
+  const targetExists =
+    question.subjectType === "item"
+      ? records.items.some((record) => record.id === question.subjectId)
+      : question.subjectType === "leg"
+        ? records.legs.some((record) => record.id === question.subjectId)
+        : question.subjectType === "stay"
+          ? records.stays.some((record) => record.id === question.subjectId)
+          : question.subjectType === "transport"
+            ? records.transport.some((record) => record.id === question.subjectId)
+            : false;
+  if (!targetExists) {
+    return { applied: false, records };
   }
 
   const changes = {
@@ -664,11 +709,15 @@ function patchAnswerTarget({
     status: "confirmed",
   };
 
-  return applyToRecord(records, question.subjectType, question.subjectId, {
+  const updated = applyToRecord(records, question.subjectType, question.subjectId, {
     item: (record) =>
       ({
         ...record,
         ...changes,
+        ...(targetField === "locationName" && value === "Somewhere nearby" &&
+        /^(?:breakfast|brunch|coffee|dinner|lunch|meal)$/i.test(record.title)
+          ? { title: `${record.title} nearby` }
+          : {}),
         ...(targetField === "description"
           ? { description: patchDescriptionAnswer(record, value) }
           : {}),
@@ -684,6 +733,8 @@ function patchAnswerTarget({
           : {}),
       }) as TripTransportRecord,
   });
+
+  return { applied: true, records: updated };
 }
 
 function applyAnswerQuestion(
@@ -693,22 +744,53 @@ function applyAnswerQuestion(
   const question = records.reviewQuestions.find(
     (item) => item.id === decision.subjectId
   );
-  const updatedQuestions = applyToRecord(records, "review_question", decision.subjectId, {
+  if (!question) {
+    return records;
+  }
+
+  const patched = patchAnswerTarget({
+    decision,
+    question,
+    records,
+  });
+  const resolvedActionApplied = (() => {
+    if (!decision.resolvedAction) return false;
+    const item = question.subjectType === "item"
+      ? records.items.find((record) => record.id === question.subjectId)
+      : null;
+
+    if (
+      decision.resolvedAction === "combine" ||
+      decision.resolvedAction === "move_to_city_tip"
+    ) {
+      return Boolean(item?.parentItemId && item.status === "ignored");
+    }
+    if (decision.resolvedAction === "delete") {
+      return Boolean(item?.status === "ignored");
+    }
+    if (decision.resolvedAction === "confirm") {
+      return Boolean(item?.status === "confirmed" && !item.reviewRequired);
+    }
+
+    return false;
+  })();
+  if (!patched.applied && !resolvedActionApplied) {
+    return records;
+  }
+
+  return applyToRecord(
+    patched.applied ? patched.records : records,
+    "review_question",
+    decision.subjectId,
+    {
     question: (question) => ({
       ...question,
       answerValue: decision.answerValue,
       resolvedAt: decision.createdAt,
       status: "answered",
     }),
-  });
-
-  return question
-    ? patchAnswerTarget({
-        decision,
-        question,
-        records: updatedQuestions,
-      })
-    : updatedQuestions;
+    }
+  );
 }
 
 export function applyReviewDecision(

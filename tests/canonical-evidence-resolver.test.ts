@@ -8,6 +8,9 @@ import {
   clusterExtractedEvidence,
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
+import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
+import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try {
@@ -65,6 +68,8 @@ function cluster({
     tripOverview: { dateRange: "April 1-4, 2031" },
   }).draft as {
     activities: Array<{
+      _canonicalParentPieceId?: string;
+      description?: string | null;
       itemType?: string | null;
       startTime?: string | null;
       title: string;
@@ -108,11 +113,47 @@ export default async function run() {
     });
     const draft = cluster(application);
 
-    assert.deepEqual(draft.activities.map((item) => item.title), ["Schonbrunn Palace"]);
+    const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
+    const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
+    assert.deepEqual(roots.map((item) => item.title), ["Schonbrunn Palace"]);
+    assert.equal(stops.length, 6);
+    assert.deepEqual(stops.map((item) => item.title), titles);
     assert.equal(
-      draft.missingDetails.filter((detail) => /We grouped/i.test(detail.prompt ?? "")).length,
+      roots[0]?.description?.includes("Gloriette") ?? false,
+      false
+    );
+    assert.equal(
+      draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? "")).length,
       1
     );
+  });
+
+  await test("first-class grouping compiles to one traveler card with ordered stops", () => {
+    const titles = ["Schonbrunn Palace", "Gloriette", "Palm House"];
+    const input = stage(titles, titles.join("\n"));
+    const draft = cluster(applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
+        claim: "The named stops form one palace-complex visit.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Schonbrunn Palace",
+      }],
+      roleDecisions: noRoleDecisions,
+    }));
+    const records = createStructuredTripRecordsFromDraft({
+      draft,
+      fallbackTripName: "Vienna",
+      tripId: "trip-first-class-group",
+    });
+    const traveler = createTravelerAppViewModel(records);
+
+    assert.equal(records.items.length, 4);
+    assert.equal(records.items.filter((item) => !item.parentItemId).length, 1);
+    assert.equal(records.items.filter((item) => item.parentItemId).length, 3);
+    assert.equal(traveler.cards.length, 1);
+    assert.deepEqual(traveler.cards[0]?.stops.map((stop) => stop.title), titles);
+    assert.equal(createGeneratedTripSummaryView(records).counts.activities, 1);
   });
 
   await test("an inconclusive relationship preserves a clean three-stop day", () => {
@@ -153,7 +194,7 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
-  await test("one timed child anchors a verified continuous grouping", () => {
+  await test("an independently timed child stays outside a continuous grouping", () => {
     const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
     const input = stage(titles, titles.join("\n"));
     const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
@@ -170,10 +211,19 @@ export default async function run() {
     });
     const draft = cluster(application);
 
-    assert.deepEqual(draft.activities.map((item) => item.title), [titles[0]]);
-    assert.equal(draft.activities[0]?.startTime, "14:30");
+    const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
+    const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
+    assert.deepEqual(
+      roots.map((item) => item.title).sort(),
+      [titles[0], titles[1]].sort()
+    );
     assert.equal(
-      draft.missingDetails.filter((detail) => /We grouped/i.test(detail.prompt ?? "")).length,
+      roots.find((item) => item.title === titles[1])?.startTime,
+      "14:30"
+    );
+    assert.deepEqual(stops.map((item) => item.title), [titles[0], titles[2]]);
+    assert.equal(
+      draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? "")).length,
       1
     );
   });
@@ -283,9 +333,12 @@ export default async function run() {
     );
     const draft = cluster(application);
 
-    assert.deepEqual(draft.activities.map((item) => item.title), ["Schonbrunn Palace"]);
+    const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
+    const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
+    assert.deepEqual(roots.map((item) => item.title), ["Schonbrunn Palace"]);
+    assert.equal(stops.length, 4);
     assert.equal(
-      draft.missingDetails.filter((detail) => /We grouped/i.test(detail.prompt ?? ""))
+      draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? ""))
         .length,
       1
     );
@@ -295,6 +348,42 @@ export default async function run() {
       "stage-2-item-3",
       "stage-2-item-4",
     ]);
+  });
+
+  await test("a source-authored dated route needs no assembly Call", () => {
+    const sourceText = ["Old Town walk", "Charles Bridge", "Old Town Square"].join("\n");
+    const proposalStage = stage(["Old Town walk"], sourceText);
+    proposalStage.sourceUploadId = "old-town-source";
+    const proposal = (proposalStage.stage as {
+      activities: Array<Record<string, unknown>>;
+    }).activities[0];
+    proposal.evidenceRole = "grouping_proposal";
+    proposal.sourceSectionType = "dated_itinerary";
+    const stopsStage = stage(["Charles Bridge", "Old Town Square"], sourceText);
+    stopsStage.sourceUploadId = "old-town-source";
+    const draft = cluster(applyCanonicalEvidenceResolution(
+      [proposalStage, stopsStage],
+      {
+        groupings: [{
+          candidateIds: ["stage-1-item-1", "stage-2-item-1", "stage-2-item-2"],
+          claim: "The source explicitly presents one walking route.",
+          confidence: "high",
+          parentCandidateId: "stage-1-item-1",
+          parentTitle: "Old Town walk",
+        }],
+        roleDecisions: noRoleDecisions,
+      }
+    ));
+
+    assert.equal(
+      draft.activities.filter((item) => !item._canonicalParentPieceId).length,
+      1
+    );
+    assert.equal(
+      draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? ""))
+        .length,
+      0
+    );
   });
 
   await test("candidate count cannot silently dead-path a late grouping", () => {

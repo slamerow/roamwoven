@@ -6,10 +6,12 @@ export type TripExtractionFingerprints = {
   activeActivities: string[];
   activeNotes: string[];
   calls: string[];
+  groupedStops: string[];
   counts: {
     activeActivities: number;
     activeNotes: number;
     calls: number;
+    groupedStops: number;
     openQuestions: number;
     stays: number;
     transport: number;
@@ -20,13 +22,14 @@ export type TripExtractionFingerprints = {
     activeActivities: string;
     activeNotes: string;
     calls: string;
+    groupedStops: string;
     openQuestions: string;
     stays: string;
     transport: string;
   };
   stays: string[];
   transport: string[];
-  version: 1;
+  version: 2;
 };
 
 function clean(value: string | null | undefined) {
@@ -65,7 +68,12 @@ export function createTripExtractionFingerprints(
 ): TripExtractionFingerprints {
   const activeActivities = sortKeys(
     records.items
-      .filter((item) => item.status !== "ignored" && item.itemType === "activity")
+      .filter(
+        (item) =>
+          item.status !== "ignored" &&
+          item.itemType === "activity" &&
+          !item.parentItemId
+      )
       .map((item) =>
         joinKey([
           item.date,
@@ -74,6 +82,29 @@ export function createTripExtractionFingerprints(
           item.endTime,
           item.categoryId,
           item.locationName,
+          item.status,
+        ])
+      )
+  );
+  const groupedStops = sortKeys(
+    records.items
+      .filter(
+        (item) =>
+          item.status !== "ignored" &&
+          item.itemType === "activity" &&
+          Boolean(item.parentItemId)
+      )
+      .map((item) =>
+        joinKey([
+          item.parentItemId,
+          String(item.sortOrder),
+          item.date,
+          item.title,
+          item.startTime,
+          item.endTime,
+          item.categoryId,
+          item.locationName,
+          item.description,
           item.status,
         ])
       )
@@ -155,6 +186,7 @@ export function createTripExtractionFingerprints(
     activeActivities,
     activeNotes,
     calls,
+    groupedStops,
     openQuestions,
     stays,
     transport,
@@ -166,6 +198,7 @@ export function createTripExtractionFingerprints(
       activeActivities: activeActivities.length,
       activeNotes: activeNotes.length,
       calls: calls.length,
+      groupedStops: groupedStops.length,
       openQuestions: openQuestions.length,
       stays: stays.length,
       transport: transport.length,
@@ -175,10 +208,11 @@ export function createTripExtractionFingerprints(
       activeActivities: hashValue(activeActivities),
       activeNotes: hashValue(activeNotes),
       calls: hashValue(calls),
+      groupedStops: hashValue(groupedStops),
       openQuestions: hashValue(openQuestions),
       stays: hashValue(stays),
       transport: hashValue(transport),
     },
-    version: 1,
+    version: 2,
   };
 }

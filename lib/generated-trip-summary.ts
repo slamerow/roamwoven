@@ -1203,31 +1203,32 @@ export function createGeneratedTripSummaryView(
   records: StructuredTripRecords
 ): GeneratedTripSummaryView {
   const activeItems = records.items.filter((item) => isActiveStatus(item.status));
+  const primaryItems = activeItems.filter((item) => !item.parentItemId);
   const review = getStructuredReviewCount(records);
-  const days = createSummaryDays(records, activeItems);
+  const days = createSummaryDays(records, primaryItems);
   const warnings = createSummaryWarnings({ days, records });
   const hardWarnings = warnings.filter((warning) => warning.severity === "hard");
 
   return {
     counts: {
-      activities: activeItems.filter((item) => item.itemType === "activity").length,
+      activities: primaryItems.filter((item) => item.itemType === "activity").length,
       places: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
       plans: countTimelinePlans(days),
       privateDetails: records.privateDetails.filter((detail) =>
         isProtectedVisibility(detail.visibility)
       ).length,
-      foodAndDining: activeItems.filter((item) => item.categoryId === "food_dining")
+      foodAndDining: primaryItems.filter((item) => item.categoryId === "food_dining")
         .length,
       review,
       stays: records.stays.filter((stay) => isActiveStatus(stay.status)).length,
       transport: records.transport.filter((item) => isActiveStatus(item.status))
         .length,
     },
-    cityNotes: createSummaryCityNotes(records, activeItems),
+    cityNotes: createSummaryCityNotes(records, primaryItems),
     dateRange: formatDateRange(records),
     days,
     destination: formatDestination(records),
-    sections: createSummarySections(records, activeItems, review),
+    sections: createSummarySections(records, primaryItems, review),
     isSemanticallyClean: review === 0 && hardWarnings.length === 0,
     title: records.trip.travelerAppTitle,
     warnings,

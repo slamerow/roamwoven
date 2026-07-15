@@ -11,6 +11,8 @@ import {
   canonicalPiecePublicPayload,
   EVIDENCE_CLUSTER_VERSION,
   type CanonicalEvidencePiece,
+  type EvidenceObservation,
+  type EvidenceObservationDisposition,
 } from "@/lib/extraction/evidence-clustering";
 import {
   CanonicalProjectionInvariantError,
@@ -123,6 +125,83 @@ function sameOrderedValues(left: string[], right: string[]) {
   );
 }
 
+function dispositionManifestViolations({
+  evidence,
+  pieces,
+}: {
+  evidence: Record<string, unknown>;
+  pieces: CanonicalEvidencePiece[];
+}) {
+  const violations: string[] = [];
+  const observationIds = getArray(evidence, "observationIds").filter(
+    (value): value is string => typeof value === "string" && Boolean(value)
+  );
+  const dispositions = getArray(evidence, "dispositions").map(asRecord);
+  const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
+  const dispositionIds = dispositions.map((item) =>
+    getString(item, "observationId") ?? ""
+  );
+
+  if (!sameOrderedValues(dispositionIds, observationIds)) {
+    violations.push(
+      "evidence disposition manifest does not cover every observation exactly once"
+    );
+  }
+
+  dispositions.forEach((disposition, index) => {
+    const pieceId = getString(disposition, "canonicalPieceId");
+    const outcome = getString(disposition, "outcome");
+    const reason = getString(disposition, "reason");
+    const reasonCode = getString(disposition, "reasonCode");
+    const piece = pieceId ? pieceById.get(pieceId) : null;
+
+    if (!reason || !reasonCode || !outcome) {
+      violations.push(`evidence disposition[${index}] is incomplete`);
+      return;
+    }
+    if (pieceId && !piece) {
+      violations.push(
+        `evidence disposition[${index}] targets missing piece ${pieceId}`
+      );
+      return;
+    }
+    if (
+      (outcome === "canonical_entity" || outcome === "declared_detail") &&
+      !piece?.outputEligible
+    ) {
+      violations.push(
+        `evidence disposition[${index}] claims a non-output canonical owner`
+      );
+    }
+  });
+
+  return violations;
+}
+
+function rebuildDispositionManifest(
+  observationIds: string[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  return observationIds.map((observationId) => {
+    const owners = pieces.filter((piece) =>
+      piece.observationIds.includes(observationId)
+    );
+    const owner = owners.find((piece) => piece.outputEligible) ?? owners[0] ?? null;
+
+    return {
+      canonicalPieceId: owner?.id ?? null,
+      observationId,
+      outcome: owner?.outputEligible ? "canonical_entity" : "evidence_only",
+      reason: owner?.outputEligible
+        ? "Rebuilt from the canonical evidence owner during bounded assembly recovery."
+        : "Retained as evidence-only lineage during bounded assembly recovery.",
+      reasonCode: owner?.outputEligible
+        ? "canonical_entity"
+        : "superseded_or_duplicate",
+    };
+  });
+}
+
 function artifactProjectionViolations({
   draft,
   pieces,
@@ -131,7 +210,7 @@ function artifactProjectionViolations({
   pieces: CanonicalEvidencePiece[];
 }) {
   const record = asRecord(draft);
-  const evidence = getObject(record, "_evidence");
+  const evidence = asRecord(getObject(record, "_evidence"));
   const violations: string[] = [];
   const artifactPieceIds = pieces.map((piece) => piece.id);
   const artifactEntityIds = pieces
@@ -154,6 +233,7 @@ function artifactProjectionViolations({
       "draft canonical entity manifest does not match output-eligible evidence artifacts"
     );
   }
+  violations.push(...dispositionManifestViolations({ evidence, pieces }));
 
   for (const { collection, kinds } of PIECE_COLLECTIONS) {
     const expected = pieces.filter(
@@ -272,6 +352,113 @@ export function prepareCanonicalEvidencePieces(
   }
 }
 
+export function materializeCanonicalEvidenceObservations({
+  draft,
+  observations,
+}: {
+  draft: unknown;
+  observations: EvidenceObservation[];
+}) {
+  const evidence = asRecord(getObject(asRecord(draft), "_evidence"));
+  const manifestObservationIds = getArray(evidence, "observationIds").filter(
+    (value): value is string => typeof value === "string" && Boolean(value)
+  );
+  const observationIds = observations.map((observation) => observation.id);
+  const dispositions = getArray(evidence, "dispositions").map(asRecord);
+  const violations: string[] = [];
+
+  if (!sameOrderedValues(observationIds, manifestObservationIds)) {
+    violations.push(
+      "persisted evidence observations do not match the validated disposition manifest"
+    );
+  }
+  if (dispositions.length !== observations.length) {
+    violations.push(
+      "validated disposition count does not match persisted evidence observations"
+    );
+  }
+
+  const dispositionByObservationId = new Map<
+    string,
+    EvidenceObservationDisposition
+  >();
+  const validReasonCodes = new Set<
+    EvidenceObservationDisposition["reasonCode"]
+  >([
+    "attached_detail",
+    "cancelled",
+    "canonical_entity",
+    "grouped_child",
+    "needs_identity_enrichment",
+    "rejected",
+    "source_context",
+    "superseded",
+    "superseded_or_duplicate",
+    "weak_source_anchor",
+  ]);
+  for (const disposition of dispositions) {
+    const observationId = getString(disposition, "observationId");
+    const canonicalPieceId = getString(disposition, "canonicalPieceId");
+    const outcome = getString(disposition, "outcome");
+    const reason = getString(disposition, "reason");
+    const reasonCode = getString(disposition, "reasonCode");
+
+    if (
+      !observationId ||
+      !reason ||
+      !validReasonCodes.has(
+        reasonCode as EvidenceObservationDisposition["reasonCode"]
+      ) ||
+      (outcome !== "canonical_entity" &&
+        outcome !== "declared_detail" &&
+        outcome !== "evidence_only" &&
+        outcome !== "maker_decision" &&
+        outcome !== "sensitive_redaction")
+    ) {
+      violations.push("validated evidence disposition is incomplete");
+      continue;
+    }
+    if (dispositionByObservationId.has(observationId)) {
+      violations.push(`duplicate evidence disposition for ${observationId}`);
+      continue;
+    }
+
+    dispositionByObservationId.set(observationId, {
+      canonicalPieceId,
+      outcome,
+      reason,
+      reasonCode: reasonCode as EvidenceObservationDisposition["reasonCode"],
+    });
+  }
+
+  if (
+    observations.some(
+      (observation) => !dispositionByObservationId.has(observation.id)
+    )
+  ) {
+    violations.push(
+      "one or more persisted evidence observations lack a validated disposition"
+    );
+  }
+
+  if (violations.length > 0) {
+    const error = new CanonicalIdentityInvariantError(
+      Array.from(new Set(violations))
+    );
+    throw recoveryFailure({
+      actions: [],
+      initialError: error,
+      retryError: error,
+      stage: "repair",
+    });
+  }
+
+  return observations.map((observation) => ({
+    ...observation,
+    disposition: dispositionByObservationId.get(observation.id),
+  }));
+}
+
 function rebuildDraftFromCanonicalPieces({
   draft,
   pieces,
@@ -302,6 +489,7 @@ function rebuildDraftFromCanonicalPieces({
       ...uniquePieces.flatMap((piece) => piece.observationIds),
     ])
   );
+  const dispositions = rebuildDispositionManifest(observationIds, uniquePieces);
 
   actions.push(
     "rebuilt_canonical_outputs_from_evidence",
@@ -332,6 +520,7 @@ function rebuildDraftFromCanonicalPieces({
         ),
         canonicalEntityIds: outputPieces.map((piece) => piece.id),
         canonicalPieceIds: uniquePieces.map((piece) => piece.id),
+        dispositions,
         observationIds,
         version: EVIDENCE_CLUSTER_VERSION,
       },

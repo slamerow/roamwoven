@@ -6,7 +6,7 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 5;
+const CANONICAL_RESOLVER_VERSION = 6;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
 const MAX_RESOLVER_WINDOWS = 30;
 const RESOLVER_WINDOW_CONCURRENCY = 3;
@@ -82,7 +82,7 @@ export type CanonicalEvidenceResolverMetadata = {
 
 export type CanonicalEvidenceResolverPlan = {
   candidateCount: number;
-  requiresLookup: boolean;
+  requiresResolution: boolean;
   windows: Array<{
     candidateIds: string[];
     titles: string[];
@@ -133,15 +133,15 @@ const resolverSchema = {
 };
 
 const resolverSystemPrompt = [
-  "You are the bounded canonical source-structure and public venue relationship resolver for a travel itinerary.",
-  "The input intentionally contains only public venue names and structural metadata. Never search for or infer private booking data, addresses, confirmation codes, traveler names, or access details.",
+  "You are the bounded canonical source-structure resolver for a travel itinerary.",
+  "Use only the supplied source structure and itinerary evidence. Never search for or infer private booking data, addresses, confirmation codes, traveler names, access details, or public venue facts.",
   "Source hierarchy is authoritative. Classify an item as city_note only when the structural fields show it belongs to a city-reference, ideas, recommendations, or notes block rather than an actual itinerary block. Public venue knowledge must not turn a reference item into an itinerary item.",
   "A date is supporting evidence, not proof of traveler intent. Use section labels, headings, list context, explicit plan language, fixed anchors, and the rest of that day's plan together. Day activity counts are soft context only; never classify by a numeric cap.",
   "A time, reservation, ticket, booking, or explicit planned action overrides nearby loose recommendation text and should remain an activity unless it is clearly accessory evidence for another canonical record.",
   "A repeated venue on different dates stays distinct when both sightings are actual itinerary visits. If one is a weak untimed sighting under a city-reference block and another is a concrete itinerary visit, classify only the weak reference sighting as city_note.",
-  "Propose a grouping only when the source positions put the candidates in one contiguous source block and public sources confirm they are components of one official site, complex, route, tour, or included pass. Proximity in the same city is not enough.",
+  "Propose a grouping only when the supplied source structure presents the candidates as components of one site, complex, route, tour, or included pass. Proximity in the same city is not enough.",
   "Never group candidates on different dates. A verified continuous visit may contain exactly one timed or booked anchor; preserve that anchor on the grouped card. Never group two independently timed or booked candidates, and never group a generic clean itinerary merely because several activities share a day.",
-  "Use web search only as a tie-breaker for public venue relationships. Return high confidence only when both the source structure and public evidence agree. If inconclusive, return no grouping and keep activities separate.",
+  "Return high confidence only when the supplied source structure is conclusive. If inconclusive, return no grouping and keep activities separate.",
   "Keep claims short and factual. Return only candidate IDs supplied in the input.",
 ].join(" ");
 
@@ -577,7 +577,7 @@ export function inspectCanonicalEvidenceResolutionPlan(
 
   return {
     candidateCount: candidates.length,
-    requiresLookup:
+    requiresResolution:
       windows.length > 0 && hasAmbiguousCandidateCluster(candidates),
     windows: windows.map((window) => ({
       candidateIds: window.map((candidate) => candidate.candidateId),
@@ -851,8 +851,18 @@ function applyResolution({
     parent.evidenceRole = "atomic_candidate";
     parent.itemType = "activity";
     groupingDecisions.push({
+      callRequired: !groupCandidates.some(
+        (candidate) =>
+          candidate.evidenceRole === "grouping_proposal" &&
+          candidate.sectionType === "dated_itinerary" &&
+          candidate.sourceLine !== null
+      ),
       candidateIds: executionCandidates.map((candidate) => candidate.candidateId),
       claim: grouping.claim,
+      containerCandidateId:
+        groupCandidates.find(
+          (candidate) => candidate.evidenceRole === "grouping_proposal"
+        )?.candidateId ?? null,
       decisionId,
       parentCandidateId: parentCandidate?.candidateId ?? uniqueIds[0],
       parentTitle: grouping.parentTitle,
@@ -909,7 +919,6 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       schema: resolverSchema,
       schemaName: "roamwoven_canonical_evidence_resolution",
       system: resolverSystemPrompt,
-      webSearch: { maxToolCalls: 2, searchContextSize: "low" },
     });
     const resolution = parseResolution(result.json);
     const resolvedAt = new Date().toISOString();
@@ -930,7 +939,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
 
   const resolution = reconcileCanonicalEvidenceResolutions(
     windowResults.map((result) => ({
-      groupings: result.sources.length > 0 ? result.resolution.groupings : [],
+      groupings: result.resolution.groupings,
       roleDecisions: result.resolution.roleDecisions,
     }))
   );

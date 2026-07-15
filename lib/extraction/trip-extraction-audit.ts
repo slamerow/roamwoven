@@ -37,6 +37,7 @@ export function createTripExtractionAuditReport({
 }): TripExtractionAuditReport {
   const summary = createGeneratedTripSummaryView(records);
   const activeItems = records.items.filter((item) => item.status !== "ignored");
+  const primaryItems = activeItems.filter((item) => !item.parentItemId);
   const warnings = summary.warnings.map((warning) => ({
     severity: warning.severity,
     subjectId: warning.subjectId,
@@ -52,10 +53,12 @@ export function createTripExtractionAuditReport({
     ...getSourceTransportAnchorsFromDraft(draft),
     ...getSourceTransportAnchorsFromUsage(usage),
   ]);
+  const canonicalization = createCanonicalizationSummary(usage);
 
   return {
-    canonicalization: createCanonicalizationSummary(usage),
+    canonicalization,
     diagnostics: createAuditDiagnostics({
+      undisposedObservationCount: canonicalization.undisposedObservationCount,
       lineage,
       records,
       sourceTransportAnchors,
@@ -69,9 +72,10 @@ export function createTripExtractionAuditReport({
       transport: sourceTransportAnchors,
     },
     structured: {
-      activeActivities: activeItems.filter((item) => item.itemType === "activity")
+      activeActivities: primaryItems.filter((item) => item.itemType === "activity")
         .length,
-      activeNotes: activeItems.filter((item) => item.itemType === "note").length,
+      activeNotes: primaryItems.filter((item) => item.itemType === "note").length,
+      groupedStops: activeItems.filter((item) => Boolean(item.parentItemId)).length,
       hardWarnings: warnings.filter((warning) => warning.severity === "hard")
         .length,
       openQuestions: records.reviewQuestions.filter(

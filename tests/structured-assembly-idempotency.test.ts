@@ -8,6 +8,7 @@ import {
 import { createTripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
 import { createTripExtractionAuditReport } from "@/lib/extraction/trip-extraction-audit";
 import { assessTripDraftQuality } from "@/lib/extraction/trip-quality-assessment";
+import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   createCentralEuropeFirstHalfDraft,
   createCentralEuropeGoldenDraft,
@@ -473,15 +474,33 @@ export default function run() {
       tripId: "canonical-grouping-call",
     });
     const call = records.reviewQuestions.find((question) =>
-      /We grouped Schönbrunn gardens into Schönbrunn Palace complex/.test(
+      /We made Schönbrunn Palace complex one activity card with 2 included stops/.test(
         question.prompt
       )
     );
 
+    assert.deepEqual(records.items.map((item) => item.title), [
+      "Schönbrunn Palace complex",
+      "Schönbrunn Palace complex",
+      "Schönbrunn gardens",
+    ]);
+    assert.equal(records.items.filter((item) => !item.parentItemId).length, 1);
     assert.deepEqual(
-      records.items.map((item) => item.title),
-      ["Schönbrunn Palace complex"]
+      records.items
+        .filter((item) => item.parentItemId)
+        .map((item) => item.title),
+      ["Schönbrunn Palace complex", "Schönbrunn gardens"]
     );
+    const traveler = createTravelerAppViewModel(records);
+    const activityCards = traveler.days.flatMap((day) => day.cards);
+    assert.equal(activityCards.length, 1);
+    assert.deepEqual(
+      activityCards[0]?.stops.map((stop) => stop.title),
+      ["Schönbrunn Palace complex", "Schönbrunn gardens"]
+    );
+    const fingerprints = createTripExtractionFingerprints(records);
+    assert.equal(fingerprints.counts.activeActivities, 1);
+    assert.equal(fingerprints.counts.groupedStops, 2);
     assert.ok(call);
     assert.equal(call.status, "noted");
     assert.equal(

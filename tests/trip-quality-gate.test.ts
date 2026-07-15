@@ -76,6 +76,22 @@ export default function run() {
     []
   );
 
+  const undisposedAssessment = assessTripDraftQuality({
+    draft,
+    records,
+    usage: {
+      evidence: {
+        dispositionCount: 1,
+        observationCount: 2,
+      },
+    },
+  });
+  assert.ok(
+    undisposedAssessment.p0Diagnostics.some(
+      (diagnostic) => diagnostic.code === "canonical_evidence_disposition_gap"
+    )
+  );
+
   const p0 = assessment.p0Diagnostics[0];
   assert.ok(p0);
   const contradictoryReport = {

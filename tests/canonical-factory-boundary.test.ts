@@ -219,9 +219,9 @@ export default async function run() {
       }),
     ]);
 
-    assert.equal(complexPlan.requiresLookup, true);
+    assert.equal(complexPlan.requiresResolution, true);
     assert.ok(complexPlan.windows.some((window) => window.titles.length >= 2));
-    assert.equal(cleanPlan.requiresLookup, false);
+    assert.equal(cleanPlan.requiresResolution, false);
     assert.equal(cleanPlan.windows.length, 0);
 
     const twoPartPlan = inspectCanonicalEvidenceResolutionPlan([
@@ -236,7 +236,7 @@ export default async function run() {
         }),
       }),
     ]);
-    assert.equal(twoPartPlan.requiresLookup, true);
+    assert.equal(twoPartPlan.requiresResolution, true);
   });
 
   await test("dense ambiguous day context reaches the bounded resolver without imposing a cap", () => {
@@ -261,7 +261,7 @@ export default async function run() {
       }),
     ]);
 
-    assert.equal(plan.requiresLookup, true);
+    assert.equal(plan.requiresResolution, true);
     assert.ok(plan.windows.some((window) => window.titles.length === titles.length));
   });
 
@@ -458,6 +458,7 @@ export default async function run() {
       candidate.prompt === "Where are you staying in Paris?"
     );
     assert.ok(question);
+    assert.match(question.evidence ?? "", /2038-04-02 to 2038-04-05/);
     const answered = applyReviewDecision(records, {
       action: "answer_question",
       answerValue: "Hotel du Louvre",

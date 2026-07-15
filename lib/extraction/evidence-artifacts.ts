@@ -3,6 +3,7 @@ import type {
   CanonicalEvidencePiece,
   EvidenceKind,
   EvidenceObservation,
+  EvidenceObservationDisposition,
   EvidenceRole,
   EvidenceSource,
   EvidenceSourceStructure,
@@ -80,6 +81,34 @@ function sourceStructure(value: unknown): EvidenceSourceStructure {
   };
 }
 
+function evidenceDisposition(value: unknown) {
+  const record = asRecord(value);
+  const outcome = record.outcome;
+  const reasonCode = record.reasonCode;
+
+  if (
+    (outcome !== "canonical_entity" &&
+      outcome !== "declared_detail" &&
+      outcome !== "evidence_only" &&
+      outcome !== "maker_decision" &&
+      outcome !== "sensitive_redaction") ||
+    typeof record.reason !== "string" ||
+    typeof reasonCode !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    canonicalPieceId:
+      typeof record.canonicalPieceId === "string"
+        ? record.canonicalPieceId
+        : null,
+    outcome,
+    reason: record.reason,
+    reasonCode,
+  } as EvidenceObservationDisposition;
+}
+
 export async function getEvidenceArtifacts({
   processingRunId,
   tripId,
@@ -130,6 +159,7 @@ export async function getEvidenceArtifacts({
     const kind = row.evidence_kind as EvidenceKind;
 
     return {
+      disposition: evidenceDisposition(meta.disposition),
       id: String(row.observation_id),
       kind,
       ordinal: Number(row.ordinal) || 0,
@@ -311,6 +341,7 @@ export async function persistEvidenceArtifacts({
         payload_json: {
           ...observation.payload,
           _evidenceMeta: {
+            disposition: observation.disposition,
             role: observation.role,
             sourceStructure: observation.sourceStructure,
           },
@@ -360,6 +391,8 @@ export async function persistEvidenceArtifacts({
   }
 
   return {
+    dispositionCount: observations.filter((observation) => observation.disposition)
+      .length,
     observationCount: observations.length,
     outputPieceCount: pieces.filter((piece) => piece.outputEligible).length,
     pieceCount: pieces.length,

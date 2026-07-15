@@ -449,6 +449,11 @@ function ActivityCard({
       <h2 className={item.time ? "mt-5 line-clamp-4 text-3xl font-semibold leading-tight" : "line-clamp-4 text-3xl font-semibold leading-tight"}>
         {item.title}
       </h2>
+      {item.stops.length > 0 ? (
+        <p className="mt-3 text-sm font-semibold text-[var(--color-muted)]">
+          {formatCount(item.stops.length, "stop")}
+        </p>
+      ) : null}
       <p className="mt-6 text-3xl leading-none">{categoryEmoji(item.categoryId)}</p>
     </button>
   );
@@ -945,6 +950,30 @@ function ActivityDetail({
       </p>
       <h2 className="mt-2 text-4xl font-semibold leading-tight">{item.title}</h2>
       <ProtectedDetailBlock details={protectedDetails} unlocked={unlocked} />
+      {item.stops.length > 0 ? (
+        <section className="mt-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]">
+          <p className="text-sm font-semibold text-[var(--color-muted)]">
+            Included stops
+          </p>
+          <ol className="mt-4 space-y-3">
+            {item.stops.map((stop, index) => (
+              <li className="flex gap-3" key={stop.id}>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-green)]/10 text-xs font-bold text-[var(--color-green)]">
+                  {index + 1}
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-semibold">{stop.title}</span>
+                  {stop.time ? (
+                    <span className="mt-0.5 block text-sm text-[var(--color-muted)]">
+                      {stop.time}
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       {detailSensitivity ? (
         <LockedDetail classification={detailSensitivity} unlocked={unlocked}>
           {item.description}

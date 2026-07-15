@@ -223,7 +223,19 @@ export type TripWeatherHookRecord = {
 };
 
 export type TripReviewQuestionRecord = {
-  answerType: "text" | "choice" | "date" | "time" | "visibility" | "confirm";
+  answerMax?: string | null;
+  answerMin?: string | null;
+  answerOptions?: Array<{ label: string; value: string }>;
+  answerType:
+    | "text"
+    | "choice"
+    | "single_choice"
+    | "multi_select"
+    | "yes_no"
+    | "date"
+    | "time"
+    | "visibility"
+    | "confirm";
   answerValue: string | null;
   canonicalId: string;
   createdAt: string | null;

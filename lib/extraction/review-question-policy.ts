@@ -22,6 +22,9 @@ function getAnswerType(
 ): TripReviewQuestionRecord["answerType"] {
   if (
     value === "choice" ||
+    value === "single_choice" ||
+    value === "multi_select" ||
+    value === "yes_no" ||
     value === "date" ||
     value === "time" ||
     value === "visibility" ||
@@ -31,6 +34,19 @@ function getAnswerType(
   }
 
   return "text";
+}
+
+function getAnswerOptions(detail: DraftObject) {
+  return getArray(detail, "answerOptions").flatMap((value) => {
+    const option =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as DraftObject)
+        : {};
+    const label = getString(option, "label");
+    const optionValue = getString(option, "value");
+
+    return label && optionValue ? [{ label, value: optionValue }] : [];
+  });
 }
 
 export function createReviewQuestions({
@@ -98,9 +114,23 @@ export function createReviewQuestions({
         : null;
       const subjectType = canonicalSubject?.subjectType ?? "trip";
       const fallbackSubjectId = tripId;
+      const answerOptions = getAnswerOptions(detail);
+      const requestedAnswerType = getAnswerType(
+        getString(detail, "answerType")
+      );
+      const answerType =
+        requestedAnswerType === "multi_select" ||
+        ((requestedAnswerType === "choice" ||
+          requestedAnswerType === "single_choice") &&
+          answerOptions.length < 2)
+          ? "text"
+          : requestedAnswerType;
 
       return [{
-        answerType: getAnswerType(getString(detail, "answerType")),
+        answerMax: getString(detail, "answerMax"),
+        answerMin: getString(detail, "answerMin"),
+        answerOptions,
+        answerType,
         answerValue: null,
         canonicalId: canonicalReviewId,
         createdAt: null,

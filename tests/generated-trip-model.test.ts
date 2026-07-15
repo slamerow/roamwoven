@@ -3007,6 +3007,259 @@ test("answering a targeted question updates the structured record", () => {
   assert.equal(getStructuredReviewCount(updated), 0);
 });
 
+test("typed answers resolve only after a valid declared mutation", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [{
+        category: "art_culture",
+        date: "2026-09-02",
+        itemType: "activity",
+        title: "Museum X or Museum Y",
+      }],
+      missingDetails: [{
+        answerOptions: [
+          { label: "Museum X", value: "Museum X" },
+          { label: "Museum Y", value: "Museum Y" },
+        ],
+        answerType: "single_choice",
+        confidence: "medium",
+        evidence: "Morning: Museum X or Museum Y",
+        guessedValue: null,
+        prompt: "Which museum should Roamwoven use?",
+        reason: "The source reserves one slot for two options.",
+        relatedTitle: "Museum X or Museum Y",
+        subjectType: "item",
+        targetField: "title",
+      }],
+      places: [{
+        arriveDate: "2026-09-01",
+        city: "Paris",
+        leaveDate: "2026-09-04",
+      }],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Paris" },
+    },
+    fallbackTripName: "Paris",
+    tripId: "typed-choice",
+  });
+  const question = records.reviewQuestions[0];
+  assert.ok(question);
+
+  const invalid = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "Museum Z",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    id: "invalid-choice",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "typed-choice",
+  });
+  assert.equal(invalid.items[0]?.title, "Museum X or Museum Y");
+  assert.equal(invalid.reviewQuestions[0]?.status, "open");
+
+  const valid = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "Museum Y",
+    createdAt: "2026-07-16T00:01:00.000Z",
+    id: "valid-choice",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "typed-choice",
+  });
+  assert.equal(valid.items[0]?.title, "Museum Y");
+  assert.equal(valid.reviewQuestions[0]?.status, "answered");
+});
+
+test("date answers stay inside the declared trip window", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [{
+        category: "art_culture",
+        date: "2026-09-02",
+        itemType: "activity",
+        title: "Borghese Gallery",
+      }],
+      missingDetails: [{
+        answerMax: "2026-09-04",
+        answerMin: "2026-09-01",
+        answerOptions: [
+          { label: "September 1", value: "2026-09-01" },
+          { label: "September 2", value: "2026-09-02" },
+        ],
+        answerType: "date",
+        confidence: "medium",
+        evidence: "Committed but undated.",
+        guessedValue: "2026-09-02",
+        prompt: "Which day does Borghese Gallery happen?",
+        reason: "Roamwoven made a provisional placement.",
+        relatedTitle: "Borghese Gallery",
+        subjectType: "item",
+        targetField: "date",
+      }],
+      places: [{
+        arriveDate: "2026-09-01",
+        city: "Rome",
+        leaveDate: "2026-09-04",
+      }],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Rome" },
+    },
+    fallbackTripName: "Rome",
+    tripId: "typed-date",
+  });
+  const question = records.reviewQuestions[0];
+  assert.ok(question);
+  const invalid = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "2026-10-01",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    id: "invalid-date",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "typed-date",
+  });
+  assert.equal(invalid.items[0]?.date, "2026-09-02");
+  assert.equal(invalid.reviewQuestions[0]?.status, "open");
+
+  const validPickerDate = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "2026-09-03",
+    createdAt: "2026-07-16T00:01:00.000Z",
+    id: "valid-picker-date",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "typed-date",
+  });
+  assert.equal(validPickerDate.items[0]?.date, "2026-09-03");
+  assert.equal(validPickerDate.reviewQuestions[0]?.status, "answered");
+});
+
+test("quick options do not reject a valid free-text answer", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [{
+        category: "food_dining",
+        date: "2026-09-02",
+        itemType: "activity",
+        startTime: "13:00",
+        title: "Lunch",
+      }],
+      missingDetails: [{
+        answerOptions: [{ label: "Somewhere nearby", value: "Somewhere nearby" }],
+        answerType: "text",
+        confidence: "medium",
+        evidence: "Lunch at 1 PM.",
+        guessedValue: "Somewhere nearby",
+        prompt: "Is there a specific lunch place, or should we keep lunch nearby?",
+        reason: "The source fixes the meal time but does not name a venue.",
+        relatedTitle: "Lunch",
+        subjectType: "item",
+        targetField: "locationName",
+      }],
+      places: [],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Paris" },
+    },
+    fallbackTripName: "Paris",
+    tripId: "typed-meal-venue",
+  });
+  const question = records.reviewQuestions[0];
+  assert.ok(question);
+  const updated = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "Le Jules Verne",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    id: "meal-venue-answer",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "typed-meal-venue",
+  });
+
+  assert.equal(updated.items[0]?.locationName, "Le Jules Verne");
+  assert.equal(updated.reviewQuestions[0]?.status, "answered");
+});
+
+test("an option question without usable options falls back to answerable text", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [{
+        category: "art_culture",
+        date: "2026-09-02",
+        itemType: "activity",
+        title: "Museum choice",
+      }],
+      missingDetails: [{
+        answerOptions: [],
+        answerType: "single_choice",
+        confidence: "medium",
+        evidence: "The source choice was cropped.",
+        guessedValue: null,
+        prompt: "Which museum should we use?",
+        reason: "The source indicates a choice but the labels are unreadable.",
+        relatedTitle: "Museum choice",
+        subjectType: "item",
+        targetField: "title",
+      }],
+      places: [],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Paris" },
+    },
+    fallbackTripName: "Paris",
+    tripId: "option-fallback",
+  });
+
+  assert.equal(records.reviewQuestions[0]?.answerType, "text");
+  assert.equal(records.reviewQuestions[0]?.status, "open");
+});
+
+test("unsupported question targets cannot silently close", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [{
+        category: "art_culture",
+        date: "2026-09-02",
+        itemType: "activity",
+        title: "Museum",
+      }],
+      missingDetails: [{
+        answerType: "text",
+        confidence: "medium",
+        evidence: "Unresolved unsupported field.",
+        guessedValue: null,
+        prompt: "Unsupported question",
+        reason: "Test invariant.",
+        relatedTitle: "Museum",
+        subjectType: "item",
+        targetField: "unsupportedField",
+      }],
+      places: [],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Test" },
+    },
+    fallbackTripName: "Test",
+    tripId: "unsupported-target",
+  });
+  const question = records.reviewQuestions[0];
+  assert.ok(question);
+  const updated = applyReviewDecision(records, {
+    action: "answer_question",
+    answerValue: "Anything",
+    createdAt: "2026-07-16T00:00:00.000Z",
+    id: "unsupported-answer",
+    subjectId: question.id,
+    subjectType: "review_question",
+    tripId: "unsupported-target",
+  });
+
+  assert.equal(updated.reviewQuestions[0]?.status, "open");
+  assert.equal(updated.reviewQuestions[0]?.answerValue, null);
+});
+
 test("answering an open description question folds the answer into the activity card", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {

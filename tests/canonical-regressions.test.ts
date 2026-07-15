@@ -652,7 +652,7 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 1);
     assert.equal(
       draft.missingDetails[0]?.prompt,
-      "Which Prague Castle ticket should be used?"
+      "Which ticket or tour option should be listed for Prague Castle?"
     );
   });
 

@@ -433,10 +433,39 @@ function ReviewQuestionAnswerForm({
 
   const isConfirmQuestion = item.answerType === "confirm";
   const yesAnswer = item.suggestedAnswer ?? "Yes";
+  const answerOptions =
+    item.answerType === "yes_no" && (item.answerOptions ?? []).length === 0
+      ? [
+          { label: "Yes", value: "Yes" },
+          { label: "No", value: "No" },
+        ]
+      : item.answerOptions ?? [];
+  const optionOnly =
+    item.answerType === "single_choice" ||
+    item.answerType === "choice" ||
+    item.answerType === "yes_no";
+  const typedInput =
+    item.answerType === "date" || item.answerType === "time";
 
   return (
     <div className="mt-4 rounded-md border border-ink/10 bg-white p-3">
-      {item.suggestedAnswer || isConfirmQuestion ? (
+      {answerOptions.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {answerOptions.map((option) => (
+            <ReviewDecisionInlineForm
+              action="answer_question"
+              actionUrl={`/maker/trips/${tripId}/data/decisions`}
+              answerValue={option.value}
+              buttonClassName="inline-flex rounded-md border border-ink/10 bg-white px-3 py-2 text-xs font-semibold text-ink transition hover:border-moss/40 disabled:cursor-wait disabled:opacity-60"
+              key={option.value}
+              subjectId={item.subjectId}
+              subjectType={item.subjectType}
+            >
+              {option.label}
+            </ReviewDecisionInlineForm>
+          ))}
+        </div>
+      ) : item.suggestedAnswer || isConfirmQuestion ? (
         <ReviewDecisionInlineForm
           action="answer_question"
           actionUrl={`/maker/trips/${tripId}/data/decisions`}
@@ -450,41 +479,67 @@ function ReviewQuestionAnswerForm({
             : item.suggestedAnswerLabel ?? "Use suggested answer"}
         </ReviewDecisionInlineForm>
       ) : null}
-      <details className={item.suggestedAnswer || isConfirmQuestion ? "mt-3" : ""}>
-        <summary className="cursor-pointer text-xs font-semibold text-ink/60">
-          {isConfirmQuestion
-            ? "No, edit answer"
-            : item.suggestedAnswer
-              ? "Change answer"
-              : "Answer question"}
-        </summary>
-        <ReviewDecisionInlineForm
-          action="answer_question"
-          actionUrl={`/maker/trips/${tripId}/data/decisions`}
-          buttonClassName="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper transition disabled:cursor-wait disabled:opacity-60"
-          extraFields={
-            <label className="block">
-              <span className="text-xs font-semibold text-ink/55">Answer</span>
-              <textarea
-                className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
-                defaultValue={item.suggestedAnswer ?? ""}
-                name="answerValue"
-                placeholder="Tell Roamwoven what is correct."
-                aria-label="Answer"
-                required
-              />
-              <p className="mt-1 text-xs leading-5 text-ink/45">
-                It is okay to write “not sure yet.” Roamwoven can keep a TBD card
-                and you can fill it in later.
-              </p>
-            </label>
+      {!optionOnly ? (
+        <details
+          className={
+            answerOptions.length > 0 || item.suggestedAnswer || isConfirmQuestion
+              ? "mt-3"
+              : ""
           }
-          subjectId={item.subjectId}
-          subjectType={item.subjectType}
         >
-          Save answer
-        </ReviewDecisionInlineForm>
-      </details>
+          <summary className="cursor-pointer text-xs font-semibold text-ink/60">
+            {typedInput
+              ? item.answerType === "date"
+                ? "Choose another date"
+                : "Choose another time"
+              : isConfirmQuestion
+                ? "No, edit answer"
+                : item.suggestedAnswer
+                  ? "Change answer"
+                  : "Answer question"}
+          </summary>
+          <ReviewDecisionInlineForm
+            action="answer_question"
+            actionUrl={`/maker/trips/${tripId}/data/decisions`}
+            buttonClassName="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-xs font-semibold text-paper transition disabled:cursor-wait disabled:opacity-60"
+            extraFields={
+              typedInput ? (
+                <label className="block">
+                  <span className="text-xs font-semibold text-ink/55">
+                    {item.answerType === "date" ? "Date" : "Time"}
+                  </span>
+                  <input
+                    aria-label={item.answerType === "date" ? "Date" : "Time"}
+                    className="mt-1 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss/40"
+                    defaultValue={item.suggestedAnswer ?? ""}
+                    max={item.answerMax ?? undefined}
+                    min={item.answerMin ?? undefined}
+                    name="answerValue"
+                    required
+                    type={item.answerType}
+                  />
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="text-xs font-semibold text-ink/55">Answer</span>
+                  <textarea
+                    aria-label="Answer"
+                    className="mt-1 min-h-24 w-full rounded-md border border-ink/10 bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition focus:border-moss/40"
+                    defaultValue={item.suggestedAnswer ?? ""}
+                    name="answerValue"
+                    placeholder="Tell Roamwoven what is correct."
+                    required
+                  />
+                </label>
+              )
+            }
+            subjectId={item.subjectId}
+            subjectType={item.subjectType}
+          >
+            Save answer
+          </ReviewDecisionInlineForm>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -1202,7 +1257,7 @@ function RealTripFirstPass({
     ? reviewedStructuredDraft.categories
         .map((category) => {
           const count = reviewedStructuredDraft.items.filter(
-            (item) => item.categoryId === category.id
+            (item) => item.categoryId === category.id && !item.parentItemId
           ).length;
 
           return `${category.label} · ${pluralize(count, "activity", "activities")}`;

@@ -23,6 +23,9 @@ export type StructuredReviewCombineOption = {
 };
 
 export type StructuredReviewItem = {
+  answerMax?: string | null;
+  answerMin?: string | null;
+  answerOptions?: Array<{ label: string; value: string }>;
   answerType?: StructuredTripRecords["reviewQuestions"][number]["answerType"];
   childItems?: Array<{
     detail: string;
@@ -71,7 +74,10 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
 
 function getReviewActivityItems(records: StructuredTripRecords) {
   return records.items.filter(
-    (item) => isActiveStatus(item.status) && item.itemType === "activity"
+    (item) =>
+      isActiveStatus(item.status) &&
+      item.itemType === "activity" &&
+      !item.parentItemId
   );
 }
 
@@ -654,6 +660,9 @@ export function getStructuredReviewSections(
       emptyDetail: "No trip questions needed.",
       id: "questions",
       items: records.reviewQuestions.filter(isOpenQuestion).map((question) => ({
+        answerMax: question.answerMax,
+        answerMin: question.answerMin,
+        answerOptions: question.answerOptions,
         combineOptions: [],
         answerType: question.answerType,
         detail: [

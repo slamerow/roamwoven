@@ -8,6 +8,7 @@ import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser"
 import {
   assembleCanonicalTripDraft,
   CanonicalAssemblyRecoveryError,
+  materializeCanonicalEvidenceObservations,
   prepareCanonicalEvidencePieces,
 } from "@/lib/extraction/canonical-trip-assembly";
 import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
@@ -394,17 +395,11 @@ export async function POST(
     });
 
     failureStage = "evidence_cluster";
-    const evidenceSummary = await persistEvidenceArtifacts({
-      observations: result.evidenceArtifacts.observations,
-      pieces: preparedEvidence.pieces,
-      processingRunId: run.id,
-      tripId,
-    });
     await recordTripProcessingEvent({
-      details: evidenceSummary,
+      details: {},
       processingRunId: run.id,
       stage: "evidence_cluster",
-      status: "completed",
+      status: "started",
       tripId,
     });
 
@@ -423,11 +418,33 @@ export async function POST(
       priorRecoveryActions: preparedEvidence.recoveryActions,
       tripId,
     });
+    failureStage = "evidence_cluster";
+    const persistedObservations = materializeCanonicalEvidenceObservations({
+      draft: assembly.draft,
+      observations: result.evidenceArtifacts.observations,
+    });
+    const evidenceSummary = await persistEvidenceArtifacts({
+      observations: persistedObservations,
+      pieces: preparedEvidence.pieces,
+      processingRunId: run.id,
+      tripId,
+    });
+    await recordTripProcessingEvent({
+      details: evidenceSummary,
+      processingRunId: run.id,
+      stage: "evidence_cluster",
+      status: "completed",
+      tripId,
+    });
+    failureStage = "assembly";
     const assemblyUsage = {
       ...(asRecord(result.usage) ?? {}),
       evidence: {
         ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
-        canonicalPieceCount: preparedEvidence.pieces.length,
+        canonicalPieceCount: preparedEvidence.pieces.filter(
+          (piece) => piece.outputEligible
+        ).length,
+        dispositionCount: persistedObservations.length,
       },
       finalization: assembly.finalization,
       identityRecovery: assembly.recovery,
@@ -446,7 +463,7 @@ export async function POST(
     const qualityAssessment = assessTripDraftQuality({
       draft: assembly.draft,
       evidenceArtifacts: {
-        observations: result.evidenceArtifacts.observations,
+        observations: persistedObservations,
         pieces: preparedEvidence.pieces,
       },
       records: assembly.records,

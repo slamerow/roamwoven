@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 6
+Ledger version: 7
 
-Ledger date: 2026-07-15
+Ledger date: 2026-07-16
 
 Approval state: Approved and implementation-tracked
 
@@ -153,9 +153,11 @@ path is bypassed.
   version 2 requires the new identity fields. The extraction route now assembles
   from persisted evidence artifacts, repairs safe identity/manifest drift once,
   recompiles before completion, and records repair telemetry without creating a
-  maker Question. The remaining gap is reconciliation of maker-created entities
-  and saved decisions across the future rebuild and merge/split lifecycle, plus
-  first-class grouping relationships.
+  maker Question. First-class parent/child grouping now survives structured
+  compilation and traveler projection without flattening child prose or
+  inflating traveler-visible card counts. The remaining gap is reconciliation
+  of maker-created entities and saved decisions across the future rebuild and
+  merge/split lifecycle.
 - Tests: `tests/assembly-purity.test.ts`,
   `tests/canonical-identity.test.ts`,
   `tests/canonical-factory-boundary.test.ts`,
@@ -174,7 +176,12 @@ path is bypassed.
   remain genuinely plausible. When precedence yields a winner, Roamwoven
   resolves it silently without a Question or preselected-answer theater.
   Question choices must come from source evidence or canonical records; prose
-  may be polished, but options may not be invented.
+  may be polished, but options may not be invented. Explicitly labeled source
+  updates, replacements, and cancellations supersede the earlier record by
+  source chronology or source reference, never merely by upload order. A
+  meaningful first-run replacement or cancellation creates one concise Call;
+  typo and non-semantic metadata corrections are silent. If no source-backed
+  supersession is clear, equal-authority alternatives remain one Question.
 - Evidence: Canonical source-hierarchy tests pass, but the latest live run still
   misattached an explicit train ticket and created source-obvious Questions.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
@@ -196,13 +203,27 @@ path is bypassed.
   subordinate stops. A grouped route counts as one activity card with its stop
   count shown separately, for example `1 activity card · 6 stops`; internal
   audit preserves all six source entities plus the grouping container without
-  inflating the traveler-visible activity count.
-- Evidence: Unit-level route and same-site coverage exists, but the latest live
-  resolver inverted negative Albertina evidence and failed to discover the
-  Schoenbrunn grouping. Current grouping also flattens children into parent prose
-  instead of preserving a first-class ordered sub-stop relationship.
+  inflating the traveler-visible activity count. A valid system-created group
+  has at least two named or traveler-meaningful stops, preserves source order,
+  and uses a restrained source-derived title rather than a generic invention.
+  A generic meal break may be a child of an otherwise valid route, but cannot
+  make one real stop into a group. A separately timed or reserved stop breaks a
+  route sequence. For a same-site visit, however, a booked or timed parent may
+  own untimed subordinate stops when the source indicates that the parent
+  booking covers the visit; an independently timed or booked child remains
+  standalone. Parent cards keep concise parent prose and ordered child records;
+  child prose is not concatenated into a wall of parent text.
+- Evidence: The latest live resolver run predates this checkpoint and inverted
+  negative Albertina evidence while failing to discover the Schoenbrunn
+  grouping. The current first-run path now requires conclusive supplied source
+  structure, preserves an explicit parent plus ordered child identities, keeps
+  independent timed/booked stops standalone, suppresses Calls for explicit
+  source-authored routes, and counts one traveler card separately from its
+  stops. A fresh real extraction is still required before discovery quality can
+  be called fully enforced.
 - Tests: `tests/canonical-evidence-resolver.test.ts`,
-  `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`
+  `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
+  `tests/structured-assembly-idempotency.test.ts`
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -217,7 +238,11 @@ path is bypassed.
   by concrete children become context or a valid parent group, not an additional
   standalone card. Supporting text routes to a declared field on its owning
   entity when possible: arrival and check-in instructions belong to the stay or
-  transport record, not a new Activity, City Note, Call, or Question.
+  transport record, not a new Activity, City Note, Call, or Question. When the
+  same place appears as both an Activity and City Note, the Activity wins; one
+  unique useful detail may move to the Activity, while generic praise and list
+  context are discarded. First-run assembly never mutates an existing draft or
+  published snapshot; these rules apply to newly assembled drafts only.
 - Evidence: Several deterministic cleanup tests pass, but the latest live run
   duplicated Borkonyha across activity and city notes, leaked stay/accessory
   content into Rome notes, and preserved day-container bloat.
@@ -239,7 +264,16 @@ path is bypassed.
   such as several restaurants under a day remains City Notes unless the source
   selects, sequences, books, or assigns a slot to an entry. A stronger planned
   sighting gives the entity one Activity home and removes its City Note duplicate.
-  Missing or disputed dates never change an entity's type.
+  Missing or disputed dates never change an entity's type. A named restaurant,
+  reservation, fixed meal time, or named meal presented as its own stop is an
+  Activity; the same restaurant inside a recommendation list is a City Note. A
+  generic meal embedded in another activity is supporting detail, not a new
+  card. An isolated untimed generic meal with no valid group context is omitted
+  from the app with retained lineage. `If time: X` is a City Note, while a fixed
+  itinerary slot such as `Morning: X or Y` is one Activity with one unresolved
+  choice. Explicit commitment such as `We definitely want to visit X` is an
+  Activity even when its date is missing. A loose ideas list after the itinerary
+  remains City Notes.
 - Evidence: The canonical resolver carries source hierarchy and role decisions,
   and regression coverage protects explicit city-reference sections. The live
   Central Europe run still duplicated Borkonyha, polluted Rome notes, and
@@ -253,7 +287,7 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: Source text is not forced into Activity or City Notes. Every
   meaningful evidence block is traceably routed to one of: canonical entity,
   declared detail on an owning entity, maker decision, evidence-only lineage, or
@@ -262,22 +296,32 @@ path is bypassed.
   content, document plumbing, unrelated boilerplate or marketing, broken OCR,
   irrelevant content, or unresolved meaning after bounded recovery. A
   low-confidence fact that could materially change the itinerary cannot be
-  silently omitted. Bounded public lookup may resolve an isolated public term's
-  identity, city, and existing City Notes category, but may never infer traveler
-  intent, a trip date, or private facts. A still-ambiguous term remains lineage,
-  not a fabricated traveler card.
-- Evidence: Evidence artifacts and canonical lineage exist, but there is no
-  exhaustive disposition contract proving every meaningful source block reached
-  exactly one of these outcomes.
-- Tests: `tests/evidence-artifacts.test.ts`,
-  `tests/canonical-factory-boundary.test.ts`,
-  `tests/canonical-regressions.test.ts`
+  silently omitted. Public lookup and description enrichment are outside the
+  first-run assembly pass. An uncertain isolated public term may receive an
+  internal `needs_identity_enrichment` disposition, but remains evidence-only
+  lineage rather than a fabricated traveler card. Any future enrichment is a
+  separate post-assembly step limited to one or two concise, sourced factual
+  lines and may never change intent, type, date, grouping, booking state, or
+  private facts.
+- Evidence: Every extracted evidence observation now receives exactly one
+  persisted disposition. The validated assembly boundary deterministically
+  rebuilds a missing manifest, re-materializes repaired dispositions onto the
+  persisted observations, and quarantines an irreconcilable observation graph in
+  the named technical recovery state. Audit surfaces dispositioned versus
+  undisposed counts and raises a P0 diagnostic for a gap. Remaining coverage is
+  reconciliation from every raw meaningful source block to an extracted
+  observation; the current invariant begins at the observation boundary.
+- Tests: `tests/canonical-factory-boundary.test.ts`,
+  `tests/canonical-regressions.test.ts`,
+  `tests/evidence-clustering.test.ts`,
+  `tests/extraction-route-recovery.test.ts`,
+  `tests/trip-quality-gate.test.ts`
 
 ## RW-PLC-001 — Unresolved placement preserves a coherent Today experience
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: Today remains the traveler app's home; Roamwoven does not create an
   inaccessible Unscheduled bucket. When a source-supported Activity has an
   unresolved date, the canonical resolver keeps it an Activity, assigns the
@@ -286,11 +330,17 @@ path is bypassed.
   now" with optional source evidence; the traveler sees a coherent itinerary,
   not extraction uncertainty. Answering moves the same canonical Activity. It is
   never duplicated across candidate dates or demoted to City Notes merely to
-  escape scheduling ambiguity.
-- Evidence: Current compilation can leave an Activity undated and mark it for
-  review; it does not yet guarantee a provisional Today placement tied to one
-  answerable canonical Question.
+  escape scheduling ambiguity. Placement first follows trustworthy source
+  proximity; if none exists, it uses the first full day in the matching city,
+  then the first city day as a fallback. A date answer is limited to the trip
+  window and moves that same canonical Activity.
+- Evidence: A committed undated Activity now receives a provisional matching-city
+  date, prefers the first full city day, and carries one bounded date Question
+  that moves the same canonical record. The remaining gap is a deterministic
+  placement fallback when the canonical trip spine itself has no usable place
+  boundary.
 - Tests: `tests/generated-trip-model.test.ts`,
+  `tests/evidence-clustering.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`
 
 ## RW-REV-001 — Calls explain; Questions request material decisions
@@ -308,6 +358,10 @@ path is bypassed.
   evidence rather than model reasoning or diagnostics. The existing review-page
   format and City Notes presentation remain in place; this assembly pass fixes
   semantics beneath them rather than redesigning their order or taxonomy.
+  First-run Calls primarily explain Roamwoven-created groupings and meaningful
+  source-authored replacements or cancellations. Multiple unresolved fields on
+  one subject may share one compact review card, but each control remains a
+  separate typed mutation that must succeed independently.
 - Evidence: Prompt and regression coverage exists, but the latest live run
   produced source-obvious, duplicated, irrelevant, and mis-targeted Questions.
 - Tests: `tests/openai-trip-parser-prompt.test.ts`,
@@ -317,7 +371,7 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: Every emitted Question declares one canonical subject, one target
   field or explicit atomic mutation, source-backed answer options, and an
   end-to-end answer handler. Supported controls are yes/no, single choice,
@@ -328,7 +382,18 @@ path is bypassed.
   target is genuinely textual and must write to its declared field; it is never
   appended to generic description as a fallback. A fixed slot with alternatives,
   such as `Dinner: Borkonyha or Stand25`, is one planned slot with candidate
-  choices and one single-choice Question, not two Activities or a City Note.
+  choices and one single-choice Question, not two Activities or a City Note. A
+  day decision is single choice, never multi-select: two or three source-backed
+  candidate dates use buttons, otherwise a date picker constrained to the trip
+  window. Natural-language date parsing is outside V1. If it is added later, it
+  must parse and validate into the date field rather than append prose.
+
+  A standalone generic timed meal keeps one lightweight Activity and asks
+  whether a specific venue is already planned; a specific venue writes to the
+  declared restaurant field, while `Somewhere nearby` keeps the generic meal.
+  An unresolved fixed choice remains one flexible traveler-visible card such as
+  `Museum X or Museum Y`; Roamwoven never invents one choice. Answering replaces
+  that same canonical slot with the chosen option.
 
   An explicit maker answer is the highest authority for that draft and applies
   immediately to the intended canonical record; derived views recompute. An
@@ -344,12 +409,15 @@ path is bypassed.
   best-judgment action. Maker-only affected-card highlighting may show the
   impact, while travelers never see the Question or marker. Published snapshots
   remain untouched.
-- Evidence: The current record has no explicit options array, yes/no or
-  multi-select type, correction escape hatch, affected-card marker, or Undo
-  lifecycle. `applyAnswerQuestion` marks a Question answered before verifying a
-  supported target mutation, and unsupported targets can therefore close without
-  changing the traveler app. Saved decisions are upserted by decision key, which
-  preserves only the current value rather than immutable answer history.
+- Evidence: Review records now carry explicit options and date bounds; first-run
+  controls render exclusive choices, yes/no buttons, bounded date/time inputs,
+  and declared free text. Exclusive choices reject invented answers, quick
+  suggestions do not constrain valid text or picker responses, and a Question
+  remains open unless its declared canonical mutation succeeds. Unsupported
+  option shapes fail soft to an answerable text control rather than killing the
+  run. Remaining gaps are true multi-select mutation, direct-edit co-resolution,
+  affected-card highlighting, Change/Undo, and immutable answer history. Saved
+  decisions still preserve only the current value.
 - Tests: `tests/generated-trip-model.test.ts`,
   `tests/published-snapshots.test.ts`, `tests/structured-trip-snapshot.test.ts`
 

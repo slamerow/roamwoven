@@ -99,6 +99,7 @@ export type TripExtractionAuditLineageRow = {
 
 export type TripExtractionAuditDiagnostic = {
   code:
+    | "canonical_evidence_disposition_gap"
     | "critical_transport_missing_details"
     | "critical_transport_missing_soft_details"
     | "critical_transport_not_travel_row"
@@ -142,12 +143,14 @@ export type TripExtractionAuditReport = {
     canonicalPieceCount: number;
     clusteredObservationCount: number;
     contextObservationCount: number;
+    dispositionCount: number;
     identityRepairCount: number;
     identityRecoveryStatus: "not_needed" | "repaired";
     observationCount: number;
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedStandaloneAnchorCount: number;
+    undisposedObservationCount: number;
   };
   diagnostics: TripExtractionAuditDiagnostic[];
   draft: DraftAuditSnapshot;
@@ -168,6 +171,7 @@ export type TripExtractionAuditReport = {
   structured: {
     activeActivities: number;
     activeNotes: number;
+    groupedStops: number;
     hardWarnings: number;
     openQuestions: number;
     quietWarnings: number;

@@ -282,11 +282,13 @@ function getOcrFailedCount(usage: unknown) {
 }
 
 export function createAuditDiagnostics({
+  undisposedObservationCount = 0,
   lineage,
   records,
   sourceTransportAnchors = [],
   usage,
 }: {
+  undisposedObservationCount?: number;
   lineage: TripExtractionAuditLineageRow[];
   records: StructuredTripRecords;
   sourceTransportAnchors?: SourceTransportAnchor[];
@@ -295,6 +297,19 @@ export function createAuditDiagnostics({
   const diagnostics: TripExtractionAuditDiagnostic[] = [];
   const finalRecords = summarizeFinalAuditRecords(records);
   const ocrFailedCount = getOcrFailedCount(usage);
+
+  if (undisposedObservationCount > 0) {
+    diagnostics.push({
+      code: "canonical_evidence_disposition_gap",
+      detail:
+        "Canonical assembly completed without recording exactly one routing outcome for every evidence observation.",
+      evidence: [
+        `${undisposedObservationCount} observation${undisposedObservationCount === 1 ? " is" : "s are"} missing a canonical disposition.`,
+      ],
+      severity: "p0",
+      title: "Canonical evidence is missing a disposition",
+    });
+  }
 
   if (ocrFailedCount > 0) {
     diagnostics.push({
@@ -495,7 +510,10 @@ export function createAuditDiagnostics({
   }
 
   const activeActivities = records.items.filter(
-    (item) => item.status !== "ignored" && item.itemType === "activity"
+    (item) =>
+      item.status !== "ignored" &&
+      item.itemType === "activity" &&
+      !item.parentItemId
   );
   const groups = new Map<string, typeof activeActivities>();
 

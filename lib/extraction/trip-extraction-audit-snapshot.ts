@@ -111,21 +111,25 @@ export function createCanonicalizationSummary(usage: unknown) {
     identityRecovery.status === "repaired"
       ? ("repaired" as const)
       : ("not_needed" as const);
+  const observationCount = Number(evidence.observationCount) || 0;
+  const dispositionCount = Number(evidence.dispositionCount) || 0;
 
   return {
     canonicalPieceCount: Number(evidence.canonicalPieceCount) || 0,
     clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
     contextObservationCount: Number(evidence.contextObservationCount) || 0,
+    dispositionCount,
     identityRepairCount: Array.isArray(identityRecovery.actions)
       ? identityRecovery.actions.length
       : 0,
     identityRecoveryStatus,
-    observationCount: Number(evidence.observationCount) || 0,
+    observationCount,
     rejectedObservationCount: Number(evidence.rejectedObservationCount) || 0,
     sourceAnchorObservationCount:
       Number(evidence.sourceAnchorObservationCount) || 0,
     suppressedStandaloneAnchorCount:
       Number(evidence.suppressedWeakAnchorCount) || 0,
+    undisposedObservationCount: Math.max(0, observationCount - dispositionCount),
   };
 }
 

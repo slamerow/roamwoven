@@ -137,6 +137,14 @@ export type TravelerCardView = {
   locationName: string | null;
   privateDetailIds: string[];
   startTime: string | null;
+  stops: Array<{
+    description: string | null;
+    endTime: string | null;
+    id: string;
+    startTime: string | null;
+    time: string | null;
+    title: string;
+  }>;
   time: string | null;
   title: string;
   url: string | null;
@@ -641,7 +649,17 @@ export function createTravelerAppViewModel(
 
   const activeItems = records.items.filter(isActiveItem);
   const tipItems = activeItems.filter(isLegLevelTip);
-  const cardItems = activeItems.filter((item) => !isLegLevelTip(item));
+  const cardItems = activeItems.filter(
+    (item) => !isLegLevelTip(item) && !item.parentItemId
+  );
+  const childrenByParentId = new Map<string, TripItemRecord[]>();
+  activeItems
+    .filter((item) => item.parentItemId)
+    .forEach((item) => {
+      const children = childrenByParentId.get(item.parentItemId ?? "") ?? [];
+      children.push(item);
+      childrenByParentId.set(item.parentItemId ?? "", children);
+    });
   const tipsByLegId = new Map<string, TravelerLegTipView[]>();
 
   for (const item of tipItems) {
@@ -685,6 +703,16 @@ export function createTravelerAppViewModel(
       locationName: item.locationName,
       privateDetailIds: privateDetailIdsBySubject.get(`item:${item.id}`) ?? [],
       startTime: item.startTime,
+      stops: (childrenByParentId.get(item.id) ?? [])
+        .sort((left, right) => left.sortOrder - right.sortOrder)
+        .map((child) => ({
+          description: child.description,
+          endTime: child.endTime,
+          id: child.id,
+          startTime: child.startTime,
+          time: formatTime(child.startTime),
+          title: child.title,
+        })),
       time: formatTime(item.startTime),
       title: item.title,
       url: item.url,

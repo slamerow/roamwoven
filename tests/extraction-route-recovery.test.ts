@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import {
   clusterExtractedEvidence,
   type CanonicalEvidencePiece,
+  type EvidenceObservation,
 } from "@/lib/extraction/evidence-clustering";
 import { readStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import type { TripExtractionResult } from "@/lib/extraction/openai-trip-parser";
@@ -111,6 +112,7 @@ export default async function run() {
   const completedCalls: Array<Record<string, unknown>> = [];
   const failedCalls: Array<Record<string, unknown>> = [];
   const events: Array<Record<string, unknown>> = [];
+  const persistedDispositionCounts: number[] = [];
   const persistedPieceIds: string[][] = [];
   const restore = [
     patchModule("@/lib/env", {
@@ -168,14 +170,19 @@ export default async function run() {
     }),
     patchModule("@/lib/extraction/evidence-artifacts", {
       persistEvidenceArtifacts: async ({
+        observations,
         pieces,
       }: {
+        observations: EvidenceObservation[];
         pieces: CanonicalEvidencePiece[];
       }) => {
         const pieceIds = pieces.map((piece) => piece.id);
         if (new Set(pieceIds).size !== pieceIds.length) {
           throw new Error("duplicate canonical piece identity");
         }
+        persistedDispositionCounts.push(
+          observations.filter((observation) => observation.disposition).length
+        );
         persistedPieceIds.push(pieceIds);
         return {
           observationCount: parserResult.evidenceArtifacts.observations.length,
@@ -227,6 +234,7 @@ export default async function run() {
       failedCalls.length = 0;
       events.length = 0;
       persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
 
       const response = await POST(
         new NextRequest(
@@ -281,6 +289,7 @@ export default async function run() {
       failedCalls.length = 0;
       events.length = 0;
       persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
 
       const response = await POST(
         new NextRequest(
@@ -329,6 +338,82 @@ export default async function run() {
       );
     });
 
+    await test("extraction route rebuilds a missing disposition manifest backstage", async () => {
+      const broken = createParserResult();
+      const draft = broken.draft as Record<string, unknown>;
+      const evidence = draft._evidence as Record<string, unknown>;
+      delete evidence.dispositions;
+      broken.evidenceArtifacts.observations.forEach((observation) => {
+        delete observation.disposition;
+      });
+      parserResult = broken;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+      persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-disposition-recovery/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-disposition-recovery" }) }
+      );
+      const location = response.headers.get("location") ?? "";
+      const completed = completedCalls[0];
+      const usage = completed?.usage as Record<string, unknown>;
+      const openai = usage.openai as Record<string, unknown>;
+      const recovery = openai.identityRecovery as Record<string, unknown>;
+
+      assert.match(location, /extraction=completed/);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      assert.equal(recovery.status, "repaired");
+      assert.ok(
+        (recovery.actions as string[]).includes(
+          "rebuilt_evidence_identity_manifest"
+        )
+      );
+      assert.deepEqual(persistedDispositionCounts, [
+        broken.evidenceArtifacts.observations.length,
+      ]);
+    });
+
+    await test("extraction route quarantines an artifact observation mismatch", async () => {
+      const conflicted = createParserResult();
+      conflicted.evidenceArtifacts.observations = [];
+      parserResult = conflicted;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+      persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-observation-conflict/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-observation-conflict" }) }
+      );
+      const location = response.headers.get("location") ?? "";
+      const evidenceEvents = events.filter(
+        (event) => event.stage === "evidence_cluster"
+      );
+      const failureDetails = failedCalls[0]
+        ?.failureDetails as Record<string, unknown>;
+
+      assert.match(location, /error=assembly-recovery-required/);
+      assert.equal(completedCalls.length, 0);
+      assert.equal(failedCalls.length, 1);
+      assert.equal(persistedPieceIds.length, 0);
+      assert.deepEqual(
+        evidenceEvents.map((event) => event.status),
+        ["started", "failed"]
+      );
+      assert.equal(failureDetails.stage, "evidence_cluster");
+      assert.equal(failureDetails.errorName, "CanonicalAssemblyRecoveryError");
+    });
+
     await test("extraction route marks only unrecoverable conflicts as assembly recovery", async () => {
       const conflicted = createParserResult();
       const piece = conflicted.evidenceArtifacts.pieces.find(
@@ -348,6 +433,7 @@ export default async function run() {
       failedCalls.length = 0;
       events.length = 0;
       persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
 
       const response = await POST(
         new NextRequest(
