@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 3
+Ledger version: 4
 
 Ledger date: 2026-07-15
 
@@ -99,7 +99,7 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: Once usable source material exists, content-quality findings do not
   kill the run or prevent publishing. Roamwoven attempts deterministic repair,
   applies a safe evidence-preserving fallback, and surfaces one material
@@ -112,11 +112,14 @@ path is bypassed.
   audit notices" while that same report contains P0/P1 diagnostics or hard
   warnings. Technical inability to recover any usable source is a recovery
   state, not semantic QA.
-- Evidence: Extraction continues P0 diagnostics into Review, but
-  `trip-extraction-audit-view.ts` builds top-level notices from run metadata and
-  failed chunks without consulting the report diagnostics or hard warnings. The
-  audit can therefore declare "No audit notices" above a non-clean report.
-- Tests: `tests/trip-quality-gate.test.ts`, `tests/generated-trip-model.test.ts`
+- Evidence: Quality assessment version 2 is the shared authority for P0/P1/P2
+  diagnostics, hard and quiet warnings, open Questions, processing disposition,
+  stored quality metadata, and top-level audit notices. Semantic Questions and
+  warnings no longer block the publish route; only missing structured records
+  remain a technical publishing failure. The remaining gap is the automatic
+  repair and deduplication pass for abnormal Question or canonical-card counts.
+- Tests: `tests/trip-quality-gate.test.ts`,
+  `tests/trip-publish-policy.test.ts`, `tests/generated-trip-model.test.ts`
 
 ## RW-CAN-001 — Canonical finalization is the semantic boundary
 

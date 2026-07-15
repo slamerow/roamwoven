@@ -1286,7 +1286,7 @@ export async function extractTripDraftWithOpenAI({
               city: null,
               date: null,
               description:
-                "Automatic extraction could not fully read this source section. Review the source and add or remove this placeholder before publishing.",
+                "Automatic extraction could not fully read this source section. Review the source and add or remove this placeholder if needed.",
               endTime: null,
               evidenceRole: "atomic_candidate",
               itemType: "placeholder",

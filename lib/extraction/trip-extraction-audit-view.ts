@@ -12,6 +12,10 @@ import {
   createTripExtractionAuditReport,
   type TripExtractionAuditReport,
 } from "@/lib/extraction/trip-extraction-audit";
+import {
+  assessTripAuditReport,
+  createTripQualityNotices,
+} from "@/lib/extraction/trip-quality-assessment";
 import { getMakerTrip } from "@/lib/trips";
 
 type AuditRunSummary = {
@@ -67,7 +71,7 @@ function summarizeRun(
   };
 }
 
-function createNotices({
+export function createTripExtractionAuditNotices({
   hasRecords,
   latestRun,
   report,
@@ -80,7 +84,9 @@ function createNotices({
   reportRun: AuditRunSummary | null;
   snapshot: AuditSnapshotSummary | null;
 }) {
-  const notices: string[] = [];
+  const notices = report
+    ? createTripQualityNotices(assessTripAuditReport(report))
+    : [];
 
   if (!snapshot) {
     notices.push("No saved draft snapshot exists yet.");
@@ -162,7 +168,7 @@ export async function getTripExtractionAuditPayload(
 
   return {
     latestRun: latestRunSummary,
-    notices: createNotices({
+    notices: createTripExtractionAuditNotices({
       hasRecords: Boolean(appliedRecords.records),
       latestRun: latestRunSummary,
       report,

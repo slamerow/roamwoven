@@ -26,7 +26,7 @@ export default async function PublishPage({
             Share the traveler app
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/65">
-            Create a traveler snapshot from the confirmed trip records, then
+            Create a traveler snapshot from the current trip records, then
             share the private link when it is ready.
           </p>
         </header>
@@ -45,7 +45,7 @@ export default async function PublishPage({
               ? "Checkout must be complete before publishing."
               : error === "publish-failed"
                 ? "Publishing failed. Check that the snapshot database table exists before trying again."
-                : "The trip still needs review decisions before publishing."}
+                : "Publishing could not be completed. Please try again."}
           </p>
         ) : null}
         {published ? (

@@ -11,6 +11,7 @@ import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
   assessTripDraftQuality,
   attachTripQualityAssessment,
+  createTripQualityAssessmentSnapshot,
 } from "@/lib/extraction/trip-quality-assessment";
 import {
   completeTripProcessingRun,
@@ -391,12 +392,12 @@ export async function POST(
       assessment: qualityAssessment,
       draft: result.draft,
     });
+    const qualityAssessmentSnapshot =
+      createTripQualityAssessmentSnapshot(qualityAssessment);
     await recordTripProcessingEvent({
       details: {
-        diagnosticCount: qualityAssessment.report.diagnostics.length,
-        disposition: qualityAssessment.disposition,
+        ...qualityAssessmentSnapshot,
         fingerprintHash: qualityAssessment.report.fingerprints.hash,
-        p0DiagnosticCount: qualityAssessment.p0Diagnostics.length,
         structured: qualityAssessment.report.structured,
       },
       processingRunId: run.id,
@@ -424,12 +425,7 @@ export async function POST(
         materialDedupe: preparedMaterials.dedupeSummary,
         ocr: ocrSummary,
         openai: result.usage,
-        qualityAssessment: {
-          diagnosticCount: qualityAssessment.report.diagnostics.length,
-          diagnostics: qualityAssessment.report.diagnostics,
-          disposition: qualityAssessment.disposition,
-          p0DiagnosticCount: qualityAssessment.p0Diagnostics.length,
-        },
+        qualityAssessment: qualityAssessmentSnapshot,
       },
     });
 

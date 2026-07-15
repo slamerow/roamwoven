@@ -1163,7 +1163,7 @@ function RealTripFirstPass({
   const structuredDiscoverySummary = formatStructuredDiscoverySummary(
     reviewedStructuredDraft,
     structuredReviewCount,
-    { blockingIssueCount: summaryHardWarningCount }
+    { reviewWarningCount: summaryHardWarningCount }
   );
   const scannedParts = reviewedStructuredDraft
     ? formatStructuredScannedSummary(reviewedStructuredDraft)

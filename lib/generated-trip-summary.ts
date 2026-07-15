@@ -87,7 +87,7 @@ export type GeneratedTripSummaryView = {
   days: GeneratedTripSummaryDay[];
   destination: string;
   sections: GeneratedTripSummarySection[];
-  isReadyForPublishReview: boolean;
+  isSemanticallyClean: boolean;
   title: string;
   warnings: GeneratedTripSummaryWarning[];
 };
@@ -947,7 +947,7 @@ function createSummaryWarnings({
 
       return [{
         detail:
-          `Source evidence includes ${issues.map((issue) => issue.label).join(", ")} that did not make it onto the travel row. Fix the Travel card before publishing.`,
+          `Source evidence includes ${issues.map((issue) => issue.label).join(", ")} that did not make it onto the travel row. Check the Travel card or keep Roamwoven's current best-supported version.`,
         id: `${item.id}-critical-transport-details`,
         severity: "hard" as const,
         subjectId: item.id,
@@ -994,7 +994,7 @@ function createSummaryWarnings({
     .filter(([, items]) => items.length > 1)
     .map(([, items]) => ({
       detail:
-        "Multiple visible activity cards have the same date, time, and title. Merge or remove the duplicate before publishing.",
+        "Multiple visible activity cards have the same date, time, and title. Review, merge, or remove the duplicate.",
       id: `${items[0]?.id ?? "activity"}-duplicate-title`,
       severity: "hard" as const,
       subjectId: items[0]?.id ?? records.trip.id,
@@ -1228,7 +1228,7 @@ export function createGeneratedTripSummaryView(
     days,
     destination: formatDestination(records),
     sections: createSummarySections(records, activeItems, review),
-    isReadyForPublishReview: review === 0 && hardWarnings.length === 0,
+    isSemanticallyClean: review === 0 && hardWarnings.length === 0,
     title: records.trip.travelerAppTitle,
     warnings,
   };

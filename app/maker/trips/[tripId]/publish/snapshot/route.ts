@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAppliedTripRecords } from "@/lib/applied-trip-records";
 import { recordTripProcessingEvent } from "@/lib/extraction/processing-events";
-import { createGeneratedTripSummaryView } from "@/lib/generated-trip-summary";
-import { getStructuredReviewCount } from "@/lib/generated-trip-review";
 import { publishTripSnapshot } from "@/lib/published-snapshots";
+import { assessTripPublishability } from "@/lib/trip-publish-policy";
 import { getMakerTrip } from "@/lib/trips";
 
 export async function POST(
@@ -31,7 +30,9 @@ export async function POST(
       tripId,
     });
 
-    if (!records) {
+    const publishAssessment = assessTripPublishability(records);
+
+    if (!publishAssessment.canPublish || !records) {
       await recordTripProcessingEvent({
         details: { reason: "records_missing" },
         errorMessage: "Structured records are not available for publishing.",
@@ -43,50 +44,14 @@ export async function POST(
       return NextResponse.redirect(dataUrl, 303);
     }
 
-    const reviewCount = getStructuredReviewCount(records);
-
-    if (reviewCount > 0) {
-      await recordTripProcessingEvent({
-        details: { reviewCount },
-        errorMessage: "Open review items block publishing.",
-        stage: "publish",
-        status: "blocked",
-        tripId,
-      });
-      dataUrl.searchParams.set("error", "review-required");
-      return NextResponse.redirect(dataUrl, 303);
-    }
-
-    const summary = createGeneratedTripSummaryView(records);
-
-    if (!summary.isReadyForPublishReview) {
-      await recordTripProcessingEvent({
-        details: {
-          counts: summary.counts,
-          warningCount: summary.warnings.length,
-          warnings: summary.warnings.map((warning) => ({
-            id: warning.id,
-            severity: warning.severity,
-            subjectId: warning.subjectId,
-            subjectType: warning.subjectType,
-            title: warning.title,
-          })),
-        },
-        errorMessage: "Summary warnings block publishing.",
-        stage: "publish",
-        status: "blocked",
-        tripId,
-      });
-      const summaryUrl = new URL(`/maker/trips/${tripId}/summary`, request.url);
-      summaryUrl.searchParams.set("error", "summary-warning-required");
-      return NextResponse.redirect(summaryUrl, 303);
-    }
-
     await recordTripProcessingEvent({
       details: {
-        counts: summary.counts,
-        dayCount: summary.days.length,
+        counts: publishAssessment.summary.counts,
+        dayCount: publishAssessment.summary.days.length,
+        hardWarningCount: publishAssessment.hardWarningCount,
         privateDetailCount: records.privateDetails.length,
+        reviewCount: publishAssessment.reviewCount,
+        semanticDisposition: publishAssessment.semanticDisposition,
       },
       stage: "publish",
       status: "started",

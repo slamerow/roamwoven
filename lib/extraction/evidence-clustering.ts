@@ -3702,7 +3702,7 @@ function recoverMissingNamedEvidence({
         date: null,
         description:
           evidence ??
-          "This named source item needs placement review before publishing.",
+          "This named source item needs placement review.",
         endTime: null,
         evidenceRole: "atomic_candidate",
         itemType: "placeholder",

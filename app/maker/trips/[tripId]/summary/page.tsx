@@ -371,9 +371,9 @@ function SummaryWarnings({
 
   const warningGroups = [
     {
-      detail: "Structural issues to resolve or mark checked before publish.",
+      detail: "Structural issues that may materially change the traveler app.",
       severity: "hard" as const,
-      title: "Must fix before publish",
+      title: "Important to review",
     },
     {
       detail: "Useful shape checks that should not block publishing by themselves.",
@@ -535,7 +535,7 @@ function QuietSummarySection({
                 ? "No unresolved review decisions remain."
                 : `${reviewCount} ${
                     reviewCount === 1 ? "decision" : "decisions"
-                  } still need attention before publishing.`}
+                  } remain open for you to review.`}
             </p>
           </div>
         </div>
@@ -546,13 +546,10 @@ function QuietSummarySection({
 
 export default async function TripSummaryPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string }>;
 }) {
   const { tripId } = await params;
-  const { error } = await searchParams;
   const trip = await getMakerTrip(tripId);
   const { latestDraft, records } = await getAppliedTripRecords({
     fallbackTripName: trip.name,
@@ -597,12 +594,6 @@ export default async function TripSummaryPage({
           tripId={tripId}
         />
 
-        {error === "summary-warning-required" ? (
-          <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-            Resolve or mark the Summary warnings before publishing.
-          </p>
-        ) : null}
-
         <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
@@ -618,14 +609,14 @@ export default async function TripSummaryPage({
             </div>
             <div
               className={
-                summary?.isReadyForPublishReview
+                summary?.isSemanticallyClean
                   ? "rounded-md bg-moss/10 px-4 py-3 text-sm font-semibold text-moss"
-                  : "rounded-md bg-clay/10 px-4 py-3 text-sm font-semibold text-clay"
+                  : "rounded-md bg-tide/10 px-4 py-3 text-sm font-semibold text-tide"
               }
             >
-              {summary?.isReadyForPublishReview
+              {summary?.isSemanticallyClean
                 ? "Ready for final review"
-                : "Needs review decisions"}
+                : "Review suggested"}
             </div>
           </div>
 
@@ -650,7 +641,8 @@ export default async function TripSummaryPage({
               <CalendarDays className="mt-0.5 shrink-0 text-moss" size={18} />
               <p className="text-sm leading-6 text-ink/65">
                 If a day, stay, transfer, or activity feels wrong here, go back
-                to the review queue before publishing.
+                to the review queue. You can also continue with the current
+                draft.
               </p>
             </div>
             <DesignPreviewStrip colors={colors} themeName={theme.name} />
@@ -688,7 +680,7 @@ export default async function TripSummaryPage({
             <ArrowLeft size={16} />
             Back to review queue
           </Link>
-          {summary?.isReadyForPublishReview ? (
+          {summary ? (
             <Link
               href={`/maker/trips/${tripId}/publish`}
               className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-3 text-sm font-semibold text-paper"
@@ -698,7 +690,7 @@ export default async function TripSummaryPage({
             </Link>
           ) : (
             <span className="inline-flex items-center gap-2 rounded-md bg-ink/20 px-4 py-3 text-sm font-semibold text-ink/45">
-              Resolve review first
+              Build trip first
               <ArrowRight size={16} />
             </span>
           )}

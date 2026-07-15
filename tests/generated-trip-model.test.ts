@@ -973,7 +973,7 @@ test("trip dates start with first actual travel day before first lodging leg", (
   assert.equal(summary.dateRange, "January 12-14, 2019");
 });
 
-test("unrecovered activity chunk gaps remain open review blockers", () => {
+test("unrecovered activity chunk gaps remain open review items", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -984,7 +984,7 @@ test("unrecovered activity chunk gaps remain open review blockers", () => {
           evidence: "Thursday, January 17th",
           guessedValue: null,
           prompt:
-            "Roamwoven could not confidently extract activities from Thursday, January 17th. Review this source section and add any missing activities before publishing.",
+            "Roamwoven could not confidently extract activities from Thursday, January 17th. Review this source section and add any missing activities if needed.",
           reason:
             "Automatic extraction and a second pass returned no traveler cards even though this source section appears to contain activity or notes/tips details.",
           relatedTitle: null,
@@ -1264,7 +1264,7 @@ test("summary flags critical trains when source-backed details are missing", () 
       /Train to Vienna is missing critical travel details/.test(warning.title)
     )
   );
-  assert.equal(summary.isReadyForPublishReview, false);
+  assert.equal(summary.isSemanticallyClean, false);
 });
 
 test("canonical missing transport time projects to an open review question", () => {
@@ -1318,7 +1318,7 @@ test("canonical missing transport time projects to an open review question", () 
     ),
     false
   );
-  assert.equal(summary.isReadyForPublishReview, false);
+  assert.equal(summary.isSemanticallyClean, false);
   assert.ok(
     records.reviewQuestions.some(
       (question) =>
@@ -1366,7 +1366,7 @@ test("summary does not hard-warn when only train arrival time is missing", () =>
     summary.warnings.some((warning) => /Train to Vienna/.test(warning.title)),
     false
   );
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isSemanticallyClean, true);
 });
 
 test("summary quietly flags source-backed missing arrival time", () => {
@@ -1413,7 +1413,7 @@ test("summary quietly flags source-backed missing arrival time", () => {
   assert.ok(warning);
   assert.equal(warning.severity, "quiet");
   assert.match(warning.detail, /arrival time/i);
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isSemanticallyClean, true);
 });
 
 test("summary orders timed transport before invisible day-part activity sorting", () => {
@@ -1522,7 +1522,7 @@ test("summary flags days with seven or more visible activities", () => {
   );
   assert.ok(warning);
   assert.equal(warning.severity, "quiet");
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isSemanticallyClean, true);
   const resolved = applyReviewDecision(records, {
     action: "confirm",
     createdAt: "2026-06-18T12:00:00.000Z",
@@ -1536,7 +1536,7 @@ test("summary flags days with seven or more visible activities", () => {
   assert.equal(resolvedSummary.warnings.length, 0);
 });
 
-test("summary hard-blocks surviving stay and transport duplicate collisions", () => {
+test("summary marks surviving stay and transport duplicate collisions for review", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -1654,7 +1654,7 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
         /Train to Lyon duplicates a travel row/.test(warning.title)
     )
   );
-  assert.equal(summary.isReadyForPublishReview, false);
+  assert.equal(summary.isSemanticallyClean, false);
 
   const resolved = summary.warnings
     .filter((warning) => warning.severity === "hard")
@@ -1676,10 +1676,10 @@ test("summary hard-blocks surviving stay and transport duplicate collisions", ()
     resolvedSummary.warnings.some((warning) => warning.severity === "hard"),
     false
   );
-  assert.equal(resolvedSummary.isReadyForPublishReview, true);
+  assert.equal(resolvedSummary.isSemanticallyClean, true);
 });
 
-test("summary does not hard-block separate luggage storage before hotel check-in", () => {
+test("summary does not flag separate luggage storage as a duplicate collision", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [
@@ -1726,7 +1726,7 @@ test("summary does not hard-block separate luggage storage before hotel check-in
       )
     )
   );
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isSemanticallyClean, true);
 });
 
 test("category taxonomy canonicalizes old aliases and avoids generic buckets", () => {
@@ -2559,7 +2559,7 @@ test("structured review summary uses maker-facing counts", () => {
 
   assert.equal(
     summary,
-    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We need you to confirm 1 thing before this becomes the traveler app."
+    "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We found 1 thing for you to confirm."
   );
   assert.equal(reviewCount, 1);
   assert.equal(summaryView.counts.plans, 2);
@@ -2594,7 +2594,7 @@ test("structured review summary uses maker-facing counts", () => {
   assert.equal(sections.find((section) => section.id === "notes")?.count, 0);
 });
 
-test("structured discovery summary respects blocking summary warnings", () => {
+test("structured discovery summary surfaces review warnings without blocking", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: [],
@@ -2621,13 +2621,13 @@ test("structured discovery summary respects blocking summary warnings", () => {
   transport.departureTime = null;
   const summaryView = createGeneratedTripSummaryView(records);
   const summary = formatStructuredDiscoverySummary(records, 0, {
-    blockingIssueCount: summaryView.warnings.filter(
+    reviewWarningCount: summaryView.warnings.filter(
       (warning) => warning.severity === "hard"
     ).length,
   });
 
   assert.match(summary ?? "", /summary warning/);
-  assert.doesNotMatch(summary ?? "", /Nothing needs confirmation/);
+  assert.match(summary ?? "", /worth reviewing/);
 });
 
 test("canonical leg boundaries project unchanged", () => {
@@ -3435,7 +3435,7 @@ test("generated trip summary uses applied structured records", () => {
   assert.equal(summary.title, "Paris summary");
   assert.equal(summary.counts.activities, 1);
   assert.equal(summary.counts.review, 0);
-  assert.equal(summary.isReadyForPublishReview, true);
+  assert.equal(summary.isSemanticallyClean, true);
   assert.equal(summary.dateRange, "September 1-3, 2026");
   assert.equal(
     summary.sections.find((section) => section.id === "legs")?.items[0]?.meta,
