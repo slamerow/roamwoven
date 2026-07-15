@@ -1,5 +1,9 @@
 # Roamwoven Technical Architecture
 
+> Historical architecture context. Current locked product behavior lives in
+> `docs/product-contracts.md`. When this working draft conflicts with a newer
+> locked contract, the locked contract wins.
+
 Version: 0.1
 Date: 2026-06-16
 Status: Working draft

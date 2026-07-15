@@ -1,5 +1,9 @@
 # Next Session Notes
 
+> Chronological handoff context. Current locked product behavior lives in
+> `docs/product-contracts.md`. Newer explicit user decisions and the locked
+> ledger supersede older entries when they conflict.
+
 ## Current State
 
 ### 2026-07-10 Central Europe P0 foundation
