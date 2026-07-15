@@ -65,7 +65,11 @@ export default function run() {
     "RW-SRC-001",
     "RW-GRP-001",
     "RW-ASM-001",
+    "RW-CLS-001",
+    "RW-EVD-001",
+    "RW-PLC-001",
     "RW-REV-001",
+    "RW-QUE-001",
     "RW-PRI-001",
     "RW-PUB-001",
   ]) {
