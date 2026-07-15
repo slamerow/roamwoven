@@ -28,11 +28,12 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 11;
+export const EVIDENCE_CLUSTER_VERSION = 12;
 
 export type EvidenceKind =
   | "activity"
   | "context"
+  | "decision"
   | "note"
   | "place"
   | "stay"
@@ -172,7 +173,7 @@ export type EvidenceClusteringResult = {
 
 const COLLECTIONS: Array<{
   collection: "activities" | "places" | "stays" | "transport";
-  kind: Exclude<EvidenceKind, "context" | "note">;
+  kind: Exclude<EvidenceKind, "context" | "decision" | "note">;
 }> = [
   { collection: "activities", kind: "activity" },
   { collection: "places", kind: "place" },
@@ -287,7 +288,7 @@ function normalizePayloadDates(
   payload: Record<string, unknown>,
   defaultYear: number | null
 ) {
-  return Object.fromEntries(
+  const normalized = Object.fromEntries(
     Object.entries(payload).map(([field, value]) => {
       if (typeof value !== "string") {
         return [field, value];
@@ -304,6 +305,31 @@ function normalizePayloadDates(
       return [field, value];
     })
   );
+
+  if (
+    !stringValue(normalized, "date") &&
+    stringValue(normalized, "itemType") !== "note" &&
+    stringValue(normalized, "sourceSectionType") === "dated_itinerary"
+  ) {
+    const structuralDates = [
+      stringValue(normalized, "sourceSectionLabel"),
+      ...(Array.isArray(normalized.sourceHeadingPath)
+        ? normalized.sourceHeadingPath.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : []),
+    ];
+
+    for (const candidate of structuralDates) {
+      const date = normalizeTripDate(candidate, defaultYear);
+      if (!date) continue;
+      normalized.date = date;
+      normalized._canonicalDateSource = "dated_source_structure";
+      break;
+    }
+  }
+
+  return normalized;
 }
 
 function stringValue(record: Record<string, unknown>, key: string) {
@@ -370,8 +396,12 @@ export function canonicalPiecePublicPayload(
 ) {
   const {
     _canonicalGroupingDecisionIds,
+    _canonicalNoteCollectionLabel,
+    _canonicalNoteEntries,
+    _canonicalNoteEntry,
     _canonicalRoleDecision,
     _canonicalProvisionalFields,
+    _canonicalSourceDecisions,
     _resolverCandidateId,
     evidenceRole: _evidenceRole,
     sourceHeadingPath: _sourceHeadingPath,
@@ -381,6 +411,31 @@ export function canonicalPiecePublicPayload(
   } = payload;
 
   return publicFields;
+}
+
+type CanonicalSourceDecision = {
+  decisionType: "ticket_choice";
+  sourceText: string;
+  targetField: "description";
+};
+
+function canonicalSourceDecisions(
+  payload: Record<string, unknown>
+): CanonicalSourceDecision[] {
+  if (!Array.isArray(payload._canonicalSourceDecisions)) return [];
+
+  return payload._canonicalSourceDecisions.flatMap((value) => {
+    const record = asRecord(value);
+    const decisionType = stringValue(record, "decisionType");
+    const sourceText = stringValue(record, "sourceText");
+    const targetField = stringValue(record, "targetField");
+
+    return decisionType === "ticket_choice" &&
+      sourceText &&
+      targetField === "description"
+      ? [{ decisionType, sourceText, targetField }]
+      : [];
+  });
 }
 
 function hasIndependentActivityAnchor(payload: Record<string, unknown>) {
@@ -1840,7 +1895,10 @@ function sameCanonicalDate(
 
 function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
   const accessories = pieces.filter(
-    (piece) => piece.role === "accessory_detail" && !piece.outputEligible
+    (piece) =>
+      piece.kind !== "decision" &&
+      piece.role === "accessory_detail" &&
+      !piece.outputEligible
   );
 
   for (const accessory of accessories) {
@@ -3066,6 +3124,33 @@ function mergeCityNoteDescription(left: unknown, right: unknown) {
   return retained.join("\n") || null;
 }
 
+function cityNoteCollectionDescription(notes: CanonicalEvidencePiece[]) {
+  const labeledEntries = new Map<string, string[]>();
+  let description: string | null = null;
+
+  for (const note of notes) {
+    const label = stringValue(note.payload, "_canonicalNoteCollectionLabel");
+    const title = stringValue(note.payload, "title");
+    if (note.payload._canonicalNoteEntry === true && label && title) {
+      labeledEntries.set(label, [...(labeledEntries.get(label) ?? []), title]);
+      continue;
+    }
+    description = mergeCityNoteDescription(
+      description,
+      note.payload.description ?? note.payload.title
+    );
+  }
+
+  for (const [label, entries] of labeledEntries) {
+    description = mergeCityNoteDescription(
+      description,
+      `${label}: ${entries.join(", ")}`
+    );
+  }
+
+  return description;
+}
+
 function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
   const places = pieces
     .filter((piece) => piece.kind === "place" && piece.outputEligible)
@@ -3115,30 +3200,40 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
   }
 
   for (const group of groups.values()) {
-    const [target, ...rest] = group;
+    const first = group[0];
     const city =
-      stringValue(target.payload, "city") ??
+      stringValue(first.payload, "city") ??
       places.find((place) =>
         normalizeText(
-          [target.payload.title, target.payload.description].filter(Boolean).join(" ")
+          [first.payload.title, first.payload.description].filter(Boolean).join(" ")
         ).includes(normalizeText(place.city))
       )?.city ??
       "City";
+    const insertionIndex = Math.min(...group.map((note) => pieces.indexOf(note)));
+    const target: CanonicalEvidencePiece = {
+      actions: [],
+      confidence: "high",
+      conflicts: [],
+      fieldSources: {},
+      fieldWinnerRanks: {},
+      id: `piece_${stableHash({ city, type: "canonical_city_note_collection" })}`,
+      kind: "note",
+      mergeReasons: ["canonical city-note collection"],
+      observationIds: [],
+      outputEligible: true,
+      payload: {
+        category: first.payload.category,
+        city,
+        date: null,
+        description: cityNoteCollectionDescription(group),
+        itemType: "note",
+        title: `${city} Notes & Tips`,
+      },
+      role: "city_note_candidate",
+    };
+    pieces.splice(insertionIndex >= 0 ? insertionIndex : pieces.length, 0, target);
 
-    target.payload.title = `${city} Notes & Tips`;
-    target.payload.city = city;
-    target.payload.date = null;
-    target.payload.itemType = "note";
-    target.payload.description = mergeCityNoteDescription(
-      null,
-      target.payload.description
-    );
-
-    for (const note of rest) {
-      target.payload.description = mergeCityNoteDescription(
-        target.payload.description,
-        note.payload.description ?? note.payload.title
-      );
+    for (const note of group) {
       mergeCanonicalPieceInto({
         reason: `canonical ${city} note collection`,
         source: note,
@@ -3219,7 +3314,7 @@ function executeCanonicalGroupingDecisions({
       : null;
     const requestedAnchorCoversVisit = Boolean(
       !explicitContainer &&
-        fixedPieces.includes(requestedAnchor) &&
+        sourcePieces.includes(requestedAnchor) &&
         (/\b(?:same[ -]?site|complex|grounds|campus|estate|one .{0,24} visit|covers? the visit)\b/i.test(
           `${decision.claim} ${activityText(requestedAnchor.payload)}`
         ) ||
@@ -3244,7 +3339,12 @@ function executeCanonicalGroupingDecisions({
       )
     ).length;
 
-    if (groupedChildPieces.length < 2 || meaningfulStopCount < 2) {
+    const minimumStopCount = explicitContainer || promotedParent ? 1 : 2;
+
+    if (
+      groupedChildPieces.length < minimumStopCount ||
+      meaningfulStopCount < minimumStopCount
+    ) {
       continue;
     }
 
@@ -3367,6 +3467,12 @@ function suppressUnresolvedIsolatedTerms({
 
   for (const piece of pieces) {
     if (!piece.outputEligible || (piece.kind !== "activity" && piece.kind !== "note")) {
+      continue;
+    }
+    if (
+      piece.payload._canonicalGroupRole === "parent" ||
+      piece.payload._canonicalGroupRole === "child"
+    ) {
       continue;
     }
     const title = stringValue(piece.payload, "title");
@@ -3661,6 +3767,43 @@ function activityKind(payload: Record<string, unknown>): EvidenceKind {
   return "activity";
 }
 
+function enforceCanonicalOutputActivityRoles(
+  pieces: CanonicalEvidencePiece[]
+) {
+  for (const piece of pieces) {
+    if (!piece.outputEligible || (piece.kind !== "activity" && piece.kind !== "note")) {
+      continue;
+    }
+    if (
+      piece.payload._canonicalGroupRole === "parent" ||
+      piece.payload._canonicalGroupRole === "child"
+    ) {
+      continue;
+    }
+    const classification = classifyDraftActivityCard(activityInput(piece.payload));
+
+    if (classification.isOverviewActivity) {
+      suppressCanonicalPiece(
+        piece,
+        "generic day overview is source context, not a traveler card"
+      );
+      continue;
+    }
+
+    if (piece.kind === "activity" && activityKind(piece.payload) === "note") {
+      piece.kind = "note";
+      piece.payload.itemType = "note";
+      piece.payload.date = null;
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [...piece.observationIds],
+        reason: "canonical activity policy routed a loose reference to city notes",
+        type: "recovered",
+      });
+    }
+  }
+}
+
 function activityInput(payload: Record<string, unknown>) {
   return {
     category: stringValue(payload, "category"),
@@ -3934,6 +4077,35 @@ function dedupeObjects(items: unknown[]) {
   });
 }
 
+export function reapplyCanonicalOutputInvariants({
+  pieces: inputPieces,
+  tripYear = null,
+}: {
+  pieces: CanonicalEvidencePiece[];
+  tripYear?: number | null;
+}) {
+  const pieces = structuredClone(inputPieces);
+  const before = JSON.stringify(pieces);
+
+  enforceCanonicalOutputActivityRoles(pieces);
+  suppressRepresentedTravelAndStayActivities(pieces);
+  routeCanonicalAccessoryEvidence({
+    actions: {
+      addAction: addCanonicalAction,
+      mergePiece: mergeCanonicalPieceInto,
+      suppressPiece: suppressCanonicalPiece,
+    },
+    pieces,
+    tripYear,
+  });
+  finalizeCanonicalOutputFields(pieces);
+
+  return {
+    changed: JSON.stringify(pieces) !== before,
+    pieces,
+  };
+}
+
 function reviewDetailText(detail: Record<string, unknown>) {
   return [
     detail.prompt,
@@ -4066,9 +4238,20 @@ function recoverMissingNamedEvidence({
     const detail = asRecord(value);
     const relatedTitle = stringValue(detail, "relatedTitle");
     const subjectType = normalizedComparable(detail.subjectType);
+    const relatedDate = normalizeTripDate(relatedTitle, null);
+    const nonEntityTitle = Boolean(
+      relatedTitle &&
+      ((relatedDate &&
+        /^(?:\d{1,2}[.]\d{1,2}[.]\d{4}|(?:19|20)\d{2}-\d{1,2}-\d{1,2})(?:\s+(?:details?|information|note|notes))?$/i.test(
+          relatedTitle.trim()
+        )) || /^(?:booking|details?|information|note|notes|reservation)$/i.test(
+          relatedTitle.trim()
+        ))
+    );
 
     if (
       !relatedTitle ||
+      nonEntityTitle ||
       subjectType !== "item" ||
       pieceForMissingDetail(detail, pieces)
     ) {
@@ -4192,6 +4375,21 @@ function unresolvedMissingDetails({
     }
     const subjectType = normalizedComparable(detail.subjectType);
     const targetField = normalizedComparable(detail.targetField).replace(/\s+/g, "");
+    const relatedTitle = stringValue(detail, "relatedTitle");
+    const relatedDate = normalizeTripDate(relatedTitle, tripYear);
+
+    if (
+      relatedTitle &&
+      ((relatedDate &&
+        /^(?:\d{1,2}[.]\d{1,2}[.]\d{4}|(?:19|20)\d{2}-\d{1,2}-\d{1,2})(?:\s+(?:details?|information|note|notes))?$/i.test(
+          relatedTitle.trim()
+        )) ||
+        /^(?:booking|details?|information|note|notes|reservation)$/i.test(
+          relatedTitle.trim()
+        ))
+    ) {
+      return false;
+    }
 
     if (stringValue(detail, "_canonicalReviewDisposition") === "call") {
       return true;
@@ -4296,14 +4494,6 @@ function unresolvedMissingDetails({
     }
 
     if (
-      stringValue(detail, "answerType") === "single_choice" &&
-      Array.isArray(detail.answerOptions) &&
-      detail.answerOptions.length >= 2
-    ) {
-      return true;
-    }
-
-    if (
       subjectType === "item" &&
       /^(?:itemtype|presentation|keep|visibility)$/.test(targetField) &&
       piece.kind === "activity" &&
@@ -4344,6 +4534,9 @@ function unresolvedMissingDetails({
       piece.kind === "activity" &&
       !isGenericTitle(piece.payload.title)
     ) {
+      if (stringValue(detail, "_canonicalQuestionKind") === "alternative_slot") {
+        return true;
+      }
       return false;
     }
 
@@ -4407,14 +4600,7 @@ function unresolvedMissingDetails({
     }
 
     if (/(?:placement|date)/.test(targetField) && payload.date) {
-      const asksForSourceAmbiguity = /\?|\b(?:ambiguous|context implies|does not state|unclear|uncertain)\b/.test(
-        normalizeText([detail.prompt, detail.reason].filter(Boolean).join(" "))
-      );
-      const sectionType = stringValue(payload, "sourceSectionType");
-      return Boolean(
-        asksForSourceAmbiguity &&
-          (!sectionType || sectionType === "unknown")
-      );
+      return false;
     }
 
     if (/(?:city|leg)/.test(targetField) && payload.city) {
@@ -4425,11 +4611,174 @@ function unresolvedMissingDetails({
       return false;
     }
 
+    if (
+      stringValue(detail, "answerType") === "single_choice" &&
+      Array.isArray(detail.answerOptions) &&
+      detail.answerOptions.length >= 2
+    ) {
+      return true;
+    }
+
     return true;
   });
 }
 
+function sourceLineMatchesActivityTitle(line: string, title: string) {
+  const normalizedLine = normalizeText(line);
+  const normalizedTitle = normalizeText(title);
+
+  if (!normalizedLine || !normalizedTitle) return false;
+  if (normalizedLine.includes(normalizedTitle)) return true;
+
+  const titleTokens = identityTokens(title);
+  const lineTokens = new Set(identityTokens(line));
+  return titleTokens.length > 0 && titleTokens.every((token) => lineTokens.has(token));
+}
+
+function explicitCityNoteEntries(payload: Record<string, unknown>) {
+  const description = stringValue(payload, "description");
+  if (!description) return null;
+
+  const labeled = /^([^:\n]{2,35}):\s*([\s\S]+)$/.exec(description.trim());
+  const collectionLabel = labeled?.[1]?.trim() ?? null;
+  const body = labeled?.[2] ?? description;
+  const entries = body
+    .split(labeled ? /\s*,\s*|\s+\/\s+|\s*;\s*/ : /\r?\n|\s*;\s*/)
+    .map((entry) => entry.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean);
+  const looksLikeStructuredNames =
+    entries.length >= 2 &&
+    entries.length <= 20 &&
+    entries.every(
+      (entry) =>
+        entry.length <= 80 &&
+        entry.split(/\s+/).length <= 7 &&
+        !/[.!?]$/.test(entry) &&
+        !/\b(?:built|founded|known for|located|opened|serves|speciali[sz]es|traditional|would recommend)\b/i.test(
+          entry
+        )
+    );
+
+  return looksLikeStructuredNames ? { collectionLabel, entries } : null;
+}
+
+function sourceDecisionObservations({
+  stageInput,
+  startingOrdinal,
+}: {
+  stageInput: EvidenceStageInput;
+  startingOrdinal: number;
+}) {
+  const sourceLines = (stageInput.sourceText ?? "").split(/\r?\n/);
+  const todoLines = sourceLines
+    .map((line, index) => ({ index, line: line.trim() }))
+    .filter(
+      ({ line }) =>
+        line.length > 0 &&
+        /\b(?:which ticket|ticket to get|choose (?:a |the |which )?ticket|need to decide.{0,30}ticket|still need to.{0,30}ticket|ticket.{0,20}tbd)\b/i.test(
+          line
+        )
+    );
+  const activities = asArray(asRecord(stageInput.stage).activities).map(asRecord);
+  const observations: EvidenceObservation[] = [];
+  let ordinal = startingOrdinal;
+
+  for (const todo of todoLines) {
+    const ranked = activities
+      .flatMap((activity, activityIndex) => {
+        const title = stringValue(activity, "title");
+        if (!title) return [];
+        const titleLines = sourceLines
+          .map((line, lineIndex) =>
+            sourceLineMatchesActivityTitle(line, title) ? lineIndex : null
+          )
+          .filter((lineIndex): lineIndex is number => lineIndex !== null);
+        const distance = Math.min(
+          ...titleLines.map((lineIndex) => Math.abs(lineIndex - todo.index))
+        );
+
+        return Number.isFinite(distance) && distance <= 4
+          ? [{ activity, activityIndex, distance, title }]
+          : [];
+      })
+      .sort(
+        (left, right) =>
+          left.distance - right.distance || left.activityIndex - right.activityIndex
+      );
+
+    if (!ranked[0] || ranked[1]?.distance === ranked[0].distance) continue;
+
+    const target = ranked[0];
+    ordinal += 1;
+    observations.push(
+      createObservation({
+        kind: "decision",
+        ordinal,
+        payload: {
+          decisionType: "ticket_choice",
+          relatedResolverCandidateId: stringValue(
+            target.activity,
+            "_resolverCandidateId"
+          ),
+          relatedTitle: target.title,
+          sourceText: todo.line,
+          targetField: "description",
+          title: `Decision for ${target.title}`,
+        },
+        role: "accessory_detail",
+        source: stageInput.source,
+        sourceFilename: stageInput.sourceFilename ?? null,
+        sourceLabel: stageInput.label,
+        sourceProvenance: stageInput.sourceProvenance ?? null,
+        sourceStructure: sourceStructureFromPayload(target.activity),
+        sourceUploadId: stageInput.sourceUploadId ?? null,
+      })
+    );
+  }
+
+  return { observations, ordinal };
+}
+
+function attachCanonicalSourceDecisions(pieces: CanonicalEvidencePiece[]) {
+  for (const decision of pieces.filter((piece) => piece.kind === "decision")) {
+    const relatedCandidateId = stringValue(
+      decision.payload,
+      "relatedResolverCandidateId"
+    );
+    const relatedTitle = normalizeText(stringValue(decision.payload, "relatedTitle"));
+    const candidates = pieces.filter(
+      (piece) =>
+        piece.kind === "activity" &&
+        piece.outputEligible &&
+        (relatedCandidateId
+          ? stringValue(piece.payload, "_resolverCandidateId") === relatedCandidateId
+          : normalizeText(stringValue(piece.payload, "title")) === relatedTitle)
+    );
+
+    if (candidates.length !== 1) continue;
+
+    const target = candidates[0];
+    const sourceText = stringValue(decision.payload, "sourceText");
+    if (!sourceText) continue;
+    const nextDecision: CanonicalSourceDecision = {
+      decisionType: "ticket_choice",
+      sourceText,
+      targetField: "description",
+    };
+    target.payload._canonicalSourceDecisions = [
+      ...canonicalSourceDecisions(target.payload),
+      nextDecision,
+    ];
+    mergeCanonicalPieceInto({
+      reason: "typed source decision attached to its canonical activity",
+      source: decision,
+      target,
+    });
+  }
+}
+
 function hasCanonicalExplicitTodo(payload: Record<string, unknown>) {
+  if (canonicalSourceDecisions(payload).length > 0) return true;
   const text = [stringValue(payload, "title"), stringValue(payload, "description")]
     .filter(Boolean)
     .join(" ");
@@ -4606,6 +4955,7 @@ function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
     if (piece.kind === "activity" && options.length > 0) {
       return [{
         _canonicalReviewDisposition: "question",
+        _canonicalQuestionKind: "alternative_slot",
         answerOptions: options.map((option) => ({ label: option, value: option })),
         answerType: "single_choice",
         confidence: "medium",
@@ -4645,7 +4995,9 @@ function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
     }
 
     if (piece.kind === "activity" && hasCanonicalExplicitTodo(piece.payload)) {
-      const text = `${title} ${description ?? ""}`;
+      const sourceDecision = canonicalSourceDecisions(piece.payload)[0] ?? null;
+      const decisionEvidence = sourceDecision?.sourceText ?? description;
+      const text = `${title} ${description ?? ""} ${decisionEvidence ?? ""}`;
       const ticketDecision = /\bticket\b/i.test(text);
       const timeDecision = /\b(time|start)\b/i.test(text);
       const bookingDecision = /\b(book|reserve|reservation)\b/i.test(text);
@@ -4654,7 +5006,7 @@ function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
         _canonicalReviewDisposition: "question",
         answerType: timeDecision && !ticketDecision ? "time" : "text",
         confidence: "medium",
-        evidence: description,
+        evidence: decisionEvidence,
         guessedValue: null,
         prompt: ticketDecision
           ? `Which ticket or tour option should be listed for ${title}?`
@@ -4915,6 +5267,67 @@ export function clusterExtractedEvidence({
         ordinal += 1;
         const kind =
           collection === "activities" ? activityKind(payload) : defaultKind;
+        const noteEntries = kind === "note"
+          ? explicitCityNoteEntries(payload)
+          : null;
+
+        if (noteEntries) {
+          pushUniqueObservation(
+            observations,
+            createObservation({
+              kind: "context",
+              ordinal,
+              payload: {
+                ...payload,
+                _canonicalNoteEntries: noteEntries.entries,
+              },
+              role: "context",
+              source: stageInput.source,
+              sourceFilename:
+                stringValue(payload, "sourceFilename") ??
+                stageInput.sourceFilename ??
+                null,
+              sourceLabel: stageInput.label,
+              sourceProvenance: stageInput.sourceProvenance ?? null,
+              sourceStructure: sourceStructureFromPayload(payload),
+              sourceUploadId: stageInput.sourceUploadId ?? null,
+            })
+          );
+
+          for (const entry of noteEntries.entries) {
+            ordinal += 1;
+            const entryPayload = {
+              ...payload,
+              _canonicalNoteCollectionLabel: noteEntries.collectionLabel,
+              _canonicalNoteEntry: true,
+              date: null,
+              description: noteEntries.collectionLabel
+                ? `${noteEntries.collectionLabel}: ${entry}`
+                : entry,
+              itemType: "note",
+              title: entry,
+            };
+            pushUniqueObservation(
+              observations,
+              createObservation({
+                kind: "note",
+                ordinal,
+                payload: entryPayload,
+                role: "city_note_candidate",
+                source: stageInput.source,
+                sourceFilename:
+                  stringValue(payload, "sourceFilename") ??
+                  stageInput.sourceFilename ??
+                  null,
+                sourceLabel: stageInput.label,
+                sourceProvenance: stageInput.sourceProvenance ?? null,
+                sourceStructure: sourceStructureFromPayload(payload),
+                sourceUploadId: stageInput.sourceUploadId ?? null,
+              })
+            );
+          }
+          continue;
+        }
         const role = evidenceRoleFromPayload(payload, kind);
         pushUniqueObservation(
           observations,
@@ -4936,6 +5349,15 @@ export function clusterExtractedEvidence({
         );
       }
     }
+
+    const sourceDecisions = sourceDecisionObservations({
+      stageInput,
+      startingOrdinal: ordinal,
+    });
+    ordinal = sourceDecisions.ordinal;
+    sourceDecisions.observations.forEach((observation) =>
+      pushUniqueObservation(observations, observation)
+    );
   }
 
   reclassifySourceContainers(observations);
@@ -5015,6 +5437,7 @@ export function clusterExtractedEvidence({
     pieces.push(createPiece(observation));
   }
 
+  attachCanonicalSourceDecisions(pieces);
   attachArrivalOnlyTransportPieces(pieces);
   routeCanonicalTravelBoundaries(pieces);
   mergeReclassifiedCanonicalPieces(pieces);
@@ -5044,6 +5467,7 @@ export function clusterExtractedEvidence({
   routeCanonicalAccessoryEvidence({
     actions: {
       addAction: addCanonicalAction,
+      mergePiece: mergeCanonicalPieceInto,
       suppressPiece: suppressCanonicalPiece,
     },
     pieces,
@@ -5055,6 +5479,7 @@ export function clusterExtractedEvidence({
     observations,
     pieces,
   });
+  enforceCanonicalOutputActivityRoles(pieces);
   suppressIsolatedUntimedGenericMeals(pieces);
   suppressUnresolvedIsolatedTerms({ observations, pieces });
   mergeCanonicalCityNotes(pieces);

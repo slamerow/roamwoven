@@ -39,6 +39,7 @@ export function createTripExtractionAuditReport({
   const activeItems = records.items.filter((item) => item.status !== "ignored");
   const primaryItems = activeItems.filter((item) => !item.parentItemId);
   const warnings = summary.warnings.map((warning) => ({
+    code: warning.code,
     severity: warning.severity,
     subjectId: warning.subjectId,
     subjectType: warning.subjectType,
@@ -64,6 +65,16 @@ export function createTripExtractionAuditReport({
       sourceTransportAnchors,
       usage,
     }),
+    detectorIncidents: lineage.flatMap((row) =>
+      row.matchMethod === "semantic_fallback" && row.canonicalPieceId && row.finalRecords[0]
+        ? [{
+            canonicalPieceId: row.canonicalPieceId,
+            code: "canonical_identity_semantic_fallback" as const,
+            detail: `Canonical ID did not join, but independent typed evidence uniquely matched ${row.finalRecords[0].recordType} ${row.finalRecords[0].title}.`,
+            finalRecordId: row.finalRecords[0].id,
+          }]
+        : []
+    ),
     draft: createDraftAuditSnapshot(draft),
     extraction: createExtractionSummary(usage),
     fingerprints: createTripExtractionFingerprints(records),

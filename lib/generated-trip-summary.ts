@@ -62,7 +62,16 @@ export type GeneratedTripSummaryDay = {
   title: string;
 };
 
+export type GeneratedTripSummaryWarningCode =
+  | "activity_bloat"
+  | "activity_duplicate_title"
+  | "activity_stay_collision"
+  | "activity_transport_collision"
+  | "transport_missing_required_details"
+  | "transport_missing_soft_details";
+
 export type GeneratedTripSummaryWarning = {
+  code: GeneratedTripSummaryWarningCode;
   detail: string;
   id: string;
   severity: "hard" | "quiet";
@@ -927,6 +936,7 @@ function createSummaryWarnings({
       return activityCount >= 7 && sourceDay?.status !== "confirmed";
     })
     .map((day) => ({
+      code: "activity_bloat" as const,
       detail:
         "This day still has 7 or more visible activity cards after assembly. Consider grouping a true route, moving loose ideas to city tips, or removing duplicates.",
       id: `${day.id}-activity-bloat`,
@@ -946,6 +956,7 @@ function createSummaryWarnings({
       }
 
       return [{
+        code: "transport_missing_required_details" as const,
         detail:
           `Source evidence includes ${issues.map((issue) => issue.label).join(", ")} that did not make it onto the travel row. Check the Travel card or keep Roamwoven's current best-supported version.`,
         id: `${item.id}-critical-transport-details`,
@@ -966,6 +977,7 @@ function createSummaryWarnings({
       }
 
       return [{
+        code: "transport_missing_soft_details" as const,
         detail:
           `Source evidence appears to include ${issues.map((issue) => issue.label).join(", ")}. This is useful to add, but it should not block publishing.`,
         id: `${item.id}-soft-transport-details`,
@@ -993,6 +1005,7 @@ function createSummaryWarnings({
   )
     .filter(([, items]) => items.length > 1)
     .map(([, items]) => ({
+      code: "activity_duplicate_title" as const,
       detail:
         "Multiple visible activity cards have the same date, time, and title. Review, merge, or remove the duplicate.",
       id: `${items[0]?.id ?? "activity"}-duplicate-title`,
@@ -1023,6 +1036,7 @@ function createSummaryWarnings({
 
       return [
         {
+          code: "activity_stay_collision" as const,
           detail:
             "This card looks like normal stay/check-in/drop-bags flow already covered by the Stay row.",
           id: `${item.id}-stay-collision`,
@@ -1050,6 +1064,7 @@ function createSummaryWarnings({
 
       return [
         {
+          code: "activity_transport_collision" as const,
           detail:
             "This card looks like movement already covered by the Travel row. Merge the useful details into Travel and remove the duplicate card.",
           id: `${item.id}-transport-collision`,

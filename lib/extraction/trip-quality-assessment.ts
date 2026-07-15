@@ -24,10 +24,14 @@ export function assessTripAuditReport(report: TripExtractionAuditReport) {
     (warning) => warning.severity === "quiet"
   );
   const openQuestionCount = report.structured.openQuestions;
+  const hasActivityBloat = quietWarnings.some(
+    (warning) => warning.code === "activity_bloat"
+  );
   const needsReview =
     p0Diagnostics.length > 0 ||
     p1Diagnostics.length > 0 ||
     hardWarnings.length > 0 ||
+    hasActivityBloat ||
     openQuestionCount > 0;
 
   return {
@@ -108,6 +112,7 @@ export function createTripQualityAssessmentSnapshot(
   assessment: ReturnType<typeof assessTripAuditReport>
 ) {
   return {
+    detectorIncidentCount: assessment.report.detectorIncidents.length,
     diagnosticCount: assessment.report.diagnostics.length,
     diagnostics: assessment.report.diagnostics,
     disposition: assessment.disposition,

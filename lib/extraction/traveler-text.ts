@@ -113,6 +113,15 @@ export function normalizeTripDate(
       Number(existingIso[3])
     );
   }
+  const numericDayFirst = /\b(\d{1,2})[.](\d{1,2})[.](\d{4})\b/.exec(trimmed);
+
+  if (numericDayFirst) {
+    return isoDate(
+      Number(numericDayFirst[3]),
+      Number(numericDayFirst[2]),
+      Number(numericDayFirst[1])
+    );
+  }
 
   const monthFirst = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i.exec(
     trimmed

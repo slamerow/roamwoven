@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 7
+Ledger version: 8
 
 Ledger date: 2026-07-16
 
@@ -110,19 +110,26 @@ path is bypassed.
   problem on the maker. Internal diagnostics, warning counts, audit notices, and
   readiness derive from one assessment: an audit surface may never report "No
   audit notices" while that same report contains P0/P1 diagnostics or hard
-  warnings. Technical inability to recover any usable source is a recovery
-  state, not semantic QA.
+  warnings. An audit diagnostic is a candidate finding until independently
+  reconciled against source evidence, canonical entities, and final records;
+  an unproven detector claim cannot authorize a mutation. Technical inability
+  to recover any usable source is a recovery state, not semantic QA.
 - Evidence: Quality assessment version 2 is the shared authority for P0/P1/P2
   diagnostics, hard and quiet warnings, open Questions, processing disposition,
   stored quality metadata, and top-level audit notices. Semantic Questions and
   warnings no longer block the publish route; only missing structured records
   remain a technical publishing failure. Canonical identity defects now run
   through one deterministic artifact-backed repair and recompile pass before a
-  named technical recovery state. The remaining gap is the automatic semantic
-  repair and deduplication pass for abnormal Question or canonical-card counts.
+  named technical recovery state. The first-run extraction route now reconciles
+  serious audit candidates, requests at most one idempotent retry from the
+  canonical output-invariant owner, and re-audits before any draft is persisted.
+  The audit layer never edits semantic output. Unrepaired findings remain an
+  explicit conservative review state rather than being hidden or killing an
+  otherwise usable run.
 - Tests: `tests/trip-quality-gate.test.ts`,
   `tests/trip-publish-policy.test.ts`, `tests/generated-trip-model.test.ts`,
-  `tests/extraction-route-recovery.test.ts`
+  `tests/extraction-route-recovery.test.ts`,
+  `tests/trip-quality-outcomes.test.ts`
 
 ## RW-CAN-001 — Canonical finalization is the semantic boundary
 
@@ -139,7 +146,11 @@ path is bypassed.
   parallel array positions. Identity represents one planned occurrence: repeated
   mentions collapse by default, while separate occurrences require affirmative
   evidence such as distinct dates, bookings, times, or explicit repeat-visit
-  language. Correcting an occurrence's date moves the same entity. Maker-added
+  language. A strong planned occurrence plus a loose mention remains one
+  Activity, never an Activity plus a City Note. Two equally plausible dates
+  without independent repeat-visit evidence remain one provisionally placed
+  Activity with one precise single-choice date Question; they do not become two
+  provisional cards. Correcting an occurrence's date moves the same entity. Maker-added
   entities receive canonical identity, and explicit maker edits or deletions
   survive a future rebuild while that subject survives. New identity versions
   apply to new builds and intentional rebuilds only; existing unpublished drafts
@@ -212,7 +223,13 @@ path is bypassed.
   own untimed subordinate stops when the source indicates that the parent
   booking covers the visit; an independently timed or booked child remains
   standalone. Parent cards keep concise parent prose and ordered child records;
-  child prose is not concatenated into a wall of parent text.
+  child prose is not concatenated into a wall of parent text. Picking up or
+  activating a citywide card or pass is a standalone admin/logistics Activity
+  and can never be grouping evidence for the sights it may cover. A pass tied to
+  one site may support a same-site group only when the source explicitly says it
+  covers that one continuous visit. Informational pass details without a planned
+  pickup or activation task belong to their owning detail or evidence lineage,
+  not a traveler card.
 - Evidence: The latest live resolver run predates this checkpoint and inverted
   negative Albertina evidence while failing to discover the Schoenbrunn
   grouping. The current first-run path now requires conclusive supplied source
@@ -241,11 +258,16 @@ path is bypassed.
   transport record, not a new Activity, City Note, Call, or Question. When the
   same place appears as both an Activity and City Note, the Activity wins; one
   unique useful detail may move to the Activity, while generic praise and list
-  context are discarded. First-run assembly never mutates an existing draft or
+  context are discarded. The scheduled place is removed from the City Note at
+  the smallest useful list or segment boundary, so Activity and City Notes never
+  overlap. First-run assembly never mutates an existing draft or
   published snapshot; these rules apply to newly assembled drafts only.
 - Evidence: Several deterministic cleanup tests pass, but the latest live run
   duplicated Borkonyha across activity and city notes, leaked stay/accessory
-  content into Rome notes, and preserved day-container bloat.
+  content into Rome notes, and preserved day-container bloat. New builds now
+  preserve explicit City Note list entries as hidden canonical pieces, route
+  each entry once, and merge only surviving entries into the visible city
+  collection; a fresh live extraction is still required to verify the boundary.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`
 
@@ -302,7 +324,14 @@ path is bypassed.
   lineage rather than a fabricated traveler card. Any future enrichment is a
   separate post-assembly step limited to one or two concise, sourced factual
   lines and may never change intent, type, date, grouping, booking state, or
-  private facts.
+  private facts. When deterministic source-block coverage proves that meaningful
+  source text never became an observation, Roamwoven may run at most one
+  excerpt-only, batched model recovery call for that build. The call has hard
+  input and output caps, records its usage separately, never retries itself, and
+  cannot be triggered by audit disagreement, grouping, classification, card
+  density, or presentation warnings. If it fails, the usable draft survives and
+  one precise maker Question is allowed only when a maker answer can actually
+  repair the declared field.
 - Evidence: Every extracted evidence observation now receives exactly one
   persisted disposition. The validated assembly boundary deterministically
   rebuilds a missing manifest, re-materializes repaired dispositions onto the
@@ -441,7 +470,7 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `ENFORCED`
+- Enforcement: `PARTIAL`
 - Contract: Extraction, assembly, review, and future fixes never mutate an
   already published traveler snapshot. Maker changes create a new draft and an
   explicit new published snapshot/version when the maker chooses to publish an
@@ -450,6 +479,48 @@ path is bypassed.
   use the active published snapshot.
 - Tests: `tests/published-snapshots.test.ts`,
   `tests/structured-trip-snapshot.test.ts`
+
+## RW-AUD-001 — Audit findings require independent proof before action
+
+- Status: `LOCKED`
+- Decision date: `2026-07-16`
+- Enforcement: `ENFORCED`
+- Contract: An audit detector produces candidate findings, not truth. Before a
+  P0, P1, or hard warning can authorize any output mutation, an independent
+  reconciliation step checks the source evidence, canonical entity, and final
+  record. Canonical ID is the primary join, but the verifier also uses typed
+  semantic evidence such as entity kind, city, normalized date/time, route
+  endpoints, booking locator, provider, venue identity, and source lineage so a
+  detector cannot report a correct record as missing merely because one identity
+  join failed. A semantic match with broken identity is reported as an identity
+  defect, not as a missing traveler record.
+
+  Every serious candidate is classified as exactly one of:
+  `confirmed_output_defect`, `confirmed_audit_defect`,
+  `confirmed_source_processing_failure`, or `genuine_maker_decision`. A
+  confirmed audit defect fixes or reconciles the detector, leaves correct output
+  untouched, creates no maker-visible Call, Question, or warning, and remains
+  loud in internal telemetry until covered by a regression. A confirmed output
+  defect cannot be relabeled as an audit incident to make the run appear ready.
+  Detector tests include known-good controls plus metamorphic changes to IDs,
+  array order, and non-semantic title formatting. The final audit report contains
+  only reconciled findings; detector disagreements are preserved separately as
+  internal incidents.
+- Evidence: Canonical identity remains the primary join. The independent
+  reconciliation layer accepts a unique exact booking locator by itself;
+  otherwise it requires at least two compatible typed fields from normalized
+  dates, times, endpoints, providers, venue identity, address, and entity type.
+  A broken identity join on
+  otherwise matching output becomes an internal detector incident and cannot
+  create a missing-record diagnostic or mutate the traveler draft. Metamorphic
+  tests cover activity, stay, and transport identity drift; array reordering;
+  title punctuation; European dotted dates; unique and shared booking locators;
+  and negative controls where the candidate is actually absent. Enforcement
+  remains partial until every serious diagnostic family carries typed canonical
+  identity rather than evidence prose.
+- Tests: `tests/trip-audit-reconciliation.test.ts`,
+  `tests/trip-quality-gate.test.ts`,
+  `tests/extraction-route-recovery.test.ts`
 
 ## RW-OPS-001 — Detectors require a complete dark-factory outcome
 
@@ -464,19 +535,29 @@ path is bypassed.
   no valid draft can exist. A processing stage is completed only after its
   persisted boundary validates. Successful backstage repair is recorded in
   internal events, usage, QA bundles, and audit notices without becoming a maker
-  Question or exposing machinery in the premium customer experience. Every new
-  terminal path requires behavioral route-level coverage before code is called
-  safe to push.
+  Question or exposing machinery in the premium customer experience. Each
+  serious reconciled finding records its truth classification, affected
+  canonical IDs, action, and before/after fingerprint. The route re-audits after
+  repair and saves only an explicit terminal result: either a converged repaired
+  draft or a usable conservative fallback whose remaining finding and single
+  retry result stay visible in review state and internal telemetry. Repair is
+  bounded and cannot repeatedly mutate the same draft. Every new terminal path
+  requires behavioral route-level coverage before code is called safe to push.
 - Evidence: Repository preflight now requires route-outcome tracing for new
   validators and terminal paths. Canonical evidence is preflighted before its
   database uniqueness boundary, exact duplicates are repaired before
   persistence, and conflicting identities enter the named recovery state.
   Canonical assembly records `started` before validation and `completed` only
   after repair, finalization, and structured compilation succeed;
-  unrecoverable identity conflicts cannot save a draft snapshot. Other existing
-  pipeline validators have not yet received the same exhaustive route audit.
+  unrecoverable identity conflicts cannot save a draft snapshot. Semantic audit
+  candidates now have explicit truth classifications and before/after
+  fingerprints; repaired output is rebuilt and re-audited, while detector
+  incidents leave correct output untouched. Other existing pipeline validators
+  have not yet received the same exhaustive route audit.
 - Tests: `tests/extraction-route-recovery.test.ts`,
-  `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`
+  `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
+  `tests/trip-quality-outcomes.test.ts`,
+  `tests/trip-audit-reconciliation.test.ts`
 
 ## RW-OPEN-001 — Question response controls in the assembly pass
 

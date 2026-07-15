@@ -114,6 +114,7 @@ export default async function run() {
   const events: Array<Record<string, unknown>> = [];
   const persistedDispositionCounts: number[] = [];
   const persistedPieceIds: string[][] = [];
+  const persistedPieceEligibility: boolean[][] = [];
   const restore = [
     patchModule("@/lib/env", {
       getOpenAIConfig: () => ({ maxInputChars: 100_000 }),
@@ -184,6 +185,9 @@ export default async function run() {
           observations.filter((observation) => observation.disposition).length
         );
         persistedPieceIds.push(pieceIds);
+        persistedPieceEligibility.push(
+          pieces.map((piece) => piece.outputEligible)
+        );
         return {
           observationCount: parserResult.evidenceArtifacts.observations.length,
           pieceCount: pieces.length,
@@ -267,6 +271,109 @@ export default async function run() {
       assert.equal(recovery.status, "repaired");
       assert.ok(records);
       assert.equal(records.items.length, 1);
+    });
+
+    await test("extraction route repairs and re-audits before persistence", async () => {
+      const repairable = createParserResult();
+      const piece = repairable.evidenceArtifacts.pieces.find(
+        (candidate) => candidate.outputEligible && candidate.kind === "activity"
+      );
+      assert.ok(piece);
+      piece.payload.title = "Paris day plan";
+      const draft = repairable.draft as Record<string, unknown>;
+      const activity = (draft.activities as Array<Record<string, unknown>>)[0];
+      activity.title = "Paris day plan";
+      parserResult = repairable;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+      persistedPieceIds.length = 0;
+      persistedPieceEligibility.length = 0;
+      persistedDispositionCounts.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-quality-remediation/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-quality-remediation" }) }
+      );
+      const location = response.headers.get("location") ?? "";
+      const completed = completedCalls[0];
+      const records = readStructuredTripSnapshot(completed?.draftJson);
+      const draftJson = completed?.draftJson as Record<string, unknown>;
+      const quality = draftJson._qualityAssessment as Record<string, unknown>;
+      const usage = completed?.usage as Record<string, unknown>;
+      const openai = usage.openai as Record<string, unknown>;
+      const remediation = openai.qualityRemediation as Record<string, unknown>;
+      const remediationEvents = events.filter(
+        (event) => event.stage === "quality_remediation"
+      );
+
+      assert.match(location, /extraction=completed/);
+      assert.equal(failedCalls.length, 0);
+      assert.ok(records);
+      assert.equal(records.items.length, 0);
+      assert.equal(remediation.retryAttempted, true);
+      assert.equal(remediation.retryChanged, true);
+      assert.deepEqual(
+        remediationEvents.map((event) => event.status),
+        ["started", "completed"]
+      );
+      assert.equal(
+        (quality.diagnostics as Array<{ code?: string }>).some(
+          (diagnostic) => diagnostic.code === "day_overview_activity_survived"
+        ),
+        false
+      );
+      assert.equal(persistedPieceEligibility.length, 1);
+      assert.equal(persistedPieceEligibility[0].includes(false), true);
+    });
+
+    await test("extraction route preserves a review-visible fallback after one no-op retry", async () => {
+      const persistent = createParserResult();
+      persistent.usage = {
+        ...(persistent.usage as Record<string, unknown>),
+        ocr: { failed: 1 },
+      };
+      parserResult = persistent;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+      persistedPieceIds.length = 0;
+      persistedPieceEligibility.length = 0;
+      persistedDispositionCounts.length = 0;
+      const response = await POST(
+          new NextRequest(
+            "http://localhost/maker/trips/route-quality-budget/data/extract"
+          ),
+          { params: Promise.resolve({ tripId: "route-quality-budget" }) }
+        );
+        const location = response.headers.get("location") ?? "";
+        const completed = completedCalls[0];
+        const usage = completed?.usage as Record<string, unknown>;
+        const openai = usage.openai as Record<string, unknown>;
+        const remediation = openai.qualityRemediation as Record<string, unknown>;
+        const outcomes = remediation.outcomes as Array<Record<string, unknown>>;
+        const finalOutcome = outcomes.find(
+          (outcome) =>
+            outcome.findingKey ===
+            "diagnostic:ocr_backfill_failed"
+        );
+        const draftJson = completed?.draftJson as Record<string, unknown>;
+        const quality = draftJson._qualityAssessment as Record<string, unknown>;
+
+        assert.match(location, /extraction=completed-with-review/);
+        assert.equal(failedCalls.length, 0);
+        assert.equal(remediation.retryAttempted, true);
+        assert.equal(remediation.retryChanged, false);
+        assert.ok(finalOutcome);
+        assert.equal(
+          finalOutcome.action,
+          "conservative_fallback_preserved_for_review"
+        );
+        assert.equal(finalOutcome.beforeFingerprint, finalOutcome.afterFingerprint);
+        assert.equal(quality.p0DiagnosticCount, 1);
+        assert.equal(persistedPieceIds.length, 1);
     });
 
     await test("extraction route repairs evidence and draft identity independently", async () => {

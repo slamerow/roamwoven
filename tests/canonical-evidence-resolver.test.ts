@@ -90,9 +90,10 @@ export default async function run() {
       "Apple Strudel Show",
       "Panorama Train pass",
     ];
-    const source = titles
-      .map((title) => title.replace("Strudel", "Studel"))
-      .join("\n");
+    const source = [
+      "Schonbrunn Palace complex includes these visitor stops:",
+      ...titles.map((title) => title.replace("Strudel", "Studel")),
+    ].join("\n");
     const input = stage(titles, source);
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
@@ -116,8 +117,8 @@ export default async function run() {
     const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
     const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
     assert.deepEqual(roots.map((item) => item.title), ["Schonbrunn Palace"]);
-    assert.equal(stops.length, 6);
-    assert.deepEqual(stops.map((item) => item.title), titles);
+    assert.equal(stops.length, 5);
+    assert.deepEqual(stops.map((item) => item.title), titles.slice(1));
     assert.equal(
       roots[0]?.description?.includes("Gloriette") ?? false,
       false
@@ -130,7 +131,10 @@ export default async function run() {
 
   await test("first-class grouping compiles to one traveler card with ordered stops", () => {
     const titles = ["Schonbrunn Palace", "Gloriette", "Palm House"];
-    const input = stage(titles, titles.join("\n"));
+    const input = stage(
+      titles,
+      ["Schonbrunn Palace complex includes:", ...titles].join("\n")
+    );
     const draft = cluster(applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
@@ -148,11 +152,11 @@ export default async function run() {
     });
     const traveler = createTravelerAppViewModel(records);
 
-    assert.equal(records.items.length, 4);
+    assert.equal(records.items.length, 3);
     assert.equal(records.items.filter((item) => !item.parentItemId).length, 1);
-    assert.equal(records.items.filter((item) => item.parentItemId).length, 3);
+    assert.equal(records.items.filter((item) => item.parentItemId).length, 2);
     assert.equal(traveler.cards.length, 1);
-    assert.deepEqual(traveler.cards[0]?.stops.map((stop) => stop.title), titles);
+    assert.deepEqual(traveler.cards[0]?.stops.map((stop) => stop.title), titles.slice(1));
     assert.equal(createGeneratedTripSummaryView(records).counts.activities, 1);
   });
 
@@ -173,6 +177,152 @@ export default async function run() {
 
     assert.deepEqual(draft.activities.map((item) => item.title), titles);
     assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("same dated heading cannot group a city-card pickup with a museum", () => {
+    const titles = ["Vienna Card pickup", "Albertina"];
+    const input = stage(titles, titles.join("\n"));
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2"],
+        claim:
+          "Vienna Card pickup and Albertina are presented together under the same dated itinerary heading.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Vienna Card pickup and Albertina",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+    const draft = cluster(application);
+
+    assert.equal(application.groupingDecisions.length, 0);
+    assert.deepEqual(draft.activities.map((item) => item.title), titles);
+  });
+
+  await test("city-pass pickup remains standalone outside the European fixtures", () => {
+    const titles = ["Kyoto Transit Pass pickup", "Kiyomizu-dera"];
+    const input = stage(titles, titles.join("\n"));
+    const activities = (input.stage as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+    activities.forEach((item) => {
+      item.city = "Kyoto";
+      item.sourceHeadingPath = ["April 2", "Kyoto"];
+      item.sourceSectionLabel = "Kyoto";
+    });
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: ["stage-1-item-1", "stage-1-item-2"],
+        claim: "The items sit under the same dated heading.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Kyoto morning",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+
+    assert.equal(application.groupingDecisions.length, 0);
+  });
+
+  await test("a runtime city name cannot become a generic grouping parent", () => {
+    const titles = ["Kiyomizu-dera", "Sannenzaka", "Yasaka Pagoda"];
+    const input = stage(
+      titles,
+      ["Kyoto attractions include:", ...titles].join("\n")
+    );
+    const activities = (input.stage as {
+      activities: Array<Record<string, unknown>>;
+    }).activities;
+    activities.forEach((item) => {
+      item.city = "Kyoto";
+      item.sourceHeadingPath = ["April 2", "Kyoto"];
+      item.sourceSectionLabel = "Kyoto";
+    });
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: [
+          "stage-1-item-1",
+          "stage-1-item-2",
+          "stage-1-item-3",
+        ],
+        claim: "The source presents one continuous route through the city.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Kyoto attractions",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+
+    assert.equal(application.groupingDecisions.length, 0);
+  });
+
+  await test("generic dated itinerary headings cannot become group parents", () => {
+    const titles = ["Albertina", "Belvedere Palace", "Prater Ferris Wheel"];
+    const input = stage(titles, titles.join("\n"));
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [{
+        candidateIds: [
+          "stage-1-item-1",
+          "stage-1-item-2",
+          "stage-1-item-3",
+        ],
+        claim: "The activities are listed together under the same date.",
+        confidence: "high",
+        parentCandidateId: "stage-1-item-1",
+        parentTitle: "Friday January 18",
+      }],
+      roleDecisions: noRoleDecisions,
+    });
+
+    assert.equal(application.groupingDecisions.length, 0);
+  });
+
+  await test("execution rejects overlapping groups even before reconciliation", () => {
+    const titles = [
+      "Schonbrunn Palace",
+      "Gloriette",
+      "Palm House",
+      "Belvedere Palace",
+      "Upper Belvedere",
+    ];
+    const input = stage(
+      titles,
+      ["Schonbrunn Palace complex includes these stops:", ...titles].join("\n")
+    );
+    const application = applyCanonicalEvidenceResolution([input], {
+      groupings: [
+        {
+          candidateIds: [
+            "stage-1-item-1",
+            "stage-1-item-2",
+            "stage-1-item-3",
+          ],
+          claim: "These are components of one palace complex.",
+          confidence: "high",
+          parentCandidateId: "stage-1-item-1",
+          parentTitle: "Schonbrunn Palace",
+        },
+        {
+          candidateIds: [
+            "stage-1-item-3",
+            "stage-1-item-4",
+            "stage-1-item-5",
+          ],
+          claim: "These are components of one museum complex.",
+          confidence: "high",
+          parentCandidateId: "stage-1-item-4",
+          parentTitle: "Belvedere Palace",
+        },
+      ],
+      roleDecisions: noRoleDecisions,
+    });
+
+    assert.equal(application.groupingDecisions.length, 1);
+    assert.deepEqual(application.groupingDecisions[0]?.candidateIds, [
+      "stage-1-item-1",
+      "stage-1-item-2",
+      "stage-1-item-3",
+    ]);
   });
 
   await test("blank-separated source blocks cannot be collapsed by lookup", () => {
@@ -196,13 +346,16 @@ export default async function run() {
 
   await test("an independently timed child stays outside a continuous grouping", () => {
     const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
-    const input = stage(titles, titles.join("\n"));
+    const input = stage(
+      titles,
+      ["Old Town walking route", ...titles].join("\n")
+    );
     const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
     stagedActivities[1].startTime = "14:30";
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
-        claim: "The stops are in one historic district.",
+        claim: "The source presents one continuous walking route.",
         confidence: "high",
         parentCandidateId: "stage-1-item-1",
         parentTitle: "Old Town walking tour",
@@ -221,7 +374,7 @@ export default async function run() {
       roots.find((item) => item.title === titles[1])?.startTime,
       "14:30"
     );
-    assert.deepEqual(stops.map((item) => item.title), [titles[0], titles[2]]);
+    assert.deepEqual(stops.map((item) => item.title), [titles[2]]);
     assert.equal(
       draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? "")).length,
       1
@@ -230,14 +383,17 @@ export default async function run() {
 
   await test("two independently timed stops reject a proposed grouping", () => {
     const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
-    const input = stage(titles, titles.join("\n"));
+    const input = stage(
+      titles,
+      ["Old Town walking route", ...titles].join("\n")
+    );
     const stagedActivities = (input.stage as { activities: Array<Record<string, unknown>> }).activities;
     stagedActivities[1].startTime = "14:30";
     stagedActivities[2].startTime = "16:00";
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],
-        claim: "The stops are in one historic district.",
+        claim: "The source presents one continuous walking route.",
         confidence: "high",
         parentCandidateId: "stage-1-item-1",
         parentTitle: "Old Town walking tour",
@@ -293,6 +449,7 @@ export default async function run() {
 
   await test("cross-chunk grouping uses shared source evidence and an atomic parent", () => {
     const sourceText = [
+      "Schonbrunn Palace complex includes:",
       "Schonbrunn Palace",
       "Gloriette",
       "Palm House",
@@ -351,7 +508,11 @@ export default async function run() {
   });
 
   await test("a source-authored dated route needs no assembly Call", () => {
-    const sourceText = ["Old Town walk", "Charles Bridge", "Old Town Square"].join("\n");
+    const sourceText = [
+      "Old Town walking route",
+      "Charles Bridge",
+      "Old Town Square",
+    ].join("\n");
     const proposalStage = stage(["Old Town walk"], sourceText);
     proposalStage.sourceUploadId = "old-town-source";
     const proposal = (proposalStage.stage as {
@@ -387,15 +548,22 @@ export default async function run() {
   });
 
   await test("candidate count cannot silently dead-path a late grouping", () => {
-    const titles = Array.from({ length: 122 }, (_, index) => `Venue ${index + 1}`);
-    const input = stage(titles, titles.join("\n"));
+    const titles = [
+      ...Array.from({ length: 120 }, (_, index) => `Venue ${index + 1}`),
+      "Schonbrunn Palace",
+      "Gloriette",
+    ];
+    const input = stage(
+      titles,
+      ["Schonbrunn Palace complex includes Gloriette.", ...titles].join("\n")
+    );
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-121", "stage-1-item-122"],
         claim: "The final two named components form one verified visit.",
         confidence: "high",
         parentCandidateId: "stage-1-item-121",
-        parentTitle: "Venue 121",
+        parentTitle: "Schonbrunn Palace",
       }],
       roleDecisions: noRoleDecisions,
     });

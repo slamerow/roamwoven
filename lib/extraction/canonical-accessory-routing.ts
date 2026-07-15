@@ -13,6 +13,11 @@ type RoutingActions = {
     piece: CanonicalEvidencePiece,
     action: CanonicalEvidenceAction
   ) => void;
+  mergePiece: (args: {
+    reason: string;
+    source: CanonicalEvidencePiece;
+    target: CanonicalEvidencePiece;
+  }) => void;
   suppressPiece: (piece: CanonicalEvidencePiece, reason: string) => void;
 };
 
@@ -32,6 +37,70 @@ function splitEvidenceSegments(value: unknown) {
     .split(/(?:\r?\n)+|\s*;\s*|(?<=[.!?])\s+/)
     .map((segment) => segment.trim().replace(/^["']|["']$/g, ""))
     .filter(Boolean);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function factualActivityDetail(
+  segment: string,
+  activity: CanonicalEvidencePiece
+) {
+  const title = stringValue(activity.payload, "title");
+  let detail = segment.trim();
+
+  if (title) {
+    detail = detail
+      .replace(
+        new RegExp(`^(?:[^:]{1,30}:\\s*)?${escapeRegExp(title)}\\s*(?:[-—,:]|\\bis\\b)?\\s*`, "i"),
+        ""
+      )
+      .trim();
+  }
+
+  if (
+    !detail ||
+    normalizeText(detail) === normalizeText(title) ||
+    !/\b(?:architecture|built|cuisine|designed|dish(?:es)?|famous|founded|historic|history|known for|located|michelin|opened|popular dishes?|serves|speciali[sz]es|traditional|wine)\b/i.test(
+      detail
+    )
+  ) {
+    return null;
+  }
+
+  if (detail.length > 220) {
+    const shortened = detail.slice(0, 220).replace(/\s+\S*$/, "").trim();
+    detail = `${shortened}.`;
+  }
+
+  return detail;
+}
+
+function attachActivityDetail({
+  actions,
+  activity,
+  detail,
+  note,
+}: {
+  actions: RoutingActions;
+  activity: CanonicalEvidencePiece;
+  detail: string;
+  note: CanonicalEvidencePiece;
+}) {
+  const existing = stringValue(activity.payload, "description");
+
+  if (existing && normalizeText(existing).includes(normalizeText(detail))) {
+    return;
+  }
+
+  activity.payload.description = [existing, detail].filter(Boolean).join(" ");
+  actions.addAction(activity, {
+    absorbedTitles: [],
+    observationIds: [...note.observationIds],
+    reason: "moved one useful source detail from a duplicate city-note mention",
+    type: "attached",
+  });
 }
 
 function sourceStructuredDate(
@@ -234,7 +303,7 @@ function routeDatedNoteEvidence({
       activityDateCompatible(piece, date)
   );
   const segments = splitEvidenceSegments(note.payload.description);
-  const retained = segments.filter((segment) => {
+  const retained = segments.flatMap((segment) => {
     const text = normalizeText(segment);
     const stayMention = compatibleStays.some((stay) =>
       exactRecordMention(segment, [stay.payload.name, stay.payload.address])
@@ -244,9 +313,10 @@ function routeDatedNoteEvidence({
       /\b(?:sleep|sleeping|stay|lodging|hostel|hotel|check in|check-in|room|address)\b/.test(
         text
       );
-    const activityMention = compatibleActivities.some((activity) =>
+    const matchingActivities = compatibleActivities.filter((activity) =>
       exactRecordMention(segment, [activity.payload.title, activity.payload.address])
     );
+    const activityMention = matchingActivities.length > 0;
     const transportMention = compatibleTransport.some((transport) =>
       exactRecordMention(segment, [
         transport.payload.title,
@@ -285,13 +355,27 @@ function routeDatedNoteEvidence({
       });
     }
 
-    return !(
-      stayMention ||
+    if (activityMention) {
+      if (matchingActivities.length === 1) {
+        const detail = factualActivityDetail(segment, matchingActivities[0]);
+        if (detail) {
+          attachActivityDetail({
+            actions,
+            activity: matchingActivities[0],
+            detail,
+            note,
+          });
+        }
+      }
+    }
+
+    return stayMention ||
       uniqueLodgingContext ||
       activityMention ||
       transportMention ||
       uniqueMovementContext
-    );
+      ? []
+      : [segment];
   });
   const dedupedRetained = retained.filter((segment, index) => {
     const normalized = normalizeText(segment);
@@ -306,7 +390,11 @@ function routeDatedNoteEvidence({
     return;
   }
 
-  if (dedupedRetained.length !== segments.length) {
+  const retainedChanged =
+    dedupedRetained.length !== segments.length ||
+    dedupedRetained.some((segment, index) => segment !== segments[index]);
+
+  if (retainedChanged) {
     note.payload.description = dedupedRetained.join(" ");
     actions.addAction(note, {
       absorbedTitles: [],
@@ -321,6 +409,94 @@ function routeDatedNoteEvidence({
   // must own it. This layer may sanitize and attach evidence only.
 }
 
+function rentalText(piece: CanonicalEvidencePiece) {
+  return normalizeText(
+    [piece.payload.title, piece.payload.description, piece.payload.category]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function isRentalPickup(piece: CanonicalEvidencePiece) {
+  return /\b(?:pick\s*up|pickup).{0,30}\b(?:rental\s*)?car\b|\brental\s*car.{0,30}\b(?:pick\s*up|pickup)\b/.test(
+    rentalText(piece)
+  );
+}
+
+function isRentalTarget(piece: CanonicalEvidencePiece) {
+  if (!piece.outputEligible) return false;
+  if (piece.kind === "transport") {
+    return /\brental\s*car\b/.test(
+      normalizeText(String(piece.payload.type ?? "").replaceAll("_", " "))
+    );
+  }
+
+  return piece.kind === "activity" &&
+    (isRentalPickup(piece) || /\b(?:rental car|car rental)\b/.test(rentalText(piece)));
+}
+
+function isRentalReservationDetail(piece: CanonicalEvidencePiece) {
+  return piece.kind === "activity" &&
+    piece.outputEligible &&
+    !isRentalPickup(piece) &&
+    /\b(?:car|vehicle)\s+(?:booking|reservation)\s+(?:detail|details|information)\b|\b(?:rental car|car rental)\s+(?:booking|reservation)\b/.test(
+      rentalText(piece)
+    );
+}
+
+function attachRentalReservationDetails({
+  actions,
+  pieces,
+}: {
+  actions: RoutingActions;
+  pieces: CanonicalEvidencePiece[];
+}) {
+  const targets = pieces.filter(isRentalTarget);
+
+  for (const detail of pieces.filter(isRentalReservationDetail)) {
+    const detailDate = stringValue(detail.payload, "date");
+    const datedTargets = targets.filter((target) => {
+      if (target === detail) return false;
+      const targetDate = stringValue(target.payload, "date");
+      return Boolean(
+        detailDate && targetDate && tripDatesMatch(detailDate, targetDate)
+      );
+    });
+    const matches = datedTargets.length > 0
+      ? datedTargets
+      : targets.filter((target) => target !== detail).length === 1
+        ? targets.filter((target) => target !== detail)
+        : [];
+
+    if (matches.length !== 1) continue;
+
+    const target = matches[0];
+    for (const field of [
+      "address",
+      "confirmation",
+      "confirmationLabel",
+      "endTime",
+      "provider",
+      "startTime",
+    ]) {
+      if (!target.payload[field] && detail.payload[field]) {
+        target.payload[field] = detail.payload[field];
+      }
+    }
+
+    const existing = stringValue(target.payload, "description");
+    const incoming = stringValue(detail.payload, "description");
+    if (incoming && !normalizeText(existing).includes(normalizeText(incoming))) {
+      target.payload.description = [existing, incoming].filter(Boolean).join(" ");
+    }
+    actions.mergePiece({
+      reason: "rental reservation details attached to the canonical rental",
+      source: detail,
+      target,
+    });
+  }
+}
+
 export function routeCanonicalAccessoryEvidence({
   actions,
   pieces,
@@ -330,6 +506,7 @@ export function routeCanonicalAccessoryEvidence({
   pieces: CanonicalEvidencePiece[];
   tripYear: number | null;
 }) {
+  attachRentalReservationDetails({ actions, pieces });
   removeCrossActivityDescriptionBleed({ actions, pieces });
 
   for (const note of pieces.filter(

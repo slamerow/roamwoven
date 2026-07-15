@@ -120,6 +120,7 @@ export default function run() {
       quietWarnings: 0,
     },
     warnings: Array.from({ length: 6 }, (_, index) => ({
+      code: "activity_duplicate_title" as const,
       severity: "hard" as const,
       subjectId: "item-" + String(index + 1),
       subjectType: "item" as const,
@@ -136,6 +137,18 @@ export default function run() {
     "Semantic audit found 2 P0 issues and 1 P1 issue.",
     "Structured review found 6 hard warnings.",
   ]);
+  const bloatAssessment = assessTripAuditReport({
+    ...assessment.report,
+    diagnostics: [],
+    warnings: [{
+      code: "activity_bloat",
+      severity: "quiet",
+      subjectId: "day-one",
+      subjectType: "day",
+      title: "A crowded day",
+    }],
+  });
+  assert.equal(bloatAssessment.disposition, "needs_review");
   const auditNotices = createTripExtractionAuditNotices({
     hasRecords: true,
     latestRun: null,

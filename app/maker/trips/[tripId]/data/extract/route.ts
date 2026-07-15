@@ -11,6 +11,7 @@ import {
   materializeCanonicalEvidenceObservations,
   prepareCanonicalEvidencePieces,
 } from "@/lib/extraction/canonical-trip-assembly";
+import { reapplyCanonicalOutputInvariants } from "@/lib/extraction/evidence-clustering";
 import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
@@ -18,6 +19,9 @@ import {
   attachTripQualityAssessment,
   createTripQualityAssessmentSnapshot,
 } from "@/lib/extraction/trip-quality-assessment";
+import {
+  createTripQualityOutcomes,
+} from "@/lib/extraction/trip-quality-outcomes";
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
@@ -46,6 +50,19 @@ import { listTripUploads } from "@/lib/uploads";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+function hasSeriousQualityFindings(
+  assessment: ReturnType<typeof assessTripDraftQuality>
+) {
+  return Boolean(
+    assessment.p0Diagnostics.length ||
+      assessment.p1Diagnostics.length ||
+      assessment.hardWarnings.length ||
+      assessment.quietWarnings.some(
+        (warning) => warning.code === "activity_bloat"
+      )
+  );
+}
 
 function redirectToData(
   request: NextRequest,
@@ -411,21 +428,122 @@ export async function POST(
       status: "started",
       tripId,
     });
-    const assembly = assembleCanonicalTripDraft({
+    const initialPieces = preparedEvidence.pieces;
+    let currentPieces = initialPieces;
+    let assembly = assembleCanonicalTripDraft({
       draft: result.draft,
-      evidencePieces: preparedEvidence.pieces,
+      evidencePieces: currentPieces,
       fallbackTripName: trip.name,
       priorRecoveryActions: preparedEvidence.recoveryActions,
       tripId,
     });
+    failureStage = "quality_assessment";
+    await recordTripProcessingEvent({
+      details: { maxCanonicalInvariantRetries: 1 },
+      processingRunId: run.id,
+      stage: "quality_remediation",
+      status: "started",
+      tripId,
+    });
+    failureStage = "evidence_cluster";
+    const initialObservations = materializeCanonicalEvidenceObservations({
+      draft: assembly.draft,
+      observations: result.evidenceArtifacts.observations,
+    });
+    failureStage = "quality_assessment";
+    const initialUsage = {
+      ...(asRecord(result.usage) ?? {}),
+      evidence: {
+        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
+        canonicalPieceCount: currentPieces.filter((piece) => piece.outputEligible)
+          .length,
+        dispositionCount: initialObservations.length,
+      },
+      finalization: assembly.finalization,
+      identityRecovery: assembly.recovery,
+    };
+    const initialAssessment = assessTripDraftQuality({
+      draft: assembly.draft,
+      evidenceArtifacts: {
+        observations: initialObservations,
+        pieces: currentPieces,
+      },
+      records: assembly.records,
+      usage: initialUsage,
+    });
+    const retryAttempted = hasSeriousQualityFindings(initialAssessment);
+    let retryChanged = false;
+
+    if (retryAttempted) {
+      const retry = reapplyCanonicalOutputInvariants({ pieces: currentPieces });
+      retryChanged = retry.changed;
+
+      if (retryChanged) {
+        currentPieces = retry.pieces;
+        failureStage = "assembly";
+        assembly = assembleCanonicalTripDraft({
+          draft: assembly.draft,
+          evidencePieces: currentPieces,
+          fallbackTripName: trip.name,
+          priorRecoveryActions: [
+            ...preparedEvidence.recoveryActions,
+            "reapplied_canonical_output_invariants",
+          ],
+          tripId,
+        });
+      }
+    }
+
     failureStage = "evidence_cluster";
     const persistedObservations = materializeCanonicalEvidenceObservations({
       draft: assembly.draft,
       observations: result.evidenceArtifacts.observations,
     });
+    const assemblyUsage = {
+      ...(asRecord(result.usage) ?? {}),
+      evidence: {
+        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
+        canonicalPieceCount: currentPieces.filter(
+          (piece) => piece.outputEligible
+        ).length,
+        dispositionCount: persistedObservations.length,
+      },
+      finalization: assembly.finalization,
+      identityRecovery: assembly.recovery,
+      qualityRemediation: {
+        retryAttempted,
+        retryChanged,
+      },
+    };
+    const qualityAssessment = assessTripDraftQuality({
+      draft: assembly.draft,
+      evidenceArtifacts: {
+        observations: persistedObservations,
+        pieces: currentPieces,
+      },
+      records: assembly.records,
+      usage: assemblyUsage,
+    });
+    const remediationOutcomes = createTripQualityOutcomes({
+      finalPieces: currentPieces,
+      finalReport: qualityAssessment.report,
+      initialPieces,
+      initialReport: initialAssessment.report,
+      records: assembly.records,
+    });
+    const finalAssemblyUsage = {
+      ...assemblyUsage,
+      qualityRemediation: {
+        outcomes: remediationOutcomes,
+        retryAttempted,
+        retryChanged,
+      },
+    };
+    extractionUsage = finalAssemblyUsage;
+    failureStage = "evidence_cluster";
     const evidenceSummary = await persistEvidenceArtifacts({
       observations: persistedObservations,
-      pieces: preparedEvidence.pieces,
+      pieces: currentPieces,
       processingRunId: run.id,
       tripId,
     });
@@ -437,20 +555,7 @@ export async function POST(
       tripId,
     });
     failureStage = "assembly";
-    const assemblyUsage = {
-      ...(asRecord(result.usage) ?? {}),
-      evidence: {
-        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
-        canonicalPieceCount: preparedEvidence.pieces.filter(
-          (piece) => piece.outputEligible
-        ).length,
-        dispositionCount: persistedObservations.length,
-      },
-      finalization: assembly.finalization,
-      identityRecovery: assembly.recovery,
-    };
-    extractionUsage = assemblyUsage;
-    const finalizationSummary = summarizeFinalizationUsage(assemblyUsage);
+    const finalizationSummary = summarizeFinalizationUsage(finalAssemblyUsage);
     await recordTripProcessingEvent({
       details: finalizationSummary ?? {},
       processingRunId: run.id,
@@ -460,14 +565,17 @@ export async function POST(
     });
 
     failureStage = "quality_assessment";
-    const qualityAssessment = assessTripDraftQuality({
-      draft: assembly.draft,
-      evidenceArtifacts: {
-        observations: persistedObservations,
-        pieces: preparedEvidence.pieces,
+    await recordTripProcessingEvent({
+      details: {
+        detectorIncidents: qualityAssessment.report.detectorIncidents,
+        outcomes: remediationOutcomes,
+        retryAttempted,
+        retryChanged,
       },
-      records: assembly.records,
-      usage: assemblyUsage,
+      processingRunId: run.id,
+      stage: "quality_remediation",
+      status: "completed",
+      tripId,
     });
     const completedDraft = attachTripQualityAssessment({
       assessment: qualityAssessment,
@@ -478,7 +586,12 @@ export async function POST(
     await recordTripProcessingEvent({
       details: {
         ...qualityAssessmentSnapshot,
+        detectorIncidentCount:
+          qualityAssessment.report.detectorIncidents.length,
         fingerprintHash: qualityAssessment.report.fingerprints.hash,
+        remediationOutcomeCount: remediationOutcomes.length,
+        remediationRetryAttempted: retryAttempted,
+        remediationRetryChanged: retryChanged,
         structured: qualityAssessment.report.structured,
       },
       processingRunId: run.id,
@@ -501,12 +614,12 @@ export async function POST(
       usage: {
         materialBudget: withRunInputEstimate(
           optimizedMaterials.summary,
-          assemblyUsage
+          finalAssemblyUsage
         ),
         materialCheckpoints: materialCheckpointSummary,
         materialDedupe: preparedMaterials.dedupeSummary,
         ocr: ocrSummary,
-        openai: assemblyUsage,
+        openai: finalAssemblyUsage,
         qualityAssessment: qualityAssessmentSnapshot,
       },
     });

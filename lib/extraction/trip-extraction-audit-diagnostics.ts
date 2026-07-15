@@ -31,6 +31,7 @@ import {
   shouldBeTravelRow,
   type TravelBoundaryRecord,
 } from "@/lib/trip-travel-boundary-policy";
+import { tripDatesMatch } from "@/lib/extraction/traveler-text";
 
 function travelBoundaryRecordForLineageCandidate(
   candidate: DraftLineageCandidate
@@ -68,7 +69,7 @@ function finalTransportMatchesCandidate(
       return false;
     }
 
-    if (candidate.date && record.date && candidate.date !== record.date) {
+    if (candidate.date && record.date && !tripDatesMatch(candidate.date, record.date)) {
       return false;
     }
 
@@ -82,6 +83,19 @@ function finalTransportMatchesCandidate(
 
 function isActiveFinalRecord(record: AuditFinalRecordSummary) {
   return record.status !== "ignored";
+}
+
+function canonicalPieceIdsForFinalRecords(
+  lineage: TripExtractionAuditLineageRow[],
+  records: AuditFinalRecordSummary[]
+) {
+  const recordIds = new Set(records.map((record) => record.id));
+  return lineage.flatMap((row) =>
+    row.canonicalPieceId &&
+    row.finalRecords.some((record) => recordIds.has(record.id))
+      ? [row.canonicalPieceId]
+      : []
+  );
 }
 
 function isCriticalTransportRecord(record: AuditFinalRecordSummary) {
@@ -381,6 +395,10 @@ export function createAuditDiagnostics({
 
   if (hardSourceAnchorsMissingDetails.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        hardSourceAnchorsMissingDetails.map(({ record }) => record)
+      ),
       code: "critical_transport_source_anchor_missing_details",
       detail:
         "Source text or OCR had critical transport fields that are absent from final travel rows.",
@@ -397,6 +415,10 @@ export function createAuditDiagnostics({
 
   if (softSourceAnchorsMissingDetails.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        softSourceAnchorsMissingDetails.map(({ record }) => record)
+      ),
       code: "critical_transport_source_anchor_missing_soft_details",
       detail:
         "Source text or OCR had useful non-blocking transport details that are absent from final travel rows.",
@@ -411,27 +433,33 @@ export function createAuditDiagnostics({
     });
   }
 
-  const criticalCandidates = lineage
+  const criticalCandidateRows = lineage
     .filter(
       (row) =>
         row.outputEligible !== false &&
         row.observations.some((observation) => observation.kind === "transport")
     )
-    .map((row) => row.canonical)
-    .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .filter(isCriticalTransportCandidate);
-  const unresolvedCritical = criticalCandidates.filter(
-    (item) => !finalTransportMatchesCandidate(item, finalRecords)
+    .filter(
+      (row) => row.canonical && isCriticalTransportCandidate(row.canonical)
+    );
+  const unresolvedCritical = criticalCandidateRows.filter(
+    (row) =>
+      row.canonical && !finalTransportMatchesCandidate(row.canonical, finalRecords)
   );
 
   if (unresolvedCritical.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: unresolvedCritical.flatMap((row) =>
+        row.canonicalPieceId ? [row.canonicalPieceId] : []
+      ),
       code: "critical_transport_not_travel_row",
       detail:
         "Source-backed flight or intercity train candidates did not become matching travel rows.",
       evidence: unresolvedCritical
         .slice(0, 10)
-        .map((item) => `${item.date ?? "undated"} - ${item.title}`),
+        .map((row) =>
+          `${row.canonical?.date ?? "undated"} - ${row.canonical?.title ?? row.title}`
+        ),
       severity: "p0",
       title: "Critical transport candidates are not travel rows",
     });
@@ -450,6 +478,10 @@ export function createAuditDiagnostics({
 
   if (criticalTransportsMissingDetails.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        criticalTransportsMissingDetails.map(({ record }) => record)
+      ),
       code: "critical_transport_missing_details",
       detail:
         "Flight and train rows are missing traveler-critical departure time or station/airport fields.",
@@ -477,6 +509,10 @@ export function createAuditDiagnostics({
 
   if (criticalTransportsMissingSoftDetails.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        criticalTransportsMissingSoftDetails.map(({ record }) => record)
+      ),
       code: "critical_transport_missing_soft_details",
       detail:
         "Travel rows are missing useful non-blocking arrival details that source evidence appears to contain.",
@@ -498,6 +534,10 @@ export function createAuditDiagnostics({
 
   if (contaminatedTransports.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        contaminatedTransports
+      ),
       code: "transport_description_contaminated",
       detail:
         "Flight or train rows include stay check-in, hostel directions, or local transfer text that should live elsewhere.",
@@ -530,10 +570,37 @@ export function createAuditDiagnostics({
     groups.set(key, existing);
   }
 
-  const duplicateGroups = [...groups.values()].filter((items) => items.length > 1);
+  const duplicateGroups = [...groups.values()].filter((items) => {
+    if (items.length < 2) return false;
+    const occurrenceKeys = items.map((item) =>
+      [item.date, item.startTime]
+        .filter(Boolean)
+        .join("|")
+    );
+    const independentlySupportedRepeats =
+      occurrenceKeys.every(Boolean) &&
+      new Set(occurrenceKeys).size === items.length &&
+      items.every(
+        (item) =>
+          Boolean(item.startTime) ||
+          /\b(?:again|another visit|booked|reservation|return visit|second visit|ticketed)\b/i.test(
+            [item.title, item.description].filter(Boolean).join(" ")
+          )
+      );
+
+    return !independentlySupportedRepeats;
+  });
 
   if (duplicateGroups.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) =>
+          duplicateGroups.some((items) =>
+            items.some((item) => item.id === record.id)
+          )
+        )
+      ),
       code: "duplicate_same_venue_activity",
       detail: "Multiple active activity cards have the same normalized identity.",
       evidence: duplicateGroups
@@ -562,6 +629,12 @@ export function createAuditDiagnostics({
 
   if (looseActivityExamples.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) =>
+          looseActivityExamples.some((item) => item.id === record.id)
+        )
+      ),
       code: "loose_tip_promoted_to_activity",
       detail:
         "Loose recommendations or tips are still appearing as dated activities instead of city notes.",
@@ -579,6 +652,12 @@ export function createAuditDiagnostics({
 
   if (visibleDayOverviews.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) =>
+          visibleDayOverviews.some((item) => item.id === record.id)
+        )
+      ),
       code: "day_overview_activity_survived",
       detail:
         "Generic day overview or day-plan cards are still visible as traveler activities.",
@@ -597,6 +676,9 @@ export function createAuditDiagnostics({
 
   if (buriedPlannedActivities.length > 0) {
     diagnostics.push({
+      canonicalPieceIds: buriedPlannedActivities.flatMap((row) =>
+        row.canonicalPieceId ? [row.canonicalPieceId] : []
+      ),
       code: "planned_activity_buried_in_city_notes",
       detail:
         "Dated planned activity candidates disappeared from the timeline and now appear only inside city notes.",

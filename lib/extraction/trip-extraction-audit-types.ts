@@ -1,4 +1,5 @@
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
+import type { GeneratedTripSummaryWarningCode } from "@/lib/generated-trip-summary";
 import type {
   CanonicalEvidenceAction,
   EvidenceKind,
@@ -83,6 +84,7 @@ export type TripExtractionAuditLineageRow = {
   finalRecords: AuditFinalRecordSummary[];
   identityKey: string;
   mergeReasons: string[];
+  matchMethod: "canonical_id" | "none" | "semantic_fallback";
   observations: Array<{
     date: string | null;
     id: string;
@@ -97,7 +99,15 @@ export type TripExtractionAuditLineageRow = {
   title: string;
 };
 
+export type TripExtractionAuditDetectorIncident = {
+  canonicalPieceId: string;
+  code: "canonical_identity_semantic_fallback";
+  detail: string;
+  finalRecordId: string;
+};
+
 export type TripExtractionAuditDiagnostic = {
+  canonicalPieceIds?: string[];
   code:
     | "canonical_evidence_disposition_gap"
     | "critical_transport_missing_details"
@@ -153,6 +163,7 @@ export type TripExtractionAuditReport = {
     undisposedObservationCount: number;
   };
   diagnostics: TripExtractionAuditDiagnostic[];
+  detectorIncidents: TripExtractionAuditDetectorIncident[];
   draft: DraftAuditSnapshot;
   extraction: {
     activityChunks: {
@@ -179,6 +190,7 @@ export type TripExtractionAuditReport = {
     transport: number;
   };
   warnings: Array<{
+    code: GeneratedTripSummaryWarningCode;
     severity: "hard" | "quiet";
     subjectId: string;
     subjectType: string;

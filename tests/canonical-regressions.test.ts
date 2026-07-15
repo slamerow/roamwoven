@@ -411,7 +411,10 @@ export default async function run() {
       title: "Rome walk after bag drop",
     };
     const ambiguous = cluster(emptyStage({
-      activities: [activity],
+      activities: [{
+        ...activity,
+        _canonicalProvisionalFields: ["date"],
+      }],
       missingDetails: [{
         answerType: "confirm",
         confidence: "medium",
@@ -769,6 +772,85 @@ export default async function run() {
     assert.ok(draft.activities.some((item) => item.title === "Borkonyha Winekitchen dinner"));
     assert.ok(/ruin bars/i.test(note?.description ?? ""));
     assert.equal(/Borkhonya|Vitae|private room|\$15/i.test(note?.description ?? ""), false);
+  });
+
+  await test("a scheduled venue cannot also survive in a city-note list", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          category: "food_dining",
+          city: "Budapest",
+          date: "2019-01-22",
+          description: "Dinner reservation at 8 PM.",
+          evidenceRole: "atomic_candidate",
+          itemType: "activity",
+          startTime: "20:00",
+          title: "Borkonyha Winekitchen dinner",
+        },
+        {
+          category: "food_dining",
+          city: "Budapest",
+          description: "Restaurants: Borkonyha Winekitchen, Rosenstein, Menza",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Budapest restaurant ideas",
+        },
+      ],
+      places: [{
+        arriveDate: "2019-01-21",
+        city: "Budapest",
+        leaveDate: "2019-01-24",
+      }],
+    }));
+    const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
+
+    assert.ok(note);
+    assert.equal(
+      /Borkonyha/i.test(note.description ?? ""),
+      false,
+      String(note.description ?? "")
+    );
+    assert.match(note.description ?? "", /Rosenstein/);
+    assert.match(note.description ?? "", /Menza/);
+  });
+
+  await test("one useful duplicate note fact moves to the scheduled activity", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          category: "food_dining",
+          city: "Budapest",
+          date: "2019-01-22",
+          description: "Dinner reservation at 8 PM.",
+          evidenceRole: "atomic_candidate",
+          itemType: "activity",
+          startTime: "20:00",
+          title: "Borkonyha",
+        },
+        {
+          category: "food_dining",
+          city: "Budapest",
+          description:
+            "Borkonyha — a traditional Hungarian restaurant known for its wine list. Ruin bars are another option.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Budapest food notes",
+        },
+      ],
+      places: [{
+        arriveDate: "2019-01-21",
+        city: "Budapest",
+        leaveDate: "2019-01-24",
+      }],
+    }));
+    const activity = draft.activities.find((item) => item.title === "Borkonyha");
+    const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
+
+    assert.match(activity?.description ?? "", /traditional Hungarian restaurant/i);
+    assert.match(note?.description ?? "", /Ruin bars/i);
+    assert.equal(/Borkonyha/i.test(note?.description ?? ""), false);
   });
 
   await test("accessory flight evidence cannot become a second activity card", () => {

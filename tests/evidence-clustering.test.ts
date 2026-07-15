@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   clusterExtractedEvidence,
+  reapplyCanonicalOutputInvariants,
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
@@ -503,6 +504,272 @@ export default async function run() {
     );
   });
 
+  await test("dated source structure resolves item dates before review", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "dated section",
+          emptyStage({
+            activities: [{
+              category: "art_culture",
+              city: "Prague",
+              date: null,
+              description: "Visit St. Barbara's Church.",
+              evidenceRole: "atomic_candidate",
+              itemType: "activity",
+              sourceHeadingPath: ["Thursday, 17.1.2019"],
+              sourceSectionLabel: "Thursday, 17.1.2019",
+              sourceSectionType: "dated_itinerary",
+              title: "St. Barbara's Church",
+            }],
+            missingDetails: [{
+              answerOptions: [
+                { label: "January 16", value: "2019-01-16" },
+                { label: "January 17", value: "2019-01-17" },
+              ],
+              answerType: "single_choice",
+              prompt: "Does St. Barbara's Church happen January 16 or 17?",
+              relatedTitle: "St. Barbara's Church",
+              subjectType: "item",
+              targetField: "date",
+            }],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.activities[0]?.date, "2019-01-17");
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("date-shaped note labels cannot become cards or Questions", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("date label", emptyStage({
+        missingDetails: [{
+          answerType: "date",
+          evidence: "The source contains the dated heading 17.1.2019.",
+          prompt: "What date is the 17.1.2019 note?",
+          reason: "The source lists this note.",
+          relatedTitle: "17.1.2019 note",
+          subjectType: "item",
+          targetField: "date",
+        }],
+        places: [{
+          arriveDate: "2019-01-16",
+          city: "Prague",
+          leaveDate: "2019-01-18",
+        }],
+        stays: [{
+          checkIn: "2019-01-16",
+          checkOut: "2019-01-18",
+          city: "Prague",
+          name: "Prague Hotel",
+        }],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.activities.length, 0);
+    assert.equal(draft.missingDetails.length, 0);
+  });
+
+  await test("explicit source ticket TODO survives an omitted model sentence", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "Prague Castle",
+        source: "model_chunk",
+        sourceFilename: "itinerary.pdf",
+        sourceText: [
+          "Wednesday, January 16, 2019",
+          "Prague Castle",
+          "Which ticket to get?",
+        ].join("\n"),
+        stage: emptyStage({
+          activities: [{
+            category: "tours_tickets",
+            city: "Prague",
+            date: "2019-01-16",
+            description: "Visit Prague Castle.",
+            evidenceRole: "atomic_candidate",
+            itemType: "activity",
+            sourceSectionType: "dated_itinerary",
+            title: "Prague Castle",
+          }],
+        }),
+      }],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.activities[0]?.description, "Visit Prague Castle.");
+    assert.equal(draft.missingDetails.length, 1);
+    assert.equal(
+      draft.missingDetails[0]?.prompt,
+      "Which ticket or tour option should be listed for Prague Castle?"
+    );
+    const decision = result.observations.find(
+      (observation) => observation.kind === "decision"
+    );
+    assert.ok(decision);
+    assert.equal(decision.payload.decisionType, "ticket_choice");
+    assert.equal(decision.disposition?.outcome, "declared_detail");
+  });
+
+  await test("city-note lists preserve hidden entry identity without overlapping activities", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "Budapest food notes",
+        source: "model_chunk",
+        sourceFilename: "notes.txt",
+        stage: emptyStage({
+          activities: [
+            {
+              category: "food_dining",
+              city: "Budapest",
+              date: "2019-01-22",
+              description: "Dinner reservation at 8 PM.",
+              evidenceRole: "atomic_candidate",
+              itemType: "activity",
+              startTime: "20:00",
+              title: "Borkonyha Winekitchen dinner",
+            },
+            {
+              category: "food_dining",
+              city: "Budapest",
+              description: "Restaurants: Borkonyha Winekitchen, Rosenstein, Menza",
+              evidenceRole: "city_note_candidate",
+              itemType: "note",
+              sourceSectionType: "city_reference",
+              title: "Budapest restaurant ideas",
+            },
+          ],
+          places: [{
+            arriveDate: "2019-01-21",
+            city: "Budapest",
+            leaveDate: "2019-01-24",
+          }],
+        }),
+      }],
+      tripOverview: { dateRange: "January 21-24, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const note = draft.activities.find(
+      (item) => item.title === "Budapest Notes & Tips"
+    );
+    const entryPieces = result.pieces.filter(
+      (piece) => piece.payload._canonicalNoteEntry === true
+    );
+
+    assert.equal(entryPieces.length, 3);
+    assert.equal(entryPieces.every((piece) => !piece.outputEligible), true);
+    assert.equal(
+      entryPieces.some(
+        (piece) =>
+          /Borkonyha/i.test(String(piece.payload.title)) &&
+          !piece.outputEligible
+      ),
+      true
+    );
+    assert.equal(/Borkonyha/i.test(String(note?.description)), false);
+    assert.equal(note?.description, "Restaurants: Rosenstein, Menza");
+    assert.equal(
+      result.observations.some(
+        (observation) =>
+          observation.kind === "context" &&
+          Array.isArray(observation.payload._canonicalNoteEntries)
+      ),
+      true
+    );
+  });
+
+  await test("the canonical output retry is idempotent", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("retry", emptyStage({
+        activities: [{
+          category: "art_culture",
+          city: "Paris",
+          date: "2032-06-17",
+          itemType: "activity",
+          title: "Museum visit",
+        }],
+      }))],
+      tripOverview: { dateRange: "June 16-18, 2032" },
+    });
+    const pieces = structuredClone(result.pieces);
+    const activity = pieces.find(
+      (piece) => piece.kind === "activity" && piece.outputEligible
+    );
+    assert.ok(activity);
+    activity.payload.title = "Paris day plan";
+
+    const first = reapplyCanonicalOutputInvariants({ pieces });
+    const second = reapplyCanonicalOutputInvariants({ pieces: first.pieces });
+    assert.equal(first.changed, true);
+    assert.equal(second.changed, false);
+  });
+
+  await test("car reservation details attach to the canonical rental", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("rental", emptyStage({
+        activities: [{
+          category: "arrival_departure",
+          city: "Prague",
+          date: null,
+          description: "Reservation confirmation CAR123.",
+          itemType: "activity",
+          sourceHeadingPath: ["Thursday, 17.1.2019"],
+          sourceSectionLabel: "Thursday, 17.1.2019",
+          sourceSectionType: "dated_itinerary",
+          title: "Car reservation details",
+        }],
+        transport: [{
+          arrival: "Prague",
+          date: "2019-01-17",
+          departure: "Prague",
+          description: "Rental car for the day.",
+          title: "Prague rental car",
+          type: "rental_car",
+        }],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+      transport: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(
+      draft.activities.some((item) => item.title === "Car reservation details"),
+      false
+    );
+    assert.equal(draft.missingDetails.length, 0);
+    const rental = draft.activities.find((item) => item.title === "Prague rental car");
+    assert.ok(rental);
+    assert.match(String(rental.description ?? ""), /CAR123/);
+    assert.equal(draft.transport.length, 0);
+  });
+
   await test("production title and time variants become one canonical activity", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
@@ -912,7 +1179,7 @@ export default async function run() {
     );
     assert.deepEqual(
       children.map((item) => item.title),
-      ["Schönbrunn Palace complex", "Schönbrunn gardens"]
+      ["Schönbrunn gardens"]
     );
     assert.equal(
       String(roots.find((item) => item.title === "Schönbrunn Palace complex")?.description ?? "")

@@ -6,7 +6,7 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 
-const CANONICAL_RESOLVER_VERSION = 6;
+const CANONICAL_RESOLVER_VERSION = 7;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
 const MAX_RESOLVER_WINDOWS = 30;
 const RESOLVER_WINDOW_CONCURRENCY = 3;
@@ -39,6 +39,7 @@ type ResolverCandidate = {
   sourceIdentity: string;
   sourceLine: number | null;
   sourcePrecedingLabel: string | null;
+  sourceRelationshipSignal: boolean;
   stageIndex: number;
   stageLabel: string;
   title: string;
@@ -139,7 +140,8 @@ const resolverSystemPrompt = [
   "A date is supporting evidence, not proof of traveler intent. Use section labels, headings, list context, explicit plan language, fixed anchors, and the rest of that day's plan together. Day activity counts are soft context only; never classify by a numeric cap.",
   "A time, reservation, ticket, booking, or explicit planned action overrides nearby loose recommendation text and should remain an activity unless it is clearly accessory evidence for another canonical record.",
   "A repeated venue on different dates stays distinct when both sightings are actual itinerary visits. If one is a weak untimed sighting under a city-reference block and another is a concrete itinerary visit, classify only the weak reference sighting as city_note.",
-  "Propose a grouping only when the supplied source structure presents the candidates as components of one site, complex, route, tour, or included pass. Proximity in the same city is not enough.",
+  "Propose a grouping only when the supplied source structure presents the candidates as components of one continuous site, complex, route, or tour. A shared date, heading, paragraph, list, or city is not enough.",
+  "Picking up or activating a citywide card or pass is a standalone logistics activity. Never group it with attractions the card may cover. A pass tied to one site may support a group only when the source explicitly says it covers that one continuous visit.",
   "Never group candidates on different dates. A verified continuous visit may contain exactly one timed or booked anchor; preserve that anchor on the grouped card. Never group two independently timed or booked candidates, and never group a generic clean itinerary merely because several activities share a day.",
   "Return high confidence only when the supplied source structure is conclusive. If inconclusive, return no grouping and keep activities separate.",
   "Keep claims short and factual. Return only candidate IDs supplied in the input.",
@@ -224,6 +226,64 @@ function sourceLineMatchesTitle(title: string, line: string) {
   );
 
   return exactMatch || typoTolerantMatch;
+}
+
+function sourceTextHasGroupingRelationship(value: string) {
+  return /\b(?:components?|complex|grounds|campus|estate|includes?|including|one continuous visit|same[ -]?site|walking route|walking tour|guided route|tour stops?|route stops?)\b/i.test(
+    value
+  );
+}
+
+function isCitywidePassTask(value: string) {
+  return (
+    /\b(?:city|tourist|travel|transit|metro)\s+(?:card|pass)\b/i.test(
+      value
+    ) ||
+    /\b(?:card|pass)\s+(?:activation|collection|pick[ -]?up)\b/i.test(value) ||
+    /\b(?:activate|collect|pick up)\s+(?:the\s+)?(?:city\s+)?(?:card|pass)\b/i.test(
+      value
+    )
+  );
+}
+
+function isConclusiveGroupingClaim(value: string) {
+  if (
+    /\b(?:same day|same dated itinerary heading|same heading|presented together|listed together|all in (?:the same )?city|under the same date)\b/i.test(
+      value
+    )
+  ) {
+    return false;
+  }
+
+  return /\b(?:components?|complex|grounds|campus|estate|same[ -]?site|continuous (?:site|visit|route|tour)|one .{0,24} visit|walking route|walking tour|guided route|tour stops?|route stops?|covers? (?:the|one|this) visit)\b/i.test(
+    value
+  );
+}
+
+function isGenericGroupingParent(
+  value: string,
+  candidates: ResolverCandidate[]
+) {
+  const normalized = normalizeText(value);
+  const cityLabels = new Set(
+    candidates
+      .map((candidate) => normalizeText(candidate.city))
+      .filter(Boolean)
+  );
+  const genericSuffix = /^(?:attractions|day plan|highlights|sights|things to do)$/;
+  const citywideLabel = [...cityLabels].some((city) =>
+    genericSuffix.test(normalized.slice(city.length).trim()) &&
+    normalized.startsWith(`${city} `)
+  );
+
+  return (
+    !normalized ||
+    /^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+.*)?$/.test(
+      normalized
+    ) ||
+    genericSuffix.test(normalized) ||
+    citywideLabel
+  );
 }
 
 function sourcePosition(title: string, sourceText: string | null | undefined) {
@@ -345,6 +405,11 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         )
         .map((block) => block.id)
         .sort();
+      const sourceRelationshipSignal = sourceBlocks.some(
+        (block) =>
+          sourceBlockIds.includes(block.id) &&
+          sourceTextHasGroupingRelationship(block.lines.join(" "))
+      );
 
       return [{
         candidateId: `stage-${stageIndex + 1}-item-${itemIndex + 1}`,
@@ -374,6 +439,7 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         sourceIdentity,
         sourceLine: position.line,
         sourcePrecedingLabel: position.precedingLabel,
+        sourceRelationshipSignal,
         stageIndex,
         stageLabel: stageInput.label,
         title,
@@ -777,6 +843,7 @@ function applyResolution({
   }
 
   const groupingDecisions: CanonicalGroupingDecision[] = [];
+  const groupedCandidateIds = new Set<string>();
 
   for (const grouping of resolution.groupings) {
     const uniqueIds = Array.from(new Set(grouping.candidateIds));
@@ -792,19 +859,40 @@ function applyResolution({
     );
     const dates = new Set(executionCandidates.map((candidate) => candidate.date));
     const sharedSourceBlocks = commonSourceBlockIds(executionCandidates);
+    const requestedParent = grouping.parentCandidateId
+      ? candidateById.get(grouping.parentCandidateId)
+      : null;
+    const nestedUnderRequestedParent = Boolean(
+      requestedParent &&
+        executionCandidates.every(
+          (candidate) =>
+            candidate.candidateId === requestedParent.candidateId ||
+            candidate.headingPath.some(
+              (heading) =>
+                normalizeText(heading) === normalizeText(requestedParent.title)
+            )
+        )
+    );
+    const independentlyProvenRelationship =
+      executionCandidates.some((candidate) => candidate.sourceRelationshipSignal) ||
+      nestedUnderRequestedParent;
 
     if (
       groupCandidates.length !== uniqueIds.length ||
       executionCandidates.length < 2 ||
       dates.size !== 1 ||
-      sharedSourceBlocks.length === 0
+      sharedSourceBlocks.length === 0 ||
+      !isConclusiveGroupingClaim(grouping.claim) ||
+      !independentlyProvenRelationship ||
+      isGenericGroupingParent(grouping.parentTitle, executionCandidates) ||
+      groupCandidates.some((candidate) => isCitywidePassTask(candidate.title)) ||
+      executionCandidates.some((candidate) =>
+        groupedCandidateIds.has(candidate.candidateId)
+      )
     ) {
       continue;
     }
 
-    const requestedParent = grouping.parentCandidateId
-      ? candidateById.get(grouping.parentCandidateId)
-      : null;
     const parentCandidate =
       (requestedParent?.evidenceRole !== "grouping_proposal"
         ? requestedParent
@@ -868,6 +956,9 @@ function applyResolution({
       parentTitle: grouping.parentTitle,
       source: "canonical_resolver",
     });
+    executionCandidates.forEach((candidate) =>
+      groupedCandidateIds.add(candidate.candidateId)
+    );
   }
 
   return { groupingDecisions, stages: nextStages };
