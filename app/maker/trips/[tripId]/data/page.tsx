@@ -28,6 +28,10 @@ import {
   type TripProcessingRun,
 } from "@/lib/extraction/processing-runs";
 import { canSeedInitialExtraction } from "@/lib/extraction/material-capabilities";
+import {
+  listMaterialExtractionCheckpoints,
+  type MaterialExtractionRecord,
+} from "@/lib/extraction/material-extractions";
 import { readStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import {
   formatStructuredDiscoverySummary,
@@ -1037,7 +1041,7 @@ function getExtractionErrorMessage(error?: string) {
   }
 
   if (error === "no-text-materials") {
-    return "No pasted notes, plain text files, PDFs, or supported image files are available for this parser pass.";
+    return "Roamwoven could not find readable trip details in the saved materials. Check the file notes below, then add a fresh export or paste the key details before retrying.";
   }
 
   if (error === "ocr-needed") {
@@ -1112,6 +1116,7 @@ function RealTripFirstPass({
   extractionStatus,
   latestDraft,
   latestRun,
+  materialCheckpoints,
   reviewDecisions,
   tripId,
   tripName,
@@ -1123,6 +1128,7 @@ function RealTripFirstPass({
   extractionStatus?: string;
   latestDraft: TripDraftSnapshot | null;
   latestRun: TripProcessingRun | null;
+  materialCheckpoints: MaterialExtractionRecord[];
   reviewDecisions: TripReviewDecision[];
   tripId: string;
   tripName: string;
@@ -1196,9 +1202,17 @@ function RealTripFirstPass({
   return (
     <>
       {extractionErrorMessage ? (
-        <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
-          {extractionErrorMessage}
-        </p>
+        <div className="mt-6 rounded-md bg-clay/10 px-3 py-3 text-sm text-clay">
+          <p className="font-semibold">{extractionErrorMessage}</p>
+          {error === "no-text-materials" || error === "ocr-failed" ? (
+            <Link
+              className="mt-3 inline-flex rounded-md border border-clay/20 bg-white px-3 py-2 text-xs font-semibold text-clay"
+              href={`/maker/trips/${tripId}/upload`}
+            >
+              Update source materials
+            </Link>
+          ) : null}
+        </div>
       ) : null}
       {completedWithReview ? (
         <p className="mt-6 rounded-md bg-moss/10 px-3 py-2 text-sm font-semibold text-moss">
@@ -1337,7 +1351,7 @@ function RealTripFirstPass({
             />
             <p className="mt-3 text-sm leading-6 text-ink/55">
               {extractionEnabled
-                ? "This one-time build reads pasted notes, plain text files, PDFs, and screenshots/images. Roamwoven tries OCR for scanned PDFs and images before the trip draft model runs."
+                ? "This one-time build reads pasted notes, TXT, CSV, PDF, DOCX, XLSX, and screenshots/images. Roamwoven reads embedded images and scans before the trip draft model runs."
                 : "AI extraction is not enabled for this trip in this environment."}
               {" "}Once a trip spine exists, later docs should update that spine instead of rebuilding from scratch.
             </p>
@@ -1411,7 +1425,10 @@ function RealTripFirstPass({
         </section>
       ) : null}
 
-      <SourceMaterials uploads={uploads} />
+      <SourceMaterials
+        materialCheckpoints={materialCheckpoints}
+        uploads={uploads}
+      />
 
       <section className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row">
@@ -1441,7 +1458,87 @@ function RealTripFirstPass({
   );
 }
 
-function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {
+function getMaterialReceipt(checkpoint: MaterialExtractionRecord | undefined) {
+  if (!checkpoint) {
+    return {
+      detail: "Saved and ready for the first build.",
+      label: "Saved",
+      tone: "text-moss",
+    };
+  }
+
+  if (checkpoint.status === "text_ready") {
+    const affectedImageCount =
+      Number(checkpoint.metadata.embeddedImageOcrFailedCount ?? 0) +
+      Number(checkpoint.metadata.embeddedImageOcrSkippedCount ?? 0);
+
+    if (affectedImageCount > 0) {
+      return {
+        detail: `We used the visible text. ${affectedImageCount} embedded image${affectedImageCount === 1 ? "" : "s"} could not be read safely.`,
+        label: "Included with a note",
+        tone: "text-clay",
+      };
+    }
+
+    return {
+      detail: "Its readable contents were included in this draft.",
+      label: "Included",
+      tone: "text-moss",
+    };
+  }
+
+  if (
+    checkpoint.status === "ocr_needed" ||
+    checkpoint.status === "ocr_processing" ||
+    checkpoint.status === "pending"
+  ) {
+    return {
+      detail: "Roamwoven is still reading this file's visual details.",
+      label: "Reading",
+      tone: "text-tide",
+    };
+  }
+
+  const failureClass = checkpoint.failureClass ?? "";
+  let detail = "We could not read this file. Re-export it and add it again.";
+
+  if (failureClass === "office_encrypted_or_legacy") {
+    detail =
+      "This file is password-protected or uses an older Office format. Save an unprotected DOCX or XLSX and add it again.";
+  } else if (
+    failureClass === "office_archive_limit_exceeded" ||
+    failureClass === "workbook_cell_limit_exceeded" ||
+    failureClass === "csv_record_limit_exceeded" ||
+    failureClass === "material_text_limit_exceeded"
+  ) {
+    detail =
+      "We left this file out because its contents exceeded a safe processing limit. Split it into smaller files and add them again.";
+  } else if (failureClass === "download_failed") {
+    detail = "We could not retrieve this saved file. Add it again before retrying.";
+  } else if (failureClass === "no_readable_visible_content") {
+    detail = "We did not find readable visible trip details in this file.";
+  } else if (failureClass.includes("ocr") || failureClass.startsWith("openai_")) {
+    detail = "We could not read the visual text in this file. Try adding a clearer export or screenshot.";
+  }
+
+  return {
+    detail,
+    label: "Not included",
+    tone: "text-clay",
+  };
+}
+
+function SourceMaterials({
+  materialCheckpoints = [],
+  uploads,
+}: {
+  materialCheckpoints?: MaterialExtractionRecord[];
+  uploads: TripUpload[];
+}) {
+  const checkpointByUploadId = new Map(
+    materialCheckpoints.map((checkpoint) => [checkpoint.uploadId, checkpoint])
+  );
+
   return (
     <section className="mt-8 rounded-md border border-ink/10 bg-white p-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -1458,20 +1555,29 @@ function SourceMaterials({ uploads }: { uploads: TripUpload[] }) {
 
       {uploads.length > 0 ? (
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          {uploads.map((upload) => (
-            <div key={upload.id} className="rounded-md bg-paper p-4">
-              <p className="truncate text-sm font-semibold text-ink">
-                {upload.originalFilename}
-              </p>
-              <p className="mt-1 text-xs text-ink/50">
-                {formatUploadDate(upload.createdAt)} ·{" "}
-                {formatSize(upload.fileSizeBytes)}
-              </p>
-              <p className="mt-1 text-xs font-semibold capitalize text-moss">
-                {upload.processingStatus}
-              </p>
-            </div>
-          ))}
+          {uploads.map((upload) => {
+            const receipt = getMaterialReceipt(
+              checkpointByUploadId.get(upload.id)
+            );
+
+            return (
+              <div key={upload.id} className="rounded-md bg-paper p-4">
+                <p className="truncate text-sm font-semibold text-ink">
+                  {upload.originalFilename}
+                </p>
+                <p className="mt-1 text-xs text-ink/50">
+                  {formatUploadDate(upload.createdAt)} ·{" "}
+                  {formatSize(upload.fileSizeBytes)}
+                </p>
+                <p className={`mt-2 text-xs font-semibold ${receipt.tone}`}>
+                  {receipt.label}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-ink/55">
+                  {receipt.detail}
+                </p>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <p className="mt-5 rounded-md bg-paper p-4 text-sm text-ink/60">
@@ -1644,13 +1750,16 @@ export default async function StructuredDataPage({
   const makerTrip = await getMakerTrip(tripId);
   const canShowUploads = makerTrip.isDemo || makerTrip.paymentStatus === "paid";
   const uploads = canShowUploads ? await listTripUploads(tripId) : [];
-  const [style, latestRun, latestDraft] = await Promise.all([
+  const [style, latestRun, latestDraft, materialCheckpoints] = await Promise.all([
     getTripStyleSettings({
       fallbackAppName: makerTrip.name,
       tripId,
     }),
     makerTrip.isDemo ? Promise.resolve(null) : getLatestTripProcessingRun(tripId),
     makerTrip.isDemo ? Promise.resolve(null) : getLatestTripDraftSnapshot(tripId),
+    makerTrip.isDemo
+      ? Promise.resolve([] as MaterialExtractionRecord[])
+      : listMaterialExtractionCheckpoints(tripId),
   ]);
   const reviewDecisions = makerTrip.isDemo
     ? []
@@ -1702,6 +1811,7 @@ export default async function StructuredDataPage({
             extractionStatus={extraction}
             latestDraft={latestDraft}
             latestRun={latestRun}
+            materialCheckpoints={materialCheckpoints}
             reviewDecisions={reviewDecisions}
             tripId={tripId}
             tripName={makerTrip.name}

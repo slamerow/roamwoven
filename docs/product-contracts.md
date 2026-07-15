@@ -1,10 +1,10 @@
 # Roamwoven Product Contracts
 
-Ledger version: 1
+Ledger version: 2
 
 Ledger date: 2026-07-15
 
-Approval state: Draft consolidation for CEO review
+Approval state: Approved and implementation-tracked
 
 This is the authoritative ledger for current Roamwoven ingestion, extraction,
 canonical assembly, review, privacy, and publication behavior. It consolidates
@@ -53,35 +53,47 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `ENFORCED`
 - Contract: If Roamwoven accepts a source file, it must extract usable material
   from it or clearly tell the maker that the named file was not included.
   Automatic retries and safe fallbacks come first. One unreadable file must not
   kill a trip when other usable material exists. If no supplied material is
   usable, show a calm recovery state rather than pretending a draft is complete.
-- Evidence: Upload acceptance and extraction capability currently use different
-  type and size rules; unsupported checkpoints can be excluded from readiness.
+- Evidence: Upload acceptance and extraction readiness now share one capability
+  registry. Each material checkpoint is rendered as a named maker receipt; a
+  failed visual source is fail-soft when another usable material exists, while
+  a trip with no usable material remains in recovery.
 - Tests: `tests/material-capabilities.test.ts`,
-  `tests/material-extractions.test.ts`
+  `tests/material-extractions.test.ts`,
+  `tests/document-material-parser.test.ts`,
+  `tests/material-ingestion-pipeline.test.ts`
 
 ## RW-ING-002 — V1 supports common intelligent-itinerary formats
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `ENFORCED`
 - Contract: V1 first-class inputs are files dropped into Roamwoven plus pasted
-  notes: TXT, PDF, JPEG, PNG, WebP, DOCX, and XLSX, including XLSX files exported
-  from Google Sheets. V1 does not ingest live Google Sheets links or other
-  internet-published documents. DOCX extraction must preserve ordered text,
-  tables, hyperlinks, and recoverable embedded-image evidence. XLSX extraction
-  must preserve tab names, row and column relationships, visible values, dates,
-  formulas' displayed results when available, and useful cell ordering. Formats
-  not actually supported must be rejected clearly before upload rather than
-  accepted optimistically.
-- Evidence: DOCX and XLSX are accepted by upload validation but do not currently
-  seed initial extraction.
+  notes: TXT, CSV, PDF, JPEG, PNG, WebP, DOCX, and XLSX, including XLSX files
+  exported from Google Sheets. V1 does not ingest live Google Sheets links or
+  other internet-published documents. DOCX extraction preserves ordered final
+  visible text, headings, lists, tables, hyperlinks, inserted revisions,
+  anchored comments as source notes, and bounded embedded-image OCR; deleted
+  revisions are ignored. XLSX extraction preserves visible sheet order, visible
+  rows and columns, cell order and addresses, dates, merged-cell cues,
+  hyperlinks, comments, cached formula display results, and bounded
+  embedded-image OCR. Hidden sheets, rows, and columns are ignored. CSV is one
+  structured sheet. Roamwoven never executes macros or formulas and never
+  fetches external workbook or document content. Legacy `.doc`/`.xls`, `.xlsm`,
+  encrypted/password-protected Office files, corrupt archives, and unsafe
+  archives are clearly rejected or receipted.
+- Evidence: One file capability registry owns upload acceptance and initial
+  extraction eligibility. DOCX, XLSX, and CSV parsers perform archive preflight,
+  structured text recovery, safe embedded-image OCR, and checkpoint receipts.
 - Tests: `tests/material-capabilities.test.ts`,
-  `tests/material-extractions.test.ts`
+  `tests/document-material-parser.test.ts`,
+  `tests/material-extractions.test.ts`,
+  `tests/material-ingestion-pipeline.test.ts`
 
 ## RW-QA-001 — Semantic QA is fail-soft
 
@@ -225,12 +237,12 @@ path is bypassed.
   changing the traveler app, and generic text can be written into typed fields.
 - Tests: `tests/generated-trip-model.test.ts`
 
-## Governance-pass exit criteria
+## Ledger maintenance criteria
 
-- CEO approves the exact ledger.
+- CEO-approved decisions are recorded as locked contracts.
 - The repository preflight points to this ledger.
 - Historical documents clearly yield to this ledger when they conflict.
 - Every contract has an honest enforcement state and test/evidence mapping.
 - The existing runtime test suite stays green.
-- No runtime ingestion, assembly, review, privacy, or publishing behavior changes
-  in the governance-only pass.
+- Enforcement states and evidence are updated in the same change as material
+  runtime behavior.

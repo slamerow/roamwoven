@@ -8,10 +8,19 @@ import {
   materialFromCheckpoint,
   upsertMaterialExtractionCheckpoint,
 } from "@/lib/extraction/material-extractions";
+import {
+  extractCsvMaterial,
+  extractDocxMaterial,
+  extractXlsxMaterial,
+} from "@/lib/extraction/document-material-parser";
+import { MaterialParserError } from "@/lib/extraction/material-parser-errors";
+import {
+  getMaterialCapability,
+  MAX_INITIAL_PDF_FILE_BYTES,
+  MAX_INITIAL_TEXT_FILE_BYTES,
+} from "@/lib/extraction/material-capabilities";
 
 const TRIP_MATERIALS_BUCKET = "trip-materials";
-const MAX_TEXT_FILE_BYTES = 250 * 1024;
-const MAX_PDF_FILE_BYTES = 10 * 1024 * 1024;
 const MIN_READABLE_PDF_TEXT_LENGTH = 50;
 const MATERIAL_EXTRACTION_CONCURRENCY = 3;
 const MIN_LARGE_PDF_IMAGE_AREA = 30000;
@@ -29,6 +38,10 @@ export type TripExtractionMaterialDedupeSummary = {
 export type TripExtractionMaterialPreparation = {
   dedupeSummary: TripExtractionMaterialDedupeSummary;
   materials: TripExtractionMaterial[];
+};
+
+type TripExtractionMaterialOptions = {
+  retryFailedOcr?: boolean;
 };
 
 class MinimalDOMMatrix {
@@ -73,12 +86,9 @@ export function getNoteExtractionMaterials(
 }
 
 function isOcrCandidate(upload: TripUpload) {
-  return (
-    upload.fileType === "application/pdf" ||
-    upload.fileType === "image/jpeg" ||
-    upload.fileType === "image/png" ||
-    upload.fileType === "image/webp"
-  );
+  const capability = getMaterialCapability(upload.originalFilename);
+
+  return capability?.kind === "pdf" || capability?.kind === "image";
 }
 
 function getMaterialTypeForRecord(
@@ -88,7 +98,9 @@ function getMaterialTypeForRecord(
     return "note";
   }
 
-  return upload.fileType === "application/pdf" ? "pdf_text" : "file_text";
+  return getMaterialCapability(upload.originalFilename)?.kind === "pdf"
+    ? "pdf_text"
+    : "file_text";
 }
 
 function sha256Hex(value: string) {
@@ -307,8 +319,8 @@ export async function getTextFileExtractionMaterials(
   const textUploads = uploads.filter(
     (upload) =>
       upload.storagePath &&
-      upload.fileType === "text/plain" &&
-      Number(upload.fileSizeBytes ?? 0) <= MAX_TEXT_FILE_BYTES
+      getMaterialCapability(upload.originalFilename)?.kind === "text" &&
+      Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_TEXT_FILE_BYTES
   );
 
   if (textUploads.length === 0) {
@@ -441,8 +453,8 @@ export async function getPdfExtractionMaterials(
   const pdfUploads = uploads.filter(
     (upload) =>
       upload.storagePath &&
-      upload.fileType === "application/pdf" &&
-      Number(upload.fileSizeBytes ?? 0) <= MAX_PDF_FILE_BYTES
+      getMaterialCapability(upload.originalFilename)?.kind === "pdf" &&
+      Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_PDF_FILE_BYTES
   );
 
   if (pdfUploads.length === 0) {
@@ -491,8 +503,21 @@ export async function getPdfExtractionMaterials(
   return materials;
 }
 
+function isFailedOcrCheckpoint(
+  checkpoint: Awaited<ReturnType<typeof listMaterialExtractionCheckpoints>>[number]
+) {
+  return Boolean(
+    checkpoint.status === "failed" &&
+      (checkpoint.extractionMethod === "ocr" ||
+        checkpoint.metadata.ocrProvider ||
+        checkpoint.failureClass?.includes("ocr") ||
+        checkpoint.failureClass?.startsWith("openai_"))
+  );
+}
+
 export async function getTripExtractionMaterialsWithSummary(
-  uploads: TripUpload[]
+  uploads: TripUpload[],
+  { retryFailedOcr = true }: TripExtractionMaterialOptions = {}
 ): Promise<TripExtractionMaterialPreparation> {
   const tripId = uploads.find((upload) => upload.tripId)?.tripId;
   const existingCheckpoints = tripId
@@ -527,7 +552,11 @@ export async function getTripExtractionMaterialsWithSummary(
         if (
           existingCheckpoint?.status === "ocr_needed" ||
           existingCheckpoint?.status === "ocr_processing" ||
-          existingCheckpoint?.status === "unsupported"
+          (existingCheckpoint &&
+            isFailedOcrCheckpoint(existingCheckpoint) &&
+            !retryFailedOcr) ||
+          (existingCheckpoint?.status === "unsupported" &&
+            !getMaterialCapability(upload.originalFilename))
         ) {
           return materials;
         }
@@ -574,8 +603,8 @@ export async function getTripExtractionMaterialsWithSummary(
       }
 
       if (
-        upload.fileType === "text/plain" &&
-        Number(upload.fileSizeBytes ?? 0) <= MAX_TEXT_FILE_BYTES
+        getMaterialCapability(upload.originalFilename)?.kind === "text" &&
+        Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_TEXT_FILE_BYTES
       ) {
         const data = await downloadMaterialFile(upload);
 
@@ -621,9 +650,105 @@ export async function getTripExtractionMaterialsWithSummary(
         return materials;
       }
 
+      const structuredFileKind = getMaterialCapability(
+        upload.originalFilename
+      )?.kind;
+
       if (
-        upload.fileType === "application/pdf" &&
-        Number(upload.fileSizeBytes ?? 0) <= MAX_PDF_FILE_BYTES
+        structuredFileKind === "csv" ||
+        structuredFileKind === "docx" ||
+        structuredFileKind === "xlsx"
+      ) {
+        const data = await downloadMaterialFile(upload);
+
+        if (!data) {
+          await upsertMaterialExtractionCheckpoint({
+            errorMessage: `Unable to download saved ${structuredFileKind.toUpperCase()} material.`,
+            extractionMethod: structuredFileKind,
+            failureClass: "download_failed",
+            metadata: {
+              fileName: upload.originalFilename,
+              fileType: upload.fileType,
+            },
+            status: "failed",
+            tripId: upload.tripId,
+            uploadId: upload.id,
+          });
+          return materials;
+        }
+
+        try {
+          const buffer = Buffer.from(await data.arrayBuffer());
+          const result =
+            structuredFileKind === "docx"
+              ? await extractDocxMaterial({
+                  buffer,
+                  filename: upload.originalFilename,
+                })
+              : structuredFileKind === "xlsx"
+                ? await extractXlsxMaterial({
+                    buffer,
+                    filename: upload.originalFilename,
+                  })
+                : extractCsvMaterial({
+                    buffer,
+                    filename: upload.originalFilename,
+                  });
+          const record = await upsertMaterialExtractionCheckpoint({
+            errorMessage: result.text
+              ? null
+              : "No readable visible text was found in this file.",
+            extractedCharCount: result.text.length,
+            extractionMethod: structuredFileKind,
+            failureClass: result.text ? null : "no_readable_visible_content",
+            metadata: {
+              ...result.metadata,
+              fileName: upload.originalFilename,
+              fileSizeBytes: upload.fileSizeBytes,
+              fileType: upload.fileType,
+            },
+            status: result.text ? "text_ready" : "failed",
+            textContent: result.text,
+            tripId: upload.tripId,
+            uploadId: upload.id,
+          });
+          const material = materialFromCheckpoint({
+            filename: upload.originalFilename,
+            record,
+            type: "file_text",
+          });
+
+          if (material) {
+            materials.push(material);
+          }
+        } catch (error) {
+          await upsertMaterialExtractionCheckpoint({
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : `Unknown ${structuredFileKind.toUpperCase()} extraction error.`,
+            extractionMethod: structuredFileKind,
+            failureClass:
+              error instanceof MaterialParserError
+                ? error.failureClass
+                : `${structuredFileKind}_parse_failed`,
+            metadata: {
+              ...(error instanceof MaterialParserError ? error.metadata : {}),
+              fileName: upload.originalFilename,
+              fileSizeBytes: upload.fileSizeBytes,
+              fileType: upload.fileType,
+            },
+            status: "failed",
+            tripId: upload.tripId,
+            uploadId: upload.id,
+          });
+        }
+        return materials;
+      }
+
+      if (
+        getMaterialCapability(upload.originalFilename)?.kind === "pdf" &&
+        Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_PDF_FILE_BYTES
       ) {
         const data = await downloadMaterialFile(upload);
 

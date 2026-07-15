@@ -17,21 +17,22 @@ const errorMessages: Record<string, string> = {
   "checkout-required": "Complete checkout before processing the first draft.",
   "demo-upload": "The demo trip keeps uploads mocked for now.",
   "empty-upload": "Add at least one file or note before saving.",
-  "file-too-large": "One file is over the 25 MB beta limit.",
+  "file-too-large": "One file is over the size limit for that file type.",
   "notes-too-large": "Pasted notes are too large for one upload.",
   "too-many-files": "Upload 20 files or fewer at a time.",
   "trip-file-limit":
     "This trip has reached the beta limit of 100 saved materials.",
   "trip-storage-limit":
     "This trip has reached the beta upload storage limit.",
-  "unsupported-file": "One file is not a supported beta file type.",
+  "unsupported-file":
+    "Use PDF, DOCX, XLSX, CSV, TXT, JPG, PNG, or WebP. Older .doc/.xls and macro-enabled files are not supported.",
   "delete-failed": "That material could not be deleted. Try again.",
   "duplicate-material":
     "That material already appears to be attached to this trip.",
   "materials-locked":
     "Materials are locked after processing starts. Create a revision instead.",
   "upload-failed":
-    "The upload could not be saved. Try a PDF, Word doc, spreadsheet, image, or pasted notes."
+    "The upload could not be saved. Try a PDF, DOCX, XLSX, CSV, image, text file, or pasted notes."
 };
 
 function formatSize(bytes: number | null) {

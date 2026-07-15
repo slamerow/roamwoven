@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { ClipboardList, FileImage, FileSpreadsheet, FileText, UploadCloud } from "lucide-react";
+import { ACCEPTED_MATERIAL_INPUT_ACCEPT } from "@/lib/extraction/material-capabilities";
 
 type QueuedFile = {
   name: string;
@@ -111,10 +112,11 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
         </span>
         <span className="mt-2 max-w-md text-sm leading-6 text-ink/60">
           {files.length > 0
-            ? "Your materials are queued below. Add another PDF, screenshot, image, text file, or note if needed."
-            : "For this parser pass, use PDFs, screenshots/images, text files, or pasted notes."}
+            ? "Your materials are queued below. Add another document, spreadsheet, screenshot, text file, or note if needed."
+            : "Use PDF, DOCX, XLSX, CSV, TXT, JPG, PNG, WebP, or pasted notes."}
         </span>
         <input
+          accept={ACCEPTED_MATERIAL_INPUT_ACCEPT}
           ref={fileInputRef}
           className="sr-only"
           multiple
@@ -122,6 +124,10 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
           type="file"
           onChange={(event) => queueFiles(event.target.files)}
         />
+        <span className="mt-2 max-w-md text-xs leading-5 text-ink/45">
+          Older .doc/.xls files, macro-enabled files, and password-protected
+          documents are not supported.
+        </span>
       </label>
 
       {files.length > 0 ? (

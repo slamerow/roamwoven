@@ -12,11 +12,14 @@ export type MaterialExtractionStatus =
   | "unsupported";
 
 export type MaterialExtractionMethod =
+  | "csv"
+  | "docx"
   | "manual_note"
   | "ocr"
   | "pdf_text"
   | "text_file"
-  | "triage";
+  | "triage"
+  | "xlsx";
 
 export type MaterialExtractionRecord = {
   id: string;
@@ -216,13 +219,16 @@ export function getMaterialOcrReadinessIssue(
 }
 
 export function getMaterialExtractionReadinessIssue(
-  records: MaterialExtractionRecord[]
+  records: MaterialExtractionRecord[],
+  { hasUsableMaterials = false }: { hasUsableMaterials?: boolean } = {}
 ): MaterialExtractionReadinessIssue {
   if (records.some((record) => record.status === "pending")) {
     return "material-incomplete";
   }
 
-  return getMaterialOcrReadinessIssue(records);
+  const ocrIssue = getMaterialOcrReadinessIssue(records);
+
+  return ocrIssue === "ocr-failed" && hasUsableMaterials ? null : ocrIssue;
 }
 
 export async function upsertMaterialExtractionCheckpoint(
@@ -501,7 +507,11 @@ export function materialFromCheckpoint({
         ? "manual_note"
         : record.extractionMethod === "ocr"
           ? "ocr"
-          : record.extractionMethod === "pdf_text"
+          : record.extractionMethod === "pdf_text" ||
+              record.extractionMethod === "docx" ||
+              record.extractionMethod === "xlsx" ||
+              record.extractionMethod === "csv" ||
+              record.extractionMethod === "text_file"
             ? "text_layer"
             : "unknown",
     sourceUploadId: record.uploadId,

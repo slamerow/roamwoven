@@ -189,13 +189,19 @@ export async function POST(
 
   if ((materialCheckpointSummary.byStatus.ocr_needed ?? 0) > 0) {
     ocrSummary = await processTripOcrNeededMaterials({ tripId, uploads });
+    preparedMaterials = await getTripExtractionMaterialsWithSummary(uploads, {
+      retryFailedOcr: false,
+    });
+    materials = preparedMaterials.materials;
     materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
     materialCheckpointSummary =
       summarizeMaterialCheckpoints(materialCheckpoints);
   }
 
   const readinessIssue =
-    getMaterialExtractionReadinessIssue(materialCheckpoints);
+    getMaterialExtractionReadinessIssue(materialCheckpoints, {
+      hasUsableMaterials: materials.length > 0,
+    });
 
   if (readinessIssue) {
     console.warn("trip_extraction_materials_not_ready", {
@@ -219,14 +225,6 @@ export async function POST(
     });
 
     return redirectToData(request, tripId, { error: readinessIssue });
-  }
-
-  if (ocrSummary) {
-    preparedMaterials = await getTripExtractionMaterialsWithSummary(uploads);
-    materials = preparedMaterials.materials;
-    materialCheckpoints = await listMaterialExtractionCheckpoints(tripId);
-    materialCheckpointSummary =
-      summarizeMaterialCheckpoints(materialCheckpoints);
   }
 
   if (materials.length === 0) {

@@ -398,4 +398,23 @@ export default async function run() {
       null
     );
   });
+
+  await test("one failed visual file does not kill a run with another usable material", () => {
+    const failedOcr = checkpoint({
+      extractionMethod: "ocr",
+      failureClass: "openai_500",
+      metadata: { ocrProvider: "test-ocr" },
+      status: "failed",
+      textContent: null,
+      uploadId: "failed-image",
+    });
+
+    assert.equal(getMaterialExtractionReadinessIssue([failedOcr]), "ocr-failed");
+    assert.equal(
+      getMaterialExtractionReadinessIssue([failedOcr], {
+        hasUsableMaterials: true,
+      }),
+      null
+    );
+  });
 }

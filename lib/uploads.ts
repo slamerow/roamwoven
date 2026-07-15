@@ -3,56 +3,18 @@ import { getCurrentUser } from "@/lib/auth";
 import { getSupabaseConfig } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  getCanonicalMaterialMimeType,
+  getMaterialCapability,
+} from "@/lib/extraction/material-capabilities";
 
 const TRIP_MATERIALS_BUCKET = "trip-materials";
 export const UNPAID_STARTER_MATERIAL_RETENTION_DAYS = 14;
 const MAX_FILES_PER_UPLOAD = 20;
-const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOADS_PER_TRIP = 100;
 const MAX_TRIP_UPLOAD_BYTES = 500 * 1024 * 1024;
 const MAX_NOTE_BYTES = 250 * 1024;
 const NOTE_FILENAME = "Pasted notes";
-
-const allowedExtensions = new Set([
-  "csv",
-  "doc",
-  "docx",
-  "jpeg",
-  "jpg",
-  "pdf",
-  "png",
-  "txt",
-  "webp",
-  "xls",
-  "xlsx",
-]);
-
-const allowedMimeTypes = new Set([
-  "application/msword",
-  "application/pdf",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "text/csv",
-  "text/plain",
-]);
-
-const mimeTypeByExtension: Record<string, string> = {
-  csv: "text/csv",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  pdf: "application/pdf",
-  png: "image/png",
-  txt: "text/plain",
-  webp: "image/webp",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-};
 
 export type TripUpload = {
   id: string;
@@ -121,11 +83,6 @@ function normalizeUpload(row: TripUploadRow): TripUpload {
   };
 }
 
-function getExtension(filename: string) {
-  const parts = filename.toLowerCase().split(".");
-  return parts.length > 1 ? parts.at(-1) ?? "" : "";
-}
-
 function getStoredFilename(filename: string) {
   const sanitized = filename
     .toLowerCase()
@@ -136,17 +93,8 @@ function getStoredFilename(filename: string) {
   return sanitized || "upload";
 }
 
-function isSupportedFile(file: File) {
-  const extension = getExtension(file.name);
-  return allowedMimeTypes.has(file.type) || allowedExtensions.has(extension);
-}
-
 function getUploadContentType(file: File) {
-  if (allowedMimeTypes.has(file.type)) {
-    return file.type;
-  }
-
-  return mimeTypeByExtension[getExtension(file.name)] ?? null;
+  return getCanonicalMaterialMimeType(file.name);
 }
 
 function validateFiles(files: File[]) {
@@ -158,17 +106,22 @@ function validateFiles(files: File[]) {
   }
 
   files.forEach((file) => {
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      throw new UploadValidationError(
-        "file-too-large",
-        `${file.name} is larger than the 25 MB beta limit.`
-      );
-    }
+    const capability = getMaterialCapability(file.name);
 
-    if (!isSupportedFile(file)) {
+    if (!capability) {
       throw new UploadValidationError(
         "unsupported-file",
         `${file.name} is not a supported beta file type.`
+      );
+    }
+
+    if (file.size > capability.maxFileBytes) {
+      const maxMegabytes = Math.round(
+        capability.maxFileBytes / (1024 * 1024)
+      );
+      throw new UploadValidationError(
+        "file-too-large",
+        `${file.name} is larger than the ${maxMegabytes} MB limit for that file type.`
       );
     }
   });
