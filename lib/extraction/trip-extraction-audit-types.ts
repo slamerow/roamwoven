@@ -58,6 +58,7 @@ export type DraftLineageCandidate =
 export type AuditFinalRecordSummary = {
   address: string | null;
   arrivalLocation: string | null;
+  canonicalId: string;
   confirmationLabel: string | null;
   category: string | null;
   date: string | null;

@@ -39,6 +39,7 @@ export type TripDayRecord = {
 
 export type TripLegRecord = {
   arriveDate: string | null;
+  canonicalId: string;
   city: string;
   country: string | null;
   displayName: string;
@@ -63,6 +64,7 @@ export type TripStayRecord = {
   address: string | null;
   addressVisibility: TripPrivateDetailVisibility;
   bookingUrl: string | null;
+  canonicalId: string;
   checkInDate: string | null;
   checkInTime: string | null;
   checkOutDate: string | null;
@@ -98,6 +100,7 @@ export type TripTransportRecord = {
   arrivalTime: string | null;
   bookingUrl: string | null;
   bookingUrlVisibility: TripPrivateDetailVisibility;
+  canonicalId: string;
   confirmationLabel: string | null;
   confirmationVisibility: TripPrivateDetailVisibility;
   date: string | null;
@@ -128,6 +131,7 @@ export type TripItemType =
 
 export type TripItemRecord = {
   address: string | null;
+  canonicalId: string;
   categoryId: string;
   date: string | null;
   description: string | null;
@@ -169,6 +173,7 @@ export type TripPrivateDetailRecord = {
   reason: string | null;
   reviewRequired: boolean;
   sourceConfidence: TripSourceConfidence;
+  subjectCanonicalId: string;
   subjectId: string;
   subjectType: "day" | "leg" | "stay" | "transport" | "item" | "photo";
   tripId: string;
@@ -220,6 +225,7 @@ export type TripWeatherHookRecord = {
 export type TripReviewQuestionRecord = {
   answerType: "text" | "choice" | "date" | "time" | "visibility" | "confirm";
   answerValue: string | null;
+  canonicalId: string;
   createdAt: string | null;
   evidence: string | null;
   guessedValue: string | null;
@@ -229,7 +235,8 @@ export type TripReviewQuestionRecord = {
   resolvedAt: string | null;
   sourceConfidence: TripSourceConfidence;
   status: "open" | "answered" | "dismissed" | "noted";
-  subjectId: string | null;
+  subjectCanonicalId: string;
+  subjectId: string;
   subjectType: "trip" | "day" | "leg" | "stay" | "transport" | "item";
   targetField: string | null;
   tripId: string;

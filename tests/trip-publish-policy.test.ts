@@ -28,6 +28,7 @@ export default function run() {
   records.reviewQuestions.push({
     answerType: "date",
     answerValue: null,
+    canonicalId: "question-1",
     createdAt: null,
     evidence: "The source lists May 1 and May 2.",
     guessedValue: "2030-05-01",
@@ -37,6 +38,7 @@ export default function run() {
     resolvedAt: null,
     sourceConfidence: "medium",
     status: "open",
+    subjectCanonicalId: records.trip.id,
     subjectId: records.trip.id,
     subjectType: "trip",
     targetField: "date",

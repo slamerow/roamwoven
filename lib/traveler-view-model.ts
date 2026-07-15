@@ -304,6 +304,7 @@ function createTripSummaryRecord(): TripSummaryRecord {
 function createLegRecords(tripId: string): TripLegRecord[] {
   return seedTrip.legs.map((leg, index) => ({
     arriveDate: leg.arriveDate ?? null,
+    canonicalId: leg.id,
     city: leg.city ?? "Unknown stop",
     country: leg.country ?? null,
     displayName: leg.city ?? "Unknown stop",
@@ -342,6 +343,7 @@ function createStayRecords({
         publicLocationLabel: leg.city ?? null,
       }),
       bookingUrl: null,
+      canonicalId: `${leg.id}-stay`,
       checkInDate: leg.arriveDate ?? null,
       checkInTime: null,
       checkOutDate: leg.leaveDate ?? null,
@@ -366,6 +368,7 @@ function createStayRecords({
 function createItemRecords(tripId: string): TripItemRecord[] {
   return seedTrip.items.map((item, index) => ({
     address: item.address ?? null,
+    canonicalId: item.id,
     categoryId: normalizeCategoryKey(item.category),
     date: item.date ?? null,
     description: item.description ?? null,
@@ -457,6 +460,7 @@ function createPrivateDetails({
       reason: "Exact lodging details should be protected before public sharing.",
       reviewRequired: false,
       sourceConfidence: "high" as TripSourceConfidence,
+      subjectCanonicalId: stay.canonicalId,
       subjectId: stay.id,
       subjectType: "stay" as const,
       tripId,
@@ -484,6 +488,7 @@ function createPrivateDetails({
         reason: classification.reason,
         reviewRequired: true,
         sourceConfidence: "medium" as TripSourceConfidence,
+        subjectCanonicalId: item.canonicalId,
         subjectId: item.id,
         subjectType: "item" as const,
         tripId,

@@ -69,6 +69,7 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .map((item) => ({
       address: item.address,
       arrivalLocation: null,
+      canonicalId: item.canonicalId,
       confirmationLabel: null,
       category: item.categoryId,
       date: item.date,
@@ -88,6 +89,7 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .map((item) => ({
       address: null,
       arrivalLocation: item.arrivalLocation,
+      canonicalId: item.canonicalId,
       confirmationLabel: item.confirmationLabel,
       category: "arrival_departure",
       date: item.date,
@@ -107,6 +109,7 @@ export function summarizeFinalAuditRecords(records: StructuredTripRecords) {
     .map((stay) => ({
       address: stay.address,
       arrivalLocation: null,
+      canonicalId: stay.canonicalId,
       confirmationLabel: null,
       category: "stay",
       date: stay.checkInDate,
@@ -215,9 +218,8 @@ function createArtifactLineageRows({
   );
   const rows = artifacts.pieces.map((piece): TripExtractionAuditLineageRow => {
     const canonical = candidateFromArtifactPiece(piece);
-    const key = lineageKey(canonical);
     const matches = piece.outputEligible
-      ? finalRecords.filter((record) => lineageKey(record) === key)
+      ? finalRecords.filter((record) => record.canonicalId === piece.id)
       : [];
 
     matches.forEach((record) => usedFinalRecordIds.add(record.id));

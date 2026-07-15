@@ -8,9 +8,9 @@ import {
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
 import {
-  CanonicalProjectionInvariantError,
   createStructuredTripRecordsFromDraft,
 } from "@/lib/extraction/draft-to-structured-trip";
+import { CanonicalIdentityInvariantError } from "@/lib/extraction/canonical-identity";
 import { applyReviewDecision } from "@/lib/generated-trip-decisions";
 
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -510,7 +510,7 @@ export default async function run() {
         fallbackTripName: "Invalid canonical draft",
         tripId: "invalid-canonical",
       }),
-      CanonicalProjectionInvariantError
+      CanonicalIdentityInvariantError
     );
   });
 }

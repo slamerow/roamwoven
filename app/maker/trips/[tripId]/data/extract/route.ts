@@ -125,7 +125,10 @@ function summarizeFinalizationUsage(usage: unknown) {
   }
 
   return {
+    canonicalEntityCount: finalization.canonicalEntityCount ?? null,
     canonicalEvidenceVersion: finalization.canonicalEvidenceVersion ?? null,
+    canonicalIdentityVersion: finalization.canonicalIdentityVersion ?? null,
+    canonicalReviewCount: finalization.canonicalReviewCount ?? null,
     status: finalization.status ?? null,
   };
 }

@@ -450,6 +450,7 @@ function createRecordSummaries({
     },
     items: activeItems.map((item) => ({
       address: redactSensitiveText(item.address, includePrivate),
+      canonicalId: item.canonicalId,
       categoryId: item.categoryId,
       date: item.date,
       description: redactSensitiveText(item.description, includePrivate),
@@ -466,6 +467,7 @@ function createRecordSummaries({
     })),
     legs: records.legs.filter(isActiveStatus).map((leg) => ({
       arriveDate: leg.arriveDate,
+      canonicalId: leg.canonicalId,
       city: leg.city,
       country: leg.country,
       displayName: leg.displayName,
@@ -480,6 +482,7 @@ function createRecordSummaries({
       label: detail.label,
       reason: redactSensitiveText(detail.reason, includePrivate),
       reviewRequired: detail.reviewRequired,
+      subjectCanonicalId: detail.subjectCanonicalId,
       subjectId: detail.subjectId,
       subjectType: detail.subjectType,
       value: redactPrivateValue(detail.value, includePrivate),
@@ -512,6 +515,7 @@ function createRecordSummaries({
         visibility: stay.addressVisibility,
       }),
       addressVisibility: stay.addressVisibility,
+      canonicalId: stay.canonicalId,
       checkInDate: stay.checkInDate,
       checkInTime: stay.checkInTime,
       checkOutDate: stay.checkOutDate,
@@ -532,6 +536,7 @@ function createRecordSummaries({
     transport: activeTransport.map((transport) => ({
       arrivalLocation: transport.arrivalLocation,
       arrivalTime: transport.arrivalTime,
+      canonicalId: transport.canonicalId,
       confirmationLabel: redactVisibilityValue({
         includePrivate,
         label: "confirmation",
@@ -559,12 +564,14 @@ function summarizeReviewQuestion(
 ) {
   return {
     answerType: question.answerType,
+    canonicalId: question.canonicalId,
     evidence: redactSensitiveText(question.evidence, includePrivate),
     guessedValue: redactSensitiveText(question.guessedValue, includePrivate),
     id: question.id,
     prompt: redactSensitiveText(question.prompt, includePrivate),
     reason: redactSensitiveText(question.reason, includePrivate),
     status: question.status,
+    subjectCanonicalId: question.subjectCanonicalId,
     subjectId: question.subjectId,
     subjectType: question.subjectType,
     targetField: question.targetField,
@@ -614,6 +621,7 @@ function createAuditSummary({
           redactSensitiveText(item, includePrivate)
         ),
         finalRecords: row.finalRecords.map((record) => ({
+          canonicalId: record.canonicalId,
           date: record.date,
           id: record.id,
           recordType: record.recordType,

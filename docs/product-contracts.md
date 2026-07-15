@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 4
+Ledger version: 5
 
 Ledger date: 2026-07-15
 
@@ -133,12 +133,25 @@ path is bypassed.
   not create a new semantic decision. Structured records, grouping relations,
   Calls, Questions, private details, maker decisions, and audit lineage refer to
   canonical IDs and declared fields rather than titles, fuzzy similarity, or
-  parallel array positions.
-- Evidence: Canonical finalization, projection invariants, stable identity, and
-  assembly-purity coverage exist. Review-subject mapping still reconstructs
-  canonical-to-structured identity through matching array positions, and some
-  downstream records do not yet carry canonical identity directly.
+  parallel array positions. Identity represents one planned occurrence: repeated
+  mentions collapse by default, while separate occurrences require affirmative
+  evidence such as distinct dates, bookings, times, or explicit repeat-visit
+  language. Correcting an occurrence's date moves the same entity. Maker-added
+  entities receive canonical identity, and explicit maker edits or deletions
+  survive a future rebuild while that subject survives. New identity versions
+  apply to new builds and intentional rebuilds only; existing unpublished drafts
+  are not migrated or rewritten. Rebuilds are staged and replace the current
+  working draft only after the complete new canonical graph validates.
+- Evidence: Finalization now records and revalidates a versioned canonical
+  identity manifest before compilation. Structured activities, legs, stays, and
+  transport carry canonical identity directly; Questions and private details
+  carry their canonical subject; projection invariants and audit lineage join by
+  identity instead of array position or title/date matching. Structured snapshot
+  version 2 requires the new identity fields. The remaining gap is reconciliation
+  of maker-created entities and saved decisions across the future rebuild and
+  merge/split lifecycle, plus first-class grouping relationships.
 - Tests: `tests/assembly-purity.test.ts`,
+  `tests/canonical-identity.test.ts`,
   `tests/canonical-factory-boundary.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`
 

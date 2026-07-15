@@ -15,6 +15,10 @@ import {
   finalizeCanonicalTripDraft,
 } from "@/lib/extraction/canonical-trip-finalization";
 import {
+  getCanonicalDraftId,
+  getCanonicalReviewId,
+} from "@/lib/extraction/canonical-identity";
+import {
   type DraftObject,
   getArray,
   getObject,
@@ -40,13 +44,25 @@ function canonicalRecordId({
   kind: "item" | "leg" | "stay" | "transport";
   tripId: string;
 }) {
-  const canonicalPieceId = getString(item, "_canonicalPieceId");
-  if (!canonicalPieceId) {
+  const canonicalId = getCanonicalDraftId(item);
+  if (!canonicalId) {
     throw new CanonicalProjectionInvariantError([
-      `${kind} is missing its canonical piece identity`,
+      `${kind} is missing its canonical identity`,
     ]);
   }
-  return `${tripId}-${kind}-${canonicalPieceId}`;
+  return `${tripId}-${kind}-${canonicalId}`;
+}
+
+function requiredCanonicalId(item: DraftObject, label: string) {
+  const canonicalId = getCanonicalDraftId(item);
+
+  if (!canonicalId) {
+    throw new CanonicalProjectionInvariantError([
+      `${label} is missing its canonical identity`,
+    ]);
+  }
+
+  return canonicalId;
 }
 
 const CANONICAL_TRANSPORT_TYPES = new Set<TripTransportType>([
@@ -229,6 +245,7 @@ function createLegRecords({
 
     return {
       arriveDate,
+      canonicalId: requiredCanonicalId(place, `place[${index}]`),
       city,
       country,
       displayName: city,
@@ -317,6 +334,7 @@ function createStayRecords({
         stayType,
       }),
       bookingUrl: null,
+      canonicalId: requiredCanonicalId(stay, `stay[${index}]`),
       checkInDate: checkIn,
       checkInTime: getString(stay, "checkInTime"),
       checkOutDate: checkOut,
@@ -376,6 +394,7 @@ function createTransportRecords({
       arrivalTime: getString(transport, "arrivalTime"),
       bookingUrl: null,
       bookingUrlVisibility: "traveler_password",
+      canonicalId: requiredCanonicalId(transport, `transport[${index}]`),
       confirmationLabel: confirmation,
       confirmationVisibility: confirmation
         ? "traveler_password"
@@ -437,6 +456,7 @@ function createItemRecords({
 
     return {
       address: getString(activity, "address"),
+      canonicalId: requiredCanonicalId(activity, `activity[${index}]`),
       categoryId,
       date: finalDate,
       description,
@@ -511,6 +531,7 @@ function createPrivateDetailRecords({
       reason: "Every exact lodging address stays behind traveler mode.",
       reviewRequired: false,
       sourceConfidence: "medium" as const,
+      subjectCanonicalId: stay.canonicalId,
       subjectId: stay.id,
       subjectType: "stay" as const,
       tripId,
@@ -526,6 +547,7 @@ function createPrivateDetailRecords({
       reason: "Stay booking-control identifiers stay behind traveler mode.",
       reviewRequired: false,
       sourceConfidence: "medium" as const,
+      subjectCanonicalId: stay.canonicalId,
       subjectId: stay.id,
       subjectType: "stay" as const,
       tripId,
@@ -542,6 +564,7 @@ function createPrivateDetailRecords({
       reason: "Booking references should default behind traveler mode.",
       reviewRequired: false,
       sourceConfidence: "medium" as const,
+      subjectCanonicalId: item.canonicalId,
       subjectId: item.id,
       subjectType: "transport" as const,
       tripId,
@@ -574,6 +597,7 @@ function createPrivateDetailRecords({
       reason,
       reviewRequired: true,
       sourceConfidence: "medium" as const,
+      subjectCanonicalId: tripId,
       subjectId: tripId,
       subjectType: "leg" as const,
       tripId,
@@ -697,12 +721,42 @@ function assertCanonicalProjectionInvariant({
   assertCount("transport", records.transport.length);
   assertCount("missingDetails", records.reviewQuestions.length);
 
-  const sourceObjects = (collection: string) =>
-    getArray(draft, collection).map((value) =>
-      value && typeof value === "object" && !Array.isArray(value)
-        ? (value as DraftObject)
-        : {}
-    );
+  const canonicalPairs = <T extends { canonicalId: string }>(
+    collection: string,
+    recordsForCollection: T[]
+  ) => {
+    const recordByCanonicalId = new Map<string, T>();
+    recordsForCollection.forEach((record, index) => {
+      if (recordByCanonicalId.has(record.canonicalId)) {
+        violations.push(
+          `${collection} record[${index}] duplicates canonical identity ${record.canonicalId}`
+        );
+      }
+      recordByCanonicalId.set(record.canonicalId, record);
+    });
+
+    return getArray(draft, collection).flatMap((value, index) => {
+      const source =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? (value as DraftObject)
+          : {};
+      const canonicalId = getCanonicalDraftId(source);
+      const record = canonicalId ? recordByCanonicalId.get(canonicalId) : null;
+
+      if (!canonicalId) {
+        violations.push(`${collection}[${index}] has no canonical identity`);
+        return [];
+      }
+      if (!record) {
+        violations.push(
+          `${collection}[${index}] identity ${canonicalId} has no structured record`
+        );
+        return [];
+      }
+
+      return [{ canonicalId, index, record, source }];
+    });
+  };
   const expect = (
     label: string,
     expected: string | null,
@@ -713,16 +767,12 @@ function assertCanonicalProjectionInvariant({
     }
   };
 
-  sourceObjects("places").forEach((source, index) => {
-    const record = records.legs[index];
-    if (!record) return;
+  canonicalPairs("places", records.legs).forEach(({ index, record, source }) => {
     expect(`place[${index}].city`, getString(source, "city"), record.city);
     expect(`place[${index}].arriveDate`, getString(source, "arriveDate"), record.arriveDate);
     expect(`place[${index}].leaveDate`, getString(source, "leaveDate"), record.leaveDate);
   });
-  sourceObjects("stays").forEach((source, index) => {
-    const record = records.stays[index];
-    if (!record) return;
+  canonicalPairs("stays", records.stays).forEach(({ index, record, source }) => {
     expect(`stay[${index}].name`, getString(source, "name"), record.name);
     expect(
       `stay[${index}].checkIn`,
@@ -732,30 +782,83 @@ function assertCanonicalProjectionInvariant({
     expect(`stay[${index}].checkOut`, getString(source, "checkOut"), record.checkOutDate);
     expect(`stay[${index}].address`, getString(source, "address"), record.address);
   });
-  sourceObjects("transport").forEach((source, index) => {
-    const record = records.transport[index];
-    if (!record) return;
-    expect(`transport[${index}].title`, getString(source, "title"), record.routeLabel);
-    expect(`transport[${index}].date`, getString(source, "date"), record.date);
-    expect(`transport[${index}].type`, getString(source, "type"), record.transportType);
-    expect(
-      `transport[${index}].description`,
-      getString(source, "description"),
-      record.description
-    );
+  canonicalPairs("transport", records.transport).forEach(
+    ({ index, record, source }) => {
+      expect(`transport[${index}].title`, getString(source, "title"), record.routeLabel);
+      expect(`transport[${index}].date`, getString(source, "date"), record.date);
+      expect(`transport[${index}].type`, getString(source, "type"), record.transportType);
+      expect(
+        `transport[${index}].description`,
+        getString(source, "description"),
+        record.description
+      );
+    }
+  );
+  canonicalPairs("activities", records.items).forEach(
+    ({ index, record, source }) => {
+      expect(`activity[${index}].title`, getString(source, "title"), record.title);
+      expect(`activity[${index}].date`, getString(source, "date"), record.date);
+      expect(`activity[${index}].itemType`, getString(source, "itemType"), record.itemType);
+      expect(`activity[${index}].category`, getString(source, "category"), record.categoryId);
+      expect(
+        `activity[${index}].description`,
+        getString(source, "description"),
+        record.description
+      );
+    }
+  );
+
+  const reviewByCanonicalId = new Map(
+    records.reviewQuestions.map((question) => [question.canonicalId, question])
+  );
+  getArray(draft, "missingDetails").forEach((value, index) => {
+    const detail =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as DraftObject)
+        : {};
+    const canonicalReviewId = getCanonicalReviewId(detail);
+    const question = canonicalReviewId
+      ? reviewByCanonicalId.get(canonicalReviewId)
+      : null;
+    const subjectCanonicalId = getString(detail, "relatedCanonicalPieceId");
+
+    if (!canonicalReviewId || !question) {
+      violations.push(
+        `missingDetails[${index}] has no matching canonical review record`
+      );
+      return;
+    }
+    if (
+      subjectCanonicalId &&
+      question.subjectCanonicalId &&
+      subjectCanonicalId !== question.subjectCanonicalId
+    ) {
+      violations.push(
+        `missingDetails[${index}] changed canonical subject ${subjectCanonicalId} to ${question.subjectCanonicalId}`
+      );
+    }
   });
-  sourceObjects("activities").forEach((source, index) => {
-    const record = records.items[index];
-    if (!record) return;
-    expect(`activity[${index}].title`, getString(source, "title"), record.title);
-    expect(`activity[${index}].date`, getString(source, "date"), record.date);
-    expect(`activity[${index}].itemType`, getString(source, "itemType"), record.itemType);
-    expect(`activity[${index}].category`, getString(source, "category"), record.categoryId);
-    expect(
-      `activity[${index}].description`,
-      getString(source, "description"),
-      record.description
-    );
+
+  const entityIds = new Set([
+    ...records.items.map((record) => record.canonicalId),
+    ...records.legs.map((record) => record.canonicalId),
+    ...records.stays.map((record) => record.canonicalId),
+    ...records.transport.map((record) => record.canonicalId),
+    records.trip.id,
+  ]);
+  records.privateDetails.forEach((detail) => {
+    if (!entityIds.has(detail.subjectCanonicalId)) {
+      violations.push(
+        `private detail ${detail.id} targets missing canonical identity ${detail.subjectCanonicalId}`
+      );
+    }
+  });
+  records.reviewQuestions.forEach((question) => {
+    if (!entityIds.has(question.subjectCanonicalId)) {
+      violations.push(
+        `review ${question.id} targets missing canonical identity ${question.subjectCanonicalId}`
+      );
+    }
   });
 
   if (violations.length > 0) {

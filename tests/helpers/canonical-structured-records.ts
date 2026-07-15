@@ -38,8 +38,13 @@ function canonicalizeFixtureDraft(value: unknown) {
     evidence.version === EVIDENCE_CLUSTER_VERSION &&
     collections.every((collection) =>
       (Array.isArray(draft[collection]) ? draft[collection] : []).every((item) =>
-        Boolean(stringValue(asRecord(item), "_canonicalPieceId"))
+        Boolean(stringValue(asRecord(item), "_canonicalId")) &&
+        stringValue(asRecord(item), "_canonicalId") ===
+          stringValue(asRecord(item), "_canonicalPieceId")
       )
+    ) &&
+    (Array.isArray(draft.missingDetails) ? draft.missingDetails : []).every(
+      (item) => Boolean(stringValue(asRecord(item), "_canonicalReviewId"))
     );
 
   if (hasCurrentCanonicalIdentity) return draft;
@@ -47,6 +52,7 @@ function canonicalizeFixtureDraft(value: unknown) {
   const places = (Array.isArray(draft.places) ? draft.places : []).map(
     (value, index) => ({
       ...asRecord(value),
+      _canonicalId: fixturePieceId("place", index),
       _canonicalPieceId: fixturePieceId("place", index),
       city: stringValue(asRecord(value), "city") ?? `Stop ${index + 1}`,
     })
@@ -66,6 +72,7 @@ function canonicalizeFixtureDraft(value: unknown) {
 
       return {
         ...stay,
+        _canonicalId: fixturePieceId("stay", index),
         _canonicalPieceId: fixturePieceId("stay", index),
         checkIn:
           checkIn ??
@@ -82,6 +89,7 @@ function canonicalizeFixtureDraft(value: unknown) {
       const item = asRecord(value);
       return {
         ...item,
+        _canonicalId: fixturePieceId("transport", index),
         _canonicalPieceId: fixturePieceId("transport", index),
         arrival:
           stringValue(item, "arrival") ??
@@ -125,6 +133,7 @@ function canonicalizeFixtureDraft(value: unknown) {
       });
       return {
         ...item,
+        _canonicalId: fixturePieceId("activity", index),
         _canonicalPieceId: fixturePieceId("activity", index),
         category: canonicalCategoryId({
           category: stringValue(item, "category"),
@@ -145,7 +154,7 @@ function canonicalizeFixtureDraft(value: unknown) {
   ];
   const missingDetails = (
     Array.isArray(draft.missingDetails) ? draft.missingDetails : []
-  ).map((value) => {
+  ).map((value, index) => {
     const detail = asRecord(value);
     const relatedTitle = stringValue(detail, "relatedTitle")?.toLowerCase();
     const subject = relatedTitle
@@ -158,6 +167,9 @@ function canonicalizeFixtureDraft(value: unknown) {
       ...detail,
       _canonicalReviewDisposition:
         stringValue(detail, "_canonicalReviewDisposition") ?? "question",
+      _canonicalReviewId:
+        stringValue(detail, "_canonicalReviewId") ??
+        `fixture-review-${index + 1}`,
       relatedCanonicalPieceId:
         stringValue(detail, "relatedCanonicalPieceId") ?? subject?.id ?? null,
     };
@@ -173,6 +185,7 @@ function canonicalizeFixtureDraft(value: unknown) {
     transport,
     _evidence: {
       ...evidence,
+      canonicalEntityIds: subjects.map((subject) => subject.id),
       canonicalPieceIds: subjects.map((subject) => subject.id),
       observationIds: [],
       version: EVIDENCE_CLUSTER_VERSION,

@@ -1592,6 +1592,7 @@ test("summary marks surviving stay and transport duplicate collisions for review
   });
   records.items.push({
     address: null,
+    canonicalId: "manual-stay-duplicate",
     categoryId: "arrival_departure",
     date: "2026-09-02",
     description: "Arrive and drop bags at Central Station Hotel before check-in.",
@@ -1615,6 +1616,7 @@ test("summary marks surviving stay and transport duplicate collisions for review
   });
   records.items.push({
     address: null,
+    canonicalId: "manual-transport-duplicate",
     categoryId: "arrival_departure",
     date: "2026-09-03",
     description: "Take train from Paris to Lyon.",

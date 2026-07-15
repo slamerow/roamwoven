@@ -28,7 +28,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 9;
+export const EVIDENCE_CLUSTER_VERSION = 10;
 
 export type EvidenceKind =
   | "activity"
@@ -1308,7 +1308,9 @@ function mergeObservationIntoPiece(
 
   piece.payload = next;
   piece.conflicts = conflicts;
-  piece.observationIds.push(observation.id);
+  piece.observationIds = Array.from(
+    new Set([...piece.observationIds, observation.id])
+  );
   piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
   const rolePriority: Record<EvidenceRole, number> = {
     atomic_candidate: 6,
@@ -3487,12 +3489,12 @@ function createObservation({
 }: Omit<EvidenceObservation, "id">): EvidenceObservation {
   const id = `obs_${stableHash({
     kind,
-    ordinal,
     payload,
     role,
     source,
     sourceFilename,
     sourceLabel,
+    sourceProvenance,
     sourceStructure,
     sourceUploadId,
   })}`;
@@ -3510,6 +3512,15 @@ function createObservation({
     sourceStructure,
     sourceUploadId,
   };
+}
+
+function pushUniqueObservation(
+  observations: EvidenceObservation[],
+  observation: EvidenceObservation
+) {
+  if (!observations.some((candidate) => candidate.id === observation.id)) {
+    observations.push(observation);
+  }
 }
 
 function anchorPayload(anchor: SourceTransportAnchor) {
@@ -3726,6 +3737,16 @@ function recoverMissingNamedEvidence({
       sourceUploadId: null,
     });
     const piece = createPiece(observation);
+    const existingPiece = pieces.find(
+      (candidate) =>
+        candidate.kind === piece.kind &&
+        candidate.observationIds.includes(observation.id)
+    );
+
+    if (existingPiece) {
+      detail.relatedCanonicalPieceId = existingPiece.id;
+      continue;
+    }
 
     addCanonicalAction(piece, {
       absorbedTitles: [relatedTitle],
@@ -3735,7 +3756,7 @@ function recoverMissingNamedEvidence({
       type: "recovered",
     });
     detail.relatedCanonicalPieceId = piece.id;
-    observations.push(observation);
+    pushUniqueObservation(observations, observation);
     pieces.push(piece);
   }
 }
@@ -4173,6 +4194,22 @@ function scrubReviewEvidence(value: unknown) {
     .trim();
 }
 
+function canonicalReviewSemanticTarget(detail: Record<string, unknown>) {
+  const text = normalizeText(
+    [detail.targetField, detail.prompt, detail.reason].filter(Boolean).join(" ")
+  );
+
+  if (/\b(ticket|ticket choice|ticket type)\b/.test(text)) return "ticket";
+  if (/\b(tour|guided|self guided|visit mode|booking status)\b/.test(text)) {
+    return "visit-mode";
+  }
+  if (/\b(check in|checkin)\b/.test(text)) return "check-in";
+  if (/\b(check out|checkout)\b/.test(text)) return "check-out";
+  if (/\b(date|day|placement)\b/.test(text)) return "date";
+  if (/\b(name|title)\b/.test(text)) return "name";
+  return normalizeText(String(detail.targetField ?? "general"));
+}
+
 function canonicalizeReviewDetails(
   details: unknown[],
   pieces: CanonicalEvidencePiece[]
@@ -4207,18 +4244,7 @@ function canonicalizeReviewDetails(
   const seen = new Set<string>();
 
   return canonical.filter((detail) => {
-    const text = normalizeText(
-      [detail.targetField, detail.prompt, detail.reason].filter(Boolean).join(" ")
-    );
-    const semanticTarget =
-      /\b(ticket|ticket choice|ticket type)\b/.test(text) ? "ticket" :
-        /\b(tour|guided|self guided|visit mode|booking status)\b/.test(text)
-          ? "visit-mode" :
-          /\b(check in|checkin)\b/.test(text) ? "check-in" :
-            /\b(check out|checkout)\b/.test(text) ? "check-out" :
-              /\b(date|day|placement)\b/.test(text) ? "date" :
-                /\b(name|title)\b/.test(text) ? "name" :
-                  normalizeText(String(detail.targetField ?? "general"));
+    const semanticTarget = canonicalReviewSemanticTarget(detail);
     const key = [
       detail._canonicalReviewDisposition,
       detail.relatedCanonicalPieceId ?? detail.subjectType,
@@ -4227,7 +4253,15 @@ function canonicalizeReviewDetails(
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).map((detail) => ({
+    ...detail,
+    _canonicalReviewId: `review_${stableHash({
+      disposition: detail._canonicalReviewDisposition,
+      semanticTarget: canonicalReviewSemanticTarget(detail),
+      subjectCanonicalId:
+        detail.relatedCanonicalPieceId ?? detail.subjectType ?? "trip",
+    })}`,
+  }));
 }
 
 export function clusterExtractedEvidence({
@@ -4266,7 +4300,8 @@ export function clusterExtractedEvidence({
         const kind =
           collection === "activities" ? activityKind(payload) : defaultKind;
         const role = evidenceRoleFromPayload(payload, kind);
-        observations.push(
+        pushUniqueObservation(
+          observations,
           createObservation({
             kind,
             ordinal,
@@ -4291,7 +4326,8 @@ export function clusterExtractedEvidence({
 
   for (const anchor of sourceTransportAnchors) {
     ordinal += 1;
-    observations.push(
+    pushUniqueObservation(
+      observations,
       createObservation({
         kind: "transport",
         ordinal,
@@ -4416,6 +4452,7 @@ export function clusterExtractedEvidence({
       .filter((piece) => piece.outputEligible && piece.kind === kind)
       .map((piece) => ({
         ...publicPayload(piece.payload),
+        _canonicalId: piece.id,
         _canonicalPieceId: piece.id,
       }));
   const activities = [...outputFor("activity"), ...outputFor("note")];
@@ -4462,6 +4499,9 @@ export function clusterExtractedEvidence({
         }))
       ),
       canonicalPieceIds: pieces.map((piece) => piece.id),
+      canonicalEntityIds: pieces
+        .filter((piece) => piece.outputEligible)
+        .map((piece) => piece.id),
       observationIds: observations.map((observation) => observation.id),
       resolver: resolverMetadata ?? null,
       version: EVIDENCE_CLUSTER_VERSION,

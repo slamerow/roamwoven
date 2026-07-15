@@ -1,6 +1,6 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 
-export const STRUCTURED_TRIP_SNAPSHOT_VERSION = 1;
+export const STRUCTURED_TRIP_SNAPSHOT_VERSION = 2;
 export const STRUCTURED_TRIP_SNAPSHOT_KEY = "_structuredTripSnapshot";
 
 type StructuredTripSnapshotEnvelope = {
@@ -16,6 +16,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function isStructuredTripRecords(value: unknown): value is StructuredTripRecords {
   const record = asRecord(value);
+  const hasCanonicalId = (item: unknown) =>
+    typeof asRecord(item).canonicalId === "string" &&
+    Boolean(String(asRecord(item).canonicalId).trim());
+  const hasSubjectCanonicalId = (item: unknown) =>
+    typeof asRecord(item).subjectCanonicalId === "string" &&
+    Boolean(String(asRecord(item).subjectCanonicalId).trim());
 
   return Boolean(
     asRecord(record.trip).id &&
@@ -26,7 +32,16 @@ function isStructuredTripRecords(value: unknown): value is StructuredTripRecords
       Array.isArray(record.privateDetails) &&
       Array.isArray(record.reviewQuestions) &&
       Array.isArray(record.stays) &&
-      Array.isArray(record.transport)
+      Array.isArray(record.transport) &&
+      record.items.every(hasCanonicalId) &&
+      record.legs.every(hasCanonicalId) &&
+      record.stays.every(hasCanonicalId) &&
+      record.transport.every(hasCanonicalId) &&
+      record.privateDetails.every(hasSubjectCanonicalId) &&
+      record.reviewQuestions.every(
+        (question) =>
+          hasCanonicalId(question) && hasSubjectCanonicalId(question)
+      )
   );
 }
 

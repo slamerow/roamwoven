@@ -108,6 +108,7 @@ const records: StructuredTripRecords = {
   items: [
     {
       address: "Public museum address",
+      canonicalId: "canonical-item-1",
       categoryId: "art_culture",
       date: "2019-01-18",
       description: "Schonnbrunn palace and gardens.",
@@ -133,6 +134,7 @@ const records: StructuredTripRecords = {
   legs: [
     {
       arriveDate: "2019-01-18",
+      canonicalId: "canonical-leg-vienna",
       city: "Vienna",
       country: "Austria",
       displayName: "Vienna",
@@ -162,6 +164,7 @@ const records: StructuredTripRecords = {
       reason: "Access instructions should stay private.",
       reviewRequired: true,
       sourceConfidence: "high",
+      subjectCanonicalId: "canonical-stay-1",
       subjectId: "stay-1",
       subjectType: "stay",
       tripId: "trip-qa",
@@ -173,6 +176,7 @@ const records: StructuredTripRecords = {
     {
       answerType: "confirm",
       answerValue: null,
+      canonicalId: "canonical-question-1",
       createdAt: null,
       evidence: "The source says Lunch: U Maliru 1:00 PM.",
       guessedValue: "1:00 PM",
@@ -182,6 +186,7 @@ const records: StructuredTripRecords = {
       resolvedAt: null,
       sourceConfidence: "high",
       status: "open",
+      subjectCanonicalId: "canonical-item-lunch",
       subjectId: "item-lunch",
       subjectType: "item",
       targetField: "startTime",
@@ -190,6 +195,7 @@ const records: StructuredTripRecords = {
     {
       answerType: "confirm",
       answerValue: null,
+      canonicalId: "canonical-call-1",
       createdAt: null,
       evidence: "Same attraction complex.",
       guessedValue: "Grouped child stops under Schonnbrunn Palace.",
@@ -199,6 +205,7 @@ const records: StructuredTripRecords = {
       resolvedAt: null,
       sourceConfidence: "high",
       status: "noted",
+      subjectCanonicalId: "canonical-item-1",
       subjectId: "item-1",
       subjectType: "item",
       targetField: null,
@@ -211,6 +218,7 @@ const records: StructuredTripRecords = {
       address: "Private apartment address",
       addressVisibility: "traveler_password",
       bookingUrl: null,
+      canonicalId: "canonical-stay-1",
       checkInDate: "2019-01-18",
       checkInTime: "14:30",
       checkOutDate: "2019-01-21",
@@ -237,6 +245,7 @@ const records: StructuredTripRecords = {
       arrivalTime: "13:23",
       bookingUrl: null,
       bookingUrlVisibility: "public",
+      canonicalId: "canonical-transport-1",
       confirmationLabel: "RJ1033",
       confirmationVisibility: "public",
       date: "2019-01-18",

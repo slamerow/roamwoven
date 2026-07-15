@@ -31,6 +31,7 @@ function createMinimalRecords(): StructuredTripRecords {
         reason: "Booking references should default behind traveler mode.",
         reviewRequired: false,
         sourceConfidence: "medium",
+        subjectCanonicalId: "canonical-transport-1",
         subjectId: "transport-1",
         subjectType: "transport",
         tripId: "trip-1",
@@ -118,6 +119,7 @@ export default async function run() {
       address: "1 Public Hotel Way",
       addressVisibility: "traveler_password",
       bookingUrl: "https://hotel.example/manage/SECRET",
+      canonicalId: "canonical-stay-1",
       checkInDate: "2031-04-01",
       checkInTime: null,
       checkOutDate: "2031-04-03",
@@ -142,6 +144,7 @@ export default async function run() {
       arrivalTime: "12:00",
       bookingUrl: "https://airline.example/manage/TRAVEL-SECRET",
       bookingUrlVisibility: "traveler_password",
+      canonicalId: "canonical-transport-1",
       confirmationLabel: "TRAVEL-SECRET",
       confirmationVisibility: "traveler_password",
       date: "2031-04-01",
@@ -165,6 +168,7 @@ export default async function run() {
       {
         ...records.privateDetails[0],
         id: "stay-address",
+        subjectCanonicalId: "canonical-stay-1",
         subjectId: "stay-1",
         subjectType: "stay",
         value: "1 Public Hotel Way",
@@ -172,6 +176,7 @@ export default async function run() {
       {
         ...records.privateDetails[0],
         id: "stay-confirmation",
+        subjectCanonicalId: "canonical-stay-1",
         subjectId: "stay-1",
         subjectType: "stay",
         value: "HOTEL-SECRET",
@@ -189,6 +194,7 @@ export default async function run() {
     records.items = [
       {
         address: null,
+        canonicalId: "canonical-item-tour",
         categoryId: "tours_tickets",
         date: "2031-04-01",
         description: "Tour ticket number 19183727.",
@@ -212,6 +218,7 @@ export default async function run() {
       },
       {
         address: null,
+        canonicalId: "canonical-item-access",
         categoryId: "arrival_departure",
         date: "2031-04-01",
         description: "Door code: 2468.",

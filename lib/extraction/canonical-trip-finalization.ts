@@ -1,11 +1,19 @@
 import { type DraftObject } from "@/lib/extraction/draft-value";
 import { EVIDENCE_CLUSTER_VERSION } from "@/lib/extraction/evidence-clustering";
+import {
+  CANONICAL_IDENTITY_VERSION,
+  createCanonicalIdentityManifest,
+  type CanonicalIdentityManifest,
+} from "@/lib/extraction/canonical-identity";
 
-const CANONICAL_FINALIZATION_VERSION = 2;
+const CANONICAL_FINALIZATION_VERSION = 3;
 const CANONICAL_FINALIZATION_KEY = "_canonicalFinalization";
 
 export type CanonicalFinalizationDebug = {
+  canonicalEntityCount: number;
   canonicalEvidenceVersion: number;
+  canonicalIdentityVersion: number;
+  canonicalReviewCount: number;
   status: "already_finalized" | "finalized";
 };
 
@@ -17,6 +25,13 @@ export class NonCanonicalDraftError extends Error {
         : `Trip finalization requires evidence version ${EVIDENCE_CLUSTER_VERSION}; received version ${version}.`
     );
     this.name = "NonCanonicalDraftError";
+  }
+}
+
+export class FinalizedCanonicalMutationError extends Error {
+  constructor() {
+    super("Finalized canonical identity cannot be changed during compilation.");
+    this.name = "FinalizedCanonicalMutationError";
   }
 }
 
@@ -33,11 +48,20 @@ function canonicalEvidenceVersion(record: DraftObject) {
 
 function existingFinalization(record: DraftObject) {
   const finalization = asRecord(record[CANONICAL_FINALIZATION_KEY]);
+  const identity = asRecord(finalization.identity);
 
   return finalization.version === CANONICAL_FINALIZATION_VERSION &&
+    identity.version === CANONICAL_IDENTITY_VERSION &&
     canonicalEvidenceVersion(record) === EVIDENCE_CLUSTER_VERSION
     ? finalization
     : null;
+}
+
+function sameIdentityManifest(
+  finalization: DraftObject,
+  identity: CanonicalIdentityManifest
+) {
+  return JSON.stringify(finalization.identity) === JSON.stringify(identity);
 }
 
 export function finalizeCanonicalTripDraft(draft: unknown): {
@@ -48,22 +72,34 @@ export function finalizeCanonicalTripDraft(draft: unknown): {
   const evidenceVersion = canonicalEvidenceVersion(record);
   const finalization = existingFinalization(record);
 
-  if (finalization) {
+  if (evidenceVersion !== EVIDENCE_CLUSTER_VERSION) {
+    throw new NonCanonicalDraftError(evidenceVersion);
+  }
+
+  const identity = createCanonicalIdentityManifest(record);
+
+  if (finalization && sameIdentityManifest(finalization, identity)) {
     return {
       debug: {
-        canonicalEvidenceVersion: evidenceVersion ?? 0,
+        canonicalEntityCount: identity.entities.length,
+        canonicalEvidenceVersion: evidenceVersion,
+        canonicalIdentityVersion: identity.version,
+        canonicalReviewCount: identity.reviews.length,
         status: "already_finalized",
       },
       draft,
     };
   }
 
-  if (evidenceVersion !== EVIDENCE_CLUSTER_VERSION) {
-    throw new NonCanonicalDraftError(evidenceVersion);
+  if (finalization) {
+    throw new FinalizedCanonicalMutationError();
   }
 
   const debug: CanonicalFinalizationDebug = {
+    canonicalEntityCount: identity.entities.length,
     canonicalEvidenceVersion: evidenceVersion,
+    canonicalIdentityVersion: identity.version,
+    canonicalReviewCount: identity.reviews.length,
     status: "finalized",
   };
 
@@ -73,6 +109,7 @@ export function finalizeCanonicalTripDraft(draft: unknown): {
       ...record,
       [CANONICAL_FINALIZATION_KEY]: {
         ...debug,
+        identity,
         version: CANONICAL_FINALIZATION_VERSION,
       },
     },

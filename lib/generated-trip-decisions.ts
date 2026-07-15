@@ -599,6 +599,7 @@ function applyMissingStayAnswer({
     address: null,
     addressVisibility: "traveler_password",
     bookingUrl: null,
+    canonicalId: `${question.canonicalId}:stay`,
     checkInDate: leg.arriveDate,
     checkInTime: null,
     checkOutDate: leg.leaveDate,

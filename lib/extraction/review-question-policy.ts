@@ -11,6 +11,7 @@ import {
   getArray,
   getString,
 } from "@/lib/extraction/draft-value";
+import { getCanonicalReviewId } from "@/lib/extraction/canonical-identity";
 
 function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
@@ -32,22 +33,6 @@ function getAnswerType(
   return "text";
 }
 
-function getReviewSubjectType(
-  value: string | null
-): TripReviewQuestionRecord["subjectType"] {
-  if (
-    value === "day" ||
-    value === "leg" ||
-    value === "stay" ||
-    value === "transport" ||
-    value === "item"
-  ) {
-    return value;
-  }
-
-  return "trip";
-}
-
 export function createReviewQuestions({
   draft,
   items,
@@ -65,32 +50,31 @@ export function createReviewQuestions({
 }): TripReviewQuestionRecord[] {
   const canonicalSubjects = new Map<
     string,
-    { id: string; subjectType: TripReviewQuestionRecord["subjectType"] }
+    {
+      canonicalId: string;
+      id: string;
+      subjectType: TripReviewQuestionRecord["subjectType"];
+    }
   >();
   const register = (
-    collection: string,
-    records: Array<{ id: string }>,
+    records: Array<{ canonicalId: string; id: string }>,
     subjectType: TripReviewQuestionRecord["subjectType"]
   ) => {
-    getArray(draft, collection).forEach((value, index) => {
-      const record =
-        value && typeof value === "object" && !Array.isArray(value)
-          ? (value as DraftObject)
-          : null;
-      const canonicalPieceId = getString(record, "_canonicalPieceId");
-      const structuredId = records[index]?.id;
-      if (canonicalPieceId && structuredId) {
-        canonicalSubjects.set(canonicalPieceId, { id: structuredId, subjectType });
-      }
-    });
+    records.forEach((record) =>
+      canonicalSubjects.set(record.canonicalId, {
+        canonicalId: record.canonicalId,
+        id: record.id,
+        subjectType,
+      })
+    );
   };
-  register("activities", items, "item");
-  register("places", legs, "leg");
-  register("stays", stays, "stay");
-  register("transport", transport, "transport");
+  register(items, "item");
+  register(legs, "leg");
+  register(stays, "stay");
+  register(transport, "transport");
 
   return getArray(draft, "missingDetails").flatMap(
-    (value, index): TripReviewQuestionRecord[] => {
+    (value): TripReviewQuestionRecord[] => {
       const detail =
         value && typeof value === "object" && !Array.isArray(value)
           ? (value as DraftObject)
@@ -105,20 +89,24 @@ export function createReviewQuestions({
       }
 
       const canonicalPieceId = getString(detail, "relatedCanonicalPieceId");
+      const canonicalReviewId = getCanonicalReviewId(detail);
+      if (!canonicalReviewId) {
+        throw new Error("Canonical review detail is missing its identity.");
+      }
       const canonicalSubject = canonicalPieceId
         ? canonicalSubjects.get(canonicalPieceId)
         : null;
-      const subjectType =
-        canonicalSubject?.subjectType ??
-        getReviewSubjectType(getString(detail, "subjectType"));
+      const subjectType = canonicalSubject?.subjectType ?? "trip";
+      const fallbackSubjectId = tripId;
 
       return [{
         answerType: getAnswerType(getString(detail, "answerType")),
         answerValue: null,
+        canonicalId: canonicalReviewId,
         createdAt: null,
         evidence: getString(detail, "evidence"),
         guessedValue: getString(detail, "guessedValue"),
-        id: `${tripId}-canonical-review-${index + 1}`,
+        id: `${tripId}-${canonicalReviewId}`,
         prompt: getString(detail, "prompt") ?? "Confirm a missing detail",
         reason:
           getString(detail, "reason") ??
@@ -131,7 +119,9 @@ export function createReviewQuestions({
             : disposition === "dismissed"
               ? "dismissed"
               : "open",
-        subjectId: canonicalSubject?.id ?? null,
+        subjectCanonicalId:
+          canonicalSubject?.canonicalId ?? fallbackSubjectId,
+        subjectId: canonicalSubject?.id ?? fallbackSubjectId,
         subjectType,
         targetField: getString(detail, "targetField"),
         tripId,
