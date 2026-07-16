@@ -52,7 +52,7 @@ const AVAILABILITY_MARKER_PATTERN =
   /\b(open until|open til|hours?|free\s*\d|free admission)\b/;
 
 const WEAK_RECOMMENDATION_PATTERN =
-  /\b(optional|maybe|if time|could visit|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b/;
+  /\b(optional|maybe|if time|if we have time|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b/;
 
 const LOOSE_FOOD_SHOPPING_PATTERN =
   /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/;

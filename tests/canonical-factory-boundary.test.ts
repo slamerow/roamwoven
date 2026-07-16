@@ -163,10 +163,51 @@ export default async function run() {
     assert.ok(records.items.every((item) => item.id.includes("item-piece_")));
   });
 
-  await test("repeat visits on different dates stay separate in a clean itinerary", () => {
+  await test("committed repeat visits on different dates stay separate", () => {
+    // 2026-07-17 commitment rule: distinct dates alone are no longer
+    // affirmative repeat-visit evidence. Timed copies are committed, so the
+    // planned double visit survives as two cards.
     const { records } = clusterAndCompile([
       stage({
         label: "repeat-visits",
+        sourceText: "National Gallery 10:00\n\nNational Gallery 14:00",
+        value: emptyStage({
+          activities: [
+            activity({
+              city: "London",
+              date: "2033-06-02",
+              startTime: "10:00",
+              title: "National Gallery",
+            }),
+            activity({
+              city: "London",
+              date: "2033-06-05",
+              startTime: "14:00",
+              title: "National Gallery",
+            }),
+          ],
+          places: [{
+            arriveDate: "2033-06-01",
+            city: "London",
+            country: "United Kingdom",
+            leaveDate: "2033-06-07",
+          }],
+        }),
+      }),
+    ], "repeat-visit-trip");
+
+    assert.equal(records.items.length, 2);
+    assert.deepEqual(records.items.map((item) => item.date), ["2033-06-02", "2033-06-05"]);
+  });
+
+  await test("uncommitted repeat mentions collapse to one city note", () => {
+    // 2026-07-17 commitment rule (approved Central Europe ground truth):
+    // same name, same leg, repeated but never committed — no time, booking,
+    // or planned language on any copy — becomes ONE city note, no cards, no
+    // question.
+    const { records } = clusterAndCompile([
+      stage({
+        label: "uncommitted-repeats",
         sourceText: "National Gallery\n\nNational Gallery",
         value: emptyStage({
           activities: [
@@ -181,10 +222,23 @@ export default async function run() {
           }],
         }),
       }),
-    ], "repeat-visit-trip");
+    ], "uncommitted-repeat-trip");
 
-    assert.equal(records.items.length, 2);
-    assert.deepEqual(records.items.map((item) => item.date), ["2033-06-02", "2033-06-05"]);
+    const activityCards = records.items.filter(
+      (item) => item.itemType !== "note"
+    );
+    const noteItems = records.items.filter((item) => item.itemType === "note");
+
+    assert.equal(activityCards.length, 0);
+    assert.equal(noteItems.length, 1);
+    // No question about the repeated entity itself (the synthetic trip has no
+    // stays, so an unrelated trip-spine lodging question is expected).
+    assert.equal(
+      records.reviewQuestions.filter((question) =>
+        /gallery/i.test(question.prompt)
+      ).length,
+      0
+    );
   });
 
   await test("resolver discovery opens complex windows but not blank-separated clean plans", () => {

@@ -905,7 +905,26 @@ export default async function run() {
     };
 
     assert.equal(draft.activities.filter((item) => /gellert|bath house/i.test(String(item.title))).length, 2);
-    assert.equal(draft.activities.filter((item) => /pinball/i.test(String(item.title))).length, 2);
+    // 2026-07-17 commitment rule: Pinball Museum repeats on two days with no
+    // time, booking, or planned language on either copy — repeated but never
+    // committed, so it has NO activity card and one city-note home.
+    assert.equal(
+      draft.activities.filter(
+        (item) =>
+          /pinball/i.test(String(item.title)) && item.itemType !== "note"
+      ).length,
+      0
+    );
+    assert.equal(
+      draft.activities.filter(
+        (item) =>
+          item.itemType === "note" &&
+          /pinball/i.test(
+            `${String(item.title)} ${String(item.description ?? "")}`
+          )
+      ).length,
+      1
+    );
     assert.equal(draft.activities.filter((item) => /synagogue/i.test(String(item.title))).length, 1);
     assert.equal(
       draft.missingDetails.filter((item) => /Which day should/i.test(item.prompt ?? "")).length,
@@ -1692,7 +1711,11 @@ export default async function run() {
     assert.equal(question?.prompt, "Which day does Borghese Gallery happen?");
   });
 
-  await test("a fixed alternative slot becomes one single-choice question", () => {
+  await test("a fixed alternative slot stays one flexible card without a question", () => {
+    // 2026-07-17 disjunction rule (approved Central Europe ground truth):
+    // an explicit "or" is a committed slot with an unresolved choice — ONE
+    // flexible traveler card keeps the alternatives, and no automatic
+    // question is generated. The maker can edit the card directly.
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [stage("museum choice", emptyStage({
@@ -1709,16 +1732,15 @@ export default async function run() {
       activities: Array<Record<string, unknown>>;
       missingDetails: Array<Record<string, unknown>>;
     };
-    const question = draft.missingDetails.find(
-      (item) => item.targetField === "title"
+    const slotQuestion = draft.missingDetails.find(
+      (item) =>
+        item.targetField === "title" &&
+        /museum x|museum y/i.test(String(item.prompt ?? ""))
     );
 
     assert.equal(draft.activities.length, 1);
-    assert.equal(question?.answerType, "single_choice");
-    assert.deepEqual(question?.answerOptions, [
-      { label: "Museum X", value: "Museum X" },
-      { label: "Museum Y", value: "Museum Y" },
-    ]);
+    assert.match(String(draft.activities[0]?.title), /museum x or museum y/i);
+    assert.equal(slotQuestion, undefined);
   });
 
   await test("a timed generic meal stays visible and asks for only the venue", () => {

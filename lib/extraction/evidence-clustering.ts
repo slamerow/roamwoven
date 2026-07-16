@@ -3821,6 +3821,485 @@ function activityInput(payload: Record<string, unknown>) {
   };
 }
 
+// --- Commitment rule of evidence (RW-CLS-001 / RW-CAN-001, 2026-07-17) ---
+//
+// A mention is COMMITTED when it carries a time, a booking/confirmation, or
+// explicit planned language — or when it is hedge-free inside a sequenced day
+// (a day with three or more explicitly timed activities), which is how an
+// untimed stop inherits plannedness from a fully sequenced source day.
+// Repeated same-name mentions with at least one committed copy keep the best
+// copy and silently drop the rest; repeats where NO copy is committed become
+// one City Note with no cards and no Question. Single uncommitted mentions
+// keep the benefit of the doubt unless they carry a hedge marker such as
+// "maybe", "if time", or "(far away)".
+
+type MentionCommitment = "fixed" | "sequenced" | "none";
+
+function committedMentionPieceCandidate(piece: CanonicalEvidencePiece) {
+  return (
+    piece.outputEligible &&
+    piece.kind === "activity" &&
+    piece.payload._canonicalGroupRole !== "parent" &&
+    piece.payload._canonicalGroupRole !== "child" &&
+    stringValue(piece.payload, "itemType") !== "note"
+  );
+}
+
+function pieceHasHedgeMarker(piece: CanonicalEvidencePiece) {
+  return classifyDraftActivityCard(activityInput(piece.payload))
+    .hasWeakRecommendationMarker;
+}
+
+function timedActivityCountsByDate(pieces: CanonicalEvidencePiece[]) {
+  const counts = new Map<string, number>();
+  for (const piece of pieces) {
+    if (!piece.outputEligible || piece.kind !== "activity") continue;
+    const date = stringValue(piece.payload, "date");
+    if (!date || !timeFrom(piece.payload)) continue;
+    counts.set(date, (counts.get(date) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function mentionCommitment(
+  piece: CanonicalEvidencePiece,
+  timedCounts: Map<string, number>
+): MentionCommitment {
+  if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) {
+    return "fixed";
+  }
+  const classification = classifyDraftActivityCard(activityInput(piece.payload));
+  if (classification.hasStrongPlannedActivityLanguage) {
+    return "fixed";
+  }
+  const date = stringValue(piece.payload, "date");
+  if (
+    date &&
+    !classification.hasWeakRecommendationMarker &&
+    (timedCounts.get(date) ?? 0) >= 3
+  ) {
+    return "sequenced";
+  }
+  return "none";
+}
+
+function reviewSubjectTitles(missingDetails: unknown[]) {
+  const titles = new Set<string>();
+  for (const detail of missingDetails) {
+    const related = stringValue(asRecord(detail), "relatedTitle");
+    if (related) titles.add(normalizedComparable(related));
+  }
+  return titles;
+}
+
+function demoteCanonicalPieceToCityNote(
+  piece: CanonicalEvidencePiece,
+  reason: string
+) {
+  piece.kind = "note";
+  piece.payload.itemType = "note";
+  piece.payload.date = null;
+  piece.payload.startTime = null;
+  piece.payload.endTime = null;
+  addCanonicalAction(piece, {
+    absorbedTitles: [],
+    observationIds: [...piece.observationIds],
+    reason,
+    type: "recovered",
+  });
+}
+
+function canonicalCityForDate(pieces: CanonicalEvidencePiece[]) {
+  const ranges: Array<{ arrive: string; city: string; leave: string }> = [];
+  for (const piece of pieces) {
+    if (piece.kind !== "place") continue;
+    const city = stringValue(piece.payload, "city");
+    const arrive = stringValue(piece.payload, "arriveDate");
+    const leave = stringValue(piece.payload, "leaveDate");
+    if (city && arrive && leave) ranges.push({ arrive, city, leave });
+  }
+  return (date: string | null) => {
+    if (!date) return "";
+    const match = ranges.find(
+      (range) => date >= range.arrive && date <= range.leave
+    );
+    return match ? normalizedComparable(match.city) : "";
+  };
+}
+
+function canonicalCitiesForDate(pieces: CanonicalEvidencePiece[]) {
+  const ranges: Array<{ arrive: string; city: string; leave: string }> = [];
+  for (const piece of pieces) {
+    if (piece.kind !== "place") continue;
+    const city = stringValue(piece.payload, "city");
+    const arrive = stringValue(piece.payload, "arriveDate");
+    const leave = stringValue(piece.payload, "leaveDate");
+    if (city && arrive && leave) ranges.push({ arrive, city, leave });
+  }
+  return (date: string | null) => {
+    const cities = new Set<string>();
+    if (!date) return cities;
+    for (const range of ranges) {
+      if (date >= range.arrive && date <= range.leave) {
+        cities.add(normalizedComparable(range.city));
+      }
+    }
+    return cities;
+  };
+}
+
+function citySetsOverlap(left: Set<string>, right: Set<string>) {
+  if (left.size === 0 || right.size === 0) return true;
+  for (const city of left) if (right.has(city)) return true;
+  return false;
+}
+
+function observationMentionDatesAndCommitment(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  const dates = new Set<string>();
+  let anyCommitted = false;
+  for (const observationId of piece.observationIds) {
+    const observation = observationById.get(observationId);
+    if (!observation || observation.kind !== "activity") continue;
+    const date = stringValue(observation.payload, "date");
+    if (date) dates.add(date);
+    if (
+      timeFrom(observation.payload) ||
+      confirmationFrom(observation.payload) ||
+      classifyDraftActivityCard(activityInput(observation.payload))
+        .hasStrongPlannedActivityLanguage
+    ) {
+      anyCommitted = true;
+    }
+  }
+  return { anyCommitted, dates };
+}
+
+function resolveUncommittedRepeatMentions(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const cityForDate = canonicalCityForDate(pieces);
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  const groups = new Map<string, CanonicalEvidencePiece[]>();
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title) continue;
+    // Same name in a DIFFERENT leg is never a duplicate (RW-CAN-001):
+    // key repeats by the city their date falls in.
+    const key = `${title}|${cityForDate(stringValue(piece.payload, "date"))}`;
+    const group = groups.get(key);
+    if (group) group.push(piece);
+    else groups.set(key, [piece]);
+  }
+
+  const commitmentRank: Record<MentionCommitment, number> = {
+    fixed: 2,
+    none: 0,
+    sequenced: 1,
+  };
+
+  for (const [key, group] of groups) {
+    if (group.length < 2) continue;
+    const title = key.slice(0, key.lastIndexOf("|"));
+
+    const ranked = group
+      .map((piece) => ({
+        commitment: mentionCommitment(piece, timedCounts),
+        piece,
+      }))
+      .sort(
+        (left, right) =>
+          commitmentRank[right.commitment] - commitmentRank[left.commitment]
+      );
+    const winner = ranked[0];
+
+    if (winner.commitment !== "none") {
+      // Multiple committed copies are affirmative evidence the source plans
+      // the visit more than once — they all stay. Only uncommitted loose
+      // copies fold into the winner.
+      for (const entry of ranked.slice(1)) {
+        if (entry.commitment !== "none") continue;
+        mergeCanonicalPieceInto({
+          reason:
+            "repeat mention of a planned activity: the committed copy wins and the loose copy is silently removed",
+          source: entry.piece,
+          target: winner.piece,
+        });
+      }
+      continue;
+    }
+
+    // No copy is committed: repeated but never committed → one City Note.
+    if (questionSubjects.has(title)) continue;
+    const [kept, ...rest] = group;
+    for (const extra of rest) {
+      mergeCanonicalPieceInto({
+        reason:
+          "repeated but never committed: duplicate mention folded into one city note",
+        source: extra,
+        target: kept,
+      });
+    }
+    demoteCanonicalPieceToCityNote(
+      kept,
+      "repeated but never committed anywhere in the source: one city note, no cards, no question"
+    );
+  }
+
+  // Repeat mentions the upstream identity merge already collapsed into one
+  // piece: multiple activity observations on DISTINCT dates, none committed
+  // (a same-day double listing stays a normal single card). Repeated but
+  // never committed → one city note.
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title || questionSubjects.has(title)) continue;
+    if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    const mentions = observationMentionDatesAndCommitment(piece, observationById);
+    if (mentions.dates.size < 2 || mentions.anyCommitted) continue;
+
+    demoteCanonicalPieceToCityNote(
+      piece,
+      "repeated across days but never committed anywhere in the source: one city note, no cards, no question"
+    );
+  }
+
+  // Repeats split across kinds at intake: a hedged copy becomes a note piece
+  // while the bare copy stays an activity. Same name in the same leg has one
+  // home (RW-ASM-001): an uncommitted activity yields to its note copy, a
+  // committed activity removes the note copy. Leg matching uses city-set
+  // overlap because a travel day belongs to two legs at once.
+  const citiesForDate = canonicalCitiesForDate(pieces);
+  const noteCopies: Array<{
+    cities: Set<string>;
+    piece: CanonicalEvidencePiece;
+    title: string;
+  }> = [];
+  for (const piece of pieces) {
+    // Absorbed note copies (folded into a city note collection) still count
+    // as the entity's note home, so eligibility is intentionally not checked.
+    if (piece.kind !== "note") continue;
+    if (
+      piece.payload._canonicalGroupRole === "parent" ||
+      piece.payload._canonicalGroupRole === "child"
+    ) {
+      continue;
+    }
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title) continue;
+    noteCopies.push({
+      cities: citiesForDate(stringValue(piece.payload, "date")),
+      piece,
+      title,
+    });
+  }
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title || questionSubjects.has(title)) continue;
+    const cities = citiesForDate(stringValue(piece.payload, "date"));
+    const matches = noteCopies.filter(
+      (note) => note.title === title && citySetsOverlap(cities, note.cities)
+    );
+    if (matches.length === 0) continue;
+
+    if (mentionCommitment(piece, timedCounts) === "none") {
+      suppressCanonicalPiece(
+        piece,
+        "repeated but never committed: the city-note copy is this entity's single home"
+      );
+      continue;
+    }
+    for (const match of matches) {
+      if (!match.piece.outputEligible) continue;
+      suppressCanonicalPiece(
+        match.piece,
+        "planned activity wins over its loose city-note copy in the same leg"
+      );
+    }
+  }
+}
+
+function demoteHedgedSingleUncommittedMentions(
+  pieces: CanonicalEvidencePiece[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title || questionSubjects.has(title)) continue;
+    if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    if (!pieceHasHedgeMarker(piece)) continue;
+
+    demoteCanonicalPieceToCityNote(
+      piece,
+      "source doubt marker (maybe / if time / far away): demoted to city note without a question"
+    );
+  }
+}
+
+// --- Deterministic area grouping (RW-GRP-001, 2026-07-17) ---
+//
+// Three or more untimed, unbooked, hedge-free sights on the same day that
+// share a parser-emitted walkable `area` hint become one system-created
+// parent card with ordered sub-stops and one statement-style Call. The area
+// hint comes from the extraction model at parse time (source knowledge, not a
+// separate public lookup); assembly stays deterministic.
+
+function createDeterministicAreaGroupingDecisions({
+  missingDetails,
+  observations,
+  pieces,
+}: {
+  missingDetails: unknown[];
+  observations: EvidenceObservation[];
+  pieces: CanonicalEvidencePiece[];
+}): CanonicalGroupingDecision[] {
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  const clusters = new Map<
+    string,
+    Array<{ area: string; piece: CanonicalEvidencePiece }>
+  >();
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const area = stringValue(piece.payload, "area");
+    const date = stringValue(piece.payload, "date");
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!area || !date || !title) continue;
+    if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) continue;
+    if (pieceHasHedgeMarker(piece)) continue;
+    if (questionSubjects.has(title)) continue;
+
+    const key = `${date}|${normalizedComparable(area)}`;
+    const cluster = clusters.get(key);
+    if (cluster) cluster.push({ area, piece });
+    else clusters.set(key, [{ area, piece }]);
+  }
+
+  const decisions: CanonicalGroupingDecision[] = [];
+
+  for (const [key, cluster] of clusters) {
+    if (cluster.length < 3) continue;
+
+    const candidateIds: string[] = [];
+    for (const entry of cluster) {
+      const observationId = entry.piece.observationIds[0];
+      const observation = observationId
+        ? observationById.get(observationId)
+        : null;
+      if (!observation) continue;
+      const candidateId =
+        stringValue(observation.payload, "_resolverCandidateId") ??
+        observation.id;
+      observation.payload._resolverCandidateId = candidateId;
+      candidateIds.push(candidateId);
+    }
+    if (candidateIds.length < 3) continue;
+
+    const area = cluster[0].area;
+    decisions.push({
+      callRequired: true,
+      candidateIds,
+      claim: `deterministic area grouping: ${cluster.length} untimed sights share the walkable area "${area}" on the same day and read as one route`,
+      containerCandidateId: null,
+      decisionId: `deterministic-area-${stableHash({ area, key })}`,
+      parentCandidateId: candidateIds[0],
+      parentTitle: `${area} walk`,
+      source: "canonical_resolver",
+    });
+  }
+
+  return decisions;
+}
+
+// --- Researched-but-uncommitted list question (RW-REV-001, 2026-07-17) ---
+//
+// Two or more same-day untimed, unbooked activities whose source text carries
+// research metadata (prices, opening hours) but no commitment do not reveal
+// intent: researched effort alone is not a strong enough planned signal. They
+// generate ONE question — "planned for this day, or just ideas?" — instead of
+// silently becoming activities or city notes.
+
+const PRICE_MARKER_PATTERN =
+  /\b\d+(?:[.,]\d+)?\s*(?:eur|euros?|czk|kc|huf|ft|usd)\b|[€$]\s?\d/i;
+
+function createResearchedListQuestions(
+  pieces: CanonicalEvidencePiece[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const byDate = new Map<string, CanonicalEvidencePiece[]>();
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const date = stringValue(piece.payload, "date");
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!date || !title || questionSubjects.has(title)) continue;
+    if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    if (pieceHasHedgeMarker(piece)) continue;
+    const text = activityText(piece.payload);
+    const classification = classifyDraftActivityCard(activityInput(piece.payload));
+    if (!PRICE_MARKER_PATTERN.test(text) && !classification.hasAvailabilityMarker) {
+      continue;
+    }
+    const group = byDate.get(date);
+    if (group) group.push(piece);
+    else byDate.set(date, [piece]);
+  }
+
+  const questions: Array<Record<string, unknown>> = [];
+
+  for (const [date, group] of byDate) {
+    if (group.length < 2) continue;
+    const titles = group
+      .map((piece) => stringValue(piece.payload, "title"))
+      .filter((value): value is string => Boolean(value));
+    if (titles.length < 2) continue;
+
+    questions.push({
+      _canonicalReviewDisposition: "question",
+      _canonicalQuestionKind: "researched_list",
+      answerOptions: [
+        { label: "Planned for this day", value: "planned" },
+        { label: "Just ideas for the city", value: "ideas" },
+      ],
+      answerType: "single_choice",
+      confidence: "medium",
+      evidence: `Listed with prices/hours but no booking or times: ${titles.join(", ")}.`,
+      guessedValue: null,
+      prompt: `This day also lists ${titles.join(", ")} — planned for the day, or just ideas?`,
+      reason:
+        "Researched prices and hours without a booking, time, or sequence do not reveal traveler intent.",
+      relatedCanonicalPieceId: group[0].id,
+      relatedTitle: stringValue(group[0].payload, "title"),
+      resolverDecisionId: `deterministic-researched-list-${stableHash({ date, titles })}`,
+      subjectType: "item",
+      targetField: "itemType",
+    });
+  }
+
+  return questions;
+}
+
 function reclassifySourceContainers(observations: EvidenceObservation[]) {
   const activities = observations.filter(
     (observation) => observation.kind === "activity"
@@ -4955,25 +5434,11 @@ function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
 
     const title = stringValue(piece.payload, "title") ?? "this item";
     const description = stringValue(piece.payload, "description");
-    const options = alternativeTitles(title);
 
-    if (piece.kind === "activity" && options.length > 0) {
-      return [{
-        _canonicalReviewDisposition: "question",
-        _canonicalQuestionKind: "alternative_slot",
-        answerOptions: options.map((option) => ({ label: option, value: option })),
-        answerType: "single_choice",
-        confidence: "medium",
-        evidence: [title, description].filter(Boolean).join(" — "),
-        guessedValue: null,
-        prompt: `Which is planned: ${options.join(" or ")}?`,
-        reason: "The source reserves one itinerary slot for mutually exclusive options.",
-        relatedCanonicalPieceId: piece.id,
-        relatedTitle: title,
-        subjectType: "item",
-        targetField: "title",
-      }];
-    }
+    // Disjunction rule (2026-07-17 ground truth, supersedes the automatic
+    // alternative-slot question): an explicit "or" slot stays ONE flexible
+    // traveler card with the unresolved choice in its title/description.
+    // No question is generated; the maker can edit the card directly.
 
     const genericTimedMeal = piece.kind === "activity" &&
       /^(?:breakfast|brunch|coffee|dinner|lunch|meal)$/i.test(title) &&
@@ -5198,6 +5663,8 @@ export function canonicalizeCanonicalReviewDetails(
     const disposition =
       internalTrace
         ? "dismissed"
+        : stringValue(detail, "_canonicalReviewDisposition") === "question"
+        ? "question"
         : stringValue(detail, "_canonicalReviewDisposition") === "call" ||
       stringValue(detail, "resolverDecisionId")
         ? "call"
@@ -5479,8 +5946,22 @@ export function clusterExtractedEvidence({
     tripYear,
   });
   assignProvisionalActivityDates({ observations, pieces });
+  resolveUncommittedRepeatMentions(pieces, observations, missingDetails);
+  demoteHedgedSingleUncommittedMentions(pieces, missingDetails);
+  const researchedListQuestions = createResearchedListQuestions(
+    pieces,
+    missingDetails
+  );
+  const combinedGroupingDecisions = [
+    ...groupingDecisions,
+    ...createDeterministicAreaGroupingDecisions({
+      missingDetails,
+      observations,
+      pieces,
+    }),
+  ];
   executeCanonicalGroupingDecisions({
-    decisions: groupingDecisions,
+    decisions: combinedGroupingDecisions,
     observations,
     pieces,
   });
@@ -5491,7 +5972,7 @@ export function clusterExtractedEvidence({
   finalizeCanonicalOutputFields(pieces);
   reconcileCanonicalConflicts(pieces, observations);
   const canonicalGroupingCalls = createCanonicalGroupingCalls(
-    groupingDecisions,
+    combinedGroupingDecisions,
     pieces
   );
   const canonicalSourceUpdateCalls = createCanonicalSourceUpdateCalls(pieces);
@@ -5524,6 +6005,7 @@ export function clusterExtractedEvidence({
         ...canonicalSourceUpdateCalls,
         ...canonicalConflictQuestions,
         ...canonicalOwnedQuestions,
+        ...researchedListQuestions,
         ...canonicalSpineQuestions,
         ...missingDetails,
       ],

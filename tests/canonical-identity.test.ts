@@ -364,16 +364,22 @@ export default async function run() {
                 itemType: "activity",
                 title: "Museum A",
               },
+              // 2026-07-17 commitment rule: bare repeats on distinct dates
+              // are no longer separate occurrences by themselves. These two
+              // Museum B visits carry explicit times, which is affirmative
+              // planned-twice evidence, so they stay two canonical entities.
               {
                 category: "art_culture",
                 date: "2032-06-17",
                 itemType: "activity",
+                startTime: "10:00",
                 title: "Museum B",
               },
               {
                 category: "art_culture",
                 date: "2032-06-18",
                 itemType: "activity",
+                startTime: "14:00",
                 title: "Museum B",
               },
             ],

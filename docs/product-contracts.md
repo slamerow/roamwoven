@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 9
+Ledger version: 10
 
-Ledger date: 2026-07-16
+Ledger date: 2026-07-17
 
 Approval state: Approved and implementation-tracked
 
@@ -135,7 +135,17 @@ path is bypassed.
 ## RW-CAN-001 — Canonical finalization is the semantic boundary
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: the commitment rule of evidence (approved Central Europe
+  ground truth v2) narrows repeat-occurrence evidence. Distinct dates alone
+  are no longer affirmative evidence of separate planned occurrences. A
+  mention is committed when it carries an explicit time, a
+  booking/confirmation, explicit planned language, or is hedge-free inside a
+  sequenced day (three or more explicitly timed activities). Repeats with at
+  least one committed copy keep the committed copies (multiple committed
+  copies are a genuine planned double visit) and silently absorb loose
+  copies; repeats where NO copy is committed become ONE City Note with no
+  cards and no Question.
 - Enforcement: `PARTIAL`
 - Contract: Evidence observations become canonical candidate entities. After
   canonical validation and resolution, finalized canonical entities are
@@ -202,14 +212,29 @@ path is bypassed.
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: the 2026-07-15 source-authored-only scope is superseded by the
+  approved Central Europe ground truth v2
+  (`docs/assembly-ground-truth-central-europe.md`), which adds
+  system-discovered geo grouping.
 - Enforcement: `PARTIAL`
 - Contract: A continuous source-authored walking route becomes one parent card
   with ordered sub-stops when no stop has an independent booking or fixed time.
-  Same-site clusters become one parent visit with sub-stops. Independently
+  Same-site clusters become one parent visit with sub-stops. In addition,
+  Roamwoven may discover a route grouping the source did not author: three or
+  more adjacent-in-source untimed selected sights that pass a geographic
+  proximity check become one parent card with ordered sub-stops and one
+  statement-style Call explaining the grouping. Source adjacency alone is never
+  sufficient — the proximity check must pass, and a mixed-geography list stays
+  individual cards. Independently
   timed, ticketed, reserved, permitted, or separately booked stops remain
-  standalone. Inconclusive relationships remain separate. Grouping cannot
-  swallow unresolved source decisions. A Call is created when Roamwoven's
+  standalone, unless the source places them inside one complex or campus visit
+  (a timed sub-stop inside a same-site parent, such as a fixed guard-changing
+  time within a castle visit, stays a child). Inconclusive relationships remain
+  separate. Grouping cannot
+  swallow unresolved source decisions. Day density (~6 visible cards) may
+  trigger a search for grouping candidates under these same rules, but density
+  never forces a group that the rules would not independently create. A Call is created when Roamwoven's
   grouping suppresses or parents records that appeared independently meaningful;
   no Call is needed when the source already presents one explicit route with
   subordinate stops. A grouped route counts as one activity card with its stop
@@ -231,7 +256,15 @@ path is bypassed.
   covers that one continuous visit. Informational pass details without a planned
   pickup or activation task belong to their owning detail or evidence lineage,
   not a traveler card.
-- Evidence: The latest live resolver run predates this checkpoint and inverted
+- Evidence: System-discovered geo grouping is now implemented: the parser
+  emits an optional per-activity `area` hint (walkable district), and
+  `createDeterministicAreaGroupingDecisions` groups three or more same-day
+  untimed unbooked hedge-free sights sharing an area into one parent with
+  ordered children and one statement-style Call, reusing the existing
+  grouping executor. Covered by `tests/assembly-ground-truth.test.ts`
+  (Malá Strana & Hradčany walk). A fresh live extraction with the new `area`
+  field is still required before discovery quality is fully enforced. The
+  older gap: the pre-checkpoint live resolver run inverted
   negative Albertina evidence while failing to discover the Schoenbrunn
   grouping. The current first-run path now requires conclusive supplied source
   structure, preserves an explicit parent plus ordered child identities, keeps
@@ -272,14 +305,54 @@ path is bypassed.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`
 
+## RW-TRV-001 — Travel cards are per-segment and cover every night
+
+- Status: `LOCKED`
+- Decision date: `2026-07-17`
+- Enforcement: `PARTIAL`
+- Contract: A travel card is a subset of activity cards covering one individual
+  flight, train, ferry, or bus segment that makes an inter-city transfer and
+  changes where the traveler sleeps. One card per segment; connections are
+  never merged into a single card (a two-flight connection is two travel
+  cards). The travel-card treatment exists so protected booking details blur
+  cleanly. A same-day round trip that returns to the same stay — such as a
+  rental car picked up and returned at one location — is a timed Activity, not
+  a travel card. Airport-prep lines ("leave for airport", "wake for flight")
+  attach to their travel card as prep notes, never as separate activities.
+  Every trip night is covered by exactly one of: a stay or an overnight travel
+  card with a next-day arrival. Stays span check-in to check-out and are not
+  required to span their whole leg; Roamwoven never fabricates a stay for a
+  night spent in transit.
+- Evidence: Specified in the approved Central Europe ground truth v2
+  (`docs/assembly-ground-truth-central-europe.md`): 8 travel cards including
+  split Delta connections on Jan 12 and Jan 25, the Jan 17 rental car as a
+  timed Activity, and the un-lodged Jan 12 night covered by the overnight
+  Delta 444 card. The ground-truth fixture now asserts all of these against
+  the real clustering + compilation path and passes. Enforcement stays
+  `PARTIAL` (upgraded from `KNOWN_GAP` on 2026-07-17) until a fresh live
+  extraction of the Central Europe PDF confirms the per-segment split
+  end to end.
+- Tests: `tests/assembly-ground-truth.test.ts`,
+  `tests/source-transport-anchors.test.ts`
+
 ## RW-CLS-001 — Source intent determines Activity versus City Note
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: doubt-marker, meal-slot, and density-trigger clarifications
+  added per the approved Central Europe ground truth v2 on 2026-07-17.
 - Enforcement: `PARTIAL`
 - Contract: Classification follows source-supported traveler intent and source
   structure, not venue type, public venue knowledge, an arbitrary activity cap,
-  or a nearby date alone. A booking, reservation, ticket, itinerary slot, time or
+  or a nearby date alone. A source doubt marker on a listed item — a
+  parenthetical hedge such as `(far away)`, `maybe`, or a trailing `?` — is
+  source intent evidence and demotes that item to City Notes silently, without
+  a Question. A single mention anchored to a meal slot (such as `breakfast`)
+  with no options language is an untimed Activity with implicit time-of-day
+  ordering. Day density (~6 visible cards) is a soft trigger that prompts
+  re-evaluation of grouping and doubt-marker demotion candidates; density by
+  itself never reclassifies an entity, forces a collapse, or invents a group,
+  and a dense day with no qualifying candidates ships at full size. A booking, reservation, ticket, itinerary slot, time or
   meal slot, or explicit planned stop supports Activity. A source-authored city
   reference, recommendation, category list, optional list, or background note
   belongs in City Notes using the existing City Notes taxonomy and presentation;
@@ -309,7 +382,13 @@ path is bypassed.
 ## RW-EVD-001 — Every meaningful source block receives an explicit disposition
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: on 2026-07-17 the CEO relaxed the lookup posture — bounded,
+  budgeted public lookups are acceptable when they materially improve the
+  generated app ("the default is a magical experience"). V1 still keeps the
+  assembly pass deterministic by sourcing geographic hints from the parser
+  call itself (per-activity `area` field); a live lookup lane for unresolved
+  terms is permitted as a follow-up and remains subject to the caps below.
 - Enforcement: `PARTIAL`
 - Contract: Source text is not forced into Activity or City Notes. Every
   meaningful evidence block is traceably routed to one of: canonical entity,
@@ -322,7 +401,12 @@ path is bypassed.
   silently omitted. Public lookup and description enrichment are outside the
   first-run assembly pass. An uncertain isolated public term may receive an
   internal `needs_identity_enrichment` disposition, but remains evidence-only
-  lineage rather than a fabricated traveler card. Any future enrichment is a
+  lineage rather than a fabricated traveler card. When the source itself
+  commits an uncertain term — sequencing it, timing it, or planning around it
+  (2026-07-17 `koscom` precedent in the approved Central Europe ground truth) —
+  the term is an Activity on source evidence alone; enrichment may later
+  identify it, but placement, date, and intent always come from the source,
+  never from lookup results. Any future enrichment is a
   separate post-assembly step limited to one or two concise, sourced factual
   lines and may never change intent, type, date, grouping, booking state, or
   private facts. When deterministic source-block coverage proves that meaningful
@@ -400,7 +484,16 @@ path is bypassed.
 ## RW-QUE-001 — Questions are typed, targeted, and answerable end to end
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: per the approved Central Europe ground truth v2, a fixed slot
+  with alternatives (`Museum X or Museum Y`) no longer generates an automatic
+  single-choice Question. It stays one flexible traveler card with the
+  unresolved choice in its title/description; the maker can edit the card
+  directly. The rest of this contract is unchanged, including the
+  standalone generic timed-meal venue Question. A new deterministic Question
+  IS generated for a researched-but-uncommitted list: two or more same-day
+  untimed unbooked entries carrying prices/hours produce one "planned for
+  this day, or just ideas?" single-choice Question.
 - Enforcement: `PARTIAL`
 - Contract: Every emitted Question declares one canonical subject, one target
   field or explicit atomic mutation, source-backed answer options, and an
