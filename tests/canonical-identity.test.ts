@@ -4,7 +4,7 @@ import {
 } from "@/lib/extraction/canonical-identity";
 import {
   assembleCanonicalTripDraft,
-  CanonicalAssemblyRecoveryError,
+  prepareCanonicalEvidencePieces,
 } from "@/lib/extraction/canonical-trip-assembly";
 import { finalizeCanonicalTripDraft } from "@/lib/extraction/canonical-trip-finalization";
 import {
@@ -135,7 +135,7 @@ export default async function run() {
     assert.equal(question.subjectCanonicalId, museum.canonicalId);
   });
 
-  await test("assembly quarantines conflicting artifact identity after bounded repair", () => {
+  await test("assembly preserves conflicting artifact identity with deterministic repair", () => {
     const evidence = identityFixture();
     const piece = evidence.pieces.find(
       (candidate) => candidate.outputEligible && candidate.kind === "activity"
@@ -149,20 +149,28 @@ export default async function run() {
       },
     };
 
-    assert.throws(
-      () => assembleCanonicalTripDraft({
-        draft: evidence.draft,
-        evidencePieces: [...evidence.pieces, conflictingPiece],
-        fallbackTripName: "Identity test",
-        tripId: "identity-conflict-recovery",
-      }),
-      (error: unknown) =>
-        error instanceof CanonicalAssemblyRecoveryError &&
-        error.details.stage === "repair"
+    const assembly = assembleCanonicalTripDraft({
+      draft: evidence.draft,
+      evidencePieces: [...evidence.pieces, conflictingPiece],
+      fallbackTripName: "Identity test",
+      tripId: "identity-conflict-recovery",
+    });
+
+    assert.equal(assembly.recovery.status, "repaired");
+    assert.equal(assembly.records.items.length, 2);
+    assert.equal(
+      new Set(assembly.records.items.map((item) => item.canonicalId)).size,
+      assembly.records.items.length
+    );
+    assert.equal(
+      assembly.recovery.actions.some((action) =>
+        action.startsWith("rekeyed_conflicting_piece:")
+      ),
+      true
     );
   });
 
-  await test("assembly preserves lineage by quarantining non-identical duplicate artifacts", () => {
+  await test("assembly preserves lineage by rekeying non-identical duplicate artifacts", () => {
     const evidence = identityFixture();
     const piece = evidence.pieces.find(
       (candidate) => candidate.outputEligible && candidate.kind === "activity"
@@ -174,17 +182,82 @@ export default async function run() {
       "observation-not-present-on-original",
     ];
 
-    assert.throws(
-      () =>
-        assembleCanonicalTripDraft({
-          draft: evidence.draft,
-          evidencePieces: [...evidence.pieces, conflictingLineagePiece],
-          fallbackTripName: "Identity test",
-          tripId: "identity-lineage-conflict",
-        }),
-      (error: unknown) =>
-        error instanceof CanonicalAssemblyRecoveryError &&
-        error.details.stage === "repair"
+    const assembly = assembleCanonicalTripDraft({
+      draft: evidence.draft,
+      evidencePieces: [...evidence.pieces, conflictingLineagePiece],
+      fallbackTripName: "Identity test",
+      tripId: "identity-lineage-conflict",
+    });
+
+    assert.equal(assembly.recovery.status, "repaired");
+    assert.equal(assembly.records.items.length, 2);
+    assert.equal(
+      assembly.recovery.actions.some((action) =>
+        action.startsWith("rekeyed_conflicting_piece:")
+      ),
+      true
+    );
+  });
+
+  await test("conflicting identity repair is stable under artifact reordering", () => {
+    const evidence = identityFixture();
+    const piece = evidence.pieces.find(
+      (candidate) => candidate.outputEligible && candidate.kind === "activity"
+    );
+    assert.ok(piece);
+    const conflictingPiece: typeof piece = {
+      ...clone(piece),
+      payload: {
+        ...clone(piece.payload),
+        title: "Conflicting activity",
+      },
+    };
+    const summarize = (pieces: typeof evidence.pieces) =>
+      prepareCanonicalEvidencePieces(pieces).pieces
+        .filter((candidate) =>
+          candidate.observationIds.some((id) => piece.observationIds.includes(id))
+        )
+        .map((candidate) => ({
+          id: candidate.id,
+          outputEligible: candidate.outputEligible,
+          title: candidate.payload.title,
+        }))
+        .sort((left, right) => String(left.title).localeCompare(String(right.title)));
+
+    assert.deepEqual(
+      summarize([...evidence.pieces, conflictingPiece]),
+      summarize([conflictingPiece, ...evidence.pieces])
+    );
+  });
+
+  await test("identity preparation leaves a clean canonical graph unchanged", () => {
+    const evidence = identityFixture();
+    const prepared = prepareCanonicalEvidencePieces(evidence.pieces);
+
+    assert.deepEqual(prepared.pieces, evidence.pieces);
+    assert.deepEqual(prepared.recoveryActions, []);
+  });
+
+  await test("identical artifacts with missing identity collapse deterministically", () => {
+    const evidence = identityFixture();
+    const piece = evidence.pieces.find(
+      (candidate) => candidate.outputEligible && candidate.kind === "activity"
+    );
+    assert.ok(piece);
+    const first = clone(piece);
+    const second = clone(piece);
+    first.id = "";
+    second.id = "";
+
+    const prepared = prepareCanonicalEvidencePieces([first, second]);
+
+    assert.equal(prepared.pieces.length, 1);
+    assert.match(prepared.pieces[0].id, /^piece_[a-f0-9]{24}$/);
+    assert.equal(
+      prepared.recoveryActions.some((action) =>
+        action.startsWith("deduplicated_identical_piece:")
+      ),
+      true
     );
   });
 

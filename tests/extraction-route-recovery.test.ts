@@ -86,6 +86,60 @@ function createParserResult(): TripExtractionResult {
   };
 }
 
+function createSingleCityNoteParserResult(): TripExtractionResult {
+  const tripOverview = {
+    dateRange: "April 3-6, 2031",
+    destinationSummary: "Kyoto",
+    title: "Single city note recovery test",
+  };
+  const evidence = clusterExtractedEvidence({
+    sourceTransportAnchors: [],
+    stages: [{
+      label: "single city note source",
+      source: "model_chunk",
+      sourceFilename: "single-city-note.txt",
+      sourceUploadId: "upload-route-recovery",
+      stage: {
+        activities: [{
+          category: "local_tips",
+          city: "Kyoto",
+          description: "Keep some cash for small temples.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Kyoto practical tip",
+        }],
+        missingDetails: [],
+        places: [{
+          arriveDate: "2031-04-03",
+          city: "Kyoto",
+          country: "Japan",
+          leaveDate: "2031-04-06",
+        }],
+        sensitiveDetails: [],
+        stays: [],
+        transport: [],
+        tripOverview,
+      },
+    }],
+    tripOverview,
+  });
+
+  return {
+    draft: evidence.draft,
+    evidenceArtifacts: {
+      observations: evidence.observations,
+      pieces: evidence.pieces,
+    },
+    model: "route-recovery-model",
+    usage: {
+      evidence: evidence.summary,
+      sourceAnchors: { transport: [] },
+      staged: true,
+    },
+  };
+}
+
 function patchModule(
   modulePath: string,
   replacements: Record<string, unknown>
@@ -486,7 +540,33 @@ export default async function run() {
       ]);
     });
 
-    await test("extraction route quarantines an artifact observation mismatch", async () => {
+    await test("a single city note completes the actual extraction route", async () => {
+      parserResult = createSingleCityNoteParserResult();
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+      persistedPieceIds.length = 0;
+      persistedDispositionCounts.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-single-city-note/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-single-city-note" }) }
+      );
+      const location = response.headers.get("location") ?? "";
+
+      assert.match(location, /extraction=completed/);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      assert.equal(persistedPieceIds.length, 1);
+      assert.equal(
+        new Set(persistedPieceIds[0]).size,
+        persistedPieceIds[0].length
+      );
+    });
+
+    await test("extraction route reconstructs missing observation artifacts backstage", async () => {
       const conflicted = createParserResult();
       conflicted.evidenceArtifacts.observations = [];
       parserResult = conflicted;
@@ -506,22 +586,22 @@ export default async function run() {
       const evidenceEvents = events.filter(
         (event) => event.stage === "evidence_cluster"
       );
-      const failureDetails = failedCalls[0]
-        ?.failureDetails as Record<string, unknown>;
-
-      assert.match(location, /error=assembly-recovery-required/);
-      assert.equal(completedCalls.length, 0);
-      assert.equal(failedCalls.length, 1);
-      assert.equal(persistedPieceIds.length, 0);
+      assert.match(location, /extraction=completed/);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      assert.equal(persistedPieceIds.length, 1);
+      assert.deepEqual(persistedDispositionCounts, [
+        conflicted.evidenceArtifacts.pieces.flatMap(
+          (piece) => piece.observationIds
+        ).filter((id, index, ids) => ids.indexOf(id) === index).length,
+      ]);
       assert.deepEqual(
         evidenceEvents.map((event) => event.status),
-        ["started", "failed"]
+        ["started", "completed"]
       );
-      assert.equal(failureDetails.stage, "evidence_cluster");
-      assert.equal(failureDetails.errorName, "CanonicalAssemblyRecoveryError");
     });
 
-    await test("extraction route marks only unrecoverable conflicts as assembly recovery", async () => {
+    await test("extraction route preserves conflicting identities in a reviewable draft", async () => {
       const conflicted = createParserResult();
       const piece = conflicted.evidenceArtifacts.pieces.find(
         (candidate) => candidate.outputEligible && candidate.kind === "activity"
@@ -552,22 +632,38 @@ export default async function run() {
       const canonicalEvents = events.filter(
         (event) => event.stage === "canonical_validation"
       );
-      const failureDetails = failedCalls[0]
-        ?.failureDetails as Record<string, unknown>;
-      const assemblyRecovery = failureDetails
-        .assemblyRecovery as Record<string, unknown>;
+      const completed = completedCalls[0];
+      const usage = completed?.usage as Record<string, unknown>;
+      const openai = usage.openai as Record<string, unknown>;
+      const recovery = openai.identityRecovery as Record<string, unknown>;
 
-      assert.match(location, /error=assembly-recovery-required/);
-      assert.equal(completedCalls.length, 0);
-      assert.equal(failedCalls.length, 1);
+      assert.match(location, /extraction=completed/);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
       assert.deepEqual(
         canonicalEvents.map((event) => event.status),
-        ["started", "failed"]
+        ["started", "completed"]
       );
-      assert.equal(persistedPieceIds.length, 0);
-      assert.equal(failureDetails.stage, "canonical_validation");
-      assert.equal(failureDetails.errorName, "CanonicalAssemblyRecoveryError");
-      assert.equal(assemblyRecovery.stage, "repair");
+      assert.equal(persistedPieceIds.length, 1);
+      assert.equal(
+        new Set(persistedPieceIds[0]).size,
+        persistedPieceIds[0].length
+      );
+      assert.equal(recovery.status, "repaired");
+      assert.equal(
+        persistedPieceEligibility[0].filter(Boolean).length,
+        conflicted.evidenceArtifacts.pieces.filter(
+          (candidate, index, pieces) =>
+            candidate.outputEligible &&
+            pieces.findIndex((piece) => piece.id === candidate.id) === index
+        ).length
+      );
+      assert.equal(
+        (recovery.actions as string[]).some((action) =>
+          action.startsWith("rekeyed_conflicting_piece:")
+        ),
+        true
+      );
     });
   } finally {
     restore.reverse().forEach((restoreModule) => restoreModule());

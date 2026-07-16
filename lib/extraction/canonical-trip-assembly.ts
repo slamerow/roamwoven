@@ -61,13 +61,6 @@ export class CanonicalAssemblyRecoveryError extends Error {
   }
 }
 
-class UnsafeCanonicalRepairError extends Error {
-  constructor(public violations: string[]) {
-    super(`Canonical repair is unsafe: ${violations.join("; ")}`);
-    this.name = "UnsafeCanonicalRepairError";
-  }
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -291,40 +284,161 @@ function isCanonicalAssemblyError(error: unknown) {
   );
 }
 
-function dedupeCanonicalPieces(
+function recoveredPieceId({
+  originalId,
+  piece,
+  salt = 0,
+}: {
+  originalId: string;
+  piece: CanonicalEvidencePiece;
+  salt?: number;
+}) {
+  return `piece_${createHash("sha256")
+    .update(JSON.stringify({
+      collisionIdentityVersion: 1,
+      originalId,
+      pieceSignature: pieceSignature(piece),
+      salt,
+    }))
+    .digest("hex")
+    .slice(0, 24)}`;
+}
+
+function collisionKeeperRank(piece: CanonicalEvidencePiece) {
+  return (
+    (piece.payload._canonicalGroupRole === "parent" ? 8 : 0) +
+    (piece.outputEligible ? 4 : 0) +
+    (piece.payload._canonicalNoteEntry === true ? 0 : 2) +
+    (piece.role === "atomic_candidate" ? 1 : 0)
+  );
+}
+
+function sameObservationLineage(
+  left: CanonicalEvidencePiece,
+  right: CanonicalEvidencePiece
+) {
+  return sameOrderedValues(
+    [...left.observationIds].sort(),
+    [...right.observationIds].sort()
+  );
+}
+
+function repairCanonicalPieceIdentities(
   pieces: CanonicalEvidencePiece[],
   actions: string[]
 ) {
-  const unique = new Map<string, CanonicalEvidencePiece>();
-  const violations: string[] = [];
+  const repaired = structuredClone(pieces);
+  const usedIds = new Set(
+    repaired.map((piece) => piece.id).filter((id): id is string => Boolean(id))
+  );
+  const missingIdBySignature = new Map<string, string>();
 
-  for (const piece of pieces) {
+  for (const piece of repaired) {
     if (!piece.id) {
-      violations.push("canonical evidence contains a piece without identity");
-      continue;
+      const signature = pieceSignature(piece);
+      const sharedId = missingIdBySignature.get(signature);
+      if (sharedId) {
+        piece.id = sharedId;
+        actions.push(`recovered_missing_piece_identity:${sharedId}`);
+        continue;
+      }
+
+      let salt = 0;
+      let nextId = recoveredPieceId({
+        originalId: "missing",
+        piece,
+        salt,
+      });
+      while (usedIds.has(nextId)) {
+        salt += 1;
+        nextId = recoveredPieceId({ originalId: "missing", piece, salt });
+      }
+      piece.id = nextId;
+      usedIds.add(nextId);
+      missingIdBySignature.set(signature, nextId);
+      actions.push(`recovered_missing_piece_identity:${nextId}`);
+    }
+  }
+
+  const groups = new Map<string, CanonicalEvidencePiece[]>();
+  for (const piece of repaired) {
+    groups.set(piece.id, [...(groups.get(piece.id) ?? []), piece]);
+  }
+
+  const retained = new Set<CanonicalEvidencePiece>();
+
+  for (const [originalId, group] of [...groups.entries()].sort(([left], [right]) =>
+    left.localeCompare(right)
+  )) {
+    const bySignature = new Map<string, CanonicalEvidencePiece[]>();
+    for (const piece of group) {
+      const signature = pieceSignature(piece);
+      bySignature.set(signature, [...(bySignature.get(signature) ?? []), piece]);
     }
 
-    const existing = unique.get(piece.id);
-    if (!existing) {
-      unique.set(piece.id, piece);
-      continue;
-    }
-
-    if (pieceSignature(existing) !== pieceSignature(piece)) {
-      violations.push(
-        `canonical evidence identity ${piece.id} represents conflicting pieces`
+    const uniquePieces = [...bySignature.entries()]
+      .map(([signature, matching]) => {
+        matching.slice(1).forEach(() =>
+          actions.push(`deduplicated_identical_piece:${originalId}`)
+        );
+        return { piece: matching[0], signature };
+      })
+      .sort((left, right) =>
+        collisionKeeperRank(right.piece) - collisionKeeperRank(left.piece) ||
+        left.signature.localeCompare(right.signature)
       );
-      continue;
+
+    const keeper = uniquePieces[0];
+    if (!keeper) continue;
+    retained.add(keeper.piece);
+
+    for (const { piece, signature } of uniquePieces.slice(1)) {
+      const sameSemanticPayload =
+        semanticSignature(canonicalPiecePublicPayload(keeper.piece.payload)) ===
+        semanticSignature(canonicalPiecePublicPayload(piece.payload));
+      if (
+        keeper.piece.outputEligible &&
+        piece.outputEligible &&
+        (sameObservationLineage(keeper.piece, piece) || sameSemanticPayload)
+      ) {
+        piece.outputEligible = false;
+        piece.actions.push({
+          absorbedTitles: [],
+          observationIds: [...piece.observationIds],
+          reason:
+            "Conflicting duplicate identity was preserved as evidence-only during deterministic assembly recovery.",
+          type: "rejected",
+        });
+        actions.push(
+          `preserved_conflicting_piece_as_evidence_only:${originalId}`
+        );
+      }
+
+      let salt = 0;
+      let nextId = recoveredPieceId({ originalId, piece, salt });
+      while (usedIds.has(nextId)) {
+        salt += 1;
+        nextId = recoveredPieceId({ originalId, piece, salt });
+      }
+
+      piece.id = nextId;
+      usedIds.add(nextId);
+      retained.add(piece);
+      actions.push(
+        [
+          "rekeyed_conflicting_piece",
+          originalId,
+          piece.kind,
+          piece.role,
+          piece.outputEligible ? "output" : "lineage",
+          signature.slice(0, 12),
+          nextId,
+        ].join(":")
+      );
     }
-
-    actions.push(`deduplicated_identical_piece:${piece.id}`);
   }
 
-  if (violations.length > 0) {
-    throw new UnsafeCanonicalRepairError(violations);
-  }
-
-  return [...unique.values()];
+  return repaired.filter((piece) => retained.has(piece));
 }
 
 export function prepareCanonicalEvidencePieces(
@@ -332,51 +446,38 @@ export function prepareCanonicalEvidencePieces(
 ): PreparedCanonicalEvidencePieces {
   const recoveryActions: string[] = [];
 
-  try {
-    return {
-      pieces: dedupeCanonicalPieces(pieces, recoveryActions),
-      recoveryActions,
-    };
-  } catch (error) {
-    const initialError =
-      error instanceof UnsafeCanonicalRepairError
-        ? new CanonicalIdentityInvariantError(error.violations)
-        : error;
-
-    throw recoveryFailure({
-      actions: recoveryActions,
-      initialError,
-      retryError: error,
-      stage: "repair",
-    });
-  }
+  return {
+    pieces: repairCanonicalPieceIdentities(pieces, recoveryActions),
+    recoveryActions,
+  };
 }
 
 export function materializeCanonicalEvidenceObservations({
   draft,
   observations,
+  pieces,
 }: {
   draft: unknown;
   observations: EvidenceObservation[];
+  pieces: CanonicalEvidencePiece[];
 }) {
   const evidence = asRecord(getObject(asRecord(draft), "_evidence"));
   const manifestObservationIds = getArray(evidence, "observationIds").filter(
     (value): value is string => typeof value === "string" && Boolean(value)
   );
-  const observationIds = observations.map((observation) => observation.id);
+  const observationIds = Array.from(new Set([
+    ...manifestObservationIds,
+    ...observations.map((observation) => observation.id),
+    ...pieces.flatMap((piece) => piece.observationIds),
+  ]));
   const dispositions = getArray(evidence, "dispositions").map(asRecord);
-  const violations: string[] = [];
-
-  if (!sameOrderedValues(observationIds, manifestObservationIds)) {
-    violations.push(
-      "persisted evidence observations do not match the validated disposition manifest"
-    );
-  }
-  if (dispositions.length !== observations.length) {
-    violations.push(
-      "validated disposition count does not match persisted evidence observations"
-    );
-  }
+  const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
+  const fallbackDispositionByObservationId = new Map(
+    rebuildDispositionManifest(observationIds, pieces).map((disposition) => [
+      disposition.observationId,
+      disposition,
+    ])
+  );
 
   const dispositionByObservationId = new Map<
     string,
@@ -415,11 +516,17 @@ export function materializeCanonicalEvidenceObservations({
         outcome !== "maker_decision" &&
         outcome !== "sensitive_redaction")
     ) {
-      violations.push("validated evidence disposition is incomplete");
       continue;
     }
     if (dispositionByObservationId.has(observationId)) {
-      violations.push(`duplicate evidence disposition for ${observationId}`);
+      continue;
+    }
+    const owner = canonicalPieceId ? pieceById.get(canonicalPieceId) : null;
+    if (canonicalPieceId && !owner) continue;
+    if (
+      (outcome === "canonical_entity" || outcome === "declared_detail") &&
+      !owner?.outputEligible
+    ) {
       continue;
     }
 
@@ -431,32 +538,51 @@ export function materializeCanonicalEvidenceObservations({
     });
   }
 
-  if (
-    observations.some(
-      (observation) => !dispositionByObservationId.has(observation.id)
-    )
-  ) {
-    violations.push(
-      "one or more persisted evidence observations lack a validated disposition"
-    );
+  const observationById = new Map<string, EvidenceObservation>();
+  for (const observation of observations) {
+    if (!observationById.has(observation.id)) {
+      observationById.set(observation.id, observation);
+    }
   }
 
-  if (violations.length > 0) {
-    const error = new CanonicalIdentityInvariantError(
-      Array.from(new Set(violations))
-    );
-    throw recoveryFailure({
-      actions: [],
-      initialError: error,
-      retryError: error,
-      stage: "repair",
-    });
-  }
+  const ownerFor = (observationId: string) =>
+    pieces.find((piece) => piece.observationIds.includes(observationId)) ?? null;
 
-  return observations.map((observation) => ({
-    ...observation,
-    disposition: dispositionByObservationId.get(observation.id),
-  }));
+  return observationIds.map((observationId, index) => {
+    const owner = ownerFor(observationId);
+    const existing = observationById.get(observationId);
+    const fallbackDisposition = fallbackDispositionByObservationId.get(
+      observationId
+    ) as EvidenceObservationDisposition | undefined;
+
+    return {
+      ...(existing ?? {
+        id: observationId,
+        kind: owner?.kind ?? "context",
+        ordinal: index + 1,
+        payload: {
+          ...(owner?.payload ?? {}),
+          _canonicalRecoveryReason: "missing_observation_artifact",
+        },
+        role: owner?.role ?? "context",
+        source: "model_spine",
+        sourceFilename:
+          typeof owner?.payload.sourceFilename === "string"
+            ? owner.payload.sourceFilename
+            : null,
+        sourceLabel: "Recovered canonical evidence",
+        sourceProvenance: "canonical_assembly_recovery",
+        sourceStructure: {
+          headingPath: [],
+          sectionLabel: null,
+          sectionType: "unknown",
+        },
+        sourceUploadId: null,
+      } satisfies EvidenceObservation),
+      disposition:
+        dispositionByObservationId.get(observationId) ?? fallbackDisposition,
+    };
+  });
 }
 
 function rebuildDraftFromCanonicalPieces({
@@ -469,7 +595,7 @@ function rebuildDraftFromCanonicalPieces({
   const actions: string[] = [];
   const record = { ...asRecord(draft) };
   const evidence = getObject(record, "_evidence");
-  const uniquePieces = dedupeCanonicalPieces(pieces, actions);
+  const uniquePieces = repairCanonicalPieceIdentities(pieces, actions);
   const outputFor = (...kinds: CanonicalEvidencePiece["kind"][]) =>
     uniquePieces
       .filter(
@@ -590,7 +716,10 @@ export function assembleCanonicalTripDraft({
 
   try {
     const artifactActions: string[] = [];
-    const uniquePieces = dedupeCanonicalPieces(evidencePieces, artifactActions);
+    const uniquePieces = repairCanonicalPieceIdentities(
+      evidencePieces,
+      artifactActions
+    );
     const artifactViolations = artifactProjectionViolations({
       draft: candidate,
       pieces: uniquePieces,
@@ -619,10 +748,7 @@ export function assembleCanonicalTripDraft({
   } catch (error) {
     throw recoveryFailure({
       actions: recoveryActions,
-      initialError:
-        error instanceof UnsafeCanonicalRepairError
-          ? new CanonicalIdentityInvariantError(error.violations)
-          : error,
+      initialError: error,
       retryError: error,
       stage: "repair",
     });
@@ -658,7 +784,7 @@ export function assembleCanonicalTripDraft({
         initialError,
         retryError,
         stage:
-          retryError instanceof UnsafeCanonicalRepairError
+          retryError instanceof CanonicalIdentityInvariantError
             ? "repair"
             : "finalization",
       });
@@ -708,7 +834,7 @@ export function assembleCanonicalTripDraft({
         initialError: error,
         retryError,
         stage:
-          retryError instanceof UnsafeCanonicalRepairError
+          retryError instanceof CanonicalIdentityInvariantError
             ? "repair"
             : "finalization",
       });

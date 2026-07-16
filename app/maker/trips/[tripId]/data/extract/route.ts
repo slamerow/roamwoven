@@ -449,7 +449,12 @@ export async function POST(
     const initialObservations = materializeCanonicalEvidenceObservations({
       draft: assembly.draft,
       observations: result.evidenceArtifacts.observations,
+      pieces: currentPieces,
     });
+    const initialRecoveredObservationCount = initialObservations.filter(
+      (observation) =>
+        observation.sourceProvenance === "canonical_assembly_recovery"
+    ).length;
     failureStage = "quality_assessment";
     const initialUsage = {
       ...(asRecord(result.usage) ?? {}),
@@ -458,6 +463,7 @@ export async function POST(
         canonicalPieceCount: currentPieces.filter((piece) => piece.outputEligible)
           .length,
         dispositionCount: initialObservations.length,
+        recoveredObservationCount: initialRecoveredObservationCount,
       },
       finalization: assembly.finalization,
       identityRecovery: assembly.recovery,
@@ -498,7 +504,12 @@ export async function POST(
     const persistedObservations = materializeCanonicalEvidenceObservations({
       draft: assembly.draft,
       observations: result.evidenceArtifacts.observations,
+      pieces: currentPieces,
     });
+    const recoveredObservationCount = persistedObservations.filter(
+      (observation) =>
+        observation.sourceProvenance === "canonical_assembly_recovery"
+    ).length;
     const assemblyUsage = {
       ...(asRecord(result.usage) ?? {}),
       evidence: {
@@ -507,6 +518,7 @@ export async function POST(
           (piece) => piece.outputEligible
         ).length,
         dispositionCount: persistedObservations.length,
+        recoveredObservationCount,
       },
       finalization: assembly.finalization,
       identityRecovery: assembly.recovery,
@@ -548,7 +560,7 @@ export async function POST(
       tripId,
     });
     await recordTripProcessingEvent({
-      details: evidenceSummary,
+      details: { ...evidenceSummary, recoveredObservationCount },
       processingRunId: run.id,
       stage: "evidence_cluster",
       status: "completed",

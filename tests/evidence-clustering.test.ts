@@ -4,6 +4,7 @@ import {
   reapplyCanonicalOutputInvariants,
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
+import { prepareCanonicalEvidencePieces } from "@/lib/extraction/canonical-trip-assembly";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -697,6 +698,44 @@ export default async function run() {
           Array.isArray(observation.payload._canonicalNoteEntries)
       ),
       true
+    );
+  });
+
+  await test("a single city-note collection cannot collide with its source identity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "Kyoto notes",
+        source: "model_chunk",
+        sourceFilename: "notes.txt",
+        stage: emptyStage({
+          activities: [{
+            category: "local_tips",
+            city: "Kyoto",
+            description: "Keep some cash for small temples.",
+            evidenceRole: "city_note_candidate",
+            itemType: "note",
+            sourceSectionType: "city_reference",
+            title: "Kyoto practical tip",
+          }],
+          places: [{
+            arriveDate: "2031-04-03",
+            city: "Kyoto",
+            leaveDate: "2031-04-06",
+          }],
+        }),
+      }],
+      tripOverview: { dateRange: "April 3-6, 2031" },
+    });
+
+    const prepared = prepareCanonicalEvidencePieces(result.pieces);
+    assert.equal(
+      new Set(prepared.pieces.map((piece) => piece.id)).size,
+      prepared.pieces.length
+    );
+    assert.equal(
+      prepared.pieces.filter((piece) => piece.outputEligible).length,
+      2
     );
   });
 

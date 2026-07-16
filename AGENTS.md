@@ -43,6 +43,9 @@ assembly, privacy, review Calls or Questions, or publishing:
 - Every such path must terminate in one of: bounded deterministic repair,
   retained last-good state, usable evidence-preserving fallback, or a named
   technical recovery state when no valid draft can exist.
+- Once the parser has returned a usable draft plus evidence pieces, canonical
+  identity, manifest, or disposition defects are internal recovery work and may
+  not terminate in a technical recovery state.
 - A processing stage may be recorded as completed only after its output passes
   the validation required by the next persisted boundary.
 - Successful internal repair belongs in support telemetry and audit tooling, not

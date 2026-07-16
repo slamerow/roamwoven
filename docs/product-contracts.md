@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 8
+Ledger version: 9
 
 Ledger date: 2026-07-16
 
@@ -117,10 +117,11 @@ path is bypassed.
 - Evidence: Quality assessment version 2 is the shared authority for P0/P1/P2
   diagnostics, hard and quiet warnings, open Questions, processing disposition,
   stored quality metadata, and top-level audit notices. Semantic Questions and
-  warnings no longer block the publish route; only missing structured records
-  remain a technical publishing failure. Canonical identity defects now run
-  through one deterministic artifact-backed repair and recompile pass before a
-  named technical recovery state. The first-run extraction route now reconciles
+  warnings no longer block the publish route. Once usable parser output exists,
+  conflicting canonical identities are deterministically re-keyed, exact
+  duplicates are collapsed, and missing observation artifacts are reconstructed
+  from canonical ownership before persistence. These internal defects cannot
+  discard the draft or create a maker Question. The first-run extraction route now reconciles
   serious audit candidates, requests at most one idempotent retry from the
   canonical output-invariant owner, and re-audits before any draft is persisted.
   The audit layer never edits semantic output. Unrepaired findings remain an
@@ -335,8 +336,8 @@ path is bypassed.
 - Evidence: Every extracted evidence observation now receives exactly one
   persisted disposition. The validated assembly boundary deterministically
   rebuilds a missing manifest, re-materializes repaired dispositions onto the
-  persisted observations, and quarantines an irreconcilable observation graph in
-  the named technical recovery state. Audit surfaces dispositioned versus
+  persisted observations, and reconstructs a missing observation artifact from
+  its canonical owner with explicit recovery provenance. Audit surfaces dispositioned versus
   undisposed counts and raises a P0 diagnostic for a gap. Remaining coverage is
   reconciliation from every raw meaningful source block to an extracted
   observation; the current invariant begins at the observation boundary.
@@ -484,7 +485,7 @@ path is bypassed.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-16`
-- Enforcement: `ENFORCED`
+- Enforcement: `PARTIAL`
 - Contract: An audit detector produces candidate findings, not truth. Before a
   P0, P1, or hard warning can authorize any output mutation, an independent
   reconciliation step checks the source evidence, canonical entity, and final
@@ -543,13 +544,21 @@ path is bypassed.
   retry result stay visible in review state and internal telemetry. Repair is
   bounded and cannot repeatedly mutate the same draft. Every new terminal path
   requires behavioral route-level coverage before code is called safe to push.
+  After the parser returns a usable draft and evidence pieces, canonical
+  identity, manifest, and disposition defects are internal recovery work and
+  cannot enter a technical recovery state or discard the draft.
 - Evidence: Repository preflight now requires route-outcome tracing for new
   validators and terminal paths. Canonical evidence is preflighted before its
   database uniqueness boundary, exact duplicates are repaired before
-  persistence, and conflicting identities enter the named recovery state.
+  persistence. Evidence-cluster version 13 preserves synthetic collection
+  identity, and conflicting identities are deterministically re-keyed with
+  sanitized collision telemetry. Same-lineage or semantically identical
+  conflicts remain in evidence-only lineage instead of becoming duplicate
+  traveler cards.
   Canonical assembly records `started` before validation and `completed` only
-  after repair, finalization, and structured compilation succeed;
-  unrecoverable identity conflicts cannot save a draft snapshot. Semantic audit
+  after repair, finalization, and structured compilation succeed. A usable
+  parser result cannot be discarded for an identity, manifest, or disposition
+  defect. Semantic audit
   candidates now have explicit truth classifications and before/after
   fingerprints; repaired output is rebuilt and re-audited, while detector
   incidents leave correct output untouched. Other existing pipeline validators

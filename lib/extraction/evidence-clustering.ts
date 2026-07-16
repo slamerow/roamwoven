@@ -28,7 +28,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 12;
+export const EVIDENCE_CLUSTER_VERSION = 13;
 
 export type EvidenceKind =
   | "activity"
@@ -1568,12 +1568,14 @@ function suppressCanonicalPiece(
 function mergeCanonicalPieceInto({
   actionType = "attached",
   decisionId,
+  preserveTargetIdentity = false,
   reason,
   source,
   target,
 }: {
   actionType?: "attached" | "grouped";
   decisionId?: string;
+  preserveTargetIdentity?: boolean;
   reason: string;
   source: CanonicalEvidencePiece;
   target: CanonicalEvidencePiece;
@@ -1621,7 +1623,9 @@ function mergeCanonicalPieceInto({
     reason,
     type: actionType,
   });
-  refreshCanonicalPieceId(target);
+  if (!preserveTargetIdentity) {
+    refreshCanonicalPieceId(target);
+  }
   suppressCanonicalPiece(source, reason);
 }
 
@@ -3235,6 +3239,7 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
 
     for (const note of group) {
       mergeCanonicalPieceInto({
+        preserveTargetIdentity: true,
         reason: `canonical ${city} note collection`,
         source: note,
         target,
