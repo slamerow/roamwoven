@@ -336,9 +336,38 @@ export function createAuditDiagnostics({
     });
   }
 
+  // Reconcile before raising a P0 (RW-AUD-001; live runs 7.17.1/7.17.2 both
+  // raised false "missing transport" P0s from identity-join failures):
+  // 1. An anchor with no time, no digit-bearing number, and no full route is
+  //    not independent proof of a transport segment (7.17.2's anchor came
+  //    from ÖBB ticket marketing boilerplate).
+  // 2. An anchor whose date already has a final transport row of the same
+  //    kind is represented — a failed field-level join is a join defect, not
+  //    a missing record, and must not be reported as one.
+  const anchorHasSegmentSignal = (anchor: SourceTransportAnchor) =>
+    Boolean(
+      anchor.departureTime ||
+        anchor.arrivalTime ||
+        (anchor.number && /\d/.test(anchor.number)) ||
+        (anchor.departureLocation && anchor.arrivalLocation)
+    );
+  const sameDateKindRecordExists = (anchor: SourceTransportAnchor) =>
+    finalRecords.some(
+      (record) =>
+        record.recordType === "transport" &&
+        Boolean(anchor.date) &&
+        record.date === anchor.date &&
+        (!record.type ||
+          !anchor.kind ||
+          record.type === anchor.kind ||
+          (anchor.kind === "flight" && /flight|plane/i.test(record.type)) ||
+          (anchor.kind === "train" && /train|rail/i.test(record.type)))
+    );
   const missingSourceAnchors = sourceTransportAnchors.filter(
     (anchor) =>
-      !finalRecords.some((record) => finalRecordMatchesSourceAnchor(anchor, record))
+      anchorHasSegmentSignal(anchor) &&
+      !finalRecords.some((record) => finalRecordMatchesSourceAnchor(anchor, record)) &&
+      !sameDateKindRecordExists(anchor)
   );
 
   if (missingSourceAnchors.length > 0) {

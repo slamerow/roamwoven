@@ -6,6 +6,120 @@
 
 ## Current State
 
+### 2026-07-17 evening — 7.17.2 audit + full defect pass (Claude/Cowork session)
+
+Read first: `docs/product-contracts.md` (updated: RW-PRI-001 scope narrowed,
+RW-QUE-001 castle fold + day-slot rule, RW-CLS-001 commitment/sections,
+RW-EVD-001 structural placement, RW-GRP-001 hierarchy membership, RW-ASM-001
+shadow guard, RW-AUD-001 anchor validity),
+`docs/assembly-defect-docket-2026-07-17-run2.md` (7.17.2 audit — includes
+Eli's recorded decisions and per-fix status), and the Δ2 amendments in
+`docs/assembly-ground-truth-central-europe.md`.
+
+- Live run 7.17.2 (trip `629d9b33-9f9e-4280-8a5c-90cacf684dc6`, ran on
+  86ea837) audited from the QA bundle + live summary page; raw JSON saved
+  locally as `run-7.17.2-qa-bundle.json` (gitignored). Scorecard: 82 activity
+  cards (target ~49), 1 group (Schönbrunn, 3/5 stops), 5 questions (2 legit +
+  3 fabricated date questions), transport/stays/times all correct. Root
+  causes found IN CODE and fixed same-day, each with a ground-truth fixture:
+  castle killed by "castle" being a `SOURCE_SUPPORT_STOPWORDS` entry (bare
+  stay-shadow reduced "Prague Castle" to "prague" ⊂ "Prague Airbnb");
+  Kutná Hora items stranded undated by parser "unknown" section typing and
+  placed by leg-guess; commitment pattern counted bare "visit" as intent;
+  the July-3 one-note-per-city rule mashed city notes and let a budget line
+  through; the ÖBB ticket's German marketing text minted a false
+  missing-transport P0 anchor (`…-bitte-…`); the rental-car card carried
+  Eli's name/home address/email/phone in cleartext (audit redactor caught
+  only some of it — the LIVE summary page is the stronger privacy surface
+  to check in audits).
+- IMPORTANT audit correction: the "parser emits no geo fields" finding from
+  the bundle was an audit artifact — `summarizeActivity` allowlisted them
+  away. Audit views now expose approxLatitude/approxLongitude/area; whether
+  the live parser actually emitted coords for the Lesser Town sights is
+  unknown until 7.17.3.
+- This session's changes (workspace copy tested: 40 test files green,
+  typecheck clean, build clean): evidence-clustering fixes above, NEW
+  `lib/extraction/canonical-placement-policy.ts` (extracted placement stage
+  + `tests/canonical-placement-policy.test.ts`), anchor validity in
+  `source-transport-anchors.ts`, reconcile-before-P0 in
+  `trip-extraction-audit-diagnostics.ts`, geo fields in audit
+  snapshot/lineage/types, qa-bundle count split (top-level vs grouped-stop
+  vs placeholder), summary Days counter excludes "Needs placement", parser
+  prompt hardening (day-section membership, access-instruction attachment,
+  same-site component listing, arrival-day recommendation rule), city-note
+  sections + Costs scrub, card/note reconciliation, ticket-question
+  consolidation (castle/St. Vitus fold), day-title slot question (baths),
+  meal-prefix aliasing, Chain Bridge containment, place-fragment
+  absorption, drop-bags arrival-time fold, PII/echo scrub.
+  14 new ground-truth checks added to
+  `tests/fixtures/central-europe-ground-truth.ts` — fixture now mirrors the
+  LIVE 7.17.2 parser shapes (undated Kutná Hora lines, bare castle +
+  separate components, Budapest promotions, access-instruction cards).
+- IMMEDIATE NEXT STEP: Eli pushes (clear `.git/*.lock` first), then fresh
+  extraction 7.17.3 on a new QA100 trip, audit against the answer key +
+  Δ2 amendments. Expect: ~49-55 activity cards, 3 groups (castle visit,
+  Schönbrunn 5 stops, Lesser Town walk IF parser emits area/coords — now
+  observable in the audit), exactly 3 questions (castle ticket incl. St.
+  Vitus, Vienna trio, baths), 0 date questions, sectioned city notes with
+  no budget line, no PII in any card description, no false transport P0.
+- Deferred (backlog): diagnostics→review-surface plumbing, audit redactor
+  fixes, remaining counter unification, summary-page UX (collapsed
+  sections, "Mark checked" semantics), leg-scoped privacy-label
+  presentation, shadow-suppression stage extraction, extraction pinning DB
+  migration (unchanged from previous entry).
+
+### 2026-07-17 Assembly ground truth + live-run defect fixes (Claude/Cowork session)
+
+Read first: `docs/product-contracts.md` (ledger v10),
+`docs/assembly-defect-docket-2026-07-17.md`,
+`docs/assembly-ground-truth-central-europe.md` (approved answer key v2).
+
+- Commits this session (all pushed): `b53c135` ground truth v2 + commitment
+  rule + first geo grouping; `147789b` defect docket; `86ea837` source-truth
+  verification + docket fixes 1-7. Suite 39 files green, typecheck clean.
+- Live QA runs: 7.17.0 (`c7b6ab75-...`, ran on PRE-b53c135 build — ignore),
+  7.17.1 (`b480e3f7-1fbe-482f-8eeb-77a5125b394f`, ran on b53c135, fully
+  audited — every defect is in the docket). Raw audit JSONs live locally as
+  `run-7.17.1-{payload,qa-bundle}.json` (gitignored, real trip data).
+- IMMEDIATE NEXT STEP: fresh extraction "7.17.2" on a new paid trip (QA100
+  promo) with the Czech PDF, then audit the QA bundle
+  (`/maker/trips/<id>/data/audit/qa-bundle`, browser access works) against
+  the answer key. Scorecard to beat from 7.17.1: 98 activity cards (expect a
+  big drop), 8 groups (expect ~3: Prague Castle visit, Schönbrunn visit,
+  Lesser Town walk), 5 questions (expect ~3: castle ticket, Vienna trio
+  planned-or-ideas, baths), 0 flight/stay shadow duplicates, Delta 5925 =
+  17:00->18:41, no Colosseum/barcode text in Prague notes, calls stating the
+  actual rule that fired. Note: coordinates/area hints only exist on fresh
+  extractions (new parser schema fields approxLatitude/approxLongitude/area).
+- Key rules shipped (tests in tests/evidence-clustering.test.ts,
+  tests/source-transport-anchors.test.ts, tests/assembly-ground-truth.test.ts):
+  commitment rule of evidence, slot-collision collapse, title-containment
+  aliases, shadow suppression, source-support suppression + code scrub,
+  grouping doctrine v3 (same-site ~300 m / walk ~1.8 km + crowded >6 +
+  unsequenced <3 timed + source-named + one walk/day), cross-city note
+  reroute, ticket-question consolidation, anchor semantic fallback +
+  time-disagreement tripwire.
+- CEO decisions recorded: merge-bias (prefer rare silent fusions over
+  duplicates; keep lineage), hallucination suppression silent, no publish
+  blocking (supersedes 2026-07-02 hard publish-blocking; suppression +
+  visible warnings instead), disjunction slots get no auto question,
+  St. Vitus folds into ONE castle ticket question, one-commit-one-extraction
+  cadence, extraction pinning approved.
+- PENDING WORK, in order: (1) run + audit 7.17.2; (2) extraction pinning by
+  material content hash — needs an additive DB migration run in Supabase
+  BEFORE deploy (deliberately deferred out of 86ea837); (3) review-page
+  visibility for confirmed hard warnings; (4) the 5-10 diverse itineraries +
+  1-2 friends' docs Eli has queued for generalization testing (answer-key-
+  lite: he marks defects on the summary page); (5) dev-only re-extract lane
+  to cut QA cost; (6) medium-term: split evidence-clustering.ts (~6k lines)
+  into ordered, individually tested policy stages.
+- Session workflow that works: Claude commits (never pushes; no credentials),
+  Eli pushes via GitHub Desktop. Every Claude commit strands
+  `.git/*.lock` files on the mount — Eli clears with
+  `rm "/Users/eli/Claude - Roamwoven/.git/"*.lock` before Desktop will
+  behave. Sandbox test copy lives at `~/rw` (rsync from mount, npm install
+  there; local node_modules on the Mac is missing dev deps).
+
 ### 2026-07-10 Central Europe P0 foundation
 
 - Production run `6cd3ed95-09c7-49de-97dd-0089ba97dc1e` for trip `65d45385-806d-4ba9-b4eb-b5ea4146eb77` proved two upstream truncations plus a missing evidence-identity boundary.

@@ -17,8 +17,16 @@ import {
 function summarizeActivity(value: unknown, index: number): DraftRecordSummary {
   const record = asRecord(value);
 
+  const numberField = (key: string) => {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+
   return {
     address: getString(record, "address"),
+    approxLatitude: numberField("approxLatitude"),
+    approxLongitude: numberField("approxLongitude"),
+    area: getString(record, "area"),
     category: getString(record, "category"),
     date: getString(record, "date"),
     description: truncate(getString(record, "description")),

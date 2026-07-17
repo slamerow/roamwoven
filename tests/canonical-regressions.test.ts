@@ -241,7 +241,12 @@ export default async function run() {
     assert.equal(draft.stays.length, 3);
   });
 
-  await test("a timed arrival and bag-drop bridge stays visible without an approval question", () => {
+  // Ground truth v2 (approved 2026-07-17) supersedes the earlier keep-visible
+  // ruling: a bag drop AT the flight's own arrival time is the arrival, not a
+  // separate luggage movement — it folds into the Stay row (Jan 13 ships with
+  // 4 activity cards, no arrive/drop-bags card; 7.17.2 flagged the survivor
+  // as a hard stay collision).
+  await test("an arrival-time bag drop folds into the stay without an approval question", () => {
     const draft = cluster(emptyStage({
       activities: [{
         category: "arrival_departure",
@@ -277,9 +282,7 @@ export default async function run() {
       }],
     }));
 
-    assert.deepEqual(draft.activities.map((item) => item.title), [
-      "Arrive in Rome and drop bags",
-    ]);
+    assert.deepEqual(draft.activities.map((item) => item.title), []);
     assert.equal(draft.missingDetails.length, 0);
   });
 

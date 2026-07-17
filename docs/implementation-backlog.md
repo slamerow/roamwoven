@@ -621,3 +621,30 @@ Deployment note:
 - Revisit hosted beta when the product is useful enough to justify switching deployments, using another host, or upgrading.
 
 This would prove the platform direction while keeping the expensive, uncertain extraction pipeline isolated for the next pass.
+
+## Deferred from the 2026-07-17 evening defect pass (7.17.2)
+
+Approved deferrals — extraction/assembly correctness took priority:
+
+- Audit surface: plumb semantic diagnostics (duplicate-venue, loose-tip) into
+  the structured review warnings after source-truth verification (the
+  St. Stephen's "loose tip" diagnostic is itself a false positive — verify
+  before surfacing). Fix the QA-bundle redactor both directions: it renders
+  dates/piece IDs as "[redacted phone]" while letting a real name + home
+  address through in card prose.
+- Counters: finish unifying summary tiles vs qa-bundle counts vs "Review: N"
+  vs the 8 summary checks (Days + activeActivities split landed; the rest
+  still use different definitions).
+- Summary-page UX: sections collapsed by default (~30 desktop screens when
+  expanded), "Mark checked" acknowledges a hard warning without resolving or
+  suppressing anything, group parents don't show which stops they absorbed.
+- Privacy presentation: 45 leg-scoped generic private-detail labels have no
+  review surface; route them to their owning records (deprioritized by CEO —
+  extraction/assembly first).
+- Refactor: extract the shadow-suppression stage from evidence-clustering.ts
+  into its own tested module (the placement stage was extracted this pass as
+  lib/extraction/canonical-placement-policy.ts; suppression is the other
+  half of the approved partial split).
+- Language module: curated 100-180 phrase packs per language,
+  category-driven, maker chooses categories; source phrase lists get a
+  covered-by-module disposition (see wrensadventure.com reference).

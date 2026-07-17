@@ -286,6 +286,35 @@ Unresolved answers never block publishing — they become descriptions.
 
 ---
 
+## Δ2 Amendments (2026-07-17 evening, Eli-approved)
+
+1. **Privacy scope narrowed:** protection covers *trip-sabotage surface* only —
+   stays (addresses, access codes, Wi-Fi, reservations) and inter-city travel
+   confirmations. Activity/tour/restaurant booking references are PUBLIC: the
+   walking tour's L272-181125-2, Klementinum and Bellevue bookings, the rental
+   car reservation 81486 (CEO: recoverable failure — "worst case take a cab"),
+   and the Vienna Card #VPA9111671 all lose their 🔒 markers. The 🔒 markers on
+   travel cards and stays above stand. Personal identity data (name, home
+   address, email, phone) is scrubbed from card prose as content hygiene —
+   it is not trip content and not a privacy toggle.
+2. **St. Vitus folds into ONE castle ticket question** (supersedes "keep St.
+   Vitus tour-vs-visit"): one venue complex, one open decision. Sub-stop
+   uncertainty folds into the container's question. Question #1 covers both
+   the ticket choice and the tour-vs-visit angle. Total questions stay 3.
+3. **City Note sections:** each city gets ONE City Note rendered in universal
+   sections — Food · Drinks & Nightlife · Sights & Culture · Shopping ·
+   Getting Around · Local Tips · Notes (fallback — nothing is dropped for not
+   fitting). The "Prague · Eat" / "Prague · Drinks" groupings above map into
+   these sections. Splitting a section later is additive; merging breaks
+   fixtures, so start merged.
+4. **Language content:** currency notes go to Local Tips. Hungarian phrases +
+   pronunciation do NOT become note prose — they signal the (curated,
+   category-driven) language-guide module; the source phrase list gets a
+   "covered by language module" disposition.
+5. **Costs exclusion applies to note text too** — a "Budget notes: $1200
+   total" line inside a tips blob is scrubbed with a recorded disposition,
+   not shipped inside a city note.
+
 ## Δ Rules added or refined this round (2026-07-17, Eli-approved)
 
 1. **Calls** explain system *action* (grouping), never absence of action or plain logic.

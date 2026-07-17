@@ -273,7 +273,18 @@ path is bypassed.
   ordered children and one statement-style Call, reusing the existing
   grouping executor. Covered by `tests/assembly-ground-truth.test.ts`
   (Malá Strana & Hradčany walk). A fresh live extraction with the new `area`
-  field is still required before discovery quality is fully enforced. The
+  field is still required before discovery quality is fully enforced.
+  2026-07-17 evening (live-run 7.17.2): same-site membership now also comes
+  from SOURCE HIERARCHY — a stop listed in the container's own description,
+  or titled "<stop> at <Site>", joins the visit even without parser
+  coordinates (7.17.2 grouped only 3 of Schönbrunn's 5 stops for lack of
+  coords); call claims state which rule actually fired (geo radius, source
+  listing, or both). A same-site container whose description lists its
+  component stops is grouping structure and is exempt from
+  covered-container context demotion (the 7.17.2 Prague Castle placeholder
+  chain). The deterministic pass never re-groups candidates the resolver
+  has already ruled on. Ground-truth checks `castle-same-site-group` and
+  `schonbrunn-all-stops` enforce hierarchy membership. The
   older gap: the pre-checkpoint live resolver run inverted
   negative Albertina evidence while failing to discover the Schoenbrunn
   grouping. The current first-run path now requires conclusive supplied source
@@ -312,8 +323,23 @@ path is bypassed.
   preserve explicit City Note list entries as hidden canonical pieces, route
   each entry once, and merge only surviving entries into the visible city
   collection; a fresh live extraction is still required to verify the boundary.
+  2026-07-17 evening (live-run 7.17.2 PB-2): bare-stay-name shadow matching
+  now keeps venue-type words as meaningful tokens and bans reduction to a
+  shared city token — "Prague Castle" can never again be suppressed as a
+  "Prague Airbnb" lodging shadow ("castle" was a matching stopword). A bag
+  drop at a same-date transport's own arrival time folds into the stay
+  (ground truth v2: Jan 13 ships 4 cards); an arrival-time-distinct luggage
+  movement still stays visible. Same-day alias containment survives a
+  trailing generic word ("Chain Bridge walk" folds into the timed
+  "Szechenyi Chain Bridge" crossing), meal-prefix phrasing no longer defeats
+  venue repeat detection ("Breakfast at Cafe Central" ≡ "Cafe Central"), and
+  place-fragment shards ("Prague Downtown", 9:00, "Return") are absorbed by
+  the real card sharing their exact slot. Enforced by ground-truth checks
+  `castle-survives-stay-shadow`, `dropbags-folds-into-stay`,
+  `chain-bridge-single-card`, `cafe-central-planned-wins`.
 - Tests: `tests/canonical-regressions.test.ts`,
-  `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`
+  `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
+  `tests/assembly-ground-truth.test.ts`
 
 ## RW-TRV-001 — Travel cards are per-segment and cover every night
 
@@ -380,14 +406,33 @@ path is bypassed.
   choice. Explicit commitment such as `We definitely want to visit X` is an
   Activity even when its date is missing. A loose ideas list after the itinerary
   remains City Notes.
-- Evidence: The canonical resolver carries source hierarchy and role decisions,
-  and regression coverage protects explicit city-reference sections. The live
-  Central Europe run still duplicated Borkonyha, polluted Rome notes, and
-  overproduced activities, so the full production path does not yet enforce the
-  rule.
+
+  2026-07-17 evening additions (Eli-approved): (1) Commitment language is
+  narrowed to first-person intent, booking language, a time, or a
+  confirmation — bare sight verbs ("visit", "explore", "stroll") are parser
+  phrasing, never commitment evidence (defect docket commitment-language
+  fix; live runs kept Museum of Communism and Pinball Museum on that
+  phrasing alone). (2) Card/note reconciliation: an uncommitted, anchor-less
+  dated card whose venue also sits in a same-city note list is "repeated but
+  never committed" — the note copy is the single home and the card folds
+  away; a committed card removes its duplicate note-list entry. (3) City
+  Note presentation: one City Note per city, rendered in the approved
+  universal sections — Food, Drinks & Nightlife, Sights & Culture, Shopping,
+  Getting Around, Local Tips, Notes (fallback; nothing is ever dropped for
+  not fitting). Splitting a section later is additive; merging breaks
+  fixtures. (4) Costs/budget planning content ("Budget notes: $1200 total")
+  is excluded from traveler notes with a recorded disposition — the Costs
+  exclusion applies to note TEXT, not only to activity records.
+- Evidence: 2026-07-17 evening pass: `PLANNED_ACTIVITY_PATTERN` narrowed in
+  `lib/trip-card-taxonomy.ts`; `reconcileCardsAgainstCityNotes` runs before
+  accessory routing so notes are matched intact; city-note sections +
+  costs scrub live in the note-collection builder. Ground-truth checks
+  `budapest-note-copies-win`, `budget-scrubbed-from-notes`,
+  `city-note-sections`, `cafe-central-planned-wins` enforce the additions.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
-  `tests/canonical-evidence-resolver.test.ts`
+  `tests/canonical-evidence-resolver.test.ts`,
+  `tests/assembly-ground-truth.test.ts`
 
 ## RW-EVD-001 — Every meaningful source block receives an explicit disposition
 
@@ -440,6 +485,18 @@ path is bypassed.
   undisposed counts and raises a P0 diagnostic for a gap. Remaining coverage is
   reconciliation from every raw meaningful source block to an extracted
   observation; the current invariant begins at the observation boundary.
+  2026-07-17 evening (live-run 7.17.2 PB-3): undated activity pieces resolve
+  their day from SOURCE STRUCTURE before any leg fallback —
+  `lib/extraction/canonical-placement-policy.ts` (extracted stage, own unit
+  tests) reads a parseable date from the piece's section label/heading path,
+  then inherits the nearest dated neighbor from the same source section,
+  bounded to the trip window and the piece's own city leg. Intake structural
+  dating also accepts "unknown"-typed sections (the parser tagged the Kutná
+  Hora day-trip lines unknown, stranding Silver mines and Koscom undated on
+  a leg-guess with fabricated date questions). Leg-guess placement plus a
+  date question is now the genuine last resort. Ground-truth checks
+  `koscom-activity` and `silver-mines-placement` enforce this from the
+  live-run shape (undated + section label).
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
@@ -509,6 +566,19 @@ path is bypassed.
   IS generated for a researched-but-uncommitted list: two or more same-day
   untimed unbooked entries carrying prices/hours produce one "planned for
   this day, or just ideas?" single-choice Question.
+
+  2026-07-17 evening additions (Eli-approved): (1) One venue complex, one
+  open decision — same-day ticket/tour questions consolidate into ONE
+  question rooted at the container-named subject; sub-stop uncertainty (St.
+  Vitus "ticket or tour") folds into the castle's ticket question even
+  before grouping parents them. This resolves the prior tension between
+  "keep St. Vitus tour-vs-visit" and the one-castle-question CEO ruling in
+  favor of folding. (2) Day-title slot rule: when a source DAY TITLE commits
+  an activity slot ("… // Budapest Bathing") whose matching entries are all
+  uncommitted options, one question asks which venue (ground truth v2
+  question #3); stays never get item date questions; undated activities
+  resolve their day from source structure before any leg-guess date
+  question is allowed (see RW-EVD-001).
 - Enforcement: `PARTIAL`
 - Contract: Every emitted Question declares one canonical subject, one target
   field or explicit atomic mutation, source-backed answer options, and an
@@ -562,18 +632,37 @@ path is bypassed.
 ## RW-PRI-001 — Privacy defaults are automatic and final-projection safe
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-17`
+- Supersession: the 2026-07-15 scope is narrowed by Eli's explicit 2026-07-17
+  evening decision: protection exists for *trip-sabotage surface* — things
+  that house you or move you between cities. Protected: stay addresses,
+  access/entry codes, Wi-Fi credentials, stay and inter-city travel booking
+  identifiers, private contacts, personal safety details. Explicitly PUBLIC:
+  activity/tour/restaurant booking references and confirmation codes, rental
+  car reservations (recoverable failure — CEO ruling), in-city passes such as
+  the Vienna Card. Personal identity data (traveler name, home address,
+  email, phone) is not trip content at all — it is scrubbed from card prose
+  as content hygiene, not gated behind privacy.
 - Enforcement: `PARTIAL`
 - Contract: Clearly sensitive details default protected without a user Question.
   Exact lodging and private-residence addresses, access codes, private contacts,
   stay/travel booking-control identifiers, credentials, and personal safety
-  details cannot leak into public activity, note, transport, or stay prose. The
+  details cannot leak into public activity, note, transport, or stay prose.
+  Lodging access instructions (lockbox steps, key pickup, buzzer/door codes,
+  arrival directions) are STAY material: they attach to their stay or are
+  suppressed — they never ship as traveler activity cards. The
   final traveler projection revalidates privacy after every merge.
-- Evidence: Privacy-policy and published-redaction tests pass, but the latest live
-  run leaked stay address/category text into Rome city notes and retained
-  lockbox/access content in a note.
+- Evidence: 2026-07-17 evening pass added stay-access instruction routing
+  (Vitae directions with public buzzer number, Rome key-pickup apartment
+  instructions — both live-run 7.17.2 leaks) and the customer-identity
+  scrub for card descriptions (7.17.2 rental car carried name + home
+  address + email + phone in cleartext). Ground-truth checks
+  `vitae-directions-fold` and `rome-key-pickup-suppressed` enforce the
+  routing; the 45 leg-scoped generic privacy labels remain a known
+  presentation gap.
 - Tests: `tests/canonical-regressions.test.ts`,
-  `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`
+  `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
+  `tests/assembly-ground-truth.test.ts`
 
 ## RW-PUB-001 — Published trip versions are immutable
 
@@ -625,6 +714,16 @@ path is bypassed.
   (`transport_times_disagree_with_source_anchor`) now fires when a matched
   final row's times disagree with its source anchor — the Delta 5925 class of
   defect the detector previously missed.
+  2026-07-17 evening (live-run 7.17.2 false P0, second consecutive class):
+  source transport anchors now require minimum validity — a time, a
+  digit-bearing transport number, or a full route — so ticket-PDF marketing
+  boilerplate can no longer mint a `train-…-bitte` anchor with an ad-copy
+  "Ticketcode" confirmation; digit-less scraped "numbers" are nulled; and
+  the missing-transport diagnostic reconciles before raising: an anchor
+  whose date already has a same-kind final transport row is an identity-join
+  incident, never a missing-record P0. Audit views also now expose the
+  parser's `approxLatitude`/`approxLongitude`/`area` fields — the 7.17.2
+  audit was structurally blind to whether geo hints were emitted at all.
   A broken identity join on
   otherwise matching output becomes an internal detector incident and cannot
   create a missing-record diagnostic or mutate the traveler draft. Metamorphic

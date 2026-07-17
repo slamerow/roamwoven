@@ -932,18 +932,27 @@ function createAnchorFromBlock({
   const provenance = uniqueValues(block.map((entry) => entry.provenance));
   const sourceFilename = block.find((entry) => entry.sourceFilename)?.sourceFilename ?? null;
   const sourceUploadId = block.find((entry) => entry.sourceUploadId)?.sourceUploadId ?? null;
+  // Transport numbers carry digits ("RJ 1033", "W6 2339", "5925"). A
+  // digit-less "number" is scraped prose, not a segment identity — live run
+  // 7.17.2 minted anchor `train-…-bitte-notime` from ÖBB ticket marketing
+  // boilerplate ("…drucken Sie dieses bitte…") and its ad-copy Ticketcode
+  // then raised a false P0 (RW-AUD-001).
+  const plausibleNumber =
+    providerAndNumber.number && /\d/.test(providerAndNumber.number)
+      ? providerAndNumber.number
+      : null;
   const anchor: SourceTransportAnchor = {
     anchorId: "",
     arrivalLocation,
     arrivalTime,
-    confidence: departureTime || providerAndNumber.number || confirmation ? "high" : "medium",
+    confidence: departureTime || plausibleNumber || confirmation ? "high" : "medium",
     confirmation,
     date,
     departureLocation,
     departureTime,
     evidence: blockText.slice(0, 1200),
     kind,
-    number: providerAndNumber.number,
+    number: plausibleNumber,
     provider: providerAndNumber.provider,
     provenance,
     routeLabel,
@@ -951,7 +960,16 @@ function createAnchorFromBlock({
     sourceUploadId,
   };
 
-  if (!departureTime && !arrivalTime && !providerAndNumber.number && !confirmation) {
+  // Minimum anchor validity (defect docket run-2, AS-1): a source transport
+  // anchor needs a real segment signal — a time, a digit-bearing transport
+  // number, or a full route. A stray confirmation-like token inside
+  // boilerplate is not transport evidence on its own.
+  if (
+    !departureTime &&
+    !arrivalTime &&
+    !plausibleNumber &&
+    !(departureLocation && arrivalLocation)
+  ) {
     return null;
   }
 

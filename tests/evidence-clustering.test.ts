@@ -694,7 +694,9 @@ export default async function run() {
       true
     );
     assert.equal(/Borkonyha/i.test(String(note?.description)), false);
-    assert.equal(note?.description, "Restaurants: Rosenstein, Menza");
+    // 2026-07-17 evening: city notes render Eli-approved universal sections;
+    // the source's "Restaurants" list lands in the Food section.
+    assert.equal(note?.description, "Food: Rosenstein, Menza");
     assert.equal(
       result.observations.some(
         (observation) =>

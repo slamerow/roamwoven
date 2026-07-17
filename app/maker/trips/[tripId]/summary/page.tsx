@@ -622,7 +622,13 @@ export default async function TripSummaryPage({
 
           <div className="mt-6 grid gap-3 md:grid-cols-6">
             {[
-              ["Days", summary?.days.length ?? 0],
+              // Dated days only — "Needs placement" is a review bucket, not
+              // a trip day (7.17.2 showed "15 Days" for a 14-day trip).
+              [
+                "Days",
+                summary?.days.filter((day) => day.date !== "needs-placement")
+                  .length ?? 0,
+              ],
               ["Legs", summary?.counts.places ?? 0],
               ["Transport", summary?.counts.transport ?? 0],
               ["Stays", summary?.counts.stays ?? 0],

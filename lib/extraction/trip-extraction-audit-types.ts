@@ -12,6 +12,12 @@ export type DraftObject = Record<string, unknown>;
 
 export type DraftRecordSummary = {
   address: string | null;
+  // Parser geo/area hints surface in audit views so grouping-doctrine
+  // failures are observable (the 7.17.2 audit was blind to whether the
+  // parser emitted coordinates at all).
+  approxLatitude: number | null;
+  approxLongitude: number | null;
+  area: string | null;
   category: string | null;
   date: string | null;
   description: string | null;

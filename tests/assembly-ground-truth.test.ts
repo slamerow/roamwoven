@@ -191,6 +191,134 @@ const evaluators: Record<string, CheckEvaluator> = {
     assert.equal(cards.length, 1, "'Tour Rome' line becomes an activity card");
     assert.equal(cards[0].date, "2019-01-24");
   },
+  "castle-survives-stay-shadow": (records) => {
+    const castle = activityCards(records, /^prague castle/i);
+    assert.equal(castle.length, 1, "Prague Castle survives as one card");
+    assert.equal(castle[0].date, "2019-01-16");
+  },
+  "castle-same-site-group": (records) => {
+    const castle = activityCards(records, /^prague castle/i)[0];
+    assert.ok(castle, "castle parent exists");
+    const guard = activityCards(records, /changing of the guard/i);
+    const vitus = activityCards(records, /st\.? vitus/i);
+    assert.equal(guard.length, 1);
+    assert.equal(vitus.length, 1);
+    assert.equal(guard[0].parentItemId, castle.id, "guard is a castle child");
+    assert.equal(vitus[0].parentItemId, castle.id, "St. Vitus is a castle child");
+  },
+  "schonbrunn-all-stops": (records) => {
+    const parent = activityCards(records, /schonbrunn palace/i).find(
+      (item) => !item.parentItemId
+    );
+    assert.ok(parent, "Schönbrunn parent exists");
+    for (const stop of [/gloriette/i, /orangeriegarten/i, /apple strudel/i, /panorama train/i]) {
+      const cards = activityCards(records, stop);
+      assert.equal(cards.length, 1, `${stop} appears exactly once`);
+      assert.equal(
+        cards[0].parentItemId,
+        parent.id,
+        `${stop} is owned by the Schönbrunn visit`
+      );
+    }
+  },
+  "silver-mines-placement": (records) => {
+    const cards = activityCards(records, /silver mines/i);
+    assert.equal(cards.length, 1, "silver mines is one activity card");
+    assert.equal(cards[0].date, "2019-01-17", "placed from source structure");
+    assert.equal(
+      records.reviewQuestions.some((question) =>
+        /which day does/i.test(question.prompt) &&
+        /silver mines|koscom/i.test(question.prompt)
+      ),
+      false,
+      "no fabricated date questions for day-trip items"
+    );
+  },
+  "vitae-directions-fold": (records) => {
+    assert.equal(
+      activityCards(records, /arrival directions/i).length,
+      0,
+      "stay directions never ship as an activity card"
+    );
+    assert.equal(
+      records.reviewQuestions.some((question) =>
+        /vitae/i.test(question.prompt)
+      ),
+      false,
+      "no question about stay directions"
+    );
+  },
+  "dropbags-folds-into-stay": (records) => {
+    assert.equal(
+      activityCards(records, /drop bags/i).length,
+      0,
+      "arrival-time bag drop folds into the stay"
+    );
+    const jan13 = records.items.filter(
+      (item) =>
+        item.itemType !== "note" &&
+        item.date === "2019-01-13" &&
+        !item.parentItemId
+    );
+    assert.equal(jan13.length, 4, "Jan 13 ships with exactly 4 cards");
+  },
+  "rome-key-pickup-suppressed": (records) => {
+    assert.equal(
+      activityCards(records, /key pickup/i).length,
+      0,
+      "access instructions never ship as a traveler card"
+    );
+  },
+  "budapest-note-copies-win": (records) => {
+    for (const venue of [/konyv bar/i, /mazel tov/i, /wine cellar/i, /gypsy music/i]) {
+      assert.equal(
+        activityCards(records, venue).length,
+        0,
+        `${venue} stays a city-note entry, not a dated card`
+      );
+    }
+  },
+  "cafe-central-planned-wins": (records) => {
+    const cards = activityCards(records, /cafe central/i);
+    assert.equal(cards.length, 1, "one Cafe Central card");
+    assert.equal(cards[0].date, "2019-01-20", "the planned breakfast wins");
+  },
+  "chain-bridge-single-card": (records) => {
+    const cards = activityCards(records, /chain bridge/i);
+    assert.equal(cards.length, 1, "one Chain Bridge card");
+    assert.equal(cards[0].startTime, "11:00", "the timed crossing wins");
+  },
+  "budget-scrubbed-from-notes": (records) => {
+    const notes = records.items.filter((item) => item.itemType === "note");
+    assert.ok(notes.length > 0, "city notes exist");
+    for (const note of notes) {
+      const text = `${note.title} ${note.description ?? ""}`;
+      assert.doesNotMatch(text, /budget|\$1200|\$100\/day/i);
+    }
+  },
+  "city-note-sections": (records) => {
+    const budapest = records.items.find(
+      (item) => item.itemType === "note" && /budapest/i.test(item.title)
+    );
+    assert.ok(budapest, "Budapest note exists");
+    assert.match(
+      budapest.description ?? "",
+      /^(Food|Drinks & Nightlife|Sights & Culture|Shopping|Getting Around|Local Tips|Notes):/m,
+      "note description renders labeled sections"
+    );
+  },
+  "one-castle-ticket-question": (records) => {
+    const ticketQuestions = records.reviewQuestions.filter(
+      (question) =>
+        question.status === "open" && /ticket|tour option/i.test(question.prompt)
+    );
+    assert.equal(
+      ticketQuestions.length,
+      1,
+      "exactly one castle-complex ticket question"
+    );
+    assert.match(ticketQuestions[0].prompt, /prague castle/i);
+  },
 };
 
 const records = assembleGroundTruthRecords();

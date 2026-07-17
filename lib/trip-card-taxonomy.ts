@@ -42,8 +42,15 @@ const BOOKING_GUARD_PATTERN =
 const LOOSE_TIP_PATTERN =
   /\b(also noted|notes?\s*(?:and|&)?\s*tips?|ideas?|recommendations?|eat|where to eat|food|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls?|shopping ideas|shopping notes?|transport notes?|transit tips?|local tips?|could visit|maybe visit|if time|possible sights?|things to check out)\b/;
 
+// Commitment requires first-person intent, booking language, a time, or a
+// confirmation (defect docket 2026-07-17, commitment-language fix): the
+// extraction model writes "Visit the museum" / "X visit." for everything, so
+// bare sight verbs ("visit", "explore", "stroll", "stop", "walk along",
+// "inside", "route") are parser phrasing, not evidence of a plan. Live runs
+// 7.17.1/7.17.2 kept Museum of Communism and Pinball Museum as activity
+// cards on the strength of that phrasing alone.
 const PLANNED_ACTIVITY_PATTERN =
-  /\b(we will|we'll|we are|we're|going to|plan to|planned|booked|reserved|reservation|take a tour|guided tour|visit|stop|doing this|continue your walk|walk along|route|same .* visit|inside|within|explore|wander|stroll)\b/;
+  /\b(we will|we'll|we are|we're|we want|we'd like|we would like|going to|plan to|planned|definitely|booked|reserved|reservation|take a tour|guided tour|doing this)\b/;
 
 const SIGHT_OR_LOOSE_PLACE_PATTERN =
   /\b(aquarium|basilica|cathedral|church|gallery|garden|hall|haus|house|landmark|market|monument|museum|park|palace|square|statue|synagogue|temple|tower|wheel)\b/;

@@ -411,8 +411,16 @@ function candidateFromArtifactPiece(
     };
   }
 
+  const numberValue = (key: string) => {
+    const value = payload[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+
   return {
     address: recordValue(payload, "address"),
+    approxLatitude: numberValue("approxLatitude"),
+    approxLongitude: numberValue("approxLongitude"),
+    area: recordValue(payload, "area"),
     category: recordValue(payload, "category"),
     date: recordValue(payload, "date"),
     description: truncate(recordValue(payload, "description")),

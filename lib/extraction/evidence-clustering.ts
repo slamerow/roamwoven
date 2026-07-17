@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
+import { resolveStructuralActivityDates } from "@/lib/extraction/canonical-placement-policy";
 import {
   canonicalCategoryId,
   canonicalItemType,
@@ -306,10 +307,18 @@ function normalizePayloadDates(
     })
   );
 
+  // A parseable date in the item's own section label/heading places the item
+  // on that day. "unknown" sections qualify too (live-run 7.17.2 PB-3: the
+  // parser tagged the Kutná Hora day-trip lines sourceSectionType "unknown",
+  // stranding Silver mines and Koscom undated); city_reference and
+  // booking_detail sections stay excluded — a ticket PDF's print date is not
+  // an itinerary day.
   if (
     !stringValue(normalized, "date") &&
     stringValue(normalized, "itemType") !== "note" &&
-    stringValue(normalized, "sourceSectionType") === "dated_itinerary"
+    (stringValue(normalized, "sourceSectionType") === "dated_itinerary" ||
+      stringValue(normalized, "sourceSectionType") === "unknown" ||
+      !stringValue(normalized, "sourceSectionType"))
   ) {
     const structuralDates = [
       stringValue(normalized, "sourceSectionLabel"),
@@ -481,6 +490,19 @@ function stableHash(value: unknown) {
 
 function normalizedComparable(value: unknown) {
   return typeof value === "string" ? normalizeText(value) : "";
+}
+
+// Same-venue repeat detection must survive meal-prefix phrasing: "Breakfast
+// at Cafe Central" (Jan 20) and "Cafe Central" (Jan 19) are one venue, not
+// two (live-run 7.17.2 duplicate). Meal words are stripped ONLY for repeat
+// keying — meal-slot commitment itself is judged on the full text.
+function mentionComparableTitle(value: unknown) {
+  const normalized = normalizedComparable(value);
+  if (!normalized) return "";
+  const stripped = normalized
+    .replace(/^(?:breakfast|brunch|lunch|dinner|coffee|drinks?)\s+(?:at|in)?\s*/,"")
+    .trim();
+  return stripped || normalized;
 }
 
 function normalizedClockTime(value: unknown) {
@@ -2253,9 +2275,16 @@ function suppressRepresentedTravelAndStayActivities(
     }
 
     // A bare stay-name activity ("AirBNB") duplicating a stay record: every
-    // distinctive title word belongs to a stay's name and the date falls in
+    // meaningful title word belongs to a stay's name and the date falls in
     // that stay's range → the stay row is the single home (RW-ASM-001).
-    const bareTitleTokens = distinctiveTitleTokens(
+    //
+    // Live-run 7.17.2 defect (PB-2): this rule previously used
+    // distinctiveTitleTokens, whose venue-type stopwords ("castle",
+    // "cathedral", "museum"…) reduced "Prague Castle" to the single token
+    // "prague" — fully contained in "Prague Airbnb" — so a real sight was
+    // suppressed as a lodging shadow. Bare-stay matching must keep venue-type
+    // words: a title that names a castle is never a bare stay alias.
+    const bareTitleTokens = stayAliasTitleTokens(
       stringValue(activity.payload, "title") ?? ""
     );
     if (
@@ -2296,31 +2325,33 @@ function suppressRepresentedTravelAndStayActivities(
       }
     }
 
-    if (!/\b(?:check in|check-in|check out|check-out|drop bags?|bag drop)\b/.test(text)) {
+    if (
+      !/\b(?:check(?:ing)? in(?:to)?|check-in|check out|check-out|drop bags?|bag drop)\b/.test(
+        text
+      )
+    ) {
       continue;
     }
 
+    // Live-run 7.17.2 defect: "Arrive in Rome and drop bags" at the flight's
+    // own arrival time survived as an activity because "spend the day
+    // touring" context counted as a distinct arrival action. A bag drop that
+    // happens AT a same-date transport arrival time IS the arrival — it folds
+    // into the stay (ground truth v2 night/stay rules). Only a bag drop at a
+    // clearly different time than every same-date arrival is a separate
+    // luggage movement.
     const activityTime = timeFrom(activity.payload);
-    const activityCity = stringValue(activity.payload, "city");
     const distinctArrivalAction = Boolean(
       activityTime &&
-        /\b(?:arrive|arrival|land|landing)\b/.test(text) &&
-        /\b(?:drop bags?|bag drop)\b/.test(text) &&
-        (transports.some(
+        /\b(?:drop bags?|bag drop|luggage)\b/.test(text) &&
+        transports.some((transport) =>
+          sameCanonicalDate(activity.payload, transport.payload)
+        ) &&
+        !transports.some(
           (transport) =>
             sameCanonicalDate(activity.payload, transport.payload) &&
-            (normalizedClockTime(transport.payload.arrivalTime) === activityTime ||
-              Boolean(
-                activityCity &&
-                  locationsMatch(
-                    transport.payload.arrival ?? transport.payload.arrivalLocation,
-                    activityCity
-                  )
-              ))
-        ) ||
-          /\b(?:before|then|later|spend (?:the )?day|sightsee|tour|explore|continue)\b/.test(
-            text
-          ))
+            normalizedClockTime(transport.payload.arrivalTime) === activityTime
+        )
     );
 
     if (distinctArrivalAction) {
@@ -2353,10 +2384,77 @@ function suppressRepresentedTravelAndStayActivities(
   }
 }
 
+// Lodging access/arrival content is stay material, never a traveler activity
+// (live-run 7.17.2 PB-3/AS-3: "Vitae Hostel arrival directions" became a
+// dated activity with a date question and a public buzzer number; "Rome
+// arrival / key pickup" carried apartment access instructions into a card).
+const STAY_ACCESS_INSTRUCTION_PATTERN =
+  /\b(?:key (?:will be|to be|is) (?:prepared|ready|left)|key pickup|lockbox|lock box|buzzer(?:\s+number)?|door code|access code|entry code|wifi password|wi-fi password|apartment is on the|door on the (?:left|right)|directions? (?:from|to) .{0,60}\b(?:station|airport|hostel|hotel|apartment|airbnb|stay)\b)/i;
+
 function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
   const stays = pieces.filter(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
+
+  // Stay-name arrival material: an activity whose title/text names a stay and
+  // reads as directions/access instructions attaches to that stay silently —
+  // and never generates a placement question (stays never get item date
+  // questions, defect docket 2026-07-17).
+  for (const activity of pieces.filter(
+    (piece) => piece.kind === "activity" && piece.outputEligible
+  )) {
+    const text = activityText(activity.payload);
+    const title = stringValue(activity.payload, "title") ?? "";
+
+    if (
+      !STAY_ACCESS_INSTRUCTION_PATTERN.test(text) &&
+      !/\barrival directions\b|\bgetting there\b/i.test(title)
+    ) {
+      continue;
+    }
+
+    const namedStay = stays.find((stay) => {
+      const stayTokens = stayAliasTitleTokens(
+        stringValue(stay.payload, "name") ?? ""
+      );
+      if (stayTokens.length === 0) return false;
+      const haystack = foldForSourceSupport(`${title} ${text}`);
+      return stayTokens.every((token) => haystack.includes(token));
+    });
+
+    if (namedStay) {
+      const instructions = stringValue(activity.payload, "description");
+      if (instructions) {
+        const existing = stringValue(namedStay.payload, "accessInstructions");
+        if (!existing) {
+          namedStay.payload.accessInstructions = instructions;
+        }
+      }
+      suppressCanonicalPiece(
+        activity,
+        "stay arrival/access instructions attached to stay record"
+      );
+      continue;
+    }
+
+    // Access instructions that name no known stay still never ship as a
+    // traveler card WHEN stay records exist to carry access details: a
+    // mis-attributed access card is a privacy leak (7.17.2 "Rome arrival /
+    // key pickup" carried another stay's apartment instructions). With no
+    // stay records at all, the card survives so the source text is preserved
+    // for card-detail protection instead of vanishing (RW-ING-001).
+    if (
+      stays.length > 0 &&
+      STAY_ACCESS_INSTRUCTION_PATTERN.test(text) &&
+      !timeFrom(activity.payload)
+    ) {
+      suppressCanonicalPiece(
+        activity,
+        "access instructions are stay material, not a traveler activity"
+      );
+      continue;
+    }
+  }
 
   for (const activity of pieces.filter(
     (piece) => piece.kind === "activity" && piece.outputEligible
@@ -3060,7 +3158,10 @@ function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
 
     if (piece.kind !== "activity" && piece.kind !== "note") continue;
     const title = stringValue(piece.payload, "title");
-    const description = stringValue(piece.payload, "description");
+    const description = sanitizeCanonicalCardDescription(
+      stringValue(piece.payload, "description")
+    );
+    piece.payload.description = description;
     const itemType = piece.kind === "note"
       ? "note"
       : canonicalItemType({
@@ -3076,6 +3177,55 @@ function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
       title,
     });
   }
+}
+
+// Card prose hygiene at the output boundary (live-run 7.17.2 PB-1): merged
+// evidence must not echo the same sentence three times, and enrichment must
+// never carry a booking document's customer-identity block (name, home
+// address, email, phone) into traveler-visible text. Reservation numbers are
+// deliberately NOT stripped here — under the 2026-07-17 privacy scope,
+// activity booking references are public; personal identity data is not trip
+// content at all.
+const CARD_IDENTITY_SENTENCE_PATTERN =
+  /\b(?:customer|renter|driver|passenger|lead (?:traveler|guest))\s*:|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b|(?:\+?\d[\d\s().-]{8,}\d)\s*$|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/i;
+
+function sanitizeCanonicalCardDescription(value: string | null) {
+  if (!value) return value;
+
+  const segments = value
+    .split(/(?<=[.!?])\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const kept: string[] = [];
+
+  const keptTokenSets: Array<Set<string>> = [];
+
+  for (const segment of segments) {
+    if (CARD_IDENTITY_SENTENCE_PATTERN.test(segment)) continue;
+    const normalized = normalizeText(segment).replace(/[^a-z0-9 ]/g, "");
+    if (normalized && seen.has(normalized)) continue;
+    const tokens = new Set(normalized.split(" ").filter(Boolean));
+    // Near-duplicate echo ("Pick up car at 9:00 AM." / "Pick up car at
+    // 9 am."): high token overlap on substantial sentences is the same
+    // sentence merged twice, not new information.
+    if (tokens.size >= 4) {
+      const isEcho = keptTokenSets.some((existing) => {
+        const smaller = Math.min(existing.size, tokens.size);
+        if (smaller < 4) return false;
+        let shared = 0;
+        for (const token of tokens) if (existing.has(token)) shared += 1;
+        return shared / smaller >= 0.8;
+      });
+      if (isEcho) continue;
+    }
+    if (normalized) seen.add(normalized);
+    keptTokenSets.push(tokens);
+    kept.push(segment);
+  }
+
+  const rebuilt = kept.join(" ").trim();
+  return rebuilt || null;
 }
 
 function shiftIsoDate(value: string, days: number) {
@@ -3208,31 +3358,173 @@ function sanitizeCityNoteText(value: unknown) {
     .trim();
 }
 
-function cityNoteCollectionDescription(notes: CanonicalEvidencePiece[]) {
-  const labeledEntries = new Map<string, string[]>();
-  let description: string | null = null;
+// City-note sections (Eli-approved taxonomy, 2026-07-17 evening): one City
+// Note per city, organized into universal sections. Splitting later is
+// additive; merging later breaks fixtures — start with the merged seven.
+export const CITY_NOTE_SECTIONS = [
+  "Food",
+  "Drinks & Nightlife",
+  "Sights & Culture",
+  "Shopping",
+  "Getting Around",
+  "Local Tips",
+  "Notes",
+] as const;
+
+export type CityNoteSection = (typeof CITY_NOTE_SECTIONS)[number];
+
+// Costs/budget planning artifacts are excluded from the traveler app
+// entirely (ground truth v2 "Excluded entirely"; live-run 7.17.2 shipped
+// "Budget notes: $1200 total, $100/day" inside the Budapest note).
+const COSTS_CONTENT_PATTERN =
+  /\bbudget\b|[$€£]\s?\d[\d,.]*\s*(?:total|\/\s*day|per\s+(?:day|night|person))|\btotal\b[^.]{0,20}[$€£]\s?\d|\bcosts?\s*:/i;
+
+const SECTION_LABEL_HINTS: Array<[RegExp, CityNoteSection]> = [
+  [/\b(?:eat|food|restaurants?|cafes?|bakery|bakeries|pastry|brunch|breakfast|lunch|dinner)\b/i, "Food"],
+  [/\b(?:drinks?|bars?|beer|beer halls?|wine|cocktails?|nightlife|pubs?|breweries|brewery)\b/i, "Drinks & Nightlife"],
+  [/\b(?:shop|shopping|markets?|souvenirs?|boutiques?|buy)\b/i, "Shopping"],
+  [/\b(?:transit|transport|metro|tram|bus|getting around|city pass|pass(?:es)?|luggage|arrival)\b/i, "Getting Around"],
+  [/\b(?:tips?|customs?|language|phrases?|safety|etiquette|good to know|practical|currency|money)\b/i, "Local Tips"],
+  [/\b(?:sights?|see|landmarks?|views?|museums?|galler(?:y|ies)|churche?s?|culture|monuments?)\b/i, "Sights & Culture"],
+];
+
+const SECTION_TEXT_HINTS: Array<[RegExp, CityNoteSection]> = [
+  [/\b(?:currency|huf|exchange rate|phrases?|pronunciation|pronounce|etiquette|customs?|safety|skippable|good to know|tipping)\b/i, "Local Tips"],
+  [/\b(?:metro|tram|transit|public transport|city pass|train ticket tip|airport bus|getting around)\b/i, "Getting Around"],
+  [/\b(?:shop|shopping|souvenir|boutique|watch shop|market for)\b/i, "Shopping"],
+  [/\b(?:bar|bars|beer|wine|cocktail|nightlife|pub|brewery|cellar|ruin bar)\b/i, "Drinks & Nightlife"],
+  [/\b(?:eat|food|restaurant|cafe|café|pastry|bakery|langos|lángos|trdelnik|soup|dish|meal|pizza|schnitzel|strudel)\b/i, "Food"],
+  [/\b(?:museum|gallery|church|cathedral|basilica|synagogue|castle|palace|tower|statue|monument|landmark|view|sight)\b/i, "Sights & Culture"],
+];
+
+function classifyCityNoteSection({
+  category,
+  label,
+  text,
+}: {
+  category: string | null;
+  label: string | null;
+  text: string;
+}): CityNoteSection {
+  if (label) {
+    for (const [pattern, section] of SECTION_LABEL_HINTS) {
+      if (pattern.test(label)) return section;
+    }
+  }
+  for (const [pattern, section] of SECTION_TEXT_HINTS) {
+    if (pattern.test(text)) return section;
+  }
+  switch (category) {
+    case "food_dining":
+      return "Food";
+    case "nightlife_entertainment":
+      return "Drinks & Nightlife";
+    case "shopping_tailor":
+      return "Shopping";
+    case "admin_logistics":
+      return "Getting Around";
+    case "art_culture":
+    case "temple_shrine":
+    case "tours_tickets":
+    case "scenic_ride":
+      return "Sights & Culture";
+    default:
+      return "Notes";
+  }
+}
+
+function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
+  const sections = new Map<CityNoteSection, string[]>();
+  const excludedCosts: string[] = [];
+
+  const addEntry = (
+    section: CityNoteSection,
+    entry: string
+  ) => {
+    const existing = sections.get(section) ?? [];
+    sections.set(
+      section,
+      mergeCityNoteDescription(existing.join("\n"), entry)?.split("\n") ?? existing
+    );
+  };
 
   for (const note of notes) {
-    const label = stringValue(note.payload, "_canonicalNoteCollectionLabel");
+    const label =
+      stringValue(note.payload, "_canonicalNoteCollectionLabel") ?? null;
+    const category = stringValue(note.payload, "category");
     const title = stringValue(note.payload, "title");
-    if (note.payload._canonicalNoteEntry === true && label && title) {
-      labeledEntries.set(label, [...(labeledEntries.get(label) ?? []), title]);
+
+    if (note.payload._canonicalNoteEntry === true && title) {
+      const text = sanitizeCityNoteText(title);
+      if (typeof text !== "string" || !text) continue;
+      if (COSTS_CONTENT_PATTERN.test(text)) {
+        excludedCosts.push(text);
+        continue;
+      }
+      addEntry(classifyCityNoteSection({ category, label, text }), text);
       continue;
     }
-    description = mergeCityNoteDescription(
-      description,
-      sanitizeCityNoteText(note.payload.description ?? note.payload.title)
+
+    const raw = sanitizeCityNoteText(
+      note.payload.description ?? note.payload.title
     );
+    if (typeof raw !== "string" || !raw) continue;
+    // Classify segment by segment so mixed prose lands in the right
+    // sections and budget lines can be excluded without losing neighbors.
+    const segments = raw
+      .split(/(?:\r?\n)+|(?<=[.!?])\s+/)
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    for (const segment of segments) {
+      if (COSTS_CONTENT_PATTERN.test(segment)) {
+        excludedCosts.push(segment);
+        continue;
+      }
+      addEntry(
+        classifyCityNoteSection({ category, label, text: segment }),
+        segment
+      );
+    }
   }
 
-  for (const [label, entries] of labeledEntries) {
-    description = mergeCityNoteDescription(
-      description,
-      `${label}: ${entries.join(", ")}`
-    );
-  }
+  const orderedSections = CITY_NOTE_SECTIONS.filter((section) =>
+    (sections.get(section) ?? []).length > 0
+  ).map((section) => ({
+    entries: sections.get(section) ?? [],
+    section,
+  }));
 
-  return description;
+  return { excludedCosts, sections: orderedSections };
+}
+
+function renderCityNoteSectionEntries(entries: string[]) {
+  let rendered = "";
+  for (const entry of entries) {
+    if (!rendered) {
+      rendered = entry;
+      continue;
+    }
+    rendered += /[.!?]$/.test(rendered) ? ` ${entry}` : `, ${entry}`;
+  }
+  return rendered;
+}
+
+function renderCityNoteSections(
+  sections: Array<{ entries: string[]; section: CityNoteSection }>
+) {
+  return sections
+    .map(
+      ({ entries, section }) =>
+        `${section}: ${renderCityNoteSectionEntries(entries)}`
+    )
+    .join("\n");
+}
+
+function cityNoteCollectionDescription(notes: CanonicalEvidencePiece[]) {
+  const { sections } = cityNoteCollectionSections(notes);
+  if (sections.length === 0) return null;
+
+  return renderCityNoteSections(sections);
 }
 
 // Content beats context (defect docket 2026-07-17): appendix material — a
@@ -3359,6 +3651,7 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       )?.city ??
       "City";
     const insertionIndex = Math.min(...group.map((note) => pieces.indexOf(note)));
+    const { excludedCosts, sections } = cityNoteCollectionSections(group);
     const target: CanonicalEvidencePiece = {
       actions: [],
       confidence: "high",
@@ -3371,16 +3664,30 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       observationIds: [],
       outputEligible: true,
       payload: {
+        _canonicalNoteSections: sections,
         category: first.payload.category,
         city,
         date: null,
-        description: cityNoteCollectionDescription(group),
+        description:
+          sections.length > 0
+            ? renderCityNoteSections(sections)
+            : cityNoteCollectionDescription(group),
         itemType: "note",
         title: `${city} Notes & Tips`,
       },
       role: "city_note_candidate",
     };
     pieces.splice(insertionIndex >= 0 ? insertionIndex : pieces.length, 0, target);
+
+    if (excludedCosts.length > 0) {
+      addCanonicalAction(target, {
+        absorbedTitles: excludedCosts,
+        observationIds: [],
+        reason:
+          "costs/budget planning content excluded from traveler notes (ground truth: Costs section is a planning artifact)",
+        type: "rejected",
+      });
+    }
 
     for (const note of group) {
       mergeCanonicalPieceInto({
@@ -4005,6 +4312,22 @@ function distinctiveTitleTokens(title: string) {
     );
 }
 
+// Structural words only — venue-type words ("castle", "museum", "hostel")
+// stay MEANINGFUL here. Used by bare-stay-name shadow matching, where
+// dropping venue words caused the 7.17.2 Prague Castle suppression (PB-2).
+const STAY_ALIAS_STRUCTURAL_STOPWORDS = new Set([
+  "and", "the", "for", "with", "day", "trip", "visit", "check", "checkin",
+]);
+
+function stayAliasTitleTokens(title: string) {
+  return foldForSourceSupport(title)
+    .split(/\s+/)
+    .filter(
+      (token) =>
+        token.length >= 3 && !STAY_ALIAS_STRUCTURAL_STOPWORDS.has(token)
+    );
+}
+
 function stampSourceSupport(
   payload: Record<string, unknown>,
   collection: string,
@@ -4077,6 +4400,74 @@ function suppressUnsupportedModelInventions(
 // evidence of two bookings). The booking-anchored copy wins identity; the
 // best proper-name title wins the label (existing field-rank rules); losers
 // stay in lineage per the CEO's merge-bias decision.
+
+// A card whose title is nothing but a place fragment ("Prague Downtown")
+// sharing the exact slot of a real card is a shard of that card's source
+// line, not an activity (live-run 7.17.2: the rental-car line "Revoluční
+// 1044/23, Prague Downtown … Return 8:00 PM" shed a 9:00 "Prague Downtown"
+// card with description "Return").
+const LOCATION_GENERIC_TOKENS = new Set([
+  "downtown", "city", "center", "centre", "central", "district", "old",
+  "town", "new", "street", "avenue", "square", "area", "quarter",
+]);
+
+function absorbLocationFragmentCards(pieces: CanonicalEvidencePiece[]) {
+  const cityTokens = new Set(
+    pieces
+      .filter((piece) => piece.kind === "place")
+      .flatMap((piece) =>
+        foldForSourceSupport(stringValue(piece.payload, "city") ?? "")
+          .split(/\s+/)
+          .filter(Boolean)
+      )
+  );
+  const slots = new Map<string, CanonicalEvidencePiece[]>();
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const date = stringValue(piece.payload, "date");
+    const time = normalizedClockTime(timeFrom(piece.payload));
+    if (!date || !time) continue;
+    const key = `${date}|${time}`;
+    const slot = slots.get(key);
+    if (slot) slot.push(piece);
+    else slots.set(key, [piece]);
+  }
+
+  for (const slot of slots.values()) {
+    if (slot.length < 2) continue;
+    for (const fragment of slot) {
+      if (!fragment.outputEligible) continue;
+      if (confirmationFrom(fragment.payload)) continue;
+      const titleTokens = foldForSourceSupport(
+        stringValue(fragment.payload, "title") ?? ""
+      )
+        .split(/\s+/)
+        .filter(Boolean);
+      if (titleTokens.length === 0) continue;
+      const isLocationFragment = titleTokens.every(
+        (token) =>
+          cityTokens.has(token) ||
+          LOCATION_GENERIC_TOKENS.has(token) ||
+          token.length < 3
+      );
+      if (!isLocationFragment) continue;
+      const target = slot.find(
+        (candidate) =>
+          candidate !== fragment &&
+          candidate.outputEligible &&
+          distinctiveTitleTokens(stringValue(candidate.payload, "title") ?? "")
+            .length > 0
+      );
+      if (!target) continue;
+      mergeCanonicalPieceInto({
+        reason:
+          "place-fragment card absorbed by the real card sharing its exact source slot",
+        source: fragment,
+        target,
+      });
+    }
+  }
+}
 
 function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
   const slots = new Map<string, CanonicalEvidencePiece[]>();
@@ -4207,7 +4598,18 @@ function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
         const generic = ordered[j];
         if (!generic.piece.outputEligible) continue;
         if (generic.phrase.length >= specific.phrase.length) continue;
-        if (!` ${specific.phrase} `.includes(` ${generic.phrase} `)) continue;
+        // A trailing/leading generic activity word does not defeat identity:
+        // "Chain Bridge walk" and "Szechenyi Chain Bridge / Four Seasons
+        // Hotel" are the same crossing (live-run 7.17.2 same-day dup). The
+        // stripped phrase must still carry at least two tokens.
+        const strippedGeneric = generic.phrase
+          .replace(/^(?:walk|visit|stroll)\s+|\s+(?:walk|visit|stroll)$/g, "")
+          .trim();
+        const genericPhrase =
+          strippedGeneric.split(" ").filter(Boolean).length >= 2
+            ? strippedGeneric
+            : generic.phrase;
+        if (!` ${specific.phrase} `.includes(` ${genericPhrase} `)) continue;
         // Same-site containers ("River Palace" vs "River Palace Gardens")
         // are parent/child structure for the grouping layer, not aliases.
         if (
@@ -4399,7 +4801,7 @@ function resolveUncommittedRepeatMentions(
 
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
-    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    const title = mentionComparableTitle(stringValue(piece.payload, "title"));
     if (!title) continue;
     // Same name in a DIFFERENT leg is never a duplicate (RW-CAN-001):
     // key repeats by the city their date falls in.
@@ -4538,6 +4940,129 @@ function resolveUncommittedRepeatMentions(
   }
 }
 
+// Dedup hierarchy across the card/note boundary (ground truth v2, approved
+// 2026-07-17): an uncommitted dated card whose venue also sits in a same-city
+// note list was "repeated but never committed" — the note copy is the single
+// home and the card disappears (live-run 7.17.2 promoted Konyv Bar, Mazel
+// Tov, the Hilton wine cellar and friends to Jan 21 activity cards while the
+// same venues sat in the Budapest note). Conversely, a committed card removes
+// its duplicate note-list entry ("planned wins, rec copy removed" —
+// Borkonyha).
+function reconcileCardsAgainstCityNotes(
+  pieces: CanonicalEvidencePiece[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const citiesForDate = canonicalCitiesForDate(pieces);
+  const notes = pieces.filter((piece) => piece.kind === "note");
+  if (notes.length === 0) return;
+
+  const placeCities = pieces
+    .filter((piece) => piece.kind === "place" && piece.outputEligible)
+    .map((piece) => normalizedComparable(stringValue(piece.payload, "city")))
+    .filter(Boolean);
+  const noteCity = (note: CanonicalEvidencePiece) => {
+    const explicit = normalizedComparable(stringValue(note.payload, "city"));
+    if (explicit) return explicit;
+    // Note collections often carry their city only in the title ("Budapest
+    // food ideas") until the later merge pass assigns it; split note ENTRIES
+    // carry it in their parent collection's title.
+    const text = normalizedComparable(
+      [
+        note.payload.title,
+        note.payload._canonicalNoteCollectionTitle,
+        note.payload.description,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    return placeCities.find((city) => text.includes(city)) ?? "";
+  };
+  const noteText = (note: CanonicalEvidencePiece) =>
+    normalizedComparable(
+      [note.payload.title, note.payload.description]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    // A card with its own standalone anchor (address, confirmation,
+    // provider details) is identifiable trip content — a note mentioning the
+    // same venue is enrichment, not a competing home ("Watches in Rome" with
+    // its street address stays a card).
+    if (
+      hasIndependentActivityAnchor(piece.payload) ||
+      stringValue(piece.payload, "address")
+    ) {
+      continue;
+    }
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title || title.length < 4) continue;
+    if (questionSubjects.has(title)) continue;
+    // A leg-boundary day (arrive Budapest = leave Vienna) belongs to BOTH
+    // cities for matching purposes.
+    const cities = citiesForDate(stringValue(piece.payload, "date"));
+    if (cities.size === 0) continue;
+    const commitment = mentionCommitment(piece, timedCounts);
+    const candidateNotes = notes.filter(
+      (note) => cities.has(noteCity(note)) && noteText(note).includes(title)
+    );
+    const matchingNote =
+      candidateNotes.find((note) => note.outputEligible) ??
+      candidateNotes[0] ??
+      null;
+    if (!matchingNote) continue;
+
+    if (commitment === "none") {
+      if (matchingNote.outputEligible) {
+        mergeCanonicalPieceInto({
+          reason:
+            "repeated but never committed: the city-note copy is the single home",
+          source: piece,
+          target: matchingNote,
+        });
+      } else {
+        // The matching note list was itself routed elsewhere; the card still
+        // demotes — an uncommitted repeat never ships as a dated card.
+        demoteCanonicalPieceToCityNote(
+          piece,
+          "repeated but never committed: demoted to the city notes"
+        );
+      }
+      continue;
+    }
+
+    // Committed card wins: silently remove the duplicate note-list entry.
+    const description = stringValue(matchingNote.payload, "description");
+    if (!description) continue;
+    const segments = description.split(/([,;]\s*|(?<=[.!?])\s+)/);
+    const kept = segments.filter((segment, index) => {
+      if (index % 2 === 1) return true; // separators
+      const normalized = normalizedComparable(segment);
+      return !normalized || normalized !== title;
+    });
+    const rebuilt = kept
+      .join("")
+      .replace(/,\s*,/g, ", ")
+      .replace(/:\s*,/g, ": ")
+      .replace(/,\s*\./g, ".")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    if (rebuilt !== description) {
+      matchingNote.payload.description = rebuilt;
+      addCanonicalAction(matchingNote, {
+        absorbedTitles: [stringValue(piece.payload, "title") ?? title],
+        observationIds: [...matchingNote.observationIds],
+        reason:
+          "planned activity wins over its note-list copy: duplicate entry removed",
+        type: "recovered",
+      });
+    }
+  }
+}
+
 function demoteHedgedSingleUncommittedMentions(
   pieces: CanonicalEvidencePiece[],
   missingDetails: unknown[]
@@ -4625,14 +5150,21 @@ function maxPairwiseKm(coords: Array<{ lat: number; lng: number }>) {
 }
 
 function createDeterministicGeoGroupingDecisions({
+  existingDecisions = [],
   missingDetails,
   observations,
   pieces,
 }: {
+  existingDecisions?: CanonicalGroupingDecision[];
   missingDetails: unknown[];
   observations: EvidenceObservation[];
   pieces: CanonicalEvidencePiece[];
 }): CanonicalGroupingDecision[] {
+  // Candidates the resolver has already ruled on stay with the resolver's
+  // decision — the deterministic pass never re-groups or overrides them.
+  const claimedCandidateIds = new Set(
+    existingDecisions.flatMap((decision) => decision.candidateIds)
+  );
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const timedCounts = timedActivityCountsByDate(pieces);
   const observationById = new Map(
@@ -4657,9 +5189,24 @@ function createDeterministicGeoGroupingDecisions({
     return candidateId;
   };
 
+  const pieceIsClaimed = (piece: CanonicalEvidencePiece) => {
+    if (claimedCandidateIds.size === 0) return false;
+    const resolverId = stringValue(piece.payload, "_resolverCandidateId");
+    if (resolverId && claimedCandidateIds.has(resolverId)) return true;
+    return piece.observationIds.some((observationId) => {
+      const observation = observationById.get(observationId);
+      const candidateId = observation
+        ? stringValue(observation.payload, "_resolverCandidateId") ??
+          observation.id
+        : null;
+      return Boolean(candidateId && claimedCandidateIds.has(candidateId));
+    });
+  };
+
   const byDate = new Map<string, CanonicalEvidencePiece[]>();
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
+    if (pieceIsClaimed(piece)) continue;
     const date = stringValue(piece.payload, "date");
     if (!date) continue;
     const group = byDate.get(date);
@@ -4673,8 +5220,13 @@ function createDeterministicGeoGroupingDecisions({
   for (const [date, dayPieces] of byDate) {
     const located = dayPieces.filter((piece) => pieceCoordinates(piece));
 
-    // SAME-SITE VISITS: a container-named site owning stops within ~300 m.
-    for (const container of located) {
+    // SAME-SITE VISITS: a container-named site owning stops within ~300 m,
+    // or stops the source itself places inside the container (RW-GRP-001
+    // source hierarchy: a child listed in the container's own description, or
+    // titled "<stop> at <Site>", belongs to the visit even when the parser
+    // gave that stop no coordinates — live-run 7.17.2 left Apple Strudel
+    // Show and Panorama Train outside Schönbrunn for lack of coords).
+    for (const container of dayPieces) {
       if (grouped.has(container)) continue;
       const containerTitle = stringValue(container.payload, "title");
       if (
@@ -4684,16 +5236,52 @@ function createDeterministicGeoGroupingDecisions({
         continue;
       }
       const origin = pieceCoordinates(container);
-      if (!origin) continue;
-      const children = located.filter((piece) => {
+      const containerText = normalizedComparable(
+        [container.payload.title, container.payload.description]
+          .filter(Boolean)
+          .join(" ")
+      );
+      const containerTokens = distinctiveTitleTokens(containerTitle);
+      const children = dayPieces.filter((piece) => {
         if (piece === container || grouped.has(piece)) return false;
         if (confirmationFrom(piece.payload)) return false;
         const coords = pieceCoordinates(piece);
-        return Boolean(
-          coords && haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
+        if (
+          origin &&
+          coords &&
+          haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
+        ) {
+          return true;
+        }
+        const childTitle = normalizedComparable(
+          stringValue(piece.payload, "title")
+        );
+        if (!childTitle) return false;
+        if (childTitle.length >= 6 && containerText.includes(childTitle)) {
+          return true;
+        }
+        return containerTokens.some(
+          (token) =>
+            token.length >= 5 && ` ${childTitle} `.includes(` ${token} `)
         );
       });
       if (children.length < 2) continue;
+
+      // Call claims state the actual rule that fired (doctrine v3).
+      const geoChildCount = origin
+        ? children.filter((piece) => {
+            const coords = pieceCoordinates(piece);
+            return Boolean(
+              coords && haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
+            );
+          }).length
+        : 0;
+      const membershipClaim =
+        geoChildCount === children.length
+          ? `${children.length} stops sit inside ${containerTitle}'s grounds (within ${Math.round(SAME_SITE_RADIUS_KM * 1000)} m)`
+          : geoChildCount === 0
+            ? `the source lists ${children.length} stops inside ${containerTitle}'s own visit`
+            : `${geoChildCount} stops sit inside ${containerTitle}'s grounds (within ${Math.round(SAME_SITE_RADIUS_KM * 1000)} m) and the source places ${children.length - geoChildCount} more inside the same visit`;
 
       const containerId = candidateIdFor(container);
       const childIds = children
@@ -4704,7 +5292,7 @@ function createDeterministicGeoGroupingDecisions({
       decisions.push({
         callRequired: true,
         candidateIds: [containerId, ...childIds],
-        claim: `same-site visit: ${children.length} stops sit inside ${containerTitle}'s grounds (within ${Math.round(SAME_SITE_RADIUS_KM * 1000)} m), so one visit card owns them`,
+        claim: `same-site visit: ${membershipClaim}, so one visit card owns them`,
         containerCandidateId: containerId,
         decisionId: `deterministic-site-${stableHash({ date, title: containerTitle })}`,
         parentCandidateId: containerId,
@@ -4855,6 +5443,101 @@ function createResearchedListQuestions(
   return questions;
 }
 
+// Day-title slot rule (ground truth v2, question #3): when a source day
+// TITLE commits an activity slot ("… // Budapest Bathing") but the matching
+// entries read as options (untimed, unbooked, alias variants), the slot is
+// committed and the venue is not — that is a maker question, not silent
+// demotion. Live runs 7.17.1/7.17.2 never fired the baths question.
+const DAY_SLOT_LEXICON: Array<{ pattern: RegExp; slot: string; stems: RegExp }> = [
+  {
+    pattern: /\bbath(?:s|ing)?\b|\bspa day\b|\bthermal\b/i,
+    slot: "bathing",
+    stems: /\bbaths?\b|\bspa\b|\bthermal\b/i,
+  },
+];
+
+function createDayLabelSlotQuestions(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  const questions: Array<Record<string, unknown>> = [];
+
+  for (const { pattern, slot, stems } of DAY_SLOT_LEXICON) {
+    // Section labels that commit the slot.
+    const slotLabels = new Set(
+      observations
+        .flatMap((observation) => [
+          observation.sourceStructure.sectionLabel,
+          observation.sourceLabel,
+          ...observation.sourceStructure.headingPath,
+        ])
+        .filter((value): value is string => Boolean(value))
+        .filter((label) => pattern.test(label))
+    );
+    if (slotLabels.size === 0) continue;
+
+    const candidates = pieces.filter((piece) => {
+      if (!committedMentionPieceCandidate(piece)) return false;
+      const title = stringValue(piece.payload, "title");
+      if (!title || !stems.test(title)) return false;
+      if (questionSubjects.has(normalizedComparable(title))) return false;
+      return mentionCommitment(piece, timedCounts) === "none";
+    });
+    if (candidates.length === 0) continue;
+
+    // Already asked by the parser or another rule?
+    const alreadyAsked = questions.some((question) =>
+      stems.test(String(question.prompt ?? ""))
+    );
+    if (alreadyAsked) continue;
+
+    const titles = Array.from(
+      new Set(
+        candidates
+          .map((piece) => stringValue(piece.payload, "title"))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const subject = candidates[0];
+    const subjectObservation = subject.observationIds
+      .map((id) => observationById.get(id))
+      .find(Boolean);
+
+    questions.push({
+      _canonicalReviewDisposition: "question",
+      _canonicalQuestionKind: "day_label_slot",
+      answerType: "text",
+      confidence: "medium",
+      evidence: `The day title commits ${slot}, and the source lists ${titles.join(
+        ", "
+      )} as options.`,
+      guessedValue: null,
+      prompt: `The itinerary plans ${slot}, but ${
+        titles.length > 1 ? `${titles.join(" and ")} both` : `${titles[0]} only`
+      } appear${titles.length > 1 ? "" : "s"} as options — which one, or keep as ideas?`,
+      reason:
+        "The source day title commits this slot but does not choose the venue.",
+      relatedCanonicalPieceId: subject.id,
+      relatedTitle: stringValue(subject.payload, "title"),
+      resolverDecisionId: `deterministic-day-slot-${stableHash({
+        slot,
+        sourceLabel: subjectObservation?.sourceLabel ?? null,
+        titles,
+      })}`,
+      subjectType: "item",
+      targetField: "description",
+    });
+  }
+
+  return questions;
+}
+
 function reclassifySourceContainers(observations: EvidenceObservation[]) {
   const activities = observations.filter(
     (observation) => observation.kind === "activity"
@@ -4891,6 +5574,14 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
       approvedGrouping ||
       approvedKeepActivity
     ) {
+      continue;
+    }
+
+    // A same-site container (castle/palace/complex visit) whose description
+    // lists its component stops is GROUPING STRUCTURE, not redundant
+    // context: it becomes the parent of one same-site visit (RW-GRP-001,
+    // doctrine v3). Only generic day/list containers demote to context.
+    if (SAME_SITE_CONTAINER_PATTERN.test(title)) {
       continue;
     }
 
@@ -6261,6 +6952,41 @@ export function canonicalizeCanonicalReviewDetails(
         : subjectId;
     ticketRoots.set(rootId, [...(ticketRoots.get(rootId) ?? []), detail]);
   }
+  // One venue complex, one open decision (CEO 2026-07-17 evening: St. Vitus
+  // folds into ONE castle ticket question). Even when grouping has not
+  // parented the sub-stop, same-day ticket/tour questions are one source
+  // decision — dedupe by normalized decision, root at the container-named
+  // subject.
+  const ticketRootIds = [...ticketRoots.keys()];
+  for (const rootId of ticketRootIds) {
+    if (!ticketRoots.has(rootId)) continue;
+    const rootPiece = pieceById.get(rootId);
+    if (!rootPiece) continue;
+    const rootDate = stringValue(rootPiece.payload, "date");
+    if (!rootDate) continue;
+    for (const otherId of ticketRootIds) {
+      if (otherId === rootId || !ticketRoots.has(otherId) || !ticketRoots.has(rootId)) {
+        continue;
+      }
+      const otherPiece = pieceById.get(otherId);
+      if (!otherPiece) continue;
+      if (stringValue(otherPiece.payload, "date") !== rootDate) continue;
+      const rootIsContainer = SAME_SITE_CONTAINER_PATTERN.test(
+        stringValue(rootPiece.payload, "title") ?? ""
+      );
+      const otherIsContainer = SAME_SITE_CONTAINER_PATTERN.test(
+        stringValue(otherPiece.payload, "title") ?? ""
+      );
+      if (!rootIsContainer && otherIsContainer) continue; // handled from the other side
+      const keepId = rootIsContainer ? rootId : rootId;
+      const foldId = otherId;
+      ticketRoots.set(keepId, [
+        ...(ticketRoots.get(keepId) ?? []),
+        ...(ticketRoots.get(foldId) ?? []),
+      ]);
+      ticketRoots.delete(foldId);
+    }
+  }
   const droppedTicketVariants = new Set<Record<string, unknown>>();
   for (const [rootId, variants] of ticketRoots) {
     if (variants.length < 2 && stringValue(variants[0], "relatedCanonicalPieceId") === rootId) {
@@ -6384,6 +7110,7 @@ export function clusterExtractedEvidence({
             const entryPayload = {
               ...payload,
               _canonicalNoteCollectionLabel: noteEntries.collectionLabel,
+              _canonicalNoteCollectionTitle: stringValue(payload, "title"),
               _canonicalNoteEntry: true,
               date: null,
               description: noteEntries.collectionLabel
@@ -6550,6 +7277,11 @@ export function clusterExtractedEvidence({
     startingOrdinal: ordinal,
   });
   applyExplicitSourceUpdates(pieces);
+  // Card/note reconciliation must see the ORIGINAL note lists before
+  // accessory routing strips matched sentences onto activity records —
+  // otherwise an uncommitted venue card eats its own note evidence and
+  // survives (live-run 7.17.2 Budapest promotions).
+  reconcileCardsAgainstCityNotes(pieces, missingDetails);
   routeCanonicalAccessoryEvidence({
     actions: {
       addAction: addCanonicalAction,
@@ -6559,18 +7291,33 @@ export function clusterExtractedEvidence({
     pieces,
     tripYear,
   });
+  resolveStructuralActivityDates({
+    addAction: addCanonicalAction,
+    observations,
+    pieces,
+    tripBounds: tripDateBounds(pieces),
+    tripYear,
+  });
   assignProvisionalActivityDates({ observations, pieces });
+  absorbLocationFragmentCards(pieces);
   collapseSlotCollisions(pieces);
   collapseTitleContainmentAliases(pieces);
   resolveUncommittedRepeatMentions(pieces, observations, missingDetails);
+  reconcileCardsAgainstCityNotes(pieces, missingDetails);
   demoteHedgedSingleUncommittedMentions(pieces, missingDetails);
   const researchedListQuestions = createResearchedListQuestions(
     pieces,
     missingDetails
   );
+  const dayLabelSlotQuestions = createDayLabelSlotQuestions(
+    pieces,
+    observations,
+    [...missingDetails, ...researchedListQuestions]
+  );
   const combinedGroupingDecisions = [
     ...groupingDecisions,
     ...createDeterministicGeoGroupingDecisions({
+      existingDecisions: groupingDecisions,
       missingDetails,
       observations,
       pieces,
@@ -6623,6 +7370,7 @@ export function clusterExtractedEvidence({
         ...canonicalConflictQuestions,
         ...canonicalOwnedQuestions,
         ...researchedListQuestions,
+        ...dayLabelSlotQuestions,
         ...canonicalSpineQuestions,
         ...missingDetails,
       ],

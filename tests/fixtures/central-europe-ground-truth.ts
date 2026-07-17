@@ -18,6 +18,21 @@ const sourceFilename = "central-europe.pdf";
 export function createCentralEuropeGroundTruthDraft() {
   return {
     activities: [
+      // Live-run 7.17.2 shape: an arrival bag-drop at the flight's own
+      // arrival time folds into the Stay row — Jan 13 ships with exactly the
+      // four sequenced sights below.
+      {
+        address: null,
+        category: "arrival_departure",
+        date: "2019-01-13",
+        description:
+          "Land in Rome at 10:15, drop bags at hostel, and spend the day touring starting at 1:30.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: "10:15",
+        title: "Arrive in Rome and drop bags",
+      },
       // Jan 13 — Rome: timed/sequenced stops, no invented parent.
       {
         address: null,
@@ -201,17 +216,45 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: null,
         title: "Trdelnik breakfast",
       },
+      // Live-run 7.17.2 shape (PB-2): the parser emits a bare "Prague
+      // Castle" container plus separate component stops. The container must
+      // survive the stay-shadow pass despite sharing "Prague" with the
+      // Prague Airbnb stay, and the components group under it as one
+      // same-site visit from the container's own description.
       {
         address: null,
         category: "tours_tickets",
         date: "2019-01-16",
         description:
-          "Prague Castle complex, about 2 hours. Changing of the Guard at 12:00 PM, St. Vitus Cathedral, Golden Lane. Need to decide which ticket.",
+          "Prague castle (2 hours) • Changing of the Guard - 12:00 PM • St. Vitus Cathedral • Need to decide which ticket to get.",
         endTime: null,
         itemType: "activity",
         sourceFilename,
         startTime: null,
-        title: "Prague Castle complex",
+        title: "Prague Castle",
+      },
+      {
+        address: null,
+        category: "art_culture",
+        date: "2019-01-16",
+        description: "Changing of the Guard at noon.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: "12:00",
+        title: "Changing of the Guard",
+      },
+      {
+        address: null,
+        category: "art_culture",
+        date: "2019-01-16",
+        description:
+          "St. Vitus Cathedral visit; source notes to decide whether to get a ticket or tour.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "St. Vitus Cathedral",
       },
       {
         address: null,
@@ -307,7 +350,10 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: null,
         title: "R2D2 statue",
       },
-      // Jan 17 — Kutna Hora day trip.
+      // Jan 17 — Kutna Hora day trip. Live-run 7.17.2 shape (PB-3): the
+      // parser emits the day-trip lines UNDATED with the day only in the
+      // section label; placement must come from source structure, never a
+      // city-leg guess plus a date question.
       {
         address: null,
         category: "temple_shrine",
@@ -333,22 +379,28 @@ export function createCentralEuropeGroundTruthDraft() {
       {
         address: null,
         category: "tours_tickets",
-        date: "2019-01-17",
+        date: null,
         description: "Silver mines tour.",
         endTime: null,
         itemType: "activity",
         sourceFilename,
+        sourceHeadingPath: ["Thursday, January 17th - Kutna Hora day trip"],
+        sourceSectionLabel: "Thursday, January 17th - Kutna Hora day trip",
+        sourceSectionType: "unknown",
         startTime: null,
         title: "Silver mines",
       },
       {
         address: null,
         category: "shopping_tailor",
-        date: "2019-01-17",
+        date: null,
         description: "Be back by 5 to go to koscom.",
         endTime: null,
         itemType: "activity",
         sourceFilename,
+        sourceHeadingPath: ["Thursday, January 17th - Kutna Hora day trip"],
+        sourceSectionLabel: "Thursday, January 17th - Kutna Hora day trip",
+        sourceSectionType: "unknown",
         startTime: null,
         title: "Koscom",
       },
@@ -409,7 +461,10 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: null,
         title: "Upper and Lower Belvedere",
       },
-      // Jan 19 — Schönbrunn cluster (source-authored same-site visit).
+      // Jan 19 — Schönbrunn cluster, live-run 7.17.2 shape: the parser emits
+      // the container AND separate component stops (only some with usable
+      // coordinates). Source hierarchy — the container's own description —
+      // must pull ALL components into one visit (7.17.2 grouped 3 of 5).
       {
         address: null,
         category: "tours_tickets",
@@ -421,6 +476,54 @@ export function createCentralEuropeGroundTruthDraft() {
         sourceFilename,
         startTime: null,
         title: "Schonbrunn Palace visit",
+      },
+      {
+        address: null,
+        approxLatitude: 48.1849,
+        approxLongitude: 16.3122,
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Gloriette visit.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Gloriette",
+      },
+      {
+        address: null,
+        approxLatitude: 48.1873,
+        approxLongitude: 16.3096,
+        category: "art_culture",
+        date: "2019-01-19",
+        description: "Orangeriegarten at Schonbrunn visit.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Orangeriegarten at Schonbrunn",
+      },
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-19",
+        description: "Apple Strudel Show",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Apple Strudel Show",
+      },
+      {
+        address: null,
+        category: "scenic_ride",
+        date: "2019-01-19",
+        description: "Panorama Train pass",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Panorama Train pass",
       },
       // Jan 19 disjunction: one committed slot, unresolved choice.
       {
@@ -446,6 +549,20 @@ export function createCentralEuropeGroundTruthDraft() {
         sourceFilename,
         startTime: null,
         title: "Vienna ideas",
+      },
+      // Live-run 7.17.2 duplicate: an uncommitted "Cafe Central" idea copy on
+      // Jan 19 next to the committed Jan 20 breakfast. Meal-prefix aliasing
+      // must fold them into the planned Jan 20 card.
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-19",
+        description: "Cafe Central.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Cafe Central",
       },
       // Jan 20 — deliberate list.
       {
@@ -513,6 +630,82 @@ export function createCentralEuropeGroundTruthDraft() {
         sourceFilename,
         startTime: null,
         title: "Laundry",
+      },
+      // Live-run 7.17.2 shape (PB-3/AS-3): stay arrival directions emitted
+      // as a dated activity with a public buzzer number. Must fold into the
+      // Vitae Hostel stay — no card, no date question.
+      {
+        address: null,
+        category: "admin_logistics",
+        date: "2019-01-22",
+        description:
+          "Directions from Keleti International train station to the hostel: take M2 to Blaha Lujza Ter, then tram 4 or 6 to Kiraly Utca. Buzzer number 25.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Vitae Hostel arrival directions",
+      },
+      // Live-run 7.17.2 shape (PB-4): arrival-day recommendation dump
+      // promoted to dated Jan 21 activity cards while the same venues sit in
+      // the Budapest notes. The note copy is the single home.
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-21",
+        description: "Konyv Bar.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Konyv Bar",
+      },
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-21",
+        description: "Mazel Tov restaurant.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Mazel Tov",
+      },
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-21",
+        description: "Wine cellar in the Hilton.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Wine cellar in the Hilton",
+      },
+      {
+        address: null,
+        category: "food_dining",
+        date: "2019-01-21",
+        description: "Hear gypsy music.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Hear gypsy music",
+      },
+      // Budapest tips note carrying the same venues (plus budget noise the
+      // Costs rule must scrub — ground truth: Costs are planning artifacts).
+      {
+        address: null,
+        category: "food_dining",
+        date: null,
+        description:
+          "Hear gypsy music. Wine cellar in the Hilton. Ruszwurm pastry shop. Budget notes: $1200 total, $100/day.",
+        endTime: null,
+        itemType: "note",
+        sourceFilename,
+        startTime: null,
+        title: "Budapest tips",
       },
       // Budapest: baths options (question #3 subject).
       {
@@ -607,6 +800,33 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: "20:00",
         title: "Borkonyha Wine Kitchen dinner",
       },
+      // Live-run 7.17.2 same-day duplicate: the timed crossing and a
+      // "Chain Bridge walk" copy are one entity (title containment survives
+      // a trailing generic word).
+      {
+        address: null,
+        category: "art_culture",
+        date: "2019-01-22",
+        description:
+          "Walk across the bridge; quick look inside the hotel / Gresham Palace.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: "11:00",
+        title: "Szechenyi Chain Bridge / Four Seasons Hotel",
+      },
+      {
+        address: null,
+        category: "art_culture",
+        date: "2019-01-22",
+        description:
+          "Szechenyi Chain Bridge walk and view the Gresham Palace line of sight.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Chain Bridge walk",
+      },
       // Borkonyha also in the eat-recs list → rec copy silently removed.
       {
         address: null,
@@ -666,6 +886,21 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: null,
         title: "Tour Rome",
       },
+      // Live-run 7.17.2 shape (AS-3): apartment access instructions emitted
+      // as a Rome arrival card. Access instructions are stay material — no
+      // traveler card.
+      {
+        address: null,
+        category: "arrival_departure",
+        date: "2019-01-24",
+        description:
+          "Check into the Rome stay; key to be prepared on arrival at 3pm. Apartment is on the first floor, door on the right side.",
+        endTime: null,
+        itemType: "activity",
+        sourceFilename,
+        startTime: null,
+        title: "Rome arrival / key pickup",
+      },
       // Prague loose food notes.
       {
         address: null,
@@ -688,7 +923,7 @@ export function createCentralEuropeGroundTruthDraft() {
         guessedValue: null,
         prompt: "Which Prague Castle ticket do you want?",
         reason: "Explicit open decision in the source.",
-        relatedTitle: "Prague Castle complex",
+        relatedTitle: "Prague Castle",
         subjectType: "item",
         targetField: "description",
       },
@@ -924,4 +1159,18 @@ export const groundTruthChecks: GroundTruthCheck[] = [
   { contract: "RW-CLS-001", id: "trdelnik-activity", label: "Trdelnik breakfast is an untimed activity card", status: "enforced" },
   { contract: "RW-EVD-001", id: "koscom-activity", label: "Koscom is an activity on Jan 17 from source sequencing", status: "enforced" },
   { contract: "RW-CLS-001", id: "tour-rome-activity", label: "'Tour Rome in afternoon/evening' is an activity card", status: "enforced" },
+  // 2026-07-17 evening pass — live-run 7.17.2 defect fixtures.
+  { contract: "RW-ASM-001", id: "castle-survives-stay-shadow", label: "Bare 'Prague Castle' is never a Prague Airbnb lodging shadow", status: "enforced" },
+  { contract: "RW-GRP-001", id: "castle-same-site-group", label: "Castle components group under one visit from the container description", status: "enforced" },
+  { contract: "RW-GRP-001", id: "schonbrunn-all-stops", label: "Schönbrunn owns all its component stops, coords or not", status: "enforced" },
+  { contract: "RW-EVD-001", id: "silver-mines-placement", label: "Silver mines lands on Jan 17 from source structure, no date question", status: "enforced" },
+  { contract: "RW-PRI-001", id: "vitae-directions-fold", label: "Vitae arrival directions fold into the stay, no card or question", status: "enforced" },
+  { contract: "RW-ASM-001", id: "dropbags-folds-into-stay", label: "Arrival-time bag drop folds into the stay; Jan 13 has 4 cards", status: "enforced" },
+  { contract: "RW-PRI-001", id: "rome-key-pickup-suppressed", label: "Apartment access instructions never ship as a traveler card", status: "enforced" },
+  { contract: "RW-CLS-001", id: "budapest-note-copies-win", label: "Uncommitted Jan 21 venue cards fold into the Budapest notes", status: "enforced" },
+  { contract: "RW-CAN-001", id: "cafe-central-planned-wins", label: "Cafe Central: one card, on the planned Jan 20 breakfast", status: "enforced" },
+  { contract: "RW-CAN-001", id: "chain-bridge-single-card", label: "Chain Bridge: the timed crossing absorbs the walk copy", status: "enforced" },
+  { contract: "RW-CLS-001", id: "budget-scrubbed-from-notes", label: "Budget/costs content never reaches city notes", status: "enforced" },
+  { contract: "RW-CLS-001", id: "city-note-sections", label: "City notes render the approved universal sections", status: "enforced" },
+  { contract: "RW-QUE-001", id: "one-castle-ticket-question", label: "St. Vitus folds into ONE castle ticket question", status: "enforced" },
 ];

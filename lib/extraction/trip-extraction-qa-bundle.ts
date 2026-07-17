@@ -433,8 +433,22 @@ function createRecordSummaries({
 
   return {
     counts: {
-      activeActivities: activeItems.filter((item) => item.itemType !== "note")
-        .length,
+      // Top-level traveler-visible cards only — grouped child stops and
+      // undated placeholders are counted separately so audit counts match
+      // what the maker sees (defect docket run-2, AS-5: "86 Plans" included
+      // three hidden Schönbrunn children and a placeholder).
+      activeActivities: activeItems.filter(
+        (item) =>
+          item.itemType !== "note" &&
+          item.itemType !== "placeholder" &&
+          !item.parentItemId
+      ).length,
+      activeGroupedStops: activeItems.filter(
+        (item) => item.itemType !== "note" && Boolean(item.parentItemId)
+      ).length,
+      activePlaceholders: activeItems.filter(
+        (item) => item.itemType === "placeholder"
+      ).length,
       activeNotes: activeItems.filter((item) => item.itemType === "note").length,
       calls: calls.length,
       dismissedQuestions: records.reviewQuestions.filter(
