@@ -10,3 +10,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# Local extraction-run artifacts (real trip data, never commit)
+run-*.json
