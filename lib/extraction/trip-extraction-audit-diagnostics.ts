@@ -364,6 +364,53 @@ export function createAuditDiagnostics({
     });
   }
 
+  // Time-corruption tripwire (defect docket 2026-07-17): the detector missed
+  // Delta 5925 shipping 2:30-5:00 against a source anchor saying 5:00-6:41.
+  // A matched anchor's times are source truth; a final row that disagrees is
+  // a hard warning even though the row itself "matched".
+  const anchorTimeDisagreements = sourceTransportAnchors.flatMap((anchor) => {
+    if (!anchor.departureTime && !anchor.arrivalTime) return [];
+    const matched = finalRecords.find(
+      (record) =>
+        record.recordType === "transport" &&
+        finalRecordMatchesSourceAnchor(anchor, record)
+    );
+    if (!matched) return [];
+    const departureDisagrees = Boolean(
+      anchor.departureTime &&
+        matched.startTime &&
+        anchor.departureTime !== matched.startTime
+    );
+    const arrivalDisagrees = Boolean(
+      anchor.arrivalTime &&
+        matched.endTime &&
+        anchor.arrivalTime !== matched.endTime
+    );
+    if (!departureDisagrees && !arrivalDisagrees) return [];
+
+    return [
+      `${anchor.date ?? "undated"} - ${anchor.routeLabel}: final ${[
+        matched.startTime,
+        matched.endTime,
+      ]
+        .filter(Boolean)
+        .join(" -> ")} vs source ${[anchor.departureTime, anchor.arrivalTime]
+        .filter(Boolean)
+        .join(" -> ")}`,
+    ];
+  });
+
+  if (anchorTimeDisagreements.length > 0) {
+    diagnostics.push({
+      code: "transport_times_disagree_with_source_anchor",
+      detail:
+        "A final travel row's times disagree with the source-text anchor that matches it. Source text is authoritative for times.",
+      evidence: anchorTimeDisagreements.slice(0, 10),
+      severity: "p1",
+      title: "Transport times disagree with source text",
+    });
+  }
+
   const sourceAnchorsMissingDetails = sourceTransportAnchors
     .flatMap((anchor) => {
       const matchedRecord = finalRecords.find((record) =>

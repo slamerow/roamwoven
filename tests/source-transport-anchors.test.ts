@@ -192,6 +192,38 @@ test("source anchors split merged PDF text into separate flight legs", () => {
   assert.equal(jfkToDca.arrivalTime, "21:50");
 });
 
+test("prep-note times never become flight segment times (live 7.17.1 regression)", () => {
+  // Exact text shape from production run 7.17.1: the anchor previously bound
+  // departure 14:30 ("Leave for Airport: 2:30 PM") and arrival 17:00 (the
+  // real 5:00 PM departure), shifting every time one field backward.
+  const anchors = extractSourceTransportAnchorsFromMaterials([
+    {
+      filename: "outbound-flights.pdf",
+      sourceUploadId: "upload-outbound",
+      text: [
+        "[PDF text layer]",
+        "Central Europe January 2019",
+        "Saturday, January 12th Fly to Rome Leave for Airport: 2:30 PM Delta Flight 5925- Confirmation #GHFHPG DCA -> JFK 11C 5:00 PM -> 6:41 PM Delta Flight 444 JFK-> FCO (8.5 hours) 30F 7:46 PM -> 10:15 AM",
+      ].join("\n"),
+      type: "pdf_text" as const,
+    },
+  ]);
+  const dcaToJfk = anchors.find(
+    (anchor) => anchor.kind === "flight" && anchor.number === "5925"
+  );
+  const jfkToFco = anchors.find(
+    (anchor) => anchor.kind === "flight" && anchor.number === "444"
+  );
+
+  assert.ok(dcaToJfk, "expected Delta 5925 anchor");
+  assert.equal(dcaToJfk.departureTime, "17:00");
+  assert.equal(dcaToJfk.arrivalTime, "18:41");
+  assert.equal(dcaToJfk.date, "2019-01-12");
+  assert.ok(jfkToFco, "expected Delta 444 anchor");
+  assert.equal(jfkToFco.departureTime, "19:46");
+  assert.equal(jfkToFco.arrivalTime, "10:15");
+});
+
 test("canonical source anchors enrich existing flights but never create a missing leg", () => {
   const anchors = extractSourceTransportAnchorsFromMaterials([
     longMergedFlightMaterial,

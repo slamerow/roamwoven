@@ -18,12 +18,16 @@ async function test(name: string, fn: () => void | Promise<void>) {
 }
 
 function activity({
+  category = "food_dining",
+  city = "Sample City",
   date = "2030-04-12",
   description = null,
   sourceFilename,
   startTime = null,
   title,
 }: {
+  category?: string;
+  city?: string | null;
   date?: string;
   description?: string | null;
   sourceFilename: string;
@@ -32,8 +36,8 @@ function activity({
 }) {
   return {
     address: null,
-    category: "food_dining",
-    city: "Sample City",
+    category,
+    city,
     date,
     description,
     endTime: null,
@@ -1869,5 +1873,394 @@ export default async function run() {
     assert.equal(updated.activities.length, 1);
     assert.equal(updated.missingDetails.length, 1);
     assert.match(String(updated.missingDetails[0]?.prompt), /updated source details/i);
+  });
+
+  await test("model inventions without source support are suppressed; codes are verified", () => {
+    // Defect docket 2026-07-17: a record whose distinctive title words appear
+    // nowhere in its producing chunk's source text is a model invention and
+    // never becomes a card ("Prague Walking Tour" dated into the Rome leg).
+    // Confirmation codes must appear verbatim in source text or are scrubbed.
+    const sourceText = [
+      "Thursday, January 24th Fly back to Rome",
+      "Watches in Rome. Via della Fontanella Borghese 33.",
+      "Tour Rome in afternoon/evening (or work)",
+      "Wizz Air Flight W6 2339 Confirmation RDGHMT",
+    ].join("\n");
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [{
+        label: "rome-day-chunk",
+        source: "model_chunk",
+        sourceFilename: "rome-day.txt",
+        sourceText,
+        stage: emptyStage({
+          activities: [
+            activity({
+              date: "2019-01-24",
+              sourceFilename: "rome-day.txt",
+              title: "Watches in Rome errand",
+            }),
+            // Invention: nothing about Prague in this chunk's text.
+            activity({
+              date: "2019-01-24",
+              sourceFilename: "rome-day.txt",
+              title: "Prague Walking Tour",
+            }),
+          ],
+          transport: [{
+            arrival: "Rome FCO",
+            confirmation: "FAKECODE99",
+            date: "2019-01-24",
+            departure: "Budapest",
+            departureTime: "12:20",
+            provider: "Wizz Air",
+            sourceFilename: "rome-day.txt",
+            title: "Flight Budapest to Rome",
+            type: "flight",
+          }],
+        }),
+      }],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      transport: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(
+      draft.activities.some((item) => /watches/i.test(String(item.title))),
+      true,
+      "supported activity survives"
+    );
+    assert.equal(
+      draft.activities.some((item) => /prague/i.test(String(item.title))),
+      false,
+      "unsupported invention is suppressed to lineage"
+    );
+    const flight = draft.transport.find((item) =>
+      /budapest/i.test(String(item.title ?? item.routeLabel ?? ""))
+    );
+    assert.ok(flight, "flight survives");
+    assert.equal(
+      flight.confirmation ?? null,
+      null,
+      "confirmation code absent from source text is scrubbed"
+    );
+  });
+
+  await test("slot collisions collapse alias-titled duplicates into one booked card", () => {
+    // Defect docket 2026-07-17 (triple lunch, live run 7.17.1): three cards
+    // with zero shared title tokens all claim the same 13:00 food slot.
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("prague-day-5", emptyStage({
+        activities: [
+          activity({
+            category: "food_dining",
+            date: "2019-01-16",
+            sourceFilename: "plan.pdf",
+            startTime: "13:00",
+            title: "U Maliru",
+          }),
+          {
+            ...activity({
+              category: "food_dining",
+              date: "2019-01-16",
+              sourceFilename: "plan.pdf",
+              startTime: "13:00",
+              title: "Restaurant Festival reservation",
+            }),
+            confirmation: "R8167918050",
+            description: "Restaurant Festival reservation at U Maliru 1543 for 1 person.",
+          },
+          activity({
+            category: "food_dining",
+            date: "2019-01-16",
+            sourceFilename: "plan.pdf",
+            startTime: "13:00",
+            title: "Lunch",
+          }),
+        ],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const lunchCards = draft.activities.filter(
+      (item) =>
+        item.itemType !== "note" &&
+        String(item.date) === "2019-01-16" &&
+        /u maliru|restaurant festival|^lunch$/i.test(String(item.title))
+    );
+
+    assert.equal(lunchCards.length, 1, "one card survives the 13:00 slot");
+    assert.match(
+      String(lunchCards[0].title),
+      /u maliru/i,
+      "venue-name title wins the label"
+    );
+  });
+
+  await test("two different booking codes in one slot stay separate", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("double-booked", emptyStage({
+        activities: [
+          {
+            ...activity({
+              category: "food_dining",
+              date: "2019-01-16",
+              sourceFilename: "plan.pdf",
+              startTime: "19:00",
+              title: "Dinner at Alpha",
+            }),
+            confirmation: "AAAA1111",
+          },
+          {
+            ...activity({
+              category: "food_dining",
+              date: "2019-01-16",
+              sourceFilename: "plan.pdf",
+              startTime: "19:00",
+              title: "Dinner at Beta",
+            }),
+            confirmation: "BBBB2222",
+          },
+        ],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const dinners = draft.activities.filter((item) =>
+      /dinner at/i.test(String(item.title))
+    );
+
+    assert.equal(dinners.length, 2, "distinct bookings are affirmative evidence");
+  });
+
+  await test("transport and stay shadow activities are suppressed on multi-segment days", () => {
+    // Defect docket 2026-07-17: four flight-shadow activities survived on
+    // two-segment days (old `matches === 1` guard), including a Delta 1043
+    // twin whose corrupted AM time blocked reconciliation; plus one bare
+    // "AirBNB" activity duplicating the stay record.
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("shadow-day", emptyStage({
+        activities: [
+          activity({
+            category: "arrival_departure",
+            date: "2019-01-25",
+            sourceFilename: "plan.pdf",
+            title: "Flight FCO to JFK",
+          }),
+          {
+            ...activity({
+              category: "arrival_departure",
+              date: "2019-01-25",
+              sourceFilename: "plan.pdf",
+              title: "Fly home",
+            }),
+            description: "Delta 1043 FCO -> JFK 2:45 -> 6:45 AM.",
+          },
+          activity({
+            category: "accommodation",
+            date: "2019-01-15",
+            sourceFilename: "plan.pdf",
+            title: "AirBNB",
+          }),
+        ],
+        places: [
+          { arriveDate: "2019-01-14", city: "Prague", country: "Czechia", leaveDate: "2019-01-18" },
+          { arriveDate: "2019-01-24", city: "Rome", country: "Italy", leaveDate: "2019-01-25" },
+        ],
+        stays: [{
+          address: "Michalska 431/5, Prague",
+          checkIn: "2019-01-14",
+          checkOut: "2019-01-18",
+          name: "Prague Airbnb",
+          sourceFilename: "plan.pdf",
+        }],
+        transport: [
+          {
+            arrival: "JFK",
+            arrivalTime: "18:45",
+            confirmation: null,
+            date: "2019-01-25",
+            departure: "FCO",
+            departureTime: "14:45",
+            provider: "Delta 1043",
+            sourceFilename: "plan.pdf",
+            title: "Flight FCO to JFK",
+            type: "flight",
+          },
+          {
+            arrival: "DCA",
+            arrivalTime: "21:50",
+            confirmation: null,
+            date: "2019-01-25",
+            departure: "JFK",
+            departureTime: "20:30",
+            provider: "Delta 2934",
+            sourceFilename: "plan.pdf",
+            title: "Flight JFK to DCA",
+            type: "flight",
+          },
+        ],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      transport: Array<Record<string, unknown>>;
+    };
+    const flightShadows = draft.activities.filter(
+      (item) =>
+        item.itemType !== "note" && /flight|fly/i.test(String(item.title))
+    );
+    const stayShadows = draft.activities.filter(
+      (item) => item.itemType !== "note" && /airbnb/i.test(String(item.title))
+    );
+
+    assert.equal(draft.transport.length, 2, "both segments survive as transport");
+    assert.equal(flightShadows.length, 0, "flight shadow activities suppressed");
+    assert.equal(stayShadows.length, 0, "bare stay-name activity suppressed");
+  });
+
+  await test("same-site stops group under the site container; spread day-trip sights never group", () => {
+    // Grouping doctrine v3 (2026-07-17): Prague Castle owns the stops inside
+    // its grounds (~300 m), keeping its own source title, timed child allowed.
+    // Kutná Hora's sights are kilometres apart on a 4-card day: 3 discrete
+    // activities, no group (density gate + geo verification).
+    const locatedActivity = (
+      title: string,
+      date: string,
+      lat: number,
+      lng: number,
+      extra: Record<string, unknown> = {}
+    ) => ({
+      ...activity({ category: "art_culture", city: null as unknown as string, date, sourceFilename: "plan.pdf", title }),
+      approxLatitude: lat,
+      approxLongitude: lng,
+      city: null,
+      ...extra,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("castle-and-daytrip", emptyStage({
+        activities: [
+          // Prague Castle complex, all within ~250 m.
+          locatedActivity("Prague Castle complex", "2019-01-16", 50.0900, 14.4000),
+          locatedActivity("Changing of the Guard", "2019-01-16", 50.0902, 14.4008, { startTime: "12:00" }),
+          locatedActivity("St. Vitus Cathedral", "2019-01-16", 50.0906, 14.4006),
+          // Kutná Hora day trip: spread far apart, small day.
+          locatedActivity("Sedlec Ossuary", "2019-01-17", 49.9622, 15.2884),
+          locatedActivity("Church of St Barbara", "2019-01-17", 49.9446, 15.2632),
+          locatedActivity("Silver mines", "2019-01-17", 49.9481, 15.2662),
+        ],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const castleParent = draft.activities.find(
+      (item) => String(item.title) === "Prague Castle complex"
+    );
+    const guard = draft.activities.find((item) =>
+      /changing of the guard/i.test(String(item.title))
+    );
+    const vitus = draft.activities.find((item) =>
+      /st\. vitus/i.test(String(item.title))
+    );
+    const kutnaHora = draft.activities.filter((item) =>
+      /sedlec|barbara|silver/i.test(String(item.title))
+    );
+
+    assert.ok(castleParent, "castle container survives with its source title");
+    assert.ok(guard && vitus, "castle stops survive as children");
+    assert.equal(guard._canonicalParentPieceId, castleParent._canonicalPieceId);
+    assert.equal(vitus._canonicalParentPieceId, castleParent._canonicalPieceId);
+    assert.equal(
+      kutnaHora.filter((item) => item._canonicalParentPieceId).length,
+      0,
+      "Kutná Hora sights stay 3 discrete ungrouped activities"
+    );
+    const groupingCall = draft.missingDetails.find(
+      (item) => item._canonicalReviewDisposition === "call" &&
+        /included stop/i.test(String(item.prompt ?? ""))
+    );
+    assert.ok(groupingCall, "grouping produces one statement-style call");
+    assert.match(
+      String(groupingCall.reason ?? ""),
+      /same-site visit/i,
+      "the call states the actual rule that fired"
+    );
+  });
+
+  await test("cross-city note content routes to its owning entity and codes never reach note prose", () => {
+    // Defect docket 2026-07-17: a Colosseum ticket (plus booking barcode)
+    // OCR'd from the appendix pages inherited Prague from its surroundings
+    // and landed inside Prague Notes & Tips.
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("appendix-pages", emptyStage({
+        activities: [
+          {
+            ...activity({
+              city: "Rome",
+              date: "2019-01-13",
+              sourceFilename: "plan.pdf",
+              startTime: "14:00",
+              title: "Colosseum",
+            }),
+          },
+          {
+            category: "art_culture",
+            city: "Prague",
+            date: null,
+            description:
+              "Colosseum entry ticket. Booking reference QX7YT99A. 4321098765432109. Admit one adult.",
+            evidenceRole: "city_note_candidate",
+            itemType: "note",
+            sourceFilename: "plan.pdf",
+            sourceSectionType: "city_reference",
+            title: "Ticket screenshot",
+          },
+          {
+            category: "food_dining",
+            city: "Prague",
+            date: null,
+            description: "Try the garlic soup cesnecka at Cafe Louvre.",
+            evidenceRole: "city_note_candidate",
+            itemType: "note",
+            sourceFilename: "plan.pdf",
+            sourceSectionType: "city_reference",
+            title: "Prague food ideas",
+          },
+        ],
+        places: [
+          { arriveDate: "2019-01-13", city: "Rome", country: "Italy", leaveDate: "2019-01-14" },
+          { arriveDate: "2019-01-14", city: "Prague", country: "Czechia", leaveDate: "2019-01-18" },
+        ],
+      }))],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const pragueNote = draft.activities.find(
+      (item) =>
+        item.itemType === "note" && /prague/i.test(String(item.title ?? ""))
+    );
+
+    assert.ok(pragueNote, "Prague note collection exists");
+    const noteText = `${pragueNote.title} ${pragueNote.description ?? ""}`;
+    assert.doesNotMatch(noteText, /colosseum/i, "Rome content never enters Prague notes");
+    assert.doesNotMatch(noteText, /QX7YT99A|4321098765/i, "booking identifiers never reach note prose");
+    assert.match(noteText, /cesnecka/i, "genuine Prague tips survive");
   });
 }

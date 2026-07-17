@@ -789,6 +789,107 @@ function betterEndpoint(left: string | null, right: string | null) {
   return endpointQuality(right) > endpointQuality(left) ? right : left;
 }
 
+// --- Segment time binding (defect docket 2026-07-17, Delta 5925) ---
+//
+// Times must bind to the transport segment itself, never to surrounding prep
+// notes. "Leave for Airport at 2:30 PM ... Delta Flight 5925 ... DCA -> JFK
+// 5:00 -> 6:41 PM" previously produced departure 14:30 / arrival 17:00 by
+// taking the first two clock times in the block. Binding order is now:
+// 1. An explicit time range (X -> Y / X to Y) in the segment-scoped text.
+// 2. Clock times from segment-scoped text with prep-note clauses stripped.
+// Prep-note clause times ("leave for/by", "wake at", "be at X by") are never
+// segment times; the prose remains in evidence and rides along as a prep
+// note on the travel card downstream.
+
+const PREP_NOTE_CLAUSE_PATTERN =
+  /\b(?:leave\s+(?:for|by|at|the)|head\s+(?:to|for)|wake(?:\s?up)?\s+at|get\s+up\s+at|be\s+at\s+[^,.;]{0,40}?\s+by|get\s+to\s+[^,.;]{0,40}?\s+by|uber\s+to|taxi\s+to)[^,.;]{0,60}?\d{1,2}(?::\d{2})?\s*(?:am|pm)?/gi;
+
+export function stripPrepNoteClauses(value: string) {
+  return value.replace(PREP_NOTE_CLAUSE_PATTERN, " ");
+}
+
+const TIME_RANGE_PATTERN =
+  /(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:->|→|–|-|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i;
+
+function extractSegmentTimeRange(text: string) {
+  const match = TIME_RANGE_PATTERN.exec(text);
+
+  if (!match) return null;
+  // Guard against price/number ranges ("12-18 EUR"): a real clock range has
+  // minutes or an am/pm marker on at least one side.
+  const clockLike = /(?::\d{2}|am|pm)/i;
+
+  if (!clockLike.test(match[1]) && !clockLike.test(match[2])) {
+    return null;
+  }
+  const departure = normalizeClockTime(match[1]);
+  let arrival = normalizeClockTime(match[2]);
+
+  if (!departure || !arrival) return null;
+
+  // Segment splitting can strand the right side's meridiem in the next
+  // segment's prefix ("5:00 PM -> 6:41 [PM Delta Flight 444...]"). When only
+  // the left side carries am/pm and the range runs backwards, the right side
+  // inherits the afternoon reading if that restores forward order.
+  const leftHasMeridiem = /\b(?:am|pm)\b/i.test(match[1]);
+  const rightHasMeridiem = /\b(?:am|pm)\b/i.test(match[2]);
+
+  if (leftHasMeridiem && !rightHasMeridiem && arrival < departure) {
+    const shifted = addTwelveHours(arrival);
+
+    if (shifted > departure) {
+      arrival = shifted;
+    }
+  }
+
+  return { arrival, departure };
+}
+
+/**
+ * The portion of the block text that belongs to the transport segment
+ * itself: for flights, everything from the first flight-number token onward
+ * (prefixes carry day headings and prep notes); for other kinds, the whole
+ * block with prep-note clauses stripped.
+ */
+function segmentScopedText(kind: SourceTransportAnchorKind, blockText: string) {
+  if (kind === "flight") {
+    const matches = flightSegmentMatches(blockText);
+    const first = matches[0];
+
+    if (first && typeof first.index === "number") {
+      return stripPrepNoteClauses(blockText.slice(first.index));
+    }
+  }
+
+  return stripPrepNoteClauses(blockText);
+}
+
+function extractSegmentTimes(
+  kind: SourceTransportAnchorKind,
+  block: SourceLine[],
+  blockText: string
+) {
+  const scoped = segmentScopedText(kind, blockText);
+  const range = extractSegmentTimeRange(scoped);
+
+  if (range) {
+    return { arrivalTime: range.arrival, departureTime: range.departure };
+  }
+
+  const scopedLines: SourceLine[] = block
+    .map((entry) => ({ ...entry, line: stripPrepNoteClauses(entry.line) }))
+    .filter((entry) => cleanLine(entry.line));
+  const timedLocations = extractTimedLocations(scopedLines);
+  const times = uniqueValues(
+    extractClockTimesFromLine(scoped).concat(extractAllTimes(scopedLines))
+  );
+
+  return {
+    arrivalTime: timedLocations[1]?.time ?? times[1] ?? null,
+    departureTime: timedLocations[0]?.time ?? times[0] ?? null,
+  };
+}
+
 function createAnchorFromBlock({
   block,
   currentDate,
@@ -808,15 +909,13 @@ function createAnchorFromBlock({
       .map((entry) => parseDateFromText(entry.line, defaultYear))
       .find(Boolean) ?? currentDate;
   const timedLocations = extractTimedLocations(block);
-  const times = extractAllTimes(block);
   const route = extractRouteFromText(kind, blockText);
   const providerAndNumber = extractProviderAndNumber(kind, blockText);
-  const rawDepartureTime = timedLocations[0]?.time ?? times[0] ?? null;
-  const rawArrivalTime = timedLocations[1]?.time ?? times[1] ?? null;
+  const segmentTimes = extractSegmentTimes(kind, block, blockText);
   const { arrivalTime, departureTime } = adjustAmbiguousFlightTimes({
-    arrivalTime: rawArrivalTime,
+    arrivalTime: segmentTimes.arrivalTime,
     blockText,
-    departureTime: rawDepartureTime,
+    departureTime: segmentTimes.departureTime,
     kind,
   });
   const departureLocation =
@@ -1298,6 +1397,20 @@ export function sourceTransportAnchorMatchesRecord(
   );
 
   if (departureTimeMatches && arrivalTimeMatches) {
+    return true;
+  }
+
+  // RW-AUD-001 semantic fallback (defect docket 2026-07-17): a mangled
+  // anchor that still shares one exact clock time, the date, and any route
+  // token with a record is describing that record — an identity-join failure
+  // must not be reported as a missing traveler row (false Budapest P0).
+  if (
+    (departureTimeMatches || arrivalTimeMatches) &&
+    anchor.date &&
+    record.date &&
+    tripDatesMatch(anchor.date, record.date) &&
+    overlapScore(routeTextForMatch(anchor), routeTextForMatch(record)) >= 1
+  ) {
     return true;
   }
 

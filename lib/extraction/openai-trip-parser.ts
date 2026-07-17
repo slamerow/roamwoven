@@ -95,6 +95,8 @@ const tripDraftSchema = {
         additionalProperties: false,
         properties: {
           address: { type: ["string", "null"] },
+          approxLatitude: { type: ["number", "null"] },
+          approxLongitude: { type: ["number", "null"] },
           area: { type: ["string", "null"] },
           category: {
             enum: TRIP_CATEGORY_IDS,
@@ -142,6 +144,8 @@ const tripDraftSchema = {
         },
         required: [
           "address",
+          "approxLatitude",
+          "approxLongitude",
           "area",
           "category",
           "city",
@@ -379,7 +383,8 @@ const systemPrompt = [
   "Preserve the traveler's mental model, but do not create activity cards that merely summarize a whole day. Full-day overview, theme, and day-title lines belong outside activities; extract the concrete traveler cards instead.",
   "For every traveler card in activities, set itemType to activity, note, admin, rest_day, social, or placeholder. Dining reservations, restaurants, cafes, bars, winery visits, and meal plans should usually be itemType activity with category food_dining.",
   "For every traveler card in activities, set city to the specific trip city/leg named by the source chunk or surrounding source header when clear; set city to null when the source does not clearly indicate one. Do not guess city from public landmark knowledge.",
-  "For sightseeing activity cards at a well-known fixed location, set area to the walkable neighborhood or district the place sits in (for example 'Mala Strana' or 'Trastevere'), using one consistent area label for places within easy walking distance of each other in the same city. Set area to null for restaurants-by-name-only, errands, transport, lodging, or anywhere you are not confident. The area hint helps group adjacent untimed sights into one walking route; it must never change a card's city, date, or intent.",
+  "For activity cards at a well-known fixed location, set approxLatitude and approxLongitude to the place's approximate coordinates (2-3 decimal places is enough) from your own knowledge of the landmark. Set both to null for generic meals, errands, unknown venues, or anywhere you are not confident of the specific place. Coordinates are used only to verify which sights are genuinely within a short walk of each other; they must never change a card's city, date, or intent.",
+  "For sightseeing activity cards, set area to a SUB-CITY walkable neighborhood label only when the source text itself names one (a day title or heading such as 'Lesser Town' or 'Old Town'). Never use the city name, a day-trip town name, or a district you inferred from your own knowledge as the area. Set area to null when unsure. It must never change a card's city, date, or intent.",
   `For every traveler card, also set category to the traveler-browse bucket, not the record type. Allowed category values are: ${TRIP_CATEGORY_IDS.join(", ")}.`,
   "Never use activity, note, or transport as a category. Those can be item types or separate transport records, but card categories should answer where a traveler would browse the plan.",
   "Use arrival_departure for flights, train transfers, airport/station arrivals, rental car pickup/dropoff, lodging check-ins, and explicit drop-bags cards that need to appear in the daily traveler timeline.",

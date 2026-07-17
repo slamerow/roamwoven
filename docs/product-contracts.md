@@ -216,7 +216,17 @@ path is bypassed.
 - Supersession: the 2026-07-15 source-authored-only scope is superseded by the
   approved Central Europe ground truth v2
   (`docs/assembly-ground-truth-central-europe.md`), which adds
-  system-discovered geo grouping.
+  system-discovered geo grouping. Doctrine v3 (2026-07-17 evening, CEO
+  clarifications in `docs/assembly-defect-docket-2026-07-17.md`) narrows it
+  further: classification precedes grouping (a City Note candidate can never
+  be a group child); same-site visits form around a container-named site with
+  parser-coordinate verification (~300 m) and keep the site's source title
+  with timed sub-stops allowed; discovered walks require a crowded (>6
+  visible cards) unsequenced (<3 timed stops) day, all stops within a
+  15-minute walk by coordinates, a source-derived area label, at most one
+  walk per day; a trip city or day-trip town name never groups; expect a
+  handful of groups per trip; grouping call claims must state the actual rule
+  that fired.
 - Enforcement: `PARTIAL`
 - Contract: A continuous source-authored walking route becomes one parent card
   with ordered sub-stops when no stop has an independent booking or fixed time.
@@ -387,8 +397,13 @@ path is bypassed.
   budgeted public lookups are acceptable when they materially improve the
   generated app ("the default is a magical experience"). V1 still keeps the
   assembly pass deterministic by sourcing geographic hints from the parser
-  call itself (per-activity `area` field); a live lookup lane for unresolved
-  terms is permitted as a follow-up and remains subject to the caps below.
+  call itself (per-activity `area`, `approxLatitude`, `approxLongitude`); a
+  live lookup lane for unresolved terms is permitted as a follow-up and
+  remains subject to the caps below. Also 2026-07-17: source-truth
+  verification is live — each model observation is checked against its
+  producing chunk's source text; records with zero distinctive-title support
+  are suppressed to evidence-only lineage silently (CEO decision), and
+  confirmation codes absent from source text are scrubbed.
 - Enforcement: `PARTIAL`
 - Contract: Source text is not forced into Activity or City Notes. Every
   meaningful evidence block is traceably routed to one of: canonical entity,
@@ -604,6 +619,12 @@ path is bypassed.
   reconciliation layer accepts a unique exact booking locator by itself;
   otherwise it requires at least two compatible typed fields from normalized
   dates, times, endpoints, providers, venue identity, address, and entity type.
+  2026-07-17: anchor-to-record matching gained a semantic fallback (one exact
+  clock time + date + a route token), fixing the false "Budapest transport
+  missing" P0, and a time-corruption tripwire
+  (`transport_times_disagree_with_source_anchor`) now fires when a matched
+  final row's times disagree with its source anchor — the Delta 5925 class of
+  defect the detector previously missed.
   A broken identity join on
   otherwise matching output becomes an internal detector incident and cannot
   create a missing-record diagnostic or mutate the traveler draft. Metamorphic

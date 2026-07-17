@@ -28,9 +28,11 @@ Run under audit: trip `b480e3f7-1fbe-482f-8eeb-77a5125b394f` (7.17.1).
   duplicating transport rows, one duplicating a stay. Delta 1043's duplicate
   activity says 2:45–6:45 AM vs the correct PM row. Remediation classified
   these `confirmed_output_defect` and preserved them; the review page never
-  shows the warnings. Confirmed collisions must suppress the duplicate, and
-  publish is blocked while confirmed hard defects remain (consistent with the
-  2026-07-02 decision that structural collisions are publish-blocking).
+  shows the warnings. Confirmed collisions must suppress the duplicate.
+  UPDATED (CEO, 2026-07-17 evening): publish is NOT blocked — publish is
+  post-review and the maker's call; suppression plus visible warnings replace
+  the 2026-07-02 hard publish-blocking behavior. Blocking was a crutch for
+  bad remediation.
 - **City-note contamination.** Prague Notes contain a Rome Colosseum ticket
   AND its booking barcode (privacy leak), plus R2D2 content misfiled. Budapest
   note repeats its own content. Fixes: note-collection city assignment from

@@ -241,6 +241,8 @@ export function createCentralEuropeGroundTruthDraft() {
       {
         address: null,
         area: "Mala Strana & Hradcany",
+        approxLatitude: 50.0886,
+        approxLongitude: 14.4106,
         category: "art_culture",
         date: "2019-01-16",
         description: "Kafka statue.",
@@ -253,6 +255,8 @@ export function createCentralEuropeGroundTruthDraft() {
       {
         address: null,
         area: "Mala Strana & Hradcany",
+        approxLatitude: 50.0862,
+        approxLongitude: 14.4067,
         category: "art_culture",
         date: "2019-01-16",
         description: "John Lennon Wall.",
@@ -265,6 +269,8 @@ export function createCentralEuropeGroundTruthDraft() {
       {
         address: null,
         area: "Mala Strana & Hradcany",
+        approxLatitude: 50.087,
+        approxLongitude: 14.4085,
         category: "art_culture",
         date: "2019-01-16",
         description: "Vinarna Certovka narrow street.",
@@ -277,6 +283,8 @@ export function createCentralEuropeGroundTruthDraft() {
       {
         address: null,
         area: "Mala Strana & Hradcany",
+        approxLatitude: 50.0918,
+        approxLongitude: 14.3892,
         category: "art_culture",
         date: "2019-01-16",
         description:
