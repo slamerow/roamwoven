@@ -2564,7 +2564,10 @@ test("structured review summary uses maker-facing counts", () => {
     "We found 1 leg across 3 days, including 1 transport item (1 flight), 1 stay, 2 activities (1 food and dining). We found 1 thing for you to confirm."
   );
   assert.equal(reviewCount, 1);
-  assert.equal(summaryView.counts.plans, 2);
+  // One count definition (Eli, 2026-07-17 wave 1): Plans = top-level
+  // activity-umbrella cards (2, including the undated Dinner TBD card the
+  // maker sees) + travel cards (1) — not the rendered-timeline entry count.
+  assert.equal(summaryView.counts.plans, 3);
   assert.equal(sections.length, 8);
   assert.deepEqual(
     sections.map((section) => section.id),

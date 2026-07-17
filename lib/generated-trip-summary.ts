@@ -1224,11 +1224,23 @@ export function createGeneratedTripSummaryView(
   const warnings = createSummaryWarnings({ days, records });
   const hardWarnings = warnings.filter((warning) => warning.severity === "hard");
 
+  // One count definition everywhere (Eli, 2026-07-17 wave 1): Plans = every
+  // top-level activity-umbrella card (sights, meals, admin) PLUS the travel
+  // cards, which are a subset of activity cards. Grouped child stops, city
+  // notes, and placeholders are excluded. Transport remains visible as its
+  // own drill-down subset beside the Plans total.
+  const planCards = primaryItems.filter(
+    (item) => item.itemType !== "note" && item.itemType !== "placeholder"
+  );
+  const activeTransportCount = records.transport.filter((item) =>
+    isActiveStatus(item.status)
+  ).length;
+
   return {
     counts: {
-      activities: primaryItems.filter((item) => item.itemType === "activity").length,
+      activities: planCards.length,
       places: records.legs.filter((leg) => isActiveStatus(leg.status)).length,
-      plans: countTimelinePlans(days),
+      plans: planCards.length + activeTransportCount,
       privateDetails: records.privateDetails.filter((detail) =>
         isProtectedVisibility(detail.visibility)
       ).length,

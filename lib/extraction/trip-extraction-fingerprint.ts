@@ -66,12 +66,17 @@ function hashValue(value: unknown) {
 export function createTripExtractionFingerprints(
   records: StructuredTripRecords
 ): TripExtractionFingerprints {
+  // One count definition everywhere (Eli, 2026-07-17 wave 1): every
+  // top-level card under the activity umbrella — including admin/logistics —
+  // is an active activity. Only notes, placeholders, and grouped children
+  // are excluded.
   const activeActivities = sortKeys(
     records.items
       .filter(
         (item) =>
           item.status !== "ignored" &&
-          item.itemType === "activity" &&
+          item.itemType !== "note" &&
+          item.itemType !== "placeholder" &&
           !item.parentItemId
       )
       .map((item) =>

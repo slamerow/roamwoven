@@ -697,11 +697,13 @@ function ReviewCombineForm({
 
 function StructuredRecordReview({
   completedDecisionCount,
+  hardWarnings = [],
   reviewStyle,
   sections,
   tripId,
 }: {
   completedDecisionCount: number;
+  hardWarnings?: Array<{ detail: string; id: string; title: string }>;
   reviewStyle: ReviewStyleVars;
   sections: StructuredReviewSection[];
   tripId: string;
@@ -918,6 +920,25 @@ function StructuredRecordReview({
           moving toward the traveler app.
         </p>
       </div>
+
+      {hardWarnings.length > 0 ? (
+        <div
+          className="mt-4 rounded-md border border-amber-300/60 bg-amber-50/60 p-4"
+          data-review-hard-warnings
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+            Important to review
+          </p>
+          <div className="mt-2 space-y-2">
+            {hardWarnings.map((warning) => (
+              <div key={warning.id}>
+                <p className="text-sm font-semibold text-ink">{warning.title}</p>
+                <p className="text-sm leading-6 text-ink/60">{warning.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-3">
         {decisionSections.map((section) =>
@@ -1222,11 +1243,15 @@ function RealTripFirstPass({
     ? getStructuredReviewSections(reviewedStructuredDraft)
     : [];
   const structuredReviewCount = getStructuredReviewCount(reviewedStructuredDraft);
-  const summaryHardWarningCount = reviewedStructuredDraft
+  // Hard warnings render on the review page too (Eli, 2026-07-17 wave 1):
+  // a maker working the review queue must see structural collisions here,
+  // not only on the summary page.
+  const summaryHardWarnings = reviewedStructuredDraft
     ? createGeneratedTripSummaryView(reviewedStructuredDraft).warnings.filter(
         (warning) => warning.severity === "hard"
-      ).length
-    : 0;
+      )
+    : [];
+  const summaryHardWarningCount = summaryHardWarnings.length;
   const structuredDiscoverySummary = formatStructuredDiscoverySummary(
     reviewedStructuredDraft,
     structuredReviewCount,
@@ -1429,6 +1454,7 @@ function RealTripFirstPass({
       {latestDraft && reviewedStructuredDraft ? (
         <StructuredRecordReview
           completedDecisionCount={reviewDecisions.length}
+          hardWarnings={summaryHardWarnings}
           reviewStyle={reviewStyle}
           sections={structuredSections}
           tripId={tripId}

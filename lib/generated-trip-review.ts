@@ -72,11 +72,18 @@ function isCityTipItem(item: StructuredTripRecords["items"][number]) {
   return isLegCityTipRecord(item);
 }
 
+// One count definition everywhere (Eli, 2026-07-17 wave 1): the activity
+// umbrella covers every top-level traveler-visible card — sights, meals,
+// admin/logistics — excluding grouped child stops, city notes, and
+// placeholders. Review, Summary, fingerprints, and the QA bundle all count
+// with this rule (live-run 7.18.0 showed 65 / 67 / 72 across three
+// surfaces).
 function getReviewActivityItems(records: StructuredTripRecords) {
   return records.items.filter(
     (item) =>
       isActiveStatus(item.status) &&
-      item.itemType === "activity" &&
+      item.itemType !== "note" &&
+      item.itemType !== "placeholder" &&
       !item.parentItemId
   );
 }
