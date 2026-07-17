@@ -363,11 +363,34 @@ export function createAuditDiagnostics({
           (anchor.kind === "flight" && /flight|plane/i.test(record.type)) ||
           (anchor.kind === "train" && /train|rail/i.test(record.type)))
     );
-  const missingSourceAnchors = sourceTransportAnchors.filter(
+  const anchorEvidenceLine = (anchor: SourceTransportAnchor) =>
+    `${anchor.date ?? "undated"} - ${anchor.routeLabel}: ${[
+      anchor.departureTime,
+      anchor.departureLocation,
+      anchor.arrivalTime,
+      anchor.arrivalLocation,
+    ]
+      .filter(Boolean)
+      .join(" -> ")}`;
+  const unmatchedSourceAnchors = sourceTransportAnchors.filter(
     (anchor) =>
       anchorHasSegmentSignal(anchor) &&
       !finalRecords.some((record) => finalRecordMatchesSourceAnchor(anchor, record)) &&
       !sameDateKindRecordExists(anchor)
+  );
+  // A route-only anchor (no time, no transport number) is thin, positionally
+  // dated evidence — it can flag a soft gap but can never authorize a P0 by
+  // itself (live-run 7.18.0: a Costs-section route line raised the run's only
+  // P0 while all 8 real segments were present and correct).
+  const missingSourceAnchors = unmatchedSourceAnchors.filter((anchor) =>
+    Boolean(
+      anchor.departureTime ||
+        anchor.arrivalTime ||
+        (anchor.number && /\d/.test(anchor.number))
+    )
+  );
+  const weakUnmatchedSourceAnchors = unmatchedSourceAnchors.filter(
+    (anchor) => !missingSourceAnchors.includes(anchor)
   );
 
   if (missingSourceAnchors.length > 0) {
@@ -375,21 +398,47 @@ export function createAuditDiagnostics({
       code: "critical_transport_source_anchor_missing",
       detail:
         "Source text or OCR exposed critical transport that did not survive into final travel rows.",
-      evidence: missingSourceAnchors
-        .slice(0, 10)
-        .map(
-          (anchor) =>
-            `${anchor.date ?? "undated"} - ${anchor.routeLabel}: ${[
-              anchor.departureTime,
-              anchor.departureLocation,
-              anchor.arrivalTime,
-              anchor.arrivalLocation,
-            ]
-              .filter(Boolean)
-              .join(" -> ")}`
-        ),
+      evidence: missingSourceAnchors.slice(0, 10).map(anchorEvidenceLine),
       severity: "p0",
       title: "Source-backed transport is missing from final app",
+    });
+  }
+
+  if (weakUnmatchedSourceAnchors.length > 0) {
+    diagnostics.push({
+      code: "weak_transport_source_anchor_unmatched",
+      detail:
+        "Route-only source lines (no time, no transport number) did not match a final travel row. These are usually planning or summary lines, not missing segments.",
+      evidence: weakUnmatchedSourceAnchors.slice(0, 10).map(anchorEvidenceLine),
+      severity: "p2",
+      title: "Weak transport source lines left unmatched",
+    });
+  }
+
+  // Anchor coverage (second-audit finding, 2026-07-17): a final transport
+  // row with NO source anchor at all means source-truth verification is
+  // blind to that segment (7.18.0 shipped Ryanair FR8331 with zero anchor
+  // coverage). Internal quiet notice — never maker-facing, never a mutation.
+  const unanchoredTransportRows = finalRecords.filter(
+    (record) =>
+      record.recordType === "transport" &&
+      !sourceTransportAnchors.some((anchor) =>
+        finalRecordMatchesSourceAnchor(anchor, record)
+      )
+  );
+  if (
+    sourceTransportAnchors.length > 0 &&
+    unanchoredTransportRows.length > 0
+  ) {
+    diagnostics.push({
+      code: "transport_row_without_source_anchor",
+      detail:
+        "Final travel rows with no matching source transport anchor: source-truth verification cannot protect these segments.",
+      evidence: unanchoredTransportRows
+        .slice(0, 10)
+        .map((record) => `${record.date ?? "undated"} - ${record.title}`),
+      severity: "p2",
+      title: "Travel rows without source-anchor coverage",
     });
   }
 

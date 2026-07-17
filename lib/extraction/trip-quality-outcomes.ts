@@ -38,6 +38,8 @@ function diagnosticClassification(
     case "critical_transport_source_anchor_missing_details":
     case "critical_transport_source_anchor_missing_soft_details":
     case "ocr_backfill_failed":
+    case "transport_row_without_source_anchor":
+    case "weak_transport_source_anchor_unmatched":
       return "confirmed_source_processing_failure";
     case "critical_transport_missing_details":
     case "critical_transport_missing_soft_details":

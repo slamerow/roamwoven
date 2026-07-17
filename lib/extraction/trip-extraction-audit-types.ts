@@ -128,7 +128,9 @@ export type TripExtractionAuditDiagnostic = {
     | "loose_tip_promoted_to_activity"
     | "ocr_backfill_failed"
     | "planned_activity_buried_in_city_notes"
-    | "transport_description_contaminated";
+    | "transport_description_contaminated"
+    | "transport_row_without_source_anchor"
+    | "weak_transport_source_anchor_unmatched";
   detail: string;
   evidence: string[];
   severity: "p0" | "p1" | "p2";

@@ -904,10 +904,34 @@ function createAnchorFromBlock({
   kind: SourceTransportAnchorKind;
 }): SourceTransportAnchor | null {
   const blockText = block.map((entry) => entry.line).join("\n");
-  const date =
-    block
-      .map((entry) => parseDateFromText(entry.line, defaultYear))
-      .find(Boolean) ?? currentDate;
+
+  // Costs/budget planning lines never mint transport anchors (live-run
+  // 7.18.0 false P0: "Prague to Vienna train: $39 Business class" from the
+  // Costs section became a route-only anchor, inherited a fabricated Jan 25
+  // date from the scan cursor, and raised a missing-transport P0 against a
+  // trip whose 8 real segments were all present). A block whose transport
+  // signal lines all carry price markers and no clock time is planning
+  // content — the Costs exclusion applies to anchors exactly as it applies
+  // to activities and note text.
+  const priceLinePattern =
+    /(?::|\s)~?\s*[$€£]\s?\d|\(\s*[$€£]?\s?\d+\s*(?:-|–|to)\s*[$€£]?\s?\d+\s*\)|\bbudget\b/i;
+  const clockTimePattern = /\b\d{1,2}:\d{2}\b/;
+  const signalLines = block.filter((entry) =>
+    getSignalKind(entry.line) !== null
+  );
+  const budgetShaped =
+    signalLines.length > 0 &&
+    signalLines.every(
+      (entry) =>
+        priceLinePattern.test(entry.line) && !clockTimePattern.test(entry.line)
+    );
+  if (budgetShaped && !clockTimePattern.test(blockText)) {
+    return null;
+  }
+
+  const blockOwnDate = block
+    .map((entry) => parseDateFromText(entry.line, defaultYear))
+    .find(Boolean) ?? null;
   const timedLocations = extractTimedLocations(block);
   const route = extractRouteFromText(kind, blockText);
   const providerAndNumber = extractProviderAndNumber(kind, blockText);
@@ -941,6 +965,17 @@ function createAnchorFromBlock({
     providerAndNumber.number && /\d/.test(providerAndNumber.number)
       ? providerAndNumber.number
       : null;
+  // A weak anchor (no time, no transport number) may not inherit the scan
+  // cursor's date: a route-only line far from its segment (a summary, a
+  // packing note) would otherwise be stamped with whatever day the scan last
+  // saw — a fabricated date that then defeats reconciliation (live-run
+  // 7.18.0). Weak anchors stay undated and match by route.
+  const segmentTimes2 = { arrivalTime, departureTime };
+  const date =
+    blockOwnDate ??
+    (segmentTimes2.departureTime || segmentTimes2.arrivalTime || plausibleNumber
+      ? currentDate
+      : null);
   const anchor: SourceTransportAnchor = {
     anchorId: "",
     arrivalLocation,
@@ -1399,7 +1434,20 @@ export function sourceTransportAnchorMatchesRecord(
     return false;
   }
 
-  if (anchor.date && record.date && !tripDatesMatch(anchor.date, record.date)) {
+  // A weak anchor's date is unreliable (it may be inherited from scan
+  // position rather than stated in its own block), so a date disagreement
+  // only disqualifies anchors that carry their own segment identity — a
+  // time or a transport number (RW-AUD-001: an identity-join failure must
+  // not become a missing-record P0).
+  const anchorCarriesSegmentIdentity = Boolean(
+    anchor.departureTime || anchor.arrivalTime || anchor.number
+  );
+  if (
+    anchorCarriesSegmentIdentity &&
+    anchor.date &&
+    record.date &&
+    !tripDatesMatch(anchor.date, record.date)
+  ) {
     return false;
   }
 
