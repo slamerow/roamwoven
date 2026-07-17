@@ -6,6 +6,81 @@
 
 ## Current State
 
+### 2026-07-17 night — wave-1 fix pass for the 7.18.0 audit (Claude/Cowork session)
+
+Read first: `docs/product-contracts.md` (ledger v11: RW-CNT-001 added;
+RW-PRI/ASM/TRV/CLS/QUE/AUD/GRP-001 evidence updated),
+`docs/assembly-defect-docket-2026-07-17-run3.md` (7.18.0 audit + cross-audit
+addendum + wave-1 fix status).
+
+- Live run 7.18.0 (trip `e0b06255-ea20-42fa-b3bf-106681db3d49`, ran on
+  a4c4fa2, extraction model gpt-5.4-mini) audited from the QA bundle + live
+  pages; raw JSON saved locally as `run-7.18.0-qa-bundle.json` (gitignored,
+  byte-exact sha256-verified). Headlines: 3 Prague stays (one public, minted
+  from a Costs line), stay Wi-Fi password + door code + address cleartext in
+  a public "Check in to AirBNB" card, two mis-dated ticket re-emissions
+  carrying train booking codes on Jan 24, Albertina destroyed by the
+  check-in router, Jan 20 St. Stephen's killed by note-copy precedence
+  inversion, false transport P0 from a Costs-section anchor with a
+  fabricated date (third consecutive false-P0 class), all 3 groups
+  defective (castle+Lesser Town mega-container, fabricated "300 m" Royal
+  Palace claim with zero coords in the payload, Schoenbrunn 2/5), 6
+  questions (3 legit + castle/KGB misfire + 2 parser chunk leaks whose
+  answers sat in final rows), note-collection content loss, counters
+  65/67/72 across surfaces. Verified against lineage/source-anchor evidence;
+  koscom + "maybe communism museum" provably in source text but never
+  emitted (parser miss, same model as 7.17.2 which parsed them); Szechenyi
+  Baths never observed in EITHER run; Ryanair FR8331 has no source anchor.
+- CEO decisions this session (Eli): fixes ship in TWO waves (wave 1
+  assembly-only, wave 2 parser), one fresh paid extraction after each; one
+  count definition — travel cards are a subset of activity cards, Plans =
+  top-level activity-umbrella cards incl. admin + travel, Transport is a
+  drill-down subset (RW-CNT-001); pending planned-or-ideas candidates hold
+  as city ideas and promote on answer, slot-committed questions keep ONE
+  flexible card with options folded into its description; duplicate-fold
+  suppressions are silent but each cross-date ticket fold gets one
+  statement-style call; hard warnings render on the review page too;
+  extraction pinning stays OUT of wave 1 (own push, Eli runs the Supabase
+  SQL first); Lennon Wall / KGB / Kafka are discrete, never castle children.
+- WAVE 1 IMPLEMENTED in this session (workspace copy: 41 test files green,
+  typecheck clean, build clean — includes NEW
+  `tests/assembly-ground-truth-run3.test.ts`, 16 checks mirroring the live
+  7.18.0 shapes): output-boundary protected-value scrub; date-agnostic
+  ticket-copy transport shadows + fold calls; stay identity venue+leg with
+  leg-boundary checkout reconciliation + costs-fragment absorption;
+  check-in router title gate (Albertina) + credential override + alias
+  stopwords (Vitae); planned-day-plan-beats-note-copy (St. Stephen's);
+  Costs excluded from anchor minting, no fabricated anchor dates, weak
+  anchors capped at P2, anchor-coverage notice; source-obvious transport
+  question reconciliation; researched-list hold-as-ideas + memberSnapshots
+  + end-to-end promote handler in the decisions layer; day-slot option
+  folding; same-site grouping verification (multi-site container rejection,
+  geo-or-source-listing membership, honest claims); note-collection
+  integrity restore + abbreviation-safe segmentation + cross-city tips
+  guard; one count definition everywhere + review-page hard warnings.
+- Fixture-caught regression worth remembering: demoting researched-list
+  members while their question pointed at a member's canonical id violated
+  the identity manifest at finalization — question subject is now the trip,
+  members ride as typed snapshots.
+- IMMEDIATE NEXT STEP: Eli commits/pushes via the provided terminal block
+  (per-family commits, already ordered so each prefix is green), creates a
+  fresh QA100 trip with the Czech PDF, runs extraction, Claude audits
+  against the key + Δ2. WAVE-1 targets: 5 stays (Prague Jan 14–18, clean
+  name), 0 credential/booking strings in any card prose, 0 false P0, 3
+  questions (trio held as ideas; baths ONE card + question; castle ticket),
+  collisions auto-folded with 2 calls, Plans = top-level cards + travel
+  everywhere, hard warnings visible on /data. Expect Jan 16 to UNGROUP
+  (castle mega-container rejected; Lesser Town walk still blocked on geo) —
+  honest regression until wave 2.
+- WAVE 2 (parser, next session after wave-1 run validates): emit
+  approxLatitude/approxLongitude/area (confirmed absent — blocks the walk
+  rule), stop re-emitting ticket pages as new-dated activities, keep
+  koscom/'maybe' mentions/Tour Rome/Szechenyi Baths, one card for "X or Y"
+  disjunctions, provider text-bleed ("PM Delta"), degenerate time pairs
+  (Borkonyha 20:00–20:00, opening-hours endTimes), plus a source-coverage
+  diagnostic (day-section lines with zero observations). Then extraction
+  pinning (Supabase SQL before deploy).
+
 ### 2026-07-17 evening — 7.17.2 audit + full defect pass (Claude/Cowork session)
 
 Read first: `docs/product-contracts.md` (updated: RW-PRI-001 scope narrowed,

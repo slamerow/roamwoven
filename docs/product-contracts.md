@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 10
+Ledger version: 11
 
-Ledger date: 2026-07-17
+Ledger date: 2026-07-17 (wave-1 defect pass, evening 2)
 
 Approval state: Approved and implementation-tracked
 
@@ -337,6 +337,18 @@ path is bypassed.
   the real card sharing their exact slot. Enforced by ground-truth checks
   `castle-survives-stay-shadow`, `dropbags-folds-into-stay`,
   `chain-bridge-single-card`, `cafe-central-planned-wins`.
+  2026-07-17 wave 1 (live-run 7.18.0): transport-shadow suppression gained a
+  date-agnostic ticket-copy fallback (exact clock time + route identity, or a
+  shared booking code, against ANY canonical segment — the parser re-emitted
+  the RegioJet and OeBB tickets as Jan 24 cards carrying booking codes);
+  check-in matching uses stay alias tokens and tolerates duplicate stay rows;
+  lodging-role words ("stay", "arrival") are structural stopwords so "Vitae
+  Hostel stay" folds; the routine check-in gate reads the TITLE and requires
+  every distinctive title token to be lodging/city vocabulary (Albertina was
+  destroyed by a description that merely mentioned the day's check-in); a
+  credential-bearing card is stay material even when timed. Each cross-date
+  ticket fold produces one statement-style call (Eli-approved) so the maker
+  sees what merged. Enforced by ground-truth run3 checks.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/assembly-ground-truth.test.ts`
@@ -367,7 +379,15 @@ path is bypassed.
   the real clustering + compilation path and passes. Enforcement stays
   `PARTIAL` (upgraded from `KNOWN_GAP` on 2026-07-17) until a fresh live
   extraction of the Central Europe PDF confirms the per-segment split
-  end to end.
+  end to end. 2026-07-17 wave 1 (live-run 7.18.0 P0: three Prague Airbnb
+  stay rows, one public, from conflicting chunk checkouts plus a Costs
+  day-price line): stay identity is venue+leg — a checkout disagreement
+  between same-venue records is a field conflict reconciled against the leg
+  departure boundary (else the later checkout), never a second stay; a
+  generic-name stay fragment with no address, booking, or checkout whose
+  night is covered by a surviving same-city stay is absorbed as cost/context
+  residue; internal date-suffix disambiguators never survive in stay names.
+  Enforced by ground-truth run3 checks.
 - Tests: `tests/assembly-ground-truth.test.ts`,
   `tests/source-transport-anchors.test.ts`
 
@@ -429,6 +449,17 @@ path is bypassed.
   costs scrub live in the note-collection builder. Ground-truth checks
   `budapest-note-copies-win`, `budget-scrubbed-from-notes`,
   `city-note-sections`, `cafe-central-planned-wins` enforce the additions.
+  2026-07-17 wave 1 (live-run 7.18.0): city-note collections gained an
+  integrity check — every routed note's content must land in the rendered
+  note or carry an explicit exclusion disposition, otherwise it is restored
+  into its classified section with a recovery action (Mistral Cafe, Cafe
+  Louvre, Malostranska Beseda, Country Life, and Pontoon were routed in and
+  silently lost); prose segmentation never splits after a title
+  abbreviation ("St. Stephen's" cannot become an orphaned "St."); a named
+  multi-topic tips/ideas note that merely mentions another leg's entity
+  keeps its city home instead of being wholesale rerouted (the Budapest
+  public-transport tip was killed this way). Enforced by ground-truth run3
+  checks.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -659,7 +690,16 @@ path is bypassed.
   address + email + phone in cleartext). Ground-truth checks
   `vitae-directions-fold` and `rome-key-pickup-suppressed` enforce the
   routing; the 45 leg-scoped generic privacy labels remain a known
-  presentation gap.
+  presentation gap. 2026-07-17 wave 1 (live-run 7.18.0 P0: a "Check in to
+  AirBNB" activity card shipped the stay address, Wi-Fi password, and door
+  code in cleartext): a protected-value scrub now runs at the output
+  boundary — values sourced from canonical STAY and TRANSPORT records
+  (addresses, access credentials, booking identifiers) are removed from all
+  public activity/note prose, and credential-shaped sentences (Wi-Fi
+  password / door code / lockbox / buzzer) are dropped whenever a stay
+  record exists to own them. Activity/tour/restaurant booking references
+  remain public per the narrowed scope. Ground-truth run3 checks enforce
+  the live shapes (`tests/assembly-ground-truth-run3.test.ts`).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
   `tests/assembly-ground-truth.test.ts`
@@ -724,7 +764,15 @@ path is bypassed.
   incident, never a missing-record P0. Audit views also now expose the
   parser's `approxLatitude`/`approxLongitude`/`area` fields — the 7.17.2
   audit was structurally blind to whether geo hints were emitted at all.
-  A broken identity join on
+  2026-07-17 wave 1 (live-run 7.18.0 false P0, third consecutive class —
+  a Costs-section route line, fabricated Jan 25 date): Costs/budget lines
+  can no longer mint transport anchors; a weak anchor (no time, no
+  transport number) never inherits the scan cursor's date and its date
+  never disqualifies route reconciliation; a route-only unmatched anchor
+  raises at most a P2, never a P0; and final travel rows with NO anchor
+  coverage raise a quiet internal notice (7.18.0 shipped Ryanair FR8331
+  with zero anchor coverage — source-truth verification was blind to that
+  segment). A broken identity join on
   otherwise matching output becomes an internal detector incident and cannot
   create a missing-record diagnostic or mutate the traveler draft. Metamorphic
   tests cover activity, stay, and transport identity drift; array reordering;
@@ -791,6 +839,28 @@ path is bypassed.
 - Evidence: Superseded by the explicit Question-control decisions consolidated in
   `RW-QUE-001`; current runtime coverage remains incomplete.
 - Tests: `tests/generated-trip-model.test.ts`
+
+## RW-CNT-001 — One count definition across every maker surface
+
+- Status: `LOCKED`
+- Decision date: `2026-07-17`
+- Enforcement: `ENFORCED`
+- Contract: Travel cards are a subset of activity cards (Eli, 2026-07-17).
+  The activity umbrella counts every top-level traveler-visible card —
+  sights, meals, admin/logistics — excluding grouped child stops, city
+  notes, and undated placeholders. "Plans" = top-level activity-umbrella
+  cards PLUS travel cards; Transport is presented as a drill-down subset of
+  Plans, not a disjoint bucket. The review page, summary page, extraction
+  fingerprints, and QA bundle all compute counts with this one definition
+  (live-run 7.18.0 showed 65 / 67 / 72 across three surfaces). Hard
+  structural warnings render on the review page as well as the summary page
+  (Eli, wave 1) so a maker working the queue sees collisions where they
+  decide.
+- Evidence: `getReviewActivityItems`, summary `plans`, and fingerprint
+  `activeActivities` share the top-level-card rule; the review page renders
+  summary hard warnings above the decision sections.
+- Tests: `tests/assembly-ground-truth-run3.test.ts`,
+  `tests/generated-trip-model.test.ts`
 
 ## Ledger maintenance criteria
 
