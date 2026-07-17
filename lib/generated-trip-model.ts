@@ -226,6 +226,20 @@ export type TripReviewQuestionRecord = {
   answerMax?: string | null;
   answerMin?: string | null;
   answerOptions?: Array<{ label: string; value: string }>;
+  /**
+   * Candidate records held as city ideas while a planned-or-ideas question is
+   * open (RW-QUE-001 end-to-end answers): a "planned" answer recreates each
+   * snapshot as a dated activity card; "ideas" resolves with the candidates
+   * already living in the city note.
+   */
+  memberSnapshots?: Array<{
+    canonicalId: string | null;
+    category: string | null;
+    city: string | null;
+    date: string | null;
+    description: string | null;
+    title: string | null;
+  }> | null;
   answerType:
     | "text"
     | "choice"

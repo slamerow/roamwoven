@@ -126,11 +126,29 @@ export function createReviewQuestions({
           ? "text"
           : requestedAnswerType;
 
+      const memberSnapshots = getArray(detail, "_canonicalMemberSnapshots")
+        .flatMap((snapshot) => {
+          const record =
+            snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+              ? (snapshot as DraftObject)
+              : null;
+          if (!record) return [];
+          return [{
+            canonicalId: getString(record, "canonicalPieceId"),
+            category: getString(record, "category"),
+            city: getString(record, "city"),
+            date: getString(record, "date"),
+            description: getString(record, "description"),
+            title: getString(record, "title"),
+          }];
+        });
+
       return [{
         answerMax: getString(detail, "answerMax"),
         answerMin: getString(detail, "answerMin"),
         answerOptions,
         answerType,
+        ...(memberSnapshots.length > 0 ? { memberSnapshots } : {}),
         answerValue: null,
         canonicalId: canonicalReviewId,
         createdAt: null,

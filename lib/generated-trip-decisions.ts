@@ -672,6 +672,130 @@ function patchAnswerTarget({
     return { applied: false, records };
   }
 
+  // Planned-or-ideas questions over held-as-ideas candidates (RW-QUE-001
+  // end-to-end answers): the candidates were folded into the city note at
+  // assembly; "planned" recreates each snapshot as a dated activity card and
+  // removes its note entry, "ideas" resolves with everything already home.
+  const memberSnapshots = question.memberSnapshots ?? [];
+  if (memberSnapshots.length > 0 && (value === "planned" || value === "ideas")) {
+    if (value === "ideas") {
+      return { applied: true, records };
+    }
+    const promoted: TripItemRecord[] = memberSnapshots.flatMap((snapshot) => {
+      if (!snapshot.title) return [];
+      const leg =
+        records.legs.find(
+          (candidate) =>
+            snapshot.date &&
+            candidate.arriveDate &&
+            candidate.leaveDate &&
+            snapshot.date >= candidate.arriveDate &&
+            snapshot.date <= candidate.leaveDate
+        ) ??
+        records.legs.find(
+          (candidate) =>
+            snapshot.city &&
+            candidate.city.toLowerCase() === snapshot.city.toLowerCase()
+        ) ??
+        null;
+      const canonicalId =
+        snapshot.canonicalId ?? `${question.canonicalId}-${snapshot.title}`;
+      const id = `${question.tripId}-item-${canonicalId}`;
+      // A leftover individual idea record with the same identity promotes by
+      // mutation instead of duplication.
+      if (records.items.some((item) => item.id === id)) {
+        return [];
+      }
+      return [{
+        address: null,
+        canonicalId,
+        categoryId: snapshot.category ?? "art_culture",
+        date: snapshot.date,
+        description: snapshot.description,
+        endTime: null,
+        id,
+        itemType: "activity",
+        legId: leg?.id ?? records.legs[0]?.id ?? "",
+        locationName: null,
+        parentItemId: null,
+        reviewRequired: false,
+        startTime: null,
+        status: "confirmed",
+        title: snapshot.title,
+      } as TripItemRecord];
+    });
+    // Existing individual idea records (same canonical identity) promote by
+    // mutation rather than duplication.
+    const existingMemberIds = new Set(
+      memberSnapshots
+        .map((snapshot) =>
+          snapshot.canonicalId
+            ? `${question.tripId}-item-${snapshot.canonicalId}`
+            : null
+        )
+        .filter((id): id is string => Boolean(id))
+    );
+    const snapshotById = new Map(
+      memberSnapshots
+        .filter((snapshot) => snapshot.canonicalId)
+        .map((snapshot) => [
+          `${question.tripId}-item-${snapshot.canonicalId}`,
+          snapshot,
+        ])
+    );
+    let mutatedExisting = 0;
+    const mutatedItems = records.items.map((item) => {
+      if (!existingMemberIds.has(item.id)) return item;
+      const snapshot = snapshotById.get(item.id);
+      mutatedExisting += 1;
+      return {
+        ...item,
+        date: snapshot?.date ?? item.date,
+        itemType: "activity",
+        parentItemId: null,
+        reviewRequired: false,
+        status: "confirmed",
+      } as TripItemRecord;
+    });
+    if (promoted.length === 0 && mutatedExisting === 0) {
+      return { applied: false, records };
+    }
+    records = { ...records, items: mutatedItems };
+    const promotedTitles = [
+      ...promoted.map((item) => item.title.toLowerCase()),
+      ...memberSnapshots
+        .map((snapshot) => snapshot.title?.toLowerCase() ?? "")
+        .filter(Boolean),
+    ];
+    // Promoted activities win their note home: remove matching entries from
+    // city-note descriptions (dedup hierarchy — activity beats note).
+    const items = records.items.map((item) => {
+      if (item.itemType !== "note" || !item.description) return item;
+      const segments = item.description.split(/([,;]\s*|(?<=[.!?])\s+)/);
+      const kept = segments.filter((segment, index) => {
+        if (index % 2 === 1) return true;
+        const normalized = segment.trim().toLowerCase().replace(/[.]$/, "");
+        return !promotedTitles.some(
+          (title) => normalized === title || normalized === `option: ${title}`
+        );
+      });
+      const rebuilt = kept
+        .join("")
+        .replace(/,\s*,/g, ", ")
+        .replace(/:\s*,/g, ": ")
+        .replace(/,\s*\./g, ".")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      return rebuilt === item.description
+        ? item
+        : { ...item, description: rebuilt };
+    });
+    return {
+      applied: true,
+      records: { ...records, items: [...items, ...promoted] },
+    };
+  }
+
   const missingStayRecords = value
     ? applyMissingStayAnswer({ question, records, value })
     : null;
