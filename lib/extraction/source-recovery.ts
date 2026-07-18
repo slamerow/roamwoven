@@ -1,5 +1,6 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 import { classifyRecoveredLineRole } from "@/lib/extraction/activity-classifier";
+import { comparableTokens, normalizeTripDate } from "@/lib/extraction/traveler-text";
 import {
   distinctiveLineTokens,
   stageOutputTokenSet,
@@ -176,6 +177,70 @@ export function buildSourceRecoveryStage(
       ? (json as Record<string, unknown>)
       : {};
 
+  // Recovery date bounds (Arc B, live-run 7.18.3 PB-9: the recovered
+  // "Train to/from Cesky Krumlov" line shipped as a Jan 25 ROME-day
+  // activity). Each recovered record is attributed to the plan section
+  // whose excerpts share its distinctive tokens; its date is then BOUND to
+  // that section's own day heading. A record no section supports keeps its
+  // date only when SOME section heading carries that date; otherwise the
+  // date clears and structural dating downstream re-derives placement.
+  const sections = plan.sections.map((section) => {
+    const excerptTokens = new Set(
+      comparableTokens([section.label, ...section.excerpts].join(" "))
+    );
+    const headingCandidates = [section.dayHeading, section.label].filter(
+      (value): value is string => Boolean(value)
+    );
+    return { excerptTokens, headingCandidates };
+  });
+  const yearHint = (() => {
+    const raw = JSON.stringify(record);
+    const match = /\b(20\d{2})-\d{2}-\d{2}\b/.exec(raw);
+    return match ? Number(match[1]) : null;
+  })();
+  const headingDateFor = (candidates: string[]) => {
+    for (const candidate of candidates) {
+      const parsed = normalizeTripDate(candidate, yearHint);
+      if (parsed) return parsed;
+    }
+    return null;
+  };
+  const allHeadingDates = new Set(
+    sections
+      .map((section) => headingDateFor(section.headingCandidates))
+      .filter((value): value is string => Boolean(value))
+  );
+  const bindRecordDate = (card: Record<string, unknown>) => {
+    const title = typeof card.title === "string" ? card.title : "";
+    const description =
+      typeof card.description === "string" ? card.description : "";
+    const recordTokens = comparableTokens(`${title} ${description}`).filter(
+      (token) => token.length >= 4
+    );
+    let best: { overlap: number; date: string | null } | null = null;
+    for (const section of sections) {
+      const overlap = recordTokens.filter((token) =>
+        section.excerptTokens.has(token)
+      ).length;
+      if (overlap > 0 && (!best || overlap > best.overlap)) {
+        best = { date: headingDateFor(section.headingCandidates), overlap };
+      }
+    }
+    const currentDate = typeof card.date === "string" ? card.date : null;
+    if (best?.date) {
+      if (currentDate !== best.date) {
+        return { ...card, date: best.date };
+      }
+      return card;
+    }
+    if (currentDate && allHeadingDates.size > 0 && !allHeadingDates.has(currentDate)) {
+      // No excerpt attribution and the model-picked date matches no
+      // excerpt's own day heading: clear it rather than trust it.
+      return { ...card, date: null };
+    }
+    return card;
+  };
+
   // Recovered-line classification (Arc B, live-run 7.18.3 PB-9/PB-4:
   // "Budapest food ideas" and "Eat some 'Za" shipped as loose-tip activity
   // cards). A recovered line is judged by the unified classifier exactly
@@ -186,9 +251,10 @@ export function buildSourceRecoveryStage(
         if (!activity || typeof activity !== "object" || Array.isArray(activity)) {
           return activity;
         }
-        const card = activity as Record<string, unknown>;
+        const boundCard = bindRecordDate(activity as Record<string, unknown>);
+        const card = boundCard;
         if (typeof card.evidenceRole === "string" && card.evidenceRole) {
-          return activity;
+          return card;
         }
         const text = (value: unknown) =>
           typeof value === "string" ? value : null;
@@ -202,7 +268,7 @@ export function buildSourceRecoveryStage(
           startTime: text(card.startTime),
           title: text(card.title),
         });
-        return role ? { ...card, evidenceRole: role } : activity;
+        return role ? { ...card, evidenceRole: role } : card;
       })
     : [];
 

@@ -2415,6 +2415,38 @@ function suppressRepresentedTravelAndStayActivities(
 
   for (const activity of activities) {
     const text = activityText(activity.payload);
+
+    // Airport-prep lines attach to their travel card, never as separate
+    // activities (RW-TRV-001; run5 PB-7 hard-warning family: "Leave for
+    // Airport" shipped as a card for a 4th run). Title-gated and
+    // foreign-token safe: a prep title with a same-date transport segment
+    // is that segment's prep note.
+    const prepTitle = normalizeText(stringValue(activity.payload, "title") ?? "");
+    if (
+      /\b(?:leave|leaving|depart(?:ing)?|head(?:ing)?|wake(?:\s?up)?|get up|taxi|uber)\b/.test(prepTitle) &&
+      /\b(?:airport|flight|station|train)\b/.test(prepTitle) &&
+      prepTitle
+        .split(/\s+/)
+        .every((token) =>
+          /^(?:leave|leaving|depart|departing|departure|head|heading|wake|up|get|taxi|uber|for|to|the|at|early|airport|flight|station|train|am|pm|a|an|and)$/.test(
+            token
+          ) || /^\d/.test(token)
+        )
+    ) {
+      const prepTransport = transports.find((transport) =>
+        sameCanonicalDate(activity.payload, transport.payload)
+      );
+      if (prepTransport) {
+        activity.payload._representedByPieceId = prepTransport.id;
+        activity.payload._representedByTitle =
+          stringValue(prepTransport.payload, "title") ?? "its Travel row";
+        suppressCanonicalPiece(
+          activity,
+          "airport-prep line attaches to its travel card as a prep note, never a separate activity (RW-TRV-001)"
+        );
+        continue;
+      }
+    }
     const activityConfirmationForGate = confirmationFrom(activity.payload);
     const sharesTransportConfirmation = Boolean(
       activityConfirmationForGate &&
@@ -2615,7 +2647,7 @@ function suppressRepresentedTravelAndStayActivities(
     // distinctive title token has to belong to a stay name or check-in/arrival
     // vocabulary for the card to count as routine lodging flow.
     const routineVocabulary =
-      /^(?:check|checkin|checkout|in|into|out|to|the|and|at|drop|bags?|bag|start|starting|arrive|arrival|arriving|hostel|hotel|airbnb|apartment|room|luggage|then|walk|tour|touring|spend|spending|land|landing|day)$/;
+      /^(?:check|checkin|checkout|in|into|out|to|the|and|at|drop|bags?|bag|start|starting|begin|beginning|head|heading|arrive|arrival|arriving|hostel|hotel|airbnb|apartment|room|luggage|then|walk|tour|touring|spend|spending|sightsee|sightseeing|explore|exploring|land|landing|day)$/;
     const stayNameTokens = new Set(
       stays.flatMap((stay) =>
         foldForSourceSupport(stringValue(stay.payload, "name") ?? "")
@@ -6033,17 +6065,45 @@ function resolveUncommittedRepeatMentions(
     observations.map((observation) => [observation.id, observation])
   );
   const groups = new Map<string, CanonicalEvidencePiece[]>();
+  const undatedByTitle = new Map<string, CanonicalEvidencePiece[]>();
 
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
     const title = mentionComparableTitle(stringValue(piece.payload, "title"));
     if (!title) continue;
+    const date = stringValue(piece.payload, "date");
+    if (!date) {
+      // Undated placeholders join their dated repeat group below (run6
+      // smaller item: St. Stephen's ×4 + an undated placeholder + a date
+      // question — the placeholder is the same entity, not a fifth copy).
+      const bucket = undatedByTitle.get(title);
+      if (bucket) bucket.push(piece);
+      else undatedByTitle.set(title, [piece]);
+      continue;
+    }
     // Same name in a DIFFERENT leg is never a duplicate (RW-CAN-001):
     // key repeats by the city their date falls in.
-    const key = `${title}|${cityForDate(stringValue(piece.payload, "date"))}`;
+    const key = `${title}|${cityForDate(date)}`;
     const group = groups.get(key);
     if (group) group.push(piece);
     else groups.set(key, [piece]);
+  }
+
+  for (const [title, undatedPieces] of undatedByTitle) {
+    if (questionSubjects.has(title)) continue;
+    const datedKeys = [...groups.keys()].filter(
+      (key) => key.slice(0, key.lastIndexOf("|")) === title
+    );
+    if (datedKeys.length === 1) {
+      groups.get(datedKeys[0])?.push(
+        ...undatedPieces.filter(
+          (piece) =>
+            !questionSubjects.has(
+              normalizedComparable(stringValue(piece.payload, "title"))
+            )
+        )
+      );
+    }
   }
 
   const commitmentRank: Record<MentionCommitment, number> = {
@@ -6089,8 +6149,28 @@ function resolveUncommittedRepeatMentions(
       continue;
     }
 
-    // No copy is committed: repeated but never committed → one City Note.
+    // No copy is committed. If exactly ONE copy sits in a deliberate
+    // day-plan section, that membership is the "stronger planned sighting"
+    // (RW-CLS-001; ground truth v2: the Jan 20 St. Stephen's plan beats
+    // the Jan 19 idea copy) — it keeps the card and the other copies fold
+    // into it. Otherwise: repeated but never committed → one City Note.
     if (questionSubjects.has(title)) continue;
+    const deliberate = group.filter((piece) =>
+      isDeliberateDayPlanMention(piece, observationById)
+    );
+    if (deliberate.length === 1) {
+      const winnerPiece = deliberate[0];
+      for (const extra of group) {
+        if (extra === winnerPiece) continue;
+        mergeCanonicalPieceInto({
+          reason:
+            "cross-day repeat: the deliberate day-plan copy is the planned sighting; the loose copy folds in (ground truth v2 dedup)",
+          source: extra,
+          target: winnerPiece,
+        });
+      }
+      continue;
+    }
     const [kept, ...rest] = group;
     for (const extra of rest) {
       mergeCanonicalPieceInto({
@@ -7094,6 +7174,37 @@ function createDayLabelSlotQuestions(
       if (questionSubjects.has(normalizedComparable(title))) return false;
       return mentionCommitment(piece, timedCounts) === "none";
     });
+    // Slot override (run5 PB-6, 6th-run baths defect): a committed day
+    // title RESERVES its venue options. Options an earlier pass demoted to
+    // city notes (doubt demotion, idea-list, researched-hold) still count —
+    // the day title is stronger source intent than the demotion, so
+    // matching note pieces rejoin the slot flow as options.
+    const demotedOptions = pieces.filter((piece) => {
+      if (!piece.outputEligible || piece.kind !== "note") return false;
+      const title = stringValue(piece.payload, "title");
+      if (!title || !stems.test(title)) return false;
+      if (questionSubjects.has(normalizedComparable(title))) return false;
+      return true;
+    });
+    if (candidates.length === 0 && demotedOptions.length > 0) {
+      // Restore the most generic demoted option as the slot's flexible
+      // subject card; the day title committed the slot (RW-QUE-001).
+      const restored = demotedOptions[0];
+      restored.kind = "activity";
+      restored.payload.itemType = "activity";
+      addCanonicalAction(restored, {
+        absorbedTitles: [],
+        observationIds: [...restored.observationIds],
+        reason:
+          "day-title slot override: the committed day title reserves this venue option (restored from city notes)",
+        type: "recovered",
+      });
+      candidates.push(restored);
+    }
+    for (const option of demotedOptions) {
+      if (candidates.includes(option)) continue;
+      candidates.push(option);
+    }
     if (candidates.length === 0) continue;
 
     // Already asked by the parser or another rule?

@@ -51,6 +51,7 @@ function diagnosticClassification(
     case "loose_tip_promoted_to_activity":
     case "planned_activity_buried_in_city_notes":
     case "transport_description_contaminated":
+    case "transport_provider_field_corrupted":
     case "transport_times_disagree_with_source_anchor":
       return "confirmed_output_defect";
   }

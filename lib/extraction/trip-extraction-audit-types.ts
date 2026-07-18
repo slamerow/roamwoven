@@ -140,6 +140,7 @@ export type TripExtractionAuditDiagnostic = {
     | "ocr_backfill_failed"
     | "planned_activity_buried_in_city_notes"
     | "transport_description_contaminated"
+    | "transport_provider_field_corrupted"
     | "transport_row_without_source_anchor"
     | "weak_transport_source_anchor_unmatched";
   detail: string;

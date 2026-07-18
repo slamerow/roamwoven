@@ -38,6 +38,7 @@ import {
 } from "@/lib/trip-card-taxonomy";
 import { SAME_SITE_CONTAINER_PATTERN } from "@/lib/extraction/evidence-clustering";
 import { findIdentityProseSignals } from "@/lib/extraction/identity-prose";
+import { providerFieldLooksCorrupted } from "@/lib/extraction/parser-artifact-normalization";
 import {
   isHeadingFragmentTitle,
   tripCityTokenSet,
@@ -746,6 +747,38 @@ export function createAuditDiagnostics({
         .map((record) => `${record.date ?? "undated"} - ${record.title}`),
       severity: "p1",
       title: "Transport cards include non-transport details",
+    });
+  }
+
+  // Provider-field corruption (PB-5 audit gap: the 7.18.3 audit read
+  // titles only while four transport rows carried corrupted provider
+  // FIELDS — "PM Delta", "Home Delta", "Za Wizz Air", "D 143"). Judged by
+  // the pipeline's own repair predicate so detector and repair never drift.
+  const corruptedProviderRows = finalRecords
+    .filter(isActiveFinalRecord)
+    .filter(
+      (record) =>
+        record.recordType === "transport" &&
+        providerFieldLooksCorrupted(record.provider)
+    );
+
+  if (corruptedProviderRows.length > 0) {
+    diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        corruptedProviderRows
+      ),
+      code: "transport_provider_field_corrupted",
+      detail:
+        "Transport provider fields carry layout-bleed words or bare transport-number shapes instead of a carrier name.",
+      evidence: corruptedProviderRows
+        .slice(0, 10)
+        .map(
+          (record) =>
+            `${record.date ?? "undated"} - ${record.title} [provider: ${record.provider ?? ""}]`
+        ),
+      severity: "p1",
+      title: "Transport provider fields look corrupted",
     });
   }
 

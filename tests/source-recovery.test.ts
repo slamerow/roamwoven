@@ -328,4 +328,94 @@ export default async function run() {
       "a recovery record with no excerpt support is suppressed"
     );
   });
+
+  await test("run6 PB-9: a recovered record's date is BOUND to its excerpt's own day heading", () => {
+    const plan = planSourceRecoveryBatch({
+      coverage: coverageWith([
+        {
+          dayHeading: "Thursday, January 17th",
+          label: "Thursday, January 17th",
+          meaningfulLineCount: 4,
+          uncoveredLines: [
+            {
+              excerpt: "Train to/from Cesky Krumlov",
+              lineIndex: 3,
+              uncoveredClauses: ["Train to/from Cesky Krumlov"],
+            },
+          ],
+        },
+      ]),
+      maxInputChars: 4000,
+      maxLines: 60,
+    });
+    assert.ok(plan, "plan exists");
+    const recoveryStage = buildSourceRecoveryStage(
+      {
+        activities: [
+          {
+            category: "arrival_departure",
+            city: "Cesky Krumlov",
+            // The model mis-dated the recovered line into the Rome leg
+            // (live-run 7.18.3 shipped it as a Jan 25 Rome-day activity).
+            date: "2019-01-25",
+            description: "Train to and from Cesky Krumlov.",
+            itemType: "activity",
+            title: "Train to/from Cesky Krumlov",
+          },
+        ],
+      },
+      plan
+    );
+    const stage = recoveryStage.stage as { activities: Array<Record<string, unknown>> };
+
+    assert.equal(
+      stage.activities[0].date,
+      "2019-01-17",
+      "the date is bound to the excerpt's own day heading"
+    );
+  });
+
+  await test("run6 PB-9: a recovered date matching no excerpt heading clears instead of shipping", () => {
+    const plan = planSourceRecoveryBatch({
+      coverage: coverageWith([
+        {
+          dayHeading: "Thursday, January 17th",
+          label: "Thursday, January 17th",
+          meaningfulLineCount: 4,
+          uncoveredLines: [
+            {
+              excerpt: "go to koscom",
+              lineIndex: 4,
+              uncoveredClauses: ["go to koscom"],
+            },
+          ],
+        },
+      ]),
+      maxInputChars: 4000,
+      maxLines: 60,
+    });
+    assert.ok(plan, "plan exists");
+    const recoveryStage = buildSourceRecoveryStage(
+      {
+        activities: [
+          {
+            category: "sightseeing",
+            city: "Rome",
+            date: "2019-01-25",
+            description: "A place the excerpts never mention.",
+            itemType: "activity",
+            title: "Unattributable extra",
+          },
+        ],
+      },
+      plan
+    );
+    const stage = recoveryStage.stage as { activities: Array<Record<string, unknown>> };
+
+    assert.equal(
+      stage.activities[0].date,
+      null,
+      "an unattributable model date outside every excerpt heading clears"
+    );
+  });
 }

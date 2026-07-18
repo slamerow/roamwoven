@@ -532,4 +532,151 @@ export default async function run() {
       "the 'if you want' hedge demotes the loop to city notes silently"
     );
   });
+
+  await test("ground truth run6 rider (RW-CAN-001): St. Stephen's cross-day repeat folds — the deliberate Jan 20 plan wins, the hedged idea copy and undated placeholder fold in", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Saturday, January 19th", emptyStage({
+          activities: [
+            {
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: "St. Stephen's Cathedral if time.",
+              itemType: "activity",
+              sourceSectionLabel: "Saturday, January 19th // Vienna ideas",
+              title: "St. Stephen's Cathedral",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-18", city: "Vienna", country: "Austria", leaveDate: "2019-01-21" },
+          ],
+        })),
+        stage("Sunday, January 20th", emptyStage({
+          activities: [
+            {
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-20",
+              description: "St. Stephen's Cathedral.",
+              itemType: "activity",
+              sourceSectionLabel: "Sunday, January 20th",
+              title: "St. Stephen's Cathedral",
+            },
+            {
+              category: "art_culture",
+              city: "Vienna",
+              date: null,
+              description: "St Stephens Cathedral.",
+              itemType: "activity",
+              sourceSectionLabel: "Sunday, January 20th",
+              title: "St. Stephen's Cathedral",
+            },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const cards = draft.activities.filter((item) =>
+      /stephen/i.test(String(item.title))
+    );
+
+    assert.equal(cards.length, 1, `one St. Stephen's card (got ${cards.length})`);
+    assert.equal(cards[0].date, "2019-01-20", "the deliberate day-plan copy wins");
+  });
+
+  await test("ground truth run6 rider (RW-TRV-001): 'Leave for Airport' attaches to its travel card, never a separate activity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Thursday, January 24th", emptyStage({
+          activities: [
+            {
+              category: "arrival_departure",
+              city: "Budapest",
+              date: "2019-01-24",
+              description: "Leave for the airport by 8.",
+              itemType: "activity",
+              title: "Leave for Airport",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+          ],
+          transport: [
+            {
+              arrival: "Rome",
+              arrivalTime: "12:05",
+              date: "2019-01-24",
+              departure: "Budapest",
+              departureTime: "10:35",
+              provider: "Wizz Air",
+              title: "Budapest to Rome",
+              type: "flight",
+            },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+
+    assert.equal(
+      draft.activities.some((item) => /leave for airport/i.test(String(item.title))),
+      false,
+      "the airport-prep line is represented by the travel row"
+    );
+  });
+
+  await test("ground truth run6 rider (PB-6, RW-QUE-001): the committed bathing day title reserves its demoted venue options — the slot flow still runs", () => {
+    const JAN21 = "Monday, January 21st // Budapest Bathing";
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(JAN21, emptyStage({
+          activities: [
+            {
+              category: "wellness_relaxation",
+              city: "Budapest",
+              date: "2019-01-21",
+              description: "Szechenyi Baths, maybe.",
+              itemType: "activity",
+              sourceSectionLabel: JAN21,
+              title: "Szechenyi Baths",
+            },
+            {
+              category: "wellness_relaxation",
+              city: "Budapest",
+              date: "2019-01-21",
+              description: "Gellert Baths, maybe.",
+              itemType: "activity",
+              sourceSectionLabel: JAN21,
+              title: "Gellert Baths",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const slotQuestion = draft.missingDetails.find(
+      (item) => item._canonicalQuestionKind === "day_label_slot"
+    );
+    const bathsCard = draft.activities.find((item) =>
+      /baths/i.test(String(item.title))
+    );
+
+    assert.ok(slotQuestion, "the baths slot question ships (ground truth question #3)");
+    assert.ok(bathsCard, "one flexible slot card owns the choice");
+    assert.match(
+      String(bathsCard?.description ?? ""),
+      /gellert|szechenyi/i,
+      "the other venue folds in as an option"
+    );
+  });
 }

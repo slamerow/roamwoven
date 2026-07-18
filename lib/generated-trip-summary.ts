@@ -1016,6 +1016,16 @@ function createSummaryWarnings({
     }));
   const stayCollisionWarnings = unresolvedActiveItems
     .filter(isStayFlowItem)
+    // A flow-shaped card whose TITLE names a real entity of its own
+    // ("Check in to hostel and walk to Albertina") is a real activity the
+    // pipeline deliberately kept — warning the maker to remove it is the
+    // un-clearable-warning family (run5 PB-7, 4 runs). Only title-level
+    // routine flow warns.
+    .filter((item) =>
+      /\b(check in|checkin|drop bags?|bag drop|store bags?|luggage storage|bag storage)\b/.test(
+        (item.title ?? "").toLowerCase()
+      )
+    )
     .flatMap((item) => {
       const matchingStay = activeStays.find((stay) => {
         if (!item.date || !stay.checkInDate) {

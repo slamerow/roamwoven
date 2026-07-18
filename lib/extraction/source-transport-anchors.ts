@@ -648,6 +648,32 @@ function extractConfirmation(blockText: string) {
   return match?.[1] ?? null;
 }
 
+// Live-run 7.18.3 PB-5: adjacent layout words bleed into the captured
+// carrier name — "4:35 PM Delta Flight 1043" captured "PM Delta",
+// "Home Delta", and "…'Za Wizz Air" captured "Za Wizz Air". Leading tokens
+// from the bleed vocabulary (and slang shards like "Za") are stripped
+// while a real carrier word remains.
+const ANCHOR_PROVIDER_BLEED_TOKEN =
+  /^(?:am|pm|home|za|eat|some|depart(?:s|ure)?|arriv(?:es|al)?)$/i;
+
+function cleanAnchorProvider(raw: string | null) {
+  if (!raw) return null;
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  while (
+    tokens.length > 1 &&
+    (ANCHOR_PROVIDER_BLEED_TOKEN.test(tokens[0]) ||
+      tokens[0].replace(/[^A-Za-z]/g, "").length <= 2)
+  ) {
+    tokens.shift();
+  }
+  const cleaned = tokens.join(" ").trim();
+  if (!cleaned) return null;
+  // A provider that is actually a transport-number shape ("D 143") is a
+  // number, never a carrier (PB-5 shaped gap).
+  if (/^[A-Za-z]{1,4}\s?\d{2,5}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 function extractProviderAndNumber(kind: SourceTransportAnchorKind, blockText: string) {
   if (kind === "flight") {
     const match =
@@ -657,7 +683,7 @@ function extractProviderAndNumber(kind: SourceTransportAnchorKind, blockText: st
 
     return {
       number: match ? cleanLine(`${match[2]}`) : null,
-      provider: match?.[1] ?? null,
+      provider: cleanAnchorProvider(match?.[1] ?? null),
     };
   }
 
@@ -667,9 +693,15 @@ function extractProviderAndNumber(kind: SourceTransportAnchorKind, blockText: st
         blockText
       ) ?? /\b([A-Z]{1,4}\s?\d{2,5})\b/.exec(blockText);
 
+    if (match && match.length === 2) {
+      // Number-only fallback: "D 143" is the train number, never a carrier
+      // (7.18.3 shipped provider "D 143").
+      return { number: match[1] ?? null, provider: null };
+    }
+
     return {
-      number: match?.[2] ?? (match && match.length === 2 ? match[1] : null),
-      provider: match?.[1] ?? null,
+      number: match?.[2] ?? null,
+      provider: cleanAnchorProvider(match?.[1] ?? null),
     };
   }
 

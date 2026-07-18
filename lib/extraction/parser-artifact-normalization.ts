@@ -203,7 +203,7 @@ function repairDegenerateTimes(
 
 // --- Rule 2: provider text-bleed and unsupported carrier labels -------------
 
-const PROVIDER_BLEED_TOKEN = /^(?:am|pm|home|depart(?:s|ure)?|arriv(?:es|al)?)$/i;
+const PROVIDER_BLEED_TOKEN = /^(?:am|pm|home|za|eat|some|depart(?:s|ure)?|arriv(?:es|al)?)$/i;
 const CARRIER_TITLE_PATTERN =
   /^([A-Za-z][A-Za-z&]+)\s+(flight|train|bus|ferry)\b/i;
 
@@ -222,9 +222,27 @@ function repairTransportProvider(
       (token) => !PROVIDER_BLEED_TOKEN.test(token)
     );
 
+    // Leading short-token shards ("Za Wizz Air", "D 143") evade the
+    // vocabulary list AND the >=3-letter source-support gate — the source
+    // text legitimately contains "'Za" (live-run 7.18.3 PB-5). A 1-2
+    // letter leading token in front of a real carrier word is bleed.
+    while (
+      tokens.length > 1 &&
+      tokens[0].replace(/[^A-Za-z]/g, "").length <= 2 &&
+      tokens.slice(1).some((token) => token.replace(/[^A-Za-z]/g, "").length >= 3)
+    ) {
+      tokens = tokens.slice(1);
+    }
+
+    // A provider that is a bare transport-number shape ("D 143", "143") is
+    // a number, never a carrier.
+    if (tokens.length > 0 && /^[A-Za-z]{0,4}\s?\d{2,5}$/.test(tokens.join(" "))) {
+      tokens = [];
+    }
+
     if (tokens.length !== originalTokens.length) {
       repairs.push({
-        detail: `Provider "${provider}" carried adjacent layout words — text-bleed family (live-run 7.18.0: "PM Delta", "Home Delta").`,
+        detail: `Provider "${provider}" carried adjacent layout words or number shards — text-bleed family (live-runs 7.18.0/7.18.3: "PM Delta", "Home Delta", "Za Wizz Air", "D 143").`,
         kind: "provider_text_bleed",
         stageLabel: stage.label,
         title,
@@ -272,6 +290,23 @@ function repairTransportProvider(
       title,
     });
   }
+}
+
+// Shared with the audit's provider-field check (PB-5 audit gap: the 7.18.3
+// audit read titles only and missed four corrupted provider FIELDS).
+export function providerFieldLooksCorrupted(provider: string | null | undefined) {
+  if (!provider) return false;
+  const tokens = provider.split(/\s+/).filter(Boolean);
+  if (tokens.some((token) => PROVIDER_BLEED_TOKEN.test(token))) return true;
+  if (/^[A-Za-z]{0,4}\s?\d{2,5}$/.test(provider.trim())) return true;
+  if (
+    tokens.length > 1 &&
+    tokens[0].replace(/[^A-Za-z]/g, "").length <= 2 &&
+    tokens.slice(1).some((token) => token.replace(/[^A-Za-z]/g, "").length >= 3)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 // --- Rule 3: day-title cards ------------------------------------------------
@@ -377,28 +412,50 @@ function repairDayTitleCard(
 const COST_PATTERN = PRICE_SIGNAL_PATTERN;
 const COST_VOCABULARY = new Set([
   "airbnb",
+  "amount",
   "apartment",
   "bed",
+  "booking",
   "budget",
   "cost",
   "costs",
+  // Currency and payment tokens (live-run 7.18.3 smaller item: the
+  // "Prague lodging cost note" escaped because a bare currency code
+  // counted as distinctive venue content).
+  "crowns",
+  "czk",
+  "deposit",
   "dorm",
   "double",
   "ensuite",
+  "eur",
+  "euro",
+  "euros",
+  "fee",
+  "fees",
+  "forint",
+  "forints",
+  "gbp",
   "hostel",
   "hotel",
+  "huf",
+  "koruna",
   "lodging",
   "night",
   "nights",
   "note",
   "notes",
+  "paid",
   "per",
+  "prepaid",
   "price",
   "private",
   "room",
   "single",
   "stay",
   "total",
+  "usd",
+  "via",
 ]);
 
 function repairCostLineCard(

@@ -436,6 +436,66 @@ export default async function run() {
     );
   });
 
+  await test("run6 PB-5: provider short-token shards strip ('Za Wizz Air' -> 'Wizz Air'); number-shaped providers null ('D 143')", () => {
+    const result = normalizeParserStageArtifacts([
+      stage("budapest-travel", emptyStage({
+        transport: [
+          {
+            date: "2019-01-24",
+            provider: "Za Wizz Air",
+            title: "Budapest to Rome",
+            type: "flight",
+          },
+          {
+            date: "2019-01-21",
+            provider: "D 143",
+            title: "Vienna to Budapest",
+            type: "train",
+          },
+          {
+            date: "2019-01-12",
+            provider: "PM Delta",
+            title: "JFK to Rome",
+            type: "flight",
+          },
+        ],
+      })),
+    ]);
+    const transport = firstStage(result).transport;
+
+    assert.equal(transport[0].provider, "Wizz Air");
+    assert.equal(transport[1].provider, null);
+    assert.equal(transport[2].provider, "Delta");
+    assert.ok(
+      result.repairs.filter((repair) => repair.kind === "provider_text_bleed")
+        .length >= 3
+    );
+  });
+
+  await test("run6 rider: a lodging cost note with a bare currency code still demotes (Prague lodging cost note, 45.75 EUR)", () => {
+    const result = normalizeParserStageArtifacts([
+      stage("prague-notes", emptyStage({
+        activities: [
+          {
+            category: "admin_logistics",
+            city: "Prague",
+            date: "2019-01-14",
+            description: "45.75 EUR paid deposit via booking.",
+            itemType: "activity",
+            title: "Prague lodging cost note",
+          },
+        ],
+      })),
+    ]);
+    const activities = firstStage(result).activities;
+
+    assert.equal(activities[0].evidenceRole, "context");
+    assert.equal(
+      result.repairs.filter((repair) => repair.kind === "cost_line_card").length,
+      1
+    );
+  });
+
   await test("integration: normalized artifacts never surface as traveler cards through clustering", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
