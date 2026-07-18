@@ -183,3 +183,51 @@ the loose-tip P1s and Pinball P1 that older private regexes missed.
 Fixtures from 7.18.3 lineage shapes in the same commits. Then extraction
 pinning immediately after 7.18.4 validates (parser variance is now a
 first-order drag: koscom 5 runs, a materially different parse per run).
+
+## Arc B fix status (2026-07-18, Claude/Cowork cloud session — implemented, awaiting 7.18.4)
+
+Commit order as decided (privacy P0 first). Suite at final state: 52 test
+files green, typecheck clean, prefix-green at every commit.
+
+1. PRIVACY WAVE (PB-1) — DONE. (a) Identity-scrub trace: PHRASING EVASION,
+   not ordering — the scrub runs after every merge, but its pattern
+   required "Customer:" WITH a colon; the colon-less block, the postal
+   home-address shape, and mid-segment phones matched nothing. Shapes now
+   live in `lib/extraction/identity-prose.ts`, shared by scrub and
+   detector. (b) FR8331: the shadow gate required a movement word; it now
+   accepts flight-code shapes and shared-confirmation matches, and the
+   pass re-runs after dates resolve; transport-shaped activities lose
+   travel confirmations from prose AND fields at the output boundary.
+   (c) Ticket-page ACTIVITY family covered (all-ticket-vocabulary title +
+   quantity/price/ticket-number boilerplate). (d) NEW
+   `identity_value_in_public_prose` P0 detector on UNREDACTED prose;
+   audit procedure updated (privacy is checked on unredacted card prose).
+2. PB-3 — DONE. Coverage v3 per-clause matching; cross-stage credit never
+   spans clauses; short clauses in multi-entity lines need FULL coverage
+   (generic "baths" can no longer mask Szechenyi); run5 noise calibration
+   preserved; uncovered clauses in telemetry.
+3. UNIFIED CLASSIFIER — DONE (`lib/extraction/activity-classifier.ts`).
+   All six acceptance criteria fixture-proven: Jan-21 idea list demotes as
+   a unit (vocabulary / notes-blob section / recommendation-majority
+   signals; priced entries stay with the researched-list question);
+   site↔component never merges + observation-title noun guards (PB-2a+b);
+   doubt demotion on OWN observation text only via intake stamps (PB-8);
+   explicit-commitment-only repeat survival — sequenced copies fold
+   (PB-7, ledger compliance restored); "if you want" hedge family;
+   recovered lines route through classification (PB-9). Resolver plan
+   signals import the taxonomy lexicon (B1 closed).
+4. GEOCODING LANE — DONE. Env-keyed, budgeted, fail-soft, proximity-only,
+   usage-JSON only; verified coords satisfy the precision gate. Set
+   GEOCODE_VERIFICATION_API_KEY in Vercel before 7.18.4 if the lane
+   should fire on the validation run.
+5. RIDERS — DONE. Provider-field repairs at anchor + parser layers with a
+   NEW transport_provider_field_corrupted P1 (PB-5); recovery date bounds
+   (PB-9); St. Stephen's cross-day fold (undated placeholders join, the
+   deliberate day-plan copy wins); cost-note currency gap; baths slot
+   override (a committed day title reserves demoted options); collision
+   auto-suppression (airport-prep fold, routine vocabulary, warning
+   alignment).
+
+Validation: fresh extraction "7.18.4", blind-first audit against the
+ship-bar floor above. Model A/B stays held unless 7.18.4 still shows
+parser-drop dominance.

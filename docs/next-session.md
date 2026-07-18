@@ -6,6 +6,42 @@
 
 ## Current State
 
+### 2026-07-18 — ARC B IMPLEMENTED: privacy wave + per-clause coverage + unified classifier + geocoding lane + riders (Claude/Cowork cloud session)
+
+Read first: `docs/product-contracts.md` (ledger v16),
+`docs/assembly-defect-docket-2026-07-18-run6.md` (§Arc B fix status).
+
+- ARC B LANDED per the run6 docket order, 5 commits, prefix-green
+  (suite 52 test files green + typecheck clean at every prefix):
+  (1) privacy wave P0 — identity scrub fixed (phrasing evasion: colon-less
+  "Customer <Name>" blocks, postal addresses, mid-segment phones; shared
+  `identity-prose.ts` predicates), FR8331 transport-shadow gate (flight
+  codes + shared confirmations + post-date re-run), travel-confirmation
+  scrub on transport-shaped activities, ticket-page ACTIVITY family, NEW
+  identity_value_in_public_prose P0 detector on UNREDACTED prose;
+  (2) PB-3 per-clause coverage (v3) — recovery trigger integrity restored;
+  (3) UNIFIED classifier (`lib/extraction/activity-classifier.ts`) — all
+  six run6 acceptance criteria fixture-proven (idea lists, site↔component,
+  own-text doubt, explicit-commitment repeat survival, "if you want",
+  recovered-line classification) + resolver B1 closed;
+  (4) geocoding verification lane (env-keyed GEOCODE_VERIFICATION_API_KEY,
+  budgeted, fail-soft, proximity-only, usage-JSON only);
+  (5) riders — provider-field repairs + P1 detector, recovery date bounds,
+  St. Stephen's fold, cost-note currency gap, baths slot override,
+  collision auto-suppression. Ledger v16.
+- IMMEDIATE NEXT STEP: Eli pushes (locks already cleared to _to_delete),
+  optionally sets GEOCODE_VERIFICATION_API_KEY in Vercel (lane is
+  disabled without it — no behavior change), creates a fresh QA100 trip
+  with the Czech PDF, runs ONE extraction ("7.18.4"), BLIND-FIRST audit
+  (standing protocol) against the ship-bar floor: castle + Schönbrunn
+  CORRECT (survive AND group), zero wrong groups, zero identity/booking
+  values in public prose, idea lists stay notes, question mix sane
+  (castle ticket + baths present), wave wins hold. Model A/B stays HELD
+  unless 7.18.4 still shows parser-drop dominance.
+- THEN: extraction pinning IMMEDIATELY after 7.18.4 validates (own push,
+  Supabase SQL BEFORE deploy) → generalization round (5-10 diverse
+  itineraries, answer-key-lite) → Phases 3-4.
+
 ### 2026-07-18 — 7.18.3 audited (Arc A validation): recovery lane works, privacy P0 resurfaced, classification is now THE bottleneck (same cloud session)
 
 Read first: `docs/product-contracts.md` (ledger v15),

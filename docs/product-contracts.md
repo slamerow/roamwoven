@@ -1,9 +1,9 @@
 # Roamwoven Product Contracts
 
-Ledger version: 15
+Ledger version: 16
 
-Ledger date: 2026-07-18 (Arc A: RW-EVD-001 bounded recovery call + Phase 1
-shared predicates/winner ladder + run5 geo calibration + cron hardening)
+Ledger date: 2026-07-18 (Arc B: privacy wave + per-clause coverage + unified
+activity-vs-city-note classifier + geocoding verification lane + riders)
 
 Approval state: Approved and implementation-tracked
 
@@ -199,6 +199,20 @@ path is bypassed.
   heading corroboration ("Tour Rome") stays a real card. Enforced by
   `tests/entity-winner.test.ts` and
   `tests/assembly-ground-truth-run5.test.ts`.
+  2026-07-18 Arc B (live-run 7.18.3 PB-2/PB-7): sameEntity now REFUSES a
+  site↔component pair outright — a container-noun card and an "X at <site>"
+  component are grouping structure, never duplicates — and merge noun
+  guards judge OBSERVATION titles as well as the current payload title, so
+  post-merge title drift cannot evade them (the Schönbrunn fusion chain).
+  The repeat rule is back in supersession compliance: a sequence-inherited
+  copy NEVER survives as a second visit (that is distinct-dates-alone in
+  disguise); only copies with their own time, booking, or first-person
+  language do, and sequenced/loose copies fold into the strongest copy.
+  Undated placeholders join their dated repeat group, and a single
+  deliberate day-plan copy wins a cross-day uncommitted repeat (ground
+  truth v2 St. Stephen's dedup). Enforced by
+  `tests/activity-classifier.test.ts` and
+  `tests/assembly-ground-truth-run6.test.ts`.
   Finalization now records and revalidates a versioned canonical
   identity manifest before compilation. Structured activities, legs, stays, and
   transport carry canonical identity directly; Questions and private details
@@ -352,9 +366,25 @@ path is bypassed.
   bundle lineage observations so radius claims are verifiable from the
   bundle. Enforced by `tests/assembly-ground-truth-run5.test.ts` and the
   updated same-site checks in `tests/evidence-clustering.test.ts`.
+  2026-07-18 Arc B: the geocoding verification lane is LIVE (standing CEO
+  decision; `lib/extraction/geocode-verification.ts`): env-keyed
+  (GEOCODE_VERIFICATION_API_KEY — absent means disabled), hard per-trip
+  lookup budget with counted overflow, fail-soft (any transport error ends
+  the lane and the draft survives on parser coordinates), deterministic
+  candidate selection (site containers first, then crowded-day walk
+  candidates), results attached as verifiedLatitude/verifiedLongitude with
+  provenance and consumed ONLY by grouping-proximity checks — lookups never
+  change intent, type, date, city, or booking state. Verified coordinates
+  satisfy the precision gate that 2-decimal parser coordinates fail.
+  Telemetry rides as usage.geocodeVerification into the audit extraction
+  summary and QA bundle; no new DB tables in v1 (durable caching is a later
+  additive migration alongside pinning). Enforced by
+  `tests/geocode-verification.test.ts` and the run6 verified-coords
+  grouping check.
 - Tests: `tests/canonical-evidence-resolver.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
-  `tests/structured-assembly-idempotency.test.ts`
+  `tests/structured-assembly-idempotency.test.ts`,
+  `tests/geocode-verification.test.ts`
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -419,10 +449,24 @@ path is bypassed.
   "Delta flight FR8331"). Every repair is recorded in extraction usage and
   counted in the audit canonicalization summary. Enforced by
   `tests/parser-artifact-normalization.test.ts`.
+  2026-07-18 Arc B (live-run 7.18.3 PB-1b/1c + run5 PB-7): the
+  transport-shadow gate now also recognizes airline flight-code shapes
+  ("Ryanair FR8331 to Prague" carries no movement word) and
+  shared-confirmation matches, and the pass re-runs after structural +
+  provisional dates resolve so late-dated shadows are caught; the
+  ticket-page family covers ACTIVITY-shaped re-emissions
+  (all-ticket-vocabulary titles with quantity/price/ticket-number
+  boilerplate); airport-prep lines ("Leave for Airport") fold into their
+  same-date travel row; transport provider fields are repaired at the
+  anchor AND parser layers (layout bleed, short-token shards,
+  number-shaped providers). Enforced by
+  `tests/assembly-ground-truth-run6.test.ts` and
+  `tests/parser-artifact-normalization.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
-  `tests/parser-artifact-normalization.test.ts`
+  `tests/parser-artifact-normalization.test.ts`,
+  `tests/assembly-ground-truth-run6.test.ts`
 
 ## RW-TRV-001 — Travel cards are per-segment and cover every night
 
@@ -565,11 +609,34 @@ path is bypassed.
   orphaned "Orangeriegarten at Schönbrunn" component leaked into a bogus
   planned-or-ideas question). Enforced by `tests/entity-winner.test.ts` and
   `tests/assembly-ground-truth-run5.test.ts`.
+  2026-07-18 Arc B (live-run 7.18.3 PB-4/PB-8; CEO decision A-6): the
+  UNIFIED activity-vs-city-note/commitment classifier is live
+  (`lib/extraction/activity-classifier.ts`) — ONE module judging source
+  structure, list shape, and commitment language (never venue knowledge)
+  that the parser-output layer, demotion rules, the LLM resolver, the
+  recovery lane, and the audit detectors import. Own-text hedge/commitment
+  stamps are recorded at intake, so doubt demotion and commitment fire on
+  the piece's OWN observation text only (absorbed sibling residue
+  hedge-demoted Prague Castle in 7.18.3); stamps propagate only between
+  comparable-title copies. A dated idea list demotes as a unit when a
+  same-day section holds 3+ entries with NO fixed commitment plus idea
+  vocabulary, a non-day-plan structural section label, or a
+  recommendation-category majority (the Jan 21 Great Synagogue / Konyv Bar
+  / Mazel Tov / gypsy-music dump) — priced/hours entries stay with the
+  researched-list question, unresolved "X or Y" slot cards and unlabeled
+  sections are never judged. "if you want / if you'd like / if you feel
+  like" joined the hedge vocabulary. The resolver's plan signal imports
+  the taxonomy commitment lexicon (audit B1 — bare sight verbs no longer
+  promote), and recovered lines route through the same classification
+  (PB-9: loose-tip recovery output becomes city-note candidates). Enforced
+  by `tests/activity-classifier.test.ts` and
+  `tests/assembly-ground-truth-run6.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
-  `tests/parser-artifact-normalization.test.ts`
+  `tests/parser-artifact-normalization.test.ts`,
+  `tests/activity-classifier.test.ts`
 
 ## RW-EVD-001 — Every meaningful source block receives an explicit disposition
 
@@ -671,6 +738,20 @@ path is bypassed.
   the FULL residual uncovered list plus recovery telemetry ship in the
   audit extraction summary and QA bundle. Enforced by
   `tests/source-recovery.test.ts` and `tests/source-coverage.test.ts`.
+  2026-07-18 Arc B (live-run 7.18.3 PB-3/PB-9): coverage is version 3 —
+  PER-CLAUSE matching. A source line splits on and/or/commas, EACH
+  clause's distinctive tokens must be covered, cross-stage credit never
+  spans clauses, and a short clause in a multi-entity line requires FULL
+  token coverage (a shared generic "baths" token can no longer mask
+  Szechenyi; koscom stays flagged when another stage covers
+  communism+museum). Single-clause lines keep majority matching so the
+  run5 noise calibration holds. Uncovered clauses ride in telemetry. This
+  is the recovery lane's trigger integrity. Recovered records now BIND
+  their date to their excerpt's own day heading (section attribution by
+  distinctive tokens); an unattributable model date matching no excerpt
+  heading clears instead of shipping (the Cesky-Krumlov-as-Rome-day
+  shape), and recovered note-ish lines classify as city-note candidates
+  before entering assembly.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
@@ -862,9 +943,25 @@ path is bypassed.
   record exists to own them. Activity/tour/restaurant booking references
   remain public per the narrowed scope. Ground-truth run3 checks enforce
   the live shapes (`tests/assembly-ground-truth-run3.test.ts`).
+  2026-07-18 Arc B privacy wave (live-run 7.18.3 PB-1, P0 first in commit
+  order per CEO decision): the identity scrub's shapes now live in ONE
+  shared module (`lib/extraction/identity-prose.ts`) covering the
+  colon-less role-labelled name block ("Customer Eli kamerow"), postal
+  home addresses (street number + street + postal code), and labelled /
+  international / mid-segment phones — the 7.18.3 rental-car leak was a
+  phrasing evasion (the old pattern required "Customer:" with a colon),
+  not an ordering defect. Transport-shaped activities (movement words,
+  flight-code shapes, or a confirmation shared with a transport row)
+  additionally lose travel confirmation values from prose AND fields at
+  the output boundary — inter-city travel booking identifiers are
+  protected class even on an activity-shaped card. Enforced by
+  `tests/assembly-ground-truth-run6.test.ts` (rental-car scrub, FR8331
+  shadow + confirmation, clean-prose agreement with the shared
+  predicates).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
-  `tests/assembly-ground-truth.test.ts`
+  `tests/assembly-ground-truth.test.ts`,
+  `tests/assembly-ground-truth-run6.test.ts`
 
 ## RW-PUB-001 — Published trip versions are immutable
 
@@ -958,6 +1055,19 @@ path is bypassed.
   Vienna" family was previously invisible to it). Lineage rows and
   candidates carry sourceSectionLabel/sourceHeadingPath and geo/area fields
   so these checks are verifiable from the QA bundle.
+  2026-07-18 Arc B (run6 RW-AUD-001 audit-gap entries): a NEW
+  `identity_value_in_public_prose` P0 detector scans the UNREDACTED
+  structured records — the same prose travelers see — for identity shapes,
+  importing the exact predicates the pipeline scrub uses
+  (`identity-prose.ts`), with evidence naming the signal shape and never
+  the value (safe in redacted bundles). Audit procedure: privacy is
+  checked on unredacted card prose — the QA bundle's redaction markers
+  made 7.18.3 LOOK clean to the auditor. A NEW
+  `transport_provider_field_corrupted` P1 detector checks final transport
+  provider FIELDS (the 7.18.3 audit read titles only) via the pipeline's
+  own repair predicate. Enforced by
+  `tests/assembly-ground-truth-run6.test.ts` (known-good control +
+  detector firing + evidence shape).
 - Tests: `tests/trip-audit-reconciliation.test.ts`,
   `tests/trip-quality-gate.test.ts`,
   `tests/extraction-route-recovery.test.ts`
