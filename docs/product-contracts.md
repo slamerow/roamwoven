@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 13
+Ledger version: 14
 
-Ledger date: 2026-07-18 (wave-2 parser pass)
+Ledger date: 2026-07-18 (remediation Phases 0+2: prune + question gate)
 
 Approval state: Approved and implementation-tracked
 
@@ -514,6 +514,12 @@ path is bypassed.
   pure lodging/price fragment. Enforced by
   `tests/parser-artifact-normalization.test.ts` and
   `tests/openai-trip-parser-prompt.test.ts`.
+  2026-07-18 remediation Phase 0 (audit finding B1): the commitment
+  pattern's first-person contraction alternations ("we'll", "we're",
+  "we'd like") were tested against apostrophe-stripped normalized text and
+  had never matched; the pattern now matches the normalized forms, so
+  contracted first-person intent counts as commitment evidence again.
+  Enforced by `tests/cleanup-cron-route.test.ts` (commitment checks).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -718,7 +724,25 @@ path is bypassed.
   best-judgment action. Maker-only affected-card highlighting may show the
   impact, while travelers never see the Question or marker. Published snapshots
   remain untouched.
-- Evidence: Review records now carry explicit options and date bounds; first-run
+- Evidence: 2026-07-18 remediation Phase 2 (live-run 7.18.2 PB-2/PB-5; audit
+  finding A3): the question pipeline is re-staged — canonical subject
+  resolution now runs BEFORE the reconciliation filters, and a new final
+  reconciliation gate runs on FINAL subjects and values before
+  consolidation: a question whose guessedValue equals the final canonical
+  state resolves silently (all field kinds, dates via tripDatesMatch, times
+  via clock normalization); a firm canonical date/time/confirmation with no
+  differing guess resolves silently; a date question proposing a DIFFERENT
+  value than canon always survives (fixture-guarded negative control);
+  transport-subject date questions reconcile against final rows (the wave-1
+  regex gained `date`, guess-aware); questions about folded duplicates
+  reconcile through the `_representedByPieceId` chain; stale presentation
+  calls about suppressed pieces are dropped (source-update cancellation
+  calls exempt by design); same-venue ticket questions consolidate with the
+  container preference actually implemented (the audit's dead ternary) and
+  undated same-venue subjects folding into the dated container root; a
+  date-target question always renders a date control. Enforced by
+  `tests/question-reconciliation-gate.test.ts`.
+  Review records now carry explicit options and date bounds; first-run
   controls render exclusive choices, yes/no buttons, bounded date/time inputs,
   and declared free text. Exclusive choices reject invented answers, quick
   suggestions do not constrain valid text or picker responses, and a Question

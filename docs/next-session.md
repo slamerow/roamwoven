@@ -6,6 +6,39 @@
 
 ## Current State
 
+### 2026-07-18 — Remediation Phases 0+2 implemented (same session)
+
+Read first: `docs/product-contracts.md` (ledger v14),
+`docs/code-audit-2026-07-18.md` (the audit these phases execute).
+
+- PHASE 0 LANDED: deleted verified-dead code — lib/trip-schema.ts (+ the
+  `zod` dependency), `@stripe/stripe-js` dependency,
+  components/structured-review-panel.tsx, lib/supabase/client.ts, and ~18
+  dead symbols across lib/ (audit §D list); fixed the never-matching
+  commitment-pattern contractions (audit B1) with fixtures; removed the
+  dead branches inside live rules (identical ternary arms, no-op guard,
+  dead alternative_slot read); wired cleanupAbandonedUnpaidStarterMaterials
+  to a Vercel Cron route (app/api/cron/cleanup-unpaid-materials, GET,
+  Bearer CRON_SECRET, named RW-OPS-001 outcomes, vercel.json schedule
+  0 3 * * * daily) — Eli must add CRON_SECRET in Vercel before it runs;
+  added OPENAI_OCR_IMAGE_DETAIL + CRON_SECRET to .env.example.
+- PHASE 2 LANDED (the question gate, audit §C): subject resolution now runs
+  BEFORE the reconciliation filters; new final gate on FINAL subjects and
+  values (guess-equals-state kill, firm-value kill, represented-chain
+  reconciliation, stale-call drop with source-update exemption); wave-1
+  transport reconciliation learned `date` (guess-aware — genuine
+  disagreements still ship, fixture-guarded); ticket consolidation
+  container preference implemented + undated same-venue roots fold into
+  dated containers (kills the 7.18.2 double castle question); date-target
+  questions always render date controls. NEW
+  `tests/question-reconciliation-gate.test.ts` (5 checks from 7.18.2
+  shapes). Suite: 46 test files green; typecheck + build clean.
+- NEXT: recovery call (RW-EVD-001 bounded excerpt-only re-ask, approved to
+  follow Phase 2) → Phase 1 (shared predicates + sameEntity/winner ladder;
+  enforces Eli's system-grouped ship-bar floor + run5 geo calibration) →
+  fresh extraction → Phases 3-4 (+ extraction pinning, Supabase SQL first).
+  Eli pushes; no DB changes in Phases 0+2.
+
 ### 2026-07-18 — CEO decisions on the remediation plan (same session)
 
 - Phase order 0 → 2 → 1 → fresh extraction → 3 → 4 APPROVED (Eli: "aligned").
