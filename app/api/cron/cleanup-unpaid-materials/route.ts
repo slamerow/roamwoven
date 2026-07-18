@@ -1,6 +1,26 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSupabaseConfig } from "@/lib/env";
 import { cleanupAbandonedUnpaidStarterMaterials } from "@/lib/uploads";
+
+// Arc A cron hardening (RW-OPS-001): the bearer compare is timing-safe (a
+// plain string !== leaks a byte-position timing oracle for the secret), and
+// every rejected attempt is logged with enough context to notice probing.
+// Hashing both sides to fixed-length digests removes the length oracle too.
+function bearerTokenMatches(authorization: string | null, secret: string) {
+  const presented = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : null;
+
+  if (!presented) {
+    return false;
+  }
+
+  const presentedDigest = createHash("sha256").update(presented).digest();
+  const secretDigest = createHash("sha256").update(secret).digest();
+
+  return timingSafeEqual(presentedDigest, secretDigest);
+}
 
 // Scheduled retention job (CEO decision 2026-07-18): source files uploaded to
 // trips that were never paid and never processed are removed after the
@@ -28,7 +48,18 @@ export async function GET(request: Request) {
     );
   }
 
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+  const authorization = request.headers.get("authorization");
+
+  if (!bearerTokenMatches(authorization, secret)) {
+    console.warn("cron_cleanup_unauthorized_attempt", {
+      hadAuthorizationHeader: authorization !== null,
+      hadBearerShape: Boolean(authorization?.startsWith("Bearer ")),
+      requestIp:
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      timestamp: new Date().toISOString(),
+      userAgent: request.headers.get("user-agent"),
+    });
+
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

@@ -38,9 +38,14 @@ export default async function run() {
     }
   });
 
-  await test("cleanup cron rejects a wrong or missing bearer token", async () => {
+  await test("cleanup cron rejects a wrong or missing bearer token and logs each rejected attempt", async () => {
     const previous = process.env.CRON_SECRET;
     process.env.CRON_SECRET = "test-cron-secret";
+    const originalWarn = console.warn;
+    const warned: Array<[unknown, unknown]> = [];
+    console.warn = (...args: unknown[]) => {
+      warned.push([args[0], args[1]]);
+    };
 
     try {
       const unauthorized = await cleanupCronRoute(cronRequest());
@@ -48,7 +53,27 @@ export default async function run() {
 
       const wrong = await cleanupCronRoute(cronRequest("Bearer nope"));
       assert.equal(wrong.status, 401);
+
+      // Arc A hardening: same-length wrong secrets are rejected too (the
+      // timing-safe digest compare has no length or prefix shortcut).
+      const sameLength = await cleanupCronRoute(
+        cronRequest("Bearer test-cron-secreX")
+      );
+      assert.equal(sameLength.status, 401);
+
+      const rejections = warned.filter(
+        ([event]) => event === "cron_cleanup_unauthorized_attempt"
+      );
+      assert.equal(
+        rejections.length,
+        3,
+        "every rejected attempt is logged (RW-OPS-001 telemetry)"
+      );
+      const detail = rejections[1][1] as Record<string, unknown>;
+      assert.equal(detail.hadBearerShape, true);
+      assert.equal(typeof detail.timestamp, "string");
     } finally {
+      console.warn = originalWarn;
       if (previous === undefined) delete process.env.CRON_SECRET;
       else process.env.CRON_SECRET = previous;
     }
