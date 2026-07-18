@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 12
+Ledger version: 13
 
-Ledger date: 2026-07-18 (wave-1.1 precision pass)
+Ledger date: 2026-07-18 (wave-2 parser pass)
 
 Approval state: Approved and implementation-tracked
 
@@ -167,7 +167,16 @@ path is bypassed.
   apply to new builds and intentional rebuilds only; existing unpublished drafts
   are not migrated or rewritten. Rebuilds are staged and replace the current
   working draft only after the complete new canonical graph validates.
-- Evidence: 2026-07-18 wave 1.1 (live-run 7.18.1: "Prague Castle" carried a
+- Evidence: 2026-07-18 wave 2 (live-run 7.18.0: Mumok and Natural History
+  emitted as two cards for one "Mumok or Natural history museum" source
+  slot): when a day-section source line offers "X or Y" and the parser
+  emitted the alternatives as separate same-day cards with NO or-carrying
+  copy, deterministic parser-artifact normalization folds them into one
+  "X or Y" card before clustering (the alternative is kept in the
+  description and as context lineage); when an or-carrying copy exists, the
+  wave-1.1 assembly collapse stays in charge. Enforced by
+  `tests/parser-artifact-normalization.test.ts`.
+  2026-07-18 wave 1.1 (live-run 7.18.1: "Prague Castle" carried a
   bled 12:00 time and slot collision merged the SITE into the timed
   "Changing of the Guard" EVENT, deleting the castle): sharing a day/time/
   category slot is only identity evidence when titles are related, one title
@@ -189,6 +198,7 @@ path is bypassed.
   of maker-created entities and saved decisions across the future rebuild and
   merge/split lifecycle.
 - Tests: `tests/assembly-purity.test.ts`,
+  `tests/parser-artifact-normalization.test.ts`,
   `tests/canonical-identity.test.ts`,
   `tests/canonical-factory-boundary.test.ts`,
   `tests/extraction-route-recovery.test.ts`,
@@ -293,6 +303,14 @@ path is bypassed.
   chain). The deterministic pass never re-groups candidates the resolver
   has already ruled on. Ground-truth checks `castle-same-site-group` and
   `schonbrunn-all-stops` enforce hierarchy membership. The
+  2026-07-18 wave 2 (live runs 7.18.0/7.18.1: approxLatitude/approxLongitude
+  appear ZERO times in either bundle — the model returns null despite the
+  schema): the geo instruction was hardened to demand coordinates for every
+  named landmark card ("a famous sight with null coordinates is an
+  extraction defect") and is now repeated in every per-chunk input, not only
+  the system prompt. Whether gpt-5.4-mini complies is only observable on the
+  next fresh extraction; the doctrine v3 walk rule stays blocked until it
+  does. The
   older gap: the pre-checkpoint live resolver run inverted
   negative Albertina evidence while failing to discover the Schoenbrunn
   grouping. The current first-run path now requires conclusive supplied source
@@ -357,9 +375,21 @@ path is bypassed.
   credential-bearing card is stay material even when timed. Each cross-date
   ticket fold produces one statement-style call (Eli-approved) so the maker
   sees what merged. Enforced by ground-truth run3 checks.
+  2026-07-18 wave 2: deterministic parser-artifact normalization now demotes
+  ticket-page transport re-emissions to accessory evidence at the parser
+  boundary (booking_detail/ticket-code activity shapes from live-run 7.18.0
+  Jan 24), clears degenerate time pairs (endTime equal to startTime; bare
+  opening-hours endTimes on browse-a-place sightseeing cards), strips
+  provider text-bleed layout tokens ("PM Delta", "Home Delta"), and scrubs a
+  carrier from a transport title/provider when that carrier appears nowhere
+  in the chunk's own source text (live-run 7.18.1: Ryanair FR8331 mislabeled
+  "Delta flight FR8331"). Every repair is recorded in extraction usage and
+  counted in the audit canonicalization summary. Enforced by
+  `tests/parser-artifact-normalization.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
-  `tests/assembly-ground-truth.test.ts`
+  `tests/assembly-ground-truth.test.ts`,
+  `tests/parser-artifact-normalization.test.ts`
 
 ## RW-TRV-001 — Travel cards are per-segment and cover every night
 
@@ -473,10 +503,22 @@ path is bypassed.
   gutted the whole Vienna leg): the shared-section veto now compares note
   copies against the card's DAY-PLAN section labels only. Enforced by
   ground-truth run4 checks (`tests/assembly-ground-truth-run4.test.ts`).
+  2026-07-18 wave 2 (live-run 7.18.1: "We Explore Budapest" and
+  "Walking tour / Jewish History / Old Town free time" shipped as day-title
+  activity cards; "Vienna lodging note / $72 (private room—ensuite)" shipped
+  as a cost card): the parser prompt gained explicit day-title,
+  reference-list, and cost-line rules, and deterministic parser-artifact
+  normalization demotes a card whose title IS the day heading's non-date
+  remainder (a venue named inside a multi-part heading survives — "Prague
+  Castle" under "Lesser Town & Prague Castle") and a card whose text is a
+  pure lodging/price fragment. Enforced by
+  `tests/parser-artifact-normalization.test.ts` and
+  `tests/openai-trip-parser-prompt.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
-  `tests/assembly-ground-truth.test.ts`
+  `tests/assembly-ground-truth.test.ts`,
+  `tests/parser-artifact-normalization.test.ts`
 
 ## RW-EVD-001 — Every meaningful source block receives an explicit disposition
 
@@ -541,11 +583,26 @@ path is bypassed.
   date question is now the genuine last resort. Ground-truth checks
   `koscom-activity` and `silver-mines-placement` enforce this from the
   live-run shape (undated + section label).
+  2026-07-18 wave 2 (live runs 7.18.0/7.18.1 each silently dropped
+  day-section lines the other run extracted — koscom, "maybe communism
+  museum", Tour Rome, Szechenyi Baths): deterministic day-section source
+  coverage now exists (`lib/extraction/source-coverage.ts`) — every
+  meaningful line under a dated day heading is checked for token coverage in
+  its chunk's extracted output, uncovered lines are recorded in extraction
+  usage with bounded excerpts, coverage counts ship in the audit extraction
+  summary and QA bundle, and a gap raises the quiet P2 advisory
+  `day_section_source_line_unextracted` (candidate finding per RW-QA-001 /
+  RW-AUD-001 — it never authorizes a mutation and never creates a maker
+  Question). The parser prompt gained a line-coverage rule naming the
+  dropped-line shapes. The contract's bounded excerpt-only model recovery
+  call is NOT yet implemented; the coverage diagnostic is its required
+  deterministic trigger evidence when that lane is built.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/extraction-route-recovery.test.ts`,
-  `tests/trip-quality-gate.test.ts`
+  `tests/trip-quality-gate.test.ts`,
+  `tests/source-coverage.test.ts`
 
 ## RW-PLC-001 — Unresolved placement preserves a coherent Today experience
 

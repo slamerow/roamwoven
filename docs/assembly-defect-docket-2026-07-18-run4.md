@@ -132,3 +132,59 @@ Suite: 42 test files green incl. NEW `tests/assembly-ground-truth-run4.test.ts`
   recommendation promotions (parser section classification), geo fields,
   day-title container cards at the source, cost cards, dropped lines,
   source-coverage diagnostic. Then extraction pinning.
+
+## Wave-2 fix status (2026-07-18, fresh session — all landed with wave-2 fixtures)
+
+Suite: 44 test files green incl. NEW `tests/parser-artifact-normalization.test.ts`
+(11 checks from live 7.18.0/7.18.1 parser shapes) and
+`tests/source-coverage.test.ts` (6 checks incl. the koscom / "tour Rome" drop
+shapes); typecheck + build clean; ledger v13.
+
+- Geo fields: prompt hardened — coordinates are demanded for every named
+  landmark card ("a famous sight with null coordinates is an extraction
+  defect") in the system prompt AND repeated in every per-chunk input.
+  Model compliance is only observable on the next fresh extraction; the
+  Lesser Town walk rule stays blocked until it complies. LANDED (prompt).
+- Dropped lines (koscom / "maybe communism museum" / Tour Rome / Szechenyi
+  Baths): line-coverage prompt rule naming exactly these shapes + the NEW
+  deterministic day-section source-coverage diagnostic
+  (`lib/extraction/source-coverage.ts`): every meaningful line under a dated
+  day heading is checked for token coverage in its chunk's output; gaps ship
+  as quiet P2 `day_section_source_line_unextracted` with bounded excerpts,
+  plus counts in the audit extraction summary and QA bundle. Candidate
+  finding only — never a mutation, never a maker Question (RW-QA-001).
+  LANDED.
+- Day-title cards ("We Explore Budapest", "Walking tour / Jewish History /
+  Old Town free time"): prompt day-title rule + deterministic demotion when
+  a card's title IS the heading's non-date remainder; a venue named inside a
+  multi-part heading ("Prague Castle" under "Lesser Town & Prague Castle")
+  survives — fixture-guarded so the castle cannot be re-killed. LANDED.
+- Cost cards ("Vienna lodging note / $72"): prompt cost-line rule +
+  deterministic demotion of pure lodging/price fragments. LANDED.
+- Disjunction singletons (Mumok + Natural History): prompt disjunction rule
+  + deterministic fold of split alternatives into one "X or Y" card when the
+  source line carries the disjunction and no or-copy exists; when an
+  or-carrying copy exists the wave-1.1 assembly collapse stays in charge.
+  LANDED.
+- Ticket-page re-emission (RegioJet/ÖBB as Jan 24 cards): prompt ticket-page
+  rule (only the ticket's own printed date; booking_detail evidence, never a
+  new activity) + deterministic demotion of transport-titled,
+  booking-code-carrying activities from ticket-page chunks to accessory
+  evidence. LANDED (assembly date-agnostic shadow remains the backstop).
+- Provider/title bleed ("PM Delta", "Home Delta", "Delta flight FR8331"):
+  prompt provider rule + deterministic scrub of layout tokens and of carrier
+  words absent from the chunk's own source text (title and provider). FR8331
+  now ships as "Flight FR8331" with provider null unless the source names
+  the carrier. LANDED.
+- Reference-list re-emission (A-1's parser half) + section classification:
+  prompt reference-list rule — trailing blobs re-listing day-section venues
+  are reference copies (city_note_candidate/context), never new dated
+  activities, and never move a card to another city's day. LANDED (prompt;
+  wave-1.1 day-plan veto remains the assembly backstop).
+- Telemetry (RW-OPS-001): every deterministic repair is recorded in
+  extraction usage (`parserArtifactRepairs`) and counted in the audit
+  canonicalization summary (`parserArtifactRepairCount`).
+- NOT in wave 2: the RW-EVD-001 bounded excerpt-only recovery call (the
+  coverage diagnostic is its deterministic trigger when built); A-6
+  recommendation-promotion assembly backstop (deferred pending Eli's call);
+  extraction pinning (next: own push, Supabase SQL first).

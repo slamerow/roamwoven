@@ -6,6 +6,60 @@
 
 ## Current State
 
+### 2026-07-18 — WAVE 2 parser pass (Claude/Cowork session, fresh session)
+
+Read first: `docs/product-contracts.md` (ledger v13),
+`docs/assembly-defect-docket-2026-07-18-run4.md` (wave-2 fix status at the
+bottom).
+
+- WAVE 2 IMPLEMENTED per the 2026-07-17 plan (44 test files green incl. NEW
+  `tests/parser-artifact-normalization.test.ts` + `tests/source-coverage.test.ts`;
+  typecheck + build clean; ledger v13). Two layers:
+  (1) parser prompt hardening — geo coordinates demanded for every named
+  landmark card (system prompt + per-chunk reminder), line-coverage rule
+  naming the dropped shapes (koscom, "maybe communism museum", Tour Rome,
+  Szechenyi/Gellert options), day-title / reference-list / ticket-page /
+  disjunction / cost-line / time-field / provider rules;
+  (2) NEW deterministic layers — `lib/extraction/parser-artifact-normalization.ts`
+  runs before clustering and silently repairs the observed artifact families
+  (degenerate/opening-hours times, provider text-bleed + source-unsupported
+  carrier scrub incl. "Delta flight FR8331", day-title cards with a guard so
+  bare "Prague Castle" under a multi-part heading survives, cost-line cards,
+  split "X or Y" disjunctions when no or-copy exists, ticket-page
+  re-emissions -> accessory), all repairs recorded in usage
+  (`parserArtifactRepairs`) and counted in the audit canonicalization
+  summary; `lib/extraction/source-coverage.ts` proves which meaningful
+  day-section lines produced zero output and raises quiet P2
+  `day_section_source_line_unextracted` with bounded excerpts (counts in the
+  audit extraction summary + QA bundle; candidate finding only, never a
+  mutation/Question). The RW-EVD-001 bounded recovery call is NOT built yet —
+  the coverage diagnostic is its deterministic trigger evidence.
+- Prompt-only fixes (geo emission, reference-list, section classification)
+  are only verifiable on a fresh extraction; the deterministic layers are
+  fixture-proven against the live 7.18.0/7.18.1 shapes either way.
+- IMMEDIATE NEXT STEP: Eli pushes (terminal block below), creates a fresh
+  QA100 trip with the Czech PDF, runs ONE extraction ("7.18.2"), Claude
+  audits against ground truth v2 + Δ2. WAVE-2 targets on that run: geo
+  fields present for named sights (unblocks the Lesser Town walk rule), no
+  day-title cards, no cost cards, one card per "X or Y" slot, no re-dated
+  ticket cards, no "Delta" on FR8331, degenerate times gone, koscom /
+  "maybe communism museum" / Tour Rome / Szechenyi Baths present OR flagged
+  by the new coverage P2 (the diagnostic makes any remaining drop visible
+  instead of silent). Wave-1/1.1 targets must hold (5 stays, 0 credential
+  leaks, 0 false P0, count definition, Vienna leg intact).
+- THEN: extraction pinning by material content hash — own push, Eli runs the
+  additive Supabase SQL BEFORE deploy (unchanged plan). Also still open:
+  A-6 recommendation-promotion backstop (needs Eli's call), RW-EVD-001
+  recovery-call lane, diagnostics->review-surface plumbing, audit redactor.
+- Push block (from the repo root; clear stranded git locks first):
+
+```bash
+rm -f "/Users/eli/Claude - Roamwoven/.git/"*.lock
+# then push the three commits (already ordered so each prefix is green)
+# via GitHub Desktop, or:
+git -C "/Users/eli/Claude - Roamwoven" push
+```
+
 ### 2026-07-18 — 7.18.1 audit + wave-1.1 precision pass (Claude/Cowork session, same session as wave 1)
 
 Read first: `docs/product-contracts.md` (ledger v12),
