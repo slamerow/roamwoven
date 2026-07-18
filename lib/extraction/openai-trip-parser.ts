@@ -1,5 +1,6 @@
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
-import { getOpenAIConfig } from "@/lib/env";
+import { getGeocodeVerificationConfig, getOpenAIConfig } from "@/lib/env";
+import { runGeocodeVerification } from "@/lib/extraction/geocode-verification";
 import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evidence-resolver";
 import {
   clusterExtractedEvidence,
@@ -1408,6 +1409,21 @@ export async function extractTripDraftWithOpenAI({
     evidenceStages.push(recovery.stage);
   }
 
+  // Geocoding verification lane (Arc B): env-keyed, hard-budgeted,
+  // fail-soft. Verified coordinates attach to the stage records in place
+  // and are consumed only by grouping-proximity checks downstream.
+  const geocodeVerification = await runGeocodeVerification({
+    config: getGeocodeVerificationConfig(),
+    stages: evidenceStages,
+  });
+  if (geocodeVerification.usage.outcome === "failed") {
+    console.error("trip_geocode_verification_failed", {
+      error: geocodeVerification.usage.error,
+      lookupCount: geocodeVerification.usage.lookupCount,
+      tripName,
+    });
+  }
+
   let resolvedEvidenceStages = {
     groupingDecisions: [] as CanonicalGroupingDecision[],
     metadata: null as unknown,
@@ -1487,7 +1503,8 @@ export async function extractTripDraftWithOpenAI({
       evidence: evidence.summary,
       parserArtifactRepairs: evidence.parserArtifactRepairs,
       sourceCoverage,
-      sourceRecovery: recovery.usage,
+      geocodeVerification: geocodeVerification.usage,
+    sourceRecovery: recovery.usage,
       sourceAnchors: {
         transport: sourceTransportAnchors,
       },

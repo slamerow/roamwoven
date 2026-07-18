@@ -226,6 +226,27 @@ export function createExtractionSummary(usage: unknown) {
           }
         : null;
     })(),
+    // Geocoding verification lane telemetry (Arc B): env-keyed, budgeted,
+    // fail-soft, proximity-only. Verifiable from the QA bundle.
+    geocodeVerification: (() => {
+      const geocode = asRecord(openai.geocodeVerification);
+
+      return Object.keys(geocode).length > 0
+        ? {
+            budget: Number(geocode.budget) || 0,
+            candidateCount: Number(geocode.candidateCount) || 0,
+            failedCount: Number(geocode.failedCount) || 0,
+            lookupCount: Number(geocode.lookupCount) || 0,
+            outcome:
+              typeof geocode.outcome === "string"
+                ? geocode.outcome
+                : "unknown",
+            resolvedCount: Number(geocode.resolvedCount) || 0,
+            skippedOverBudgetCount:
+              Number(geocode.skippedOverBudgetCount) || 0,
+          }
+        : null;
+    })(),
     staged: openai.staged === true,
   };
 }

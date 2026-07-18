@@ -429,6 +429,79 @@ export default async function run() {
     );
   });
 
+  await test("ground truth run6 (RW-GRP-001): verified geocode coordinates satisfy the precision gate that 2-decimal parser coords fail", () => {
+    const VIENNA_HEADING = "Saturday, January 19th // Schonbrunn Palace";
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Saturday, January 19th", emptyStage({
+          activities: [
+            {
+              // 2-decimal parser coords are radius-ineligible on their own
+              // (run5 calibration); the geocoding lane attached verified
+              // coordinates with provenance.
+              _geoVerified: true,
+              approxLatitude: 48.18,
+              approxLongitude: 16.31,
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: "Visit Schonbrunn Palace and walk the grounds.",
+              itemType: "activity",
+              sourceHeadingPath: [VIENNA_HEADING],
+              sourceSectionLabel: VIENNA_HEADING,
+              title: "Schonbrunn Palace",
+              verifiedLatitude: 48.1849,
+              verifiedLongitude: 16.3122,
+            },
+            {
+              _geoVerified: true,
+              approxLatitude: 48.18,
+              approxLongitude: 16.31,
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: "Hilltop gloriette above the palace gardens.",
+              itemType: "activity",
+              sourceHeadingPath: [VIENNA_HEADING],
+              sourceSectionLabel: VIENNA_HEADING,
+              title: "Gloriette",
+              verifiedLatitude: 48.1832,
+              verifiedLongitude: 16.3105,
+            },
+            {
+              _geoVerified: true,
+              approxLatitude: 48.18,
+              approxLongitude: 16.31,
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: "Roman ruin folly in the gardens.",
+              itemType: "activity",
+              sourceHeadingPath: [VIENNA_HEADING],
+              sourceSectionLabel: VIENNA_HEADING,
+              title: "Roman Ruin",
+              verifiedLatitude: 48.1826,
+              verifiedLongitude: 16.3138,
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-18", city: "Vienna", country: "Austria", leaveDate: "2019-01-21" },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const children = draft.activities.filter(
+      (item) => item._canonicalGroupRole === "child"
+    );
+    assert.ok(
+      children.length >= 2,
+      `verified coordinates support the same-site group (got ${children.length} children)`
+    );
+  });
+
   await test("ground truth run6 (RW-CLS-001): 'if you want' is a hedge — Buda hills loop demotes without a question", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],

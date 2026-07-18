@@ -6498,6 +6498,21 @@ function containerListsComponent(
 }
 
 function pieceCoordinates(piece: CanonicalEvidencePiece) {
+  // Verified coordinates from the geocoding lane (Arc B) outrank parser
+  // approximations. They are attached with provenance and consumed only
+  // here — grouping proximity — per the standing CEO decision.
+  const verifiedLat = piece.payload.verifiedLatitude;
+  const verifiedLng = piece.payload.verifiedLongitude;
+  if (
+    piece.payload._geoVerified === true &&
+    typeof verifiedLat === "number" &&
+    typeof verifiedLng === "number" &&
+    Number.isFinite(verifiedLat) &&
+    Number.isFinite(verifiedLng) &&
+    (verifiedLat !== 0 || verifiedLng !== 0)
+  ) {
+    return { lat: verifiedLat, lng: verifiedLng, verified: true };
+  }
   const lat = piece.payload.approxLatitude;
   const lng = piece.payload.approxLongitude;
 
@@ -6506,7 +6521,7 @@ function pieceCoordinates(piece: CanonicalEvidencePiece) {
     Number.isFinite(lat) &&
     Number.isFinite(lng) &&
     (lat !== 0 || lng !== 0)
-    ? { lat, lng }
+    ? { lat, lng, verified: false }
     : null;
 }
 
@@ -6532,6 +6547,12 @@ function coordinateDecimals(value: number) {
 
 function precisePieceCoordinates(piece: CanonicalEvidencePiece) {
   const coords = pieceCoordinates(piece);
+
+  // Verified lookup results are precise by construction — the decimals
+  // gate only defends against model quantization.
+  if (coords?.verified) {
+    return coords;
+  }
 
   // Quantization hits BOTH components at once; a single round-number
   // component (50.09, 14.4106) is not quantization evidence, and JSON
@@ -6830,8 +6851,9 @@ function createDeterministicGeoGroupingDecisions({
         // sights look adjacent, so imprecise members fail the walk check.
         const coords = group
           .map(precisePieceCoordinates)
-          .filter((value): value is { lat: number; lng: number } =>
-            Boolean(value)
+          .filter(
+            (value): value is { lat: number; lng: number; verified: boolean } =>
+              Boolean(value)
           );
         return (
           coords.length === group.length &&

@@ -103,6 +103,26 @@ export function getOpenAIConfig() {
   };
 }
 
+// Geocoding verification lane (Arc B, standing CEO decision): env-keyed —
+// no API key means the lane is disabled; hard per-trip lookup budget;
+// results ride in usage JSON only (no DB tables in v1).
+export function getGeocodeVerificationConfig() {
+  return {
+    apiKey: getOptionalEnv("GEOCODE_VERIFICATION_API_KEY"),
+    endpoint:
+      getOptionalEnv("GEOCODE_VERIFICATION_ENDPOINT") ??
+      "https://maps.googleapis.com/maps/api/geocode/json",
+    maxLookups: getOptionalPositiveInteger(
+      "GEOCODE_VERIFICATION_MAX_LOOKUPS",
+      15
+    ),
+    timeoutMs: getOptionalPositiveInteger(
+      "GEOCODE_VERIFICATION_TIMEOUT_MS",
+      4000
+    ),
+  };
+}
+
 export function hasStripeCheckoutConfig() {
   const config = getStripeConfig();
   return Boolean(config.secretKey && config.tripPriceId);

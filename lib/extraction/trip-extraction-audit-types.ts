@@ -208,6 +208,15 @@ export type TripExtractionAuditReport = {
       recoveredLineCount: number;
       residualUncoveredLineCount: number;
     } | null;
+    geocodeVerification: {
+      budget: number;
+      candidateCount: number;
+      failedCount: number;
+      lookupCount: number;
+      outcome: string;
+      resolvedCount: number;
+      skippedOverBudgetCount: number;
+    } | null;
     staged: boolean;
   };
   fingerprints: TripExtractionFingerprints;
