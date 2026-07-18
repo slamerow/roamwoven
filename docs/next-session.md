@@ -36,7 +36,11 @@ CEO decisions recorded this session (Eli, end of session):
   docs, answer-key-lite) is scheduled RIGHT AFTER this arc's validation
   run — it is the unified classifier's real exam, not the Czech PDF.
 
-THE ARC (one push at the end, then ONE fresh extraction):
+THE WORK IS SPLIT INTO TWO ARCS (CEO decision: proactive split to protect
+session quality; restores the one-push-one-extraction cadence). Each arc is
+one session, one push, ONE fresh extraction, audited before the next starts.
+
+ARC A — "stop the bleeding at the source" (next session):
 1. RW-EVD-001 bounded recovery call: coverage diagnostic's uncovered
    day-section lines -> ONE excerpt-only batched re-ask (hard input/output
    caps, separate usage recording, never retries itself, one per build);
@@ -51,17 +55,24 @@ THE ARC (one push at the end, then ONE fresh extraction):
    predicates. Includes run5 geo calibration: real-site containers only
    (no "quick look" cards), timed stops never join, walk members must match
    the area label, model coords below precision are ineligible for the
-   300 m rule (verified geocoded coords are preferred when present).
-3. Unified classifier (see CEO decision above) with fixtures for BOTH
-   directions (real plans survive; recommendation runs demote) drawn from
-   all four QA bundles, not just the key.
-4. Geocoding verification lane (see CEO decision above).
-5. Cheap cron hardening promised to Eli: timing-safe CRON_SECRET compare +
-   log rejected attempts (app/api/cron/cleanup-unpaid-materials/route.ts).
-Then: Eli pushes, ONE fresh extraction ("7.18.3"), audit against ground
-truth v2 + Δ2 + the run5 wave-2.1 targets + Eli's ship-bar floor. After
-validation: generalization round, then Phases 3-4 + extraction pinning
-(Supabase SQL before deploy).
+   300 m rule.
+3. Cron hardening: timing-safe CRON_SECRET compare + log rejected attempts.
+Then Eli pushes, fresh extraction "7.18.3", audit. Arc A validation
+targets: koscom/Szechenyi recovered (or precisely flagged) by the recovery
+call; Schönbrunn survives and groups; zero wrong groups; question count
+sane; wave-1/2 wins hold.
+
+ARC B — "make classification scale" (session after 7.18.3 validates):
+4. Unified activity-vs-city-note classifier (CEO decision above) replacing
+   the 4 divergent implementations; A-6 promotions are its acceptance
+   criterion; fixtures BOTH directions drawn from all four QA bundles.
+5. Geocoding verification lane (CEO decision above; env-keyed, budgeted,
+   fail-soft, grouping-proximity only, no new DB tables in v1).
+Then push, fresh extraction "7.18.4", audit against Eli's ship-bar floor
+(castle + Schönbrunn correct, nothing groups wrongly, Lesser Town walk when
+verified coords support it). After Arc B validates: the generalization
+round (5-10 diverse itineraries, answer-key-lite), then Phases 3-4 +
+extraction pinning (Supabase SQL before deploy).
 
 Status of this session's work: Phases 0+2 committed (b0818af, ad01d85,
 131d774) and PUSHED by Eli; CRON_SECRET configured in Vercel Production and
