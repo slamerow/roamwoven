@@ -122,6 +122,7 @@ export type TripExtractionAuditDiagnostic = {
     | "critical_transport_source_anchor_missing"
     | "critical_transport_source_anchor_missing_details"
     | "critical_transport_source_anchor_missing_soft_details"
+    | "day_section_source_line_unextracted"
     | "transport_times_disagree_with_source_anchor"
     | "day_overview_activity_survived"
     | "duplicate_same_venue_activity"
@@ -166,6 +167,7 @@ export type TripExtractionAuditReport = {
     identityRepairCount: number;
     identityRecoveryStatus: "not_needed" | "repaired";
     observationCount: number;
+    parserArtifactRepairCount: number;
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedStandaloneAnchorCount: number;
@@ -180,6 +182,11 @@ export type TripExtractionAuditReport = {
       failed: number;
       rescued: number;
       succeeded: number;
+    } | null;
+    sourceCoverage: {
+      daySectionCount: number;
+      meaningfulLineCount: number;
+      uncoveredLineCount: number;
     } | null;
     staged: boolean;
   };

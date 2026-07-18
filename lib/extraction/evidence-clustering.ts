@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
+import {
+  normalizeParserStageArtifacts,
+  type ParserArtifactRepair,
+} from "@/lib/extraction/parser-artifact-normalization";
 import { resolveStructuralActivityDates } from "@/lib/extraction/canonical-placement-policy";
 import {
   canonicalCategoryId,
@@ -159,6 +163,7 @@ export type CanonicalEvidencePiece = {
 export type EvidenceClusteringResult = {
   draft: unknown;
   observations: EvidenceObservation[];
+  parserArtifactRepairs: ParserArtifactRepair[];
   pieces: CanonicalEvidencePiece[];
   summary: {
     canonicalPieceCount: number;
@@ -166,6 +171,7 @@ export type EvidenceClusteringResult = {
     contextObservationCount: number;
     dispositionCount: number;
     observationCount: number;
+    parserArtifactRepairCount: number;
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedWeakAnchorCount: number;
@@ -8191,17 +8197,24 @@ export function clusterExtractedEvidence({
   stages: EvidenceStageInput[];
   tripOverview: unknown;
 }): EvidenceClusteringResult {
+  // Wave-2 parser pass: deterministic repair of known parser artifact
+  // families (degenerate times, provider text-bleed, day-title cards,
+  // cost-line cards, split disjunctions, ticket-page re-emissions) BEFORE
+  // observations are created, with every repair recorded for telemetry.
+  const parserNormalization = normalizeParserStageArtifacts(stages);
+  const normalizedStages = parserNormalization.stages;
+  const parserArtifactRepairs = parserNormalization.repairs;
   const observations: EvidenceObservation[] = [];
   const missingDetails: unknown[] = [];
   const sensitiveDetails: unknown[] = [];
   const tripYear = inferTripYear(
     tripOverview,
-    ...stages.map((stageInput) => stageInput.stage),
+    ...normalizedStages.map((stageInput) => stageInput.stage),
     sourceTransportAnchors
   );
   let ordinal = 0;
 
-  for (const stageInput of stages) {
+  for (const stageInput of normalizedStages) {
     const stage = asRecord(stageInput.stage);
     missingDetails.push(...asArray(stage.missingDetails));
     sensitiveDetails.push(...asArray(stage.sensitiveDetails));
@@ -8560,6 +8573,7 @@ export function clusterExtractedEvidence({
   return {
     draft,
     observations,
+    parserArtifactRepairs,
     pieces,
     summary: {
       canonicalPieceCount: pieces.filter((piece) => piece.outputEligible).length,
@@ -8573,6 +8587,7 @@ export function clusterExtractedEvidence({
       dispositionCount: observations.filter((observation) => observation.disposition)
         .length,
       observationCount: observations.length,
+      parserArtifactRepairCount: parserArtifactRepairs.length,
       rejectedObservationCount: new Set(
         pieces
           .filter((piece) => !piece.outputEligible)

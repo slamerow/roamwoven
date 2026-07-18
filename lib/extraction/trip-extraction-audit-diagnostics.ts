@@ -16,6 +16,7 @@ import type {
 } from "@/lib/extraction/trip-extraction-audit-types";
 import {
   asRecord,
+  findOpenAIUsage,
   normalizeAuditIdentity,
 } from "@/lib/extraction/trip-extraction-audit-utils";
 import {
@@ -439,6 +440,44 @@ export function createAuditDiagnostics({
         .map((record) => `${record.date ?? "undated"} - ${record.title}`),
       severity: "p2",
       title: "Travel rows without source-anchor coverage",
+    });
+  }
+
+  // Deterministic day-section source coverage (wave 2, RW-EVD-001; live runs
+  // 7.18.0/7.18.1 silently dropped koscom, "maybe communism museum", Tour
+  // Rome, and Szechenyi Baths from day sections in different combinations).
+  // Candidate finding only (RW-QA-001/RW-AUD-001): a quiet P2 advisory that
+  // never authorizes a mutation and never becomes a maker Question by itself.
+  const sourceCoverage = asRecord(findOpenAIUsage(usage).sourceCoverage);
+  const uncoveredLineCount = Number(sourceCoverage.uncoveredLineCount) || 0;
+
+  if (uncoveredLineCount > 0) {
+    const coverageStages = Array.isArray(sourceCoverage.stages)
+      ? sourceCoverage.stages
+      : [];
+    const evidenceLines = coverageStages.flatMap((stageReport) => {
+      const report = asRecord(stageReport);
+      const label =
+        typeof report.label === "string" ? report.label : "day section";
+      const uncovered = Array.isArray(report.uncoveredLines)
+        ? report.uncoveredLines
+        : [];
+
+      return uncovered.flatMap((line) => {
+        const lineRecord = asRecord(line);
+        return typeof lineRecord.excerpt === "string"
+          ? [`${label}: "${lineRecord.excerpt}"`]
+          : [];
+      });
+    });
+
+    diagnostics.push({
+      code: "day_section_source_line_unextracted",
+      detail:
+        "Deterministic day-section coverage found meaningful source lines that produced no extracted output. Candidate parser drops (RW-EVD-001): verify against the source before acting — this advisory never authorizes a mutation.",
+      evidence: evidenceLines.slice(0, 10),
+      severity: "p2",
+      title: "Day-section source lines produced no observations",
     });
   }
 

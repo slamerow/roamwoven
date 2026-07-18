@@ -132,6 +132,7 @@ export function createCanonicalizationSummary(usage: unknown) {
       : 0,
     identityRecoveryStatus,
     observationCount,
+    parserArtifactRepairCount: Number(evidence.parserArtifactRepairCount) || 0,
     rejectedObservationCount: Number(evidence.rejectedObservationCount) || 0,
     sourceAnchorObservationCount:
       Number(evidence.sourceAnchorObservationCount) || 0,
@@ -144,6 +145,7 @@ export function createCanonicalizationSummary(usage: unknown) {
 export function createExtractionSummary(usage: unknown) {
   const openai = findOpenAIUsage(usage);
   const activityChunks = asRecord(openai.activityChunks);
+  const sourceCoverage = asRecord(openai.sourceCoverage);
 
   return {
     activityChunks:
@@ -153,6 +155,18 @@ export function createExtractionSummary(usage: unknown) {
             failed: Number(activityChunks.failed) || 0,
             rescued: Number(activityChunks.rescued) || 0,
             succeeded: Number(activityChunks.succeeded) || 0,
+          }
+        : null,
+    // Deterministic day-section coverage counts (wave 2, RW-EVD-001) —
+    // counts only; uncovered-line excerpts stay in internal usage.
+    sourceCoverage:
+      Object.keys(sourceCoverage).length > 0
+        ? {
+            daySectionCount: Number(sourceCoverage.daySectionCount) || 0,
+            meaningfulLineCount:
+              Number(sourceCoverage.meaningfulLineCount) || 0,
+            uncoveredLineCount:
+              Number(sourceCoverage.uncoveredLineCount) || 0,
           }
         : null,
     staged: openai.staged === true,

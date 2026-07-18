@@ -52,6 +52,7 @@ function report(
       identityRepairCount: 0,
       identityRecoveryStatus: "not_needed",
       observationCount: 0,
+      parserArtifactRepairCount: 0,
       rejectedObservationCount: 0,
       sourceAnchorObservationCount: 0,
       suppressedStandaloneAnchorCount: 0,
@@ -73,7 +74,7 @@ function report(
       stays: [],
       transport: [],
     },
-    extraction: { activityChunks: null, staged: true },
+    extraction: { activityChunks: null, sourceCoverage: null, staged: true },
     fingerprints: {
       hash: "fingerprint",
       sections: {},
