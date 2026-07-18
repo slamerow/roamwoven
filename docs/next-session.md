@@ -6,6 +6,48 @@
 
 ## Current State
 
+### 2026-07-18 — 7.18.1 audit + wave-1.1 precision pass (Claude/Cowork session, same session as wave 1)
+
+Read first: `docs/product-contracts.md` (ledger v12),
+`docs/assembly-defect-docket-2026-07-18-run4.md` (7.18.1 audit + wave-1.1
+fix status).
+
+- Live run 7.18.1 (trip `5fc3223b-f31f-4d85-b287-e80dbb388f9a`, first
+  wave-1 build run) VALIDATED every wave-1 target: 5 stays (Prague Jan
+  14–18, clean name), zero credentials/booking codes in public prose (live
+  DOM checked), zero false P0s (budget anchor never minted; coverage P2
+  correctly flags unanchored FR8331), transport question leaks gone, baths
+  options folded into one card, Schönbrunn 5/5 with honest call, 77 Plans =
+  69 cards + 8 travel consistent, hard warnings 3→1. Bundle saved locally
+  as `run-7.18.1-qa-bundle.json` (gitignored, sha256-verified).
+- Still no-ship: parser variance now dominates (third materially different
+  parse of the same PDF on the same model) — dropped the Jan 20 Vienna list
+  into a reference blob, dropped Watches in Rome / Tour Rome / Rome note /
+  koscom / Szechenyi Baths / 2 of 3 trio venues, emitted day-title cards
+  ("We Explore Budapest"), exploded a lunch choice into 4 cards + question,
+  minted a $72 cost card, killed Prague Castle via a bled 12:00 slot
+  collision, mislabeled Ryanair as "Delta flight FR8331".
+- WAVE 1.1 IMPLEMENTED same session (42 test files green incl. NEW
+  `tests/assembly-ground-truth-run4.test.ts`, 6 checks from 7.18.1 shapes;
+  typecheck + build clean; ledger v12): day-plan-scoped note-copy veto
+  (un-guts the Vienna leg), site-vs-event slot-collision guard (restores
+  Prague Castle the card; the castle GROUP still needs wave-2 geo/shapes),
+  component-list-shaped source-listing membership + "A to B" = route (kills
+  the Fisherman's Bastion overgroup), alternative-slot collapse (one lunch
+  card, choice in description, "which was chosen" question suppressed) with
+  the or-carrying copy always winning merges, day-slot alias dedupe (no
+  venue question under two distinct venues — Gellert), note-content
+  promotion questions suppressed (beer spots), title-gate vocabulary
+  (tour/spend/land — "Drop bags and tour Rome" folds), audit structured
+  count joined RW-CNT-001.
+- IMMEDIATE NEXT STEP: Eli pushes wave 1.1 (terminal block provided), then
+  WAVE 2 parser pass in a FRESH session per the 2026-07-17 entry below
+  (geo fields, section classification, no day-title cards, disjunction
+  singletons, no cost cards, provider/title bleed, keep dropped lines,
+  source-coverage diagnostic), then extraction pinning (Supabase SQL before
+  deploy). Wave 1.1 needs no dedicated extraction — the wave-2 run
+  validates both.
+
 ### 2026-07-17 night — wave-1 fix pass for the 7.18.0 audit (Claude/Cowork session)
 
 Read first: `docs/product-contracts.md` (ledger v11: RW-CNT-001 added;

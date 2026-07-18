@@ -1,8 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 11
+Ledger version: 12
 
-Ledger date: 2026-07-17 (wave-1 defect pass, evening 2)
+Ledger date: 2026-07-18 (wave-1.1 precision pass)
 
 Approval state: Approved and implementation-tracked
 
@@ -167,7 +167,15 @@ path is bypassed.
   apply to new builds and intentional rebuilds only; existing unpublished drafts
   are not migrated or rewritten. Rebuilds are staged and replace the current
   working draft only after the complete new canonical graph validates.
-- Evidence: Finalization now records and revalidates a versioned canonical
+- Evidence: 2026-07-18 wave 1.1 (live-run 7.18.1: "Prague Castle" carried a
+  bled 12:00 time and slot collision merged the SITE into the timed
+  "Changing of the Guard" EVENT, deleting the castle): sharing a day/time/
+  category slot is only identity evidence when titles are related, one title
+  is generic, or one text cross-references the other AND the pair is not a
+  site-vs-event mismatch. Near-identical same-day descriptions collapse to
+  one card, with the copy carrying an unresolved "X or Y" choice always
+  winning the merge. Enforced by ground-truth run4 checks.
+  Finalization now records and revalidates a versioned canonical
   identity manifest before compilation. Structured activities, legs, stays, and
   transport carry canonical identity directly; Questions and private details
   carry their canonical subject; projection invariants and audit lineage join by
@@ -459,7 +467,12 @@ path is bypassed.
   multi-topic tips/ideas note that merely mentions another leg's entity
   keeps its city home instead of being wholesale rerouted (the Budapest
   public-transport tip was killed this way). Enforced by ground-truth run3
-  checks.
+  checks. 2026-07-18 wave 1.1 (live-run 7.18.1: the parser emitted the Vienna
+  venues both as day-section activities and as a notes-blob reference list;
+  merged blob copies made every card look same-section and the note-copy rule
+  gutted the whole Vienna leg): the shared-section veto now compares note
+  copies against the card's DAY-PLAN section labels only. Enforced by
+  ground-truth run4 checks (`tests/assembly-ground-truth-run4.test.ts`).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -858,7 +871,9 @@ path is bypassed.
   decide.
 - Evidence: `getReviewActivityItems`, summary `plans`, and fingerprint
   `activeActivities` share the top-level-card rule; the review page renders
-  summary hard warnings above the decision sections.
+  summary hard warnings above the decision sections. 2026-07-18 wave 1.1:
+  the audit `structured.activeActivities` count joined the shared rule (the
+  last 68-vs-69 straggler in live run 7.18.1).
 - Tests: `tests/assembly-ground-truth-run3.test.ts`,
   `tests/generated-trip-model.test.ts`
 
