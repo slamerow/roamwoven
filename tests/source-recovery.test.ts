@@ -37,7 +37,7 @@ function coverageWith(
     meaningfulLineCount: uncoveredLineCount + 5,
     stages,
     uncoveredLineCount,
-    version: 2,
+    version: 3,
   };
 }
 
@@ -47,8 +47,12 @@ const KOSCOM_COVERAGE = coverageWith([
     label: "Thursday, January 17th",
     meaningfulLineCount: 6,
     uncoveredLines: [
-      { excerpt: "go to koscom", lineIndex: 4 },
-      { excerpt: "maybe communism museum", lineIndex: 5 },
+      { excerpt: "go to koscom", lineIndex: 4, uncoveredClauses: ["go to koscom"] },
+      {
+        excerpt: "maybe communism museum",
+        lineIndex: 5,
+        uncoveredClauses: ["maybe communism museum"],
+      },
     ],
   },
   {
@@ -56,7 +60,11 @@ const KOSCOM_COVERAGE = coverageWith([
     label: "Monday, January 21st",
     meaningfulLineCount: 4,
     uncoveredLines: [
-      { excerpt: "Szechenyi Baths or Gellert - 6500 Ft", lineIndex: 2 },
+      {
+        excerpt: "Szechenyi Baths or Gellert - 6500 Ft",
+        lineIndex: 2,
+        uncoveredClauses: ["Szechenyi Baths", "Gellert - 6500 Ft"],
+      },
     ],
   },
 ]);

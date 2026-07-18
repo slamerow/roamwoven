@@ -20,6 +20,11 @@ import { comparableTokens } from "@/lib/extraction/traveler-text";
 export type SourceCoverageUncoveredLine = {
   excerpt: string;
   lineIndex: number;
+  // The clause(s) inside the line whose distinctive tokens no stage's
+  // output covers (version 3, run6 PB-3): "…koscom and maybe communism
+  // museum" is uncovered BECAUSE of the koscom clause even when another
+  // stage covers communism+museum.
+  uncoveredClauses: string[];
 };
 
 export type SourceCoverageStageReport = {
@@ -39,7 +44,7 @@ export type SourceCoverageSummary = {
   meaningfulLineCount: number;
   stages: SourceCoverageStageReport[];
   uncoveredLineCount: number;
-  version: 2;
+  version: 3;
 };
 
 const EXCERPT_MAX_CHARS = 120;
@@ -112,6 +117,25 @@ export function distinctiveLineTokens(line: string) {
       !/^\d+$/.test(token) &&
       !LINE_STOPWORDS.has(token)
   );
+}
+
+// Per-clause coverage (version 3; live-run 7.18.3 PB-3, an Arc A
+// calibration regression): whole-line majority matching let a multi-entity
+// line count as covered when ANOTHER clause's tokens were covered
+// elsewhere — "Get back by 5 to go to koscom and maybe communism museum"
+// passed because communism+museum were covered by a (misplaced) Jan 14
+// card, while koscom vanished UNFLAGGED for the first time in three runs;
+// "Szechenyi Baths or Gellert…" was masked the same way. A source line is
+// split on and/or/commas into clauses, EACH clause's distinctive tokens
+// must be covered, and cross-stage credit never spans clauses. This is the
+// recovery lane's trigger integrity (RW-EVD-001).
+const CLAUSE_SPLIT_PATTERN = /[,;]|\s+(?:and|or|&)\s+|\/(?!\d)/i;
+
+export function splitLineClauses(line: string) {
+  return line
+    .split(CLAUSE_SPLIT_PATTERN)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
 }
 
 function stripLineDecorations(line: string) {
@@ -278,19 +302,56 @@ export function computeDaySectionSourceCoverage(
       }
 
       stageMeaningfulLineCount += 1;
-      const covered = distinctive.filter((token) => outputTokens.has(token));
-      const requiredCoverage = Math.ceil(distinctive.length / 2);
 
-      if (covered.length >= requiredCoverage) {
-        return;
+      // Judge each clause independently; a clause with no distinctive
+      // tokens ("get back by 5") never gates the line.
+      const clauses = splitLineClauses(line)
+        .map((clause) => ({
+          clause,
+          distinctive: distinctiveLineTokens(clause),
+        }))
+        .filter((entry) => entry.distinctive.length > 0);
+      const judged = clauses.length > 0
+        ? clauses
+        : [{ clause: line, distinctive }];
+
+      let usedCrossStageCredit = false;
+      const uncoveredClauses: string[] = [];
+
+      for (const entry of judged) {
+        // In a MULTI-entity line, a short clause ("Szechenyi Baths",
+        // "go to koscom") must be fully covered — with only 1-2
+        // distinctive tokens, majority matching lets a shared generic
+        // token ("baths") mask the named entity, the exact PB-3 shape.
+        // Single-clause lines and longer clauses keep majority matching so
+        // paraphrased extractions ("Flight JFK -> FCO overnight" without
+        // "overnight") do not re-raise the run5 noise class.
+        const required =
+          judged.length >= 2 && entry.distinctive.length <= 2
+            ? entry.distinctive.length
+            : Math.ceil(entry.distinctive.length / 2);
+        const ownCovered = entry.distinctive.filter((token) =>
+          outputTokens.has(token)
+        );
+        if (ownCovered.length >= required) {
+          continue;
+        }
+        // Cross-stage credit is granted per clause, never pooled across
+        // the line's clauses.
+        const crossCovered = entry.distinctive.filter((token) =>
+          allStageTokens.has(token)
+        );
+        if (crossCovered.length >= required) {
+          usedCrossStageCredit = true;
+          continue;
+        }
+        uncoveredClauses.push(entry.clause);
       }
 
-      const crossStageCovered = distinctive.filter((token) =>
-        allStageTokens.has(token)
-      );
-
-      if (crossStageCovered.length >= requiredCoverage) {
-        crossStageCoveredLineCount += 1;
+      if (uncoveredClauses.length === 0) {
+        if (usedCrossStageCredit) {
+          crossStageCoveredLineCount += 1;
+        }
         return;
       }
 
@@ -300,6 +361,7 @@ export function computeDaySectionSourceCoverage(
             ? `${line.slice(0, EXCERPT_MAX_CHARS - 1)}…`
             : line,
         lineIndex,
+        uncoveredClauses,
       });
     });
 
@@ -322,6 +384,6 @@ export function computeDaySectionSourceCoverage(
     meaningfulLineCount,
     stages: reports,
     uncoveredLineCount,
-    version: 2,
+    version: 3,
   };
 }

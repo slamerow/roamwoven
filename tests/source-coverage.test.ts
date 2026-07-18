@@ -75,6 +75,80 @@ export default async function run() {
     assert.match(coverage.stages[0].uncoveredLines[0].excerpt, /koscom/i);
   });
 
+  await test("run6 PB-3: cross-stage credit never spans clauses — koscom stays flagged when another stage covers communism museum", () => {
+    const coverage = computeDaySectionSourceCoverage([
+      chunkStage("Thursday, January 17th", KUTNA_HORA_SOURCE, {
+        activities: [
+          {
+            date: "2019-01-17",
+            itemType: "activity",
+            startTime: "9:00",
+            title: "Pick up rental car",
+          },
+          {
+            date: "2019-01-17",
+            itemType: "activity",
+            title: "Sedlec Ossuary and silver mines visit",
+          },
+        ],
+      }),
+      // The 7.18.3 masking shape: a (misplaced) card from ANOTHER stage
+      // covers communism+museum, which previously satisfied the whole
+      // line's majority requirement and hid the koscom drop.
+      chunkStage("Monday, January 14th", null, {
+        activities: [
+          {
+            date: "2019-01-14",
+            itemType: "activity",
+            title: "Museum of communism",
+          },
+        ],
+      }),
+    ]);
+
+    assert.equal(coverage.uncoveredLineCount, 1);
+    const line = coverage.stages[0].uncoveredLines[0];
+    assert.match(line.excerpt, /koscom/i);
+    assert.equal(line.uncoveredClauses.length, 1);
+    assert.match(line.uncoveredClauses[0], /koscom/i);
+  });
+
+  await test("run6 PB-3: a multi-entity line is covered only when EVERY clause is covered (Szechenyi or Gellert)", () => {
+    const bathsSource = [
+      "Monday, January 21st // Budapest Bathing",
+      "Szechenyi Baths or Gellert Baths - 6500 Ft",
+    ].join("\n");
+
+    const masked = computeDaySectionSourceCoverage([
+      chunkStage("Monday, January 21st", bathsSource, {
+        activities: [
+          {
+            date: "2019-01-21",
+            itemType: "activity",
+            title: "Gellert Baths",
+          },
+        ],
+      }),
+    ]);
+
+    assert.equal(masked.uncoveredLineCount, 1, "the Szechenyi clause stays flagged");
+    assert.match(masked.stages[0].uncoveredLines[0].uncoveredClauses[0], /szechenyi/i);
+
+    const covered = computeDaySectionSourceCoverage([
+      chunkStage("Monday, January 21st", bathsSource, {
+        activities: [
+          {
+            date: "2019-01-21",
+            itemType: "activity",
+            title: "Szechenyi Baths or Gellert Baths",
+          },
+        ],
+      }),
+    ]);
+
+    assert.equal(covered.uncoveredLineCount, 0, "both clauses covered = no drop");
+  });
+
   await test("run5 calibration: page markers and ticket boilerplate are never meaningful lines", () => {
     const coverage = computeDaySectionSourceCoverage([
       chunkStage(
