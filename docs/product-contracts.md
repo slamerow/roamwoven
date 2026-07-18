@@ -1,8 +1,9 @@
 # Roamwoven Product Contracts
 
-Ledger version: 14
+Ledger version: 15
 
-Ledger date: 2026-07-18 (remediation Phases 0+2: prune + question gate)
+Ledger date: 2026-07-18 (Arc A: RW-EVD-001 bounded recovery call + Phase 1
+shared predicates/winner ladder + run5 geo calibration + cron hardening)
 
 Approval state: Approved and implementation-tracked
 
@@ -184,6 +185,20 @@ path is bypassed.
   site-vs-event mismatch. Near-identical same-day descriptions collapse to
   one card, with the copy carrying an unresolved "X or Y" choice always
   winning the merge. Enforced by ground-truth run4 checks.
+  2026-07-18 Arc A (live-run 7.18.2 PB-3: the "Explore Vienna" heading
+  fragment won the near-identical collapse by raw title length and deleted
+  Schonbrunn Palace): every collapse/dedup rule now takes its winner from
+  ONE shared ladder (`lib/extraction/entity-winner.ts`) — merge eligibility
+  first (an overview, day-arc, or heading-fragment card can NEVER win a
+  merge against a real card), then the or-carrying-copy preference, then
+  booking > named-venue tokens > commitment > specificity > title quality.
+  A heading fragment is a card whose title is one segment of its OWN source
+  day heading with no venue content; a venue named inside a multi-part
+  heading ("Prague Castle" under "Lesser Town & Prague Castle") keeps its
+  content tokens and stays eligible, and a bare verb+city title with no
+  heading corroboration ("Tour Rome") stays a real card. Enforced by
+  `tests/entity-winner.test.ts` and
+  `tests/assembly-ground-truth-run5.test.ts`.
   Finalization now records and revalidates a versioned canonical
   identity manifest before compilation. Structured activities, legs, stays, and
   transport carry canonical identity directly; Questions and private details
@@ -319,6 +334,24 @@ path is bypassed.
   source-authored routes, and counts one traveler card separately from its
   stops. A fresh real extraction is still required before discovery quality can
   be called fully enforced.
+  2026-07-18 Arc A run5 geo calibration (live-run 7.18.2 PB-4: a "Quick
+  look inside the Gresham Palace" card claimed half of central Pest,
+  including a timed bridge crossing, because 2-decimal coordinates quantize
+  to ~1.1 km): coordinates below 3-decimal precision are ineligible for any
+  geo-radius rule (still valid for source-hierarchy membership); a
+  passing-mention title ("quick look", "walk past", "photo stop") is never
+  a visit container in either the decision creator or the execution
+  verifier; on the geo path a TIMED stop joins a same-site visit only when
+  it shares the container's own category (preserving the locked
+  guard-changing-inside-the-castle child while killing the coarse-radius
+  timed-stop grab); a discovered-walk member's `area` label must be
+  supported by its OWN source section/heading text (structure-less fixture
+  pieces are never judged, mirroring the source-truth posture); and the
+  parser prompt now demands >=3-decimal coordinates in both the system
+  prompt and every per-chunk reminder. Geo/area fields now ride on QA
+  bundle lineage observations so radius claims are verifiable from the
+  bundle. Enforced by `tests/assembly-ground-truth-run5.test.ts` and the
+  updated same-site checks in `tests/evidence-clustering.test.ts`.
 - Tests: `tests/canonical-evidence-resolver.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`
@@ -520,6 +553,18 @@ path is bypassed.
   had never matched; the pattern now matches the normalized forms, so
   contracted first-person intent counts as commitment evidence again.
   Enforced by `tests/cleanup-cron-route.test.ts` (commitment checks).
+  2026-07-18 Arc A (live-run 7.18.2 PB-3: "Explore Vienna" — the non-date
+  remainder segment of the Jan 18 heading — shipped as a Jan 19 card):
+  parser-artifact normalization now also demotes a card whose title is one
+  verb+city segment of its OWN day heading (`heading_fragment_card`
+  repair), using the shared heading-fragment predicate and each card's own
+  sourceSectionLabel/sourceHeadingPath, so the fragment is caught even when
+  it ships on a different day than its heading. The researched-list
+  question additionally excludes "X at Site" component titles when the site
+  is named by a container noun or any co-extracted piece (run5 PB-3: the
+  orphaned "Orangeriegarten at Schönbrunn" component leaked into a bogus
+  planned-or-ideas question). Enforced by `tests/entity-winner.test.ts` and
+  `tests/assembly-ground-truth-run5.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -600,9 +645,32 @@ path is bypassed.
   `day_section_source_line_unextracted` (candidate finding per RW-QA-001 /
   RW-AUD-001 — it never authorizes a mutation and never creates a maker
   Question). The parser prompt gained a line-coverage rule naming the
-  dropped-line shapes. The contract's bounded excerpt-only model recovery
-  call is NOT yet implemented; the coverage diagnostic is its required
-  deterministic trigger evidence when that lane is built.
+  dropped-line shapes.
+  2026-07-18 Arc A: the contract's bounded excerpt-only model recovery call
+  is now IMPLEMENTED (`lib/extraction/source-recovery.ts`, wired in
+  `openai-trip-parser.ts`). The deterministic coverage diagnostic is its
+  ONLY trigger. One batched excerpt-only call per build (a prior recovery
+  stage blocks a second call), hard env-tunable input/output/line caps
+  (OPENAI_RECOVERY_MAX_INPUT_CHARS/[…]_MAX_OUTPUT_TOKENS/[…]_MAX_LINES),
+  model = the extraction model unless OPENAI_RECOVERY_MODEL overrides, no
+  incomplete-output retry (the lane never retries itself), over-cap lines
+  counted in telemetry (never silently dropped), and usage recorded
+  separately as `usage.sourceRecovery`. Recovered observations enter
+  assembly as a normal late stage — a synthesized model_chunk
+  EvidenceStageInput whose sourceText is the excerpt batch, so the standard
+  resolver, clustering, and source-truth verification judge recovered
+  records exactly like parser output (a recovery record with no excerpt
+  support is suppressed). Reported coverage is reconciled against the
+  recovery output: recovered lines clear, residual drops stay flagged by
+  the quiet P2 advisory. On call failure the usable draft survives and ONE
+  precise maker Question ships (subject trip, targetField sourceRecovery,
+  confirm — the established failed-chunk shape). The coverage diagnostic
+  itself was calibrated (version 2, run5 noise items): OCR page markers and
+  ticket boilerplate are excluded, a line covered by ANOTHER stage's output
+  (spine included) counts as cross-stage content rather than a drop, and
+  the FULL residual uncovered list plus recovery telemetry ship in the
+  audit extraction summary and QA bundle. Enforced by
+  `tests/source-recovery.test.ts` and `tests/source-coverage.test.ts`.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
@@ -874,6 +942,22 @@ path is bypassed.
   and negative controls where the candidate is actually absent. Enforcement
   remains partial until every serious diagnostic family carries typed canonical
   identity rather than evidence prose.
+  2026-07-18 Arc A (audit finding B4 — detector drift): audit detectors now
+  IMPORT pipeline predicates instead of re-implementing them. Hedge and
+  availability detection use the taxonomy's own
+  hasWeakRecommendationMarker/hasAvailabilityMarker (the private audit
+  regex missed five hedge phrases the pipeline demotes on — false P1s);
+  high-intent detection uses hasStandaloneActivityAnchor +
+  hasStrongPlannedActivityLanguage + the shared sight/container
+  vocabularies; loose-tip detection uses isLooseTipActivity (booking and
+  time guards included); the audit identity join uses the pipeline's
+  exported identityTokens (plural folding + one stopword set) and
+  normalizeAuditIdentity now folds with the canonical normalizeText; the
+  day-overview P0 detector also runs the shared heading-fragment predicate
+  against each card's source-heading context from lineage (the "Explore
+  Vienna" family was previously invisible to it). Lineage rows and
+  candidates carry sourceSectionLabel/sourceHeadingPath and geo/area fields
+  so these checks are verifiable from the QA bundle.
 - Tests: `tests/trip-audit-reconciliation.test.ts`,
   `tests/trip-quality-gate.test.ts`,
   `tests/extraction-route-recovery.test.ts`
@@ -918,6 +1002,15 @@ path is bypassed.
   fingerprints; repaired output is rebuilt and re-audited, while detector
   incidents leave correct output untouched. Other existing pipeline validators
   have not yet received the same exhaustive route audit.
+  2026-07-18 Arc A cron hardening: the cleanup cron route's CRON_SECRET
+  bearer compare is timing-safe (SHA-256 digests compared with
+  crypto.timingSafeEqual — no byte-position or length oracle) and every
+  rejected attempt is logged (`cron_cleanup_unauthorized_attempt` with
+  header shape, forwarded IP, user agent, timestamp). Route-level outcomes
+  unchanged. The RW-EVD-001 recovery call records its own dark-factory
+  outcomes: recovered / failed-with-one-question / no-trigger, each with
+  separate usage telemetry. Enforced by `tests/cleanup-cron-route.test.ts`
+  and `tests/source-recovery.test.ts`.
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,

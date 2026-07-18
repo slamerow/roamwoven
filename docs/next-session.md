@@ -6,6 +6,68 @@
 
 ## Current State
 
+### 2026-07-18 — ARC A IMPLEMENTED: recovery call + Phase 1 predicates/winner ladder + geo calibration + cron hardening (Claude/Cowork cloud session)
+
+Read first: `docs/product-contracts.md` (ledger v15),
+`docs/assembly-defect-docket-2026-07-18-run5.md` (Arc A fix status appended),
+`docs/code-audit-2026-07-18.md` (§E: Phases 0+1+2 now done + the RW-EVD-001
+recovery call).
+
+- ARC A LANDED, per the split plan below (4 commits, prefix-green order):
+  (1) Phase 1 shared predicates — one comparable fold + tokenizer in
+  `traveler-text.ts` (parser-artifact/source-coverage/extraction-qa/
+  boundary-policy forks retired), one day-heading detector (chunking's
+  byte-duplicate retired, bullet prefixes stripped), shared date parser
+  (slash day-first "16/1/2026" + 2-digit years), shared time parser
+  (dot-times "14.30"), ONE price detector (£ + Ft + Kc gaps closed), and
+  the ONE sameEntity/winner module `lib/extraction/entity-winner.ts`:
+  eligibility (overview/day-arc/heading-fragment cards can NEVER win a
+  merge) > or-copy > booking > named-venue tokens > commitment >
+  specificity > length — wired into all six collapse rules. Heading-
+  fragment demotion at the parser-artifact layer (card's OWN heading, works
+  cross-day; "Prague Castle"/"Tour Rome" survive). Run5 geo calibration:
+  ≥3-decimal coordinate precision for radius rules (prompt demands it too),
+  passing-mention containers banned, timed geo-children require the
+  container's category (locked guard-changing child preserved — this is the
+  reconciliation of the docket's "timed stops never join" with RW-GRP-001's
+  timed-child rule; flag if you want it stricter), walk areas must be
+  source-supported per piece, geo/area in bundle lineage. Audit detectors
+  import pipeline predicates (B4). Researched-list excludes "X at Site".
+  Slot-collision retitle considers only actually-merged copies (A2-lite).
+  (2) RW-EVD-001 bounded recovery call `lib/extraction/source-recovery.ts`
+  off the (now-calibrated, v2) coverage diagnostic: one excerpt-only
+  batched call per build, hard caps (OPENAI_RECOVERY_* env vars, in
+  .env.example), model env-overridable, never self-retries, separate
+  usage.sourceRecovery, recovered observations enter as a normal late stage
+  and are source-truth verified against the excerpt batch, residual drops
+  stay P2-flagged, failure = draft survives + ONE sourceRecovery Question.
+  Coverage v2: page-marker/boilerplate excluded, cross-stage union matching
+  (kills the 121/393 noise), full uncovered list + recovery telemetry in
+  the QA bundle.
+  (3) Cron hardening: timing-safe CRON_SECRET digest compare +
+  cron_cleanup_unauthorized_attempt logging.
+  NEW tests: `entity-winner.test.ts`, `assembly-ground-truth-run5.test.ts`,
+  `source-recovery.test.ts`, plus coverage/cron/prompt fixture updates.
+  Suite at final state: 49 test files green, typecheck clean, build clean.
+  Ledger v15 (RW-CAN/GRP/CLS/EVD/AUD/OPS-001 evidence updated).
+- IMMEDIATE NEXT STEP: Eli pushes (clear `.git/*.lock` first), creates a
+  fresh QA100 trip with the Czech PDF, runs ONE extraction ("7.18.3"),
+  Claude audits. ARC A VALIDATION TARGETS: koscom/Szechenyi recovered by
+  the recovery call (usage.sourceRecovery.outcome "recovered") or precisely
+  flagged (residual P2 with excerpts); Schönbrunn survives AND groups; zero
+  wrong groups (no Gresham-style container, no timed grab, no wrong-area
+  walk members); question count sane (no component leak, no bogus date
+  questions — Phase 2 gate holds); wave-1/2 wins hold (5 stays, 0
+  credential leaks, 0 false P0, counts consistent).
+- THEN ARC B (next session after 7.18.3 validates): unified
+  activity-vs-city-note classifier (A-6 acceptance) + geocoding
+  verification lane (env-keyed, budgeted, fail-soft, proximity-only, no new
+  DB tables in v1) → "7.18.4" → generalization round → Phases 3-4 +
+  extraction pinning (Supabase SQL before deploy). Carried-forward small
+  items: PB-1 Rome-note stay-fragment scrub, PB-6 baths slot override, PB-7
+  collision auto-suppression (5th run), Old Town Square absorption, Pinball
+  duplicate, car pickup/return alias dedupe.
+
 ### 2026-07-18 — Handoff for the NEXT ARC: recovery call + Phase 1 + geocoding (fresh session)
 
 Read first: `docs/product-contracts.md` (ledger v14),

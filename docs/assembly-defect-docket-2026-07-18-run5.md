@@ -166,3 +166,55 @@ diagnostic fired exactly as designed (a candidate finding, no mutation).
 Each fix lands with a 7.18.2-shape fixture in the same commit, per
 `AGENTS.md`. After the pass: one fresh extraction — do not hand-edit this
 draft.
+
+## Arc A fix status (2026-07-18, pre-7.18.3)
+
+Implemented this session (fixtures in the same commits; see
+`docs/product-contracts.md` ledger v15 for contract evidence):
+
+- **PB-3 (Schönbrunn)** — FIXED at three layers: (a) ONE shared
+  sameEntity/winner ladder (`lib/extraction/entity-winner.ts`) — overview /
+  day-arc / heading-fragment cards can never win any merge; every collapse
+  rule (near-identical, slot collision, title containment, fragment
+  absorption, placeholder attachment) now takes its winner from the ladder
+  (eligibility > or-copy > booking > named-venue tokens > commitment >
+  specificity > length); (b) heading-fragment demotion in parser-artifact
+  normalization catches "Explore Vienna" via the card's OWN
+  sourceSectionLabel/headingPath even when it ships on another day
+  ("Prague Castle" under a multi-part heading and un-corroborated
+  "Tour Rome" survive); (c) researched-list questions exclude "X at Site"
+  component titles. `tests/assembly-ground-truth-run5.test.ts`,
+  `tests/entity-winner.test.ts`.
+- **PB-4 (geo grouping)** — CALIBRATED: coords below 3-decimal precision
+  are ineligible for radius rules; passing-mention titles ("Quick look
+  inside …") can never be visit containers; on the geo path a timed stop
+  joins only with the container's own category (the locked castle
+  guard-changing child survives, the Chain Bridge grab dies); walk members'
+  area labels must be source-supported from their own section/heading;
+  prompt now demands ≥3-decimal coords (system + per-chunk); geo/area ride
+  on QA-bundle lineage observations (the audit-visibility gap).
+- **Coverage calibration** — v2: page-marker/boilerplate lines excluded,
+  cross-stage union matching (spine included) so other-stage-owned content
+  is no longer flagged, full residual uncovered list ships in the bundle.
+- **RW-EVD-001 recovery call** — BUILT (`lib/extraction/source-recovery.ts`):
+  one excerpt-only batched re-ask off the coverage diagnostic, hard caps,
+  separate usage, never self-retries, recovered observations enter assembly
+  as a normal late stage (source-truth verified against the excerpts), on
+  failure one precise sourceRecovery Question. This is the chronic
+  koscom/Szechenyi drop's repair lane (4 runs).
+- **Slot-collision retitle (audit A2, partial)** — the cross-referenced
+  retitle now only considers copies that actually merged.
+- **Audit detector drift (B4)** — detectors import pipeline predicates
+  (hedge/availability, high-intent, loose-tip, identity tokenizer,
+  heading-fragment day-overview detection).
+- Cron hardening: timing-safe CRON_SECRET compare + rejected-attempt logs.
+
+Still open from this docket (Arc B / later): unified
+activity-vs-city-note classifier (A-6 promotions), geocoding verification
+lane, PB-1 stay-fragment note scrub, PB-5 castle consolidation remainder,
+PB-6 slot-rule override, PB-7 collision auto-suppression, Pinball
+duplicate, Old Town Square absorption, car pickup/return alias dedupe,
+MUMOK/St. Stephen's disjunction pairing verification.
+
+Validation: fresh extraction "7.18.3" against the Arc A targets in
+`docs/next-session.md`.
