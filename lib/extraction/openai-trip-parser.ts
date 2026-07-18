@@ -12,6 +12,7 @@ import { optimizeTripExtractionMaterials } from "@/lib/extraction/material-budge
 import {
   extractSourceTransportAnchorsFromMaterials,
 } from "@/lib/extraction/source-transport-anchors";
+import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
@@ -383,8 +384,16 @@ const systemPrompt = [
   "Preserve the traveler's mental model, but do not create activity cards that merely summarize a whole day. Full-day overview, theme, and day-title lines belong outside activities; extract the concrete traveler cards instead.",
   "For every traveler card in activities, set itemType to activity, note, admin, rest_day, social, or placeholder. Dining reservations, restaurants, cafes, bars, winery visits, and meal plans should usually be itemType activity with category food_dining.",
   "For every traveler card in activities, set city to the specific trip city/leg named by the source chunk or surrounding source header when clear; set city to null when the source does not clearly indicate one. Do not guess city from public landmark knowledge.",
-  "For activity cards at a well-known fixed location, set approxLatitude and approxLongitude to the place's approximate coordinates (2-3 decimal places is enough) from your own knowledge of the landmark. Set both to null for generic meals, errands, unknown venues, or anywhere you are not confident of the specific place. Coordinates are used only to verify which sights are genuinely within a short walk of each other; they must never change a card's city, date, or intent.",
+  "Geo fields are REQUIRED output, not optional metadata: every activity card for a named landmark, museum, gallery, castle, palace, church, cathedral, bridge, square, market, baths, park, monument, or other specific named venue MUST carry approxLatitude and approxLongitude — the place's approximate coordinates (2-3 decimal places is enough) from your own knowledge of the landmark. A famous sight with null coordinates is an extraction defect. Reserve null for generic meals, errands, unbranded venues, or places you genuinely cannot identify. Coordinates are used only to verify which sights are genuinely within a short walk of each other; they must never change a card's city, date, or intent.",
   "For sightseeing activity cards, set area to a SUB-CITY walkable neighborhood label only when the source text itself names one (a day title or heading such as 'Lesser Town' or 'Old Town'). Never use the city name, a day-trip town name, or a district you inferred from your own knowledge as the area. Set area to null when unsure. It must never change a card's city, date, or intent.",
+  "Line-coverage rule: every meaningful line inside a dated day section must be represented in your output as an activity, note, stay, transport record, sensitive detail, or question. Never skip a line because it is short, odd, hedged, or unfamiliar: an unknown proper noun ('go to koscom'), a hedged mention ('maybe communism museum' — emit as city_note_candidate per the doubt-marker rule), a bath-house or venue option under a day title ('Szechenyi' or 'Gellert'), and a sparse committed item ('Tour Rome' — emit as placeholder or flexible card) must all still be emitted. Dropping a source line is an extraction defect.",
+  "Day-title rule: a day heading or its title fragment ('We Explore Budapest', 'Walking tour / Jewish History / Old Town free time') is never an activity card title. Extract the concrete traveler items underneath instead; keep the heading itself in sourceSectionLabel only.",
+  "Reference-list rule: when a trailing summary or notes blob re-lists venues that already appear inside dated day sections, those trailing entries are reference copies — emit them as city_note_candidate or context sightings, never as new dated activities, and never move a card onto a different city's day because a reference list sits near that day's text.",
+  "Ticket-page rule: an e-ticket, boarding pass, booking confirmation, or ticket PDF page that re-describes a transport segment (route, times, booking/ticket/travel codes) is booking_detail evidence for that transport record, never a new activity card. Use only the date printed on the ticket itself; never date ticket content by page position or by the surrounding day sections.",
+  "Disjunction rule: when one itinerary slot offers alternatives ('Lunch at X or Y', 'Mumok or Natural History Museum'), emit exactly ONE activity card whose title or description carries the 'X or Y' choice. Never also emit the individual alternatives as separate activity cards — that duplicates one decision into several plans.",
+  "Cost-line rule: prices and budget lines ('$72 (private room—ensuite)', 'Prague — $56 (airbnb)') are cost context. Attach the amount to the stay, transport, or activity it prices when that is clear; otherwise leave it in evidence. Never emit a standalone cost or lodging-price card, and never let a cost line become a note entry.",
+  "Time-field rule: startTime and endTime are the traveler's planned times only. Never set endTime equal to startTime, and never copy a venue's opening hours into startTime or endTime — opening hours belong in the description.",
+  "Provider rule: a transport record's provider is the operating brand exactly as the source names it for that segment ('Delta', 'OeBB', 'RegioJet', 'Ryanair'). Never absorb adjacent layout words such as 'PM' or 'Home' into provider, and never label a segment's title or provider with a carrier the source does not name for that segment.",
   `For every traveler card, also set category to the traveler-browse bucket, not the record type. Allowed category values are: ${TRIP_CATEGORY_IDS.join(", ")}.`,
   "Never use activity, note, or transport as a category. Those can be item types or separate transport records, but card categories should answer where a traveler would browse the plan.",
   "Use arrival_departure for flights, train transfers, airport/station arrivals, rental car pickup/dropoff, lodging check-ins, and explicit drop-bags cards that need to appear in the daily traveler timeline.",
@@ -744,6 +753,7 @@ function formatActivityChunkInput({
       "Extract every source-backed activity, city note/tip, place, stay, transport segment, sensitive detail, and genuine unresolved material question from this chunk.",
       "If this chunk contains multiple named dated venues, preserve them as separate cards unless the source clearly makes them one tour, route, complex, or pick-one cluster.",
       "Preserve the chunk's heading/list hierarchy in sourceHeadingPath, sourceSectionLabel, sourceSectionType, and evidenceRole. Do not promote recommendations from a city-reference section merely because a dated section appeared above them.",
+      "Cover every meaningful source line in this chunk with at least one output record, and fill approxLatitude/approxLongitude for every named landmark or venue card you emit.",
       rescueInstructions,
     ].join("\n"),
     formatMaterials(chunk.materials),
@@ -1394,6 +1404,7 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
+  const sourceCoverage = computeDaySectionSourceCoverage(evidenceStages);
   const evidence = clusterExtractedEvidence({
     groupingDecisions: resolvedEvidenceStages.groupingDecisions,
     resolverMetadata: resolvedEvidenceStages.metadata,
@@ -1450,6 +1461,8 @@ export async function extractTripDraftWithOpenAI({
         canonicalDraft,
       },
       evidence: evidence.summary,
+      parserArtifactRepairs: evidence.parserArtifactRepairs,
+      sourceCoverage,
       sourceAnchors: {
         transport: sourceTransportAnchors,
       },

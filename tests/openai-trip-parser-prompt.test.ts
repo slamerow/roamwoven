@@ -38,3 +38,26 @@ test("extraction prompt reserves missingDetails for maker decisions, not model c
     /include it as a missingDetails entry with a statement-style prompt/i
   );
 });
+
+test("wave-2 prompt hardening: geo fields, line coverage, and artifact rules are demanded", () => {
+  assert.match(parserSource, /Geo fields are REQUIRED output/i);
+  assert.match(parserSource, /Line-coverage rule:/);
+  assert.match(parserSource, /go to koscom/i);
+  assert.match(parserSource, /maybe communism museum/i);
+  assert.match(parserSource, /Tour Rome/);
+  assert.match(parserSource, /Day-title rule:/);
+  assert.match(parserSource, /We Explore Budapest/);
+  assert.match(parserSource, /Reference-list rule:/);
+  assert.match(parserSource, /Ticket-page rule:/);
+  assert.match(parserSource, /never date ticket content by page position/i);
+  assert.match(parserSource, /Disjunction rule:/);
+  assert.match(parserSource, /exactly ONE activity card whose title or description carries the 'X or Y' choice/);
+  assert.match(parserSource, /Cost-line rule:/);
+  assert.match(parserSource, /Time-field rule:/);
+  assert.match(parserSource, /Never set endTime equal to startTime/);
+  assert.match(parserSource, /Provider rule:/);
+  assert.match(
+    parserSource,
+    /fill approxLatitude\/approxLongitude for every named landmark/i
+  );
+});
