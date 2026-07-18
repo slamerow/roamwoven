@@ -6,6 +6,43 @@
 
 ## Current State
 
+### 2026-07-18 — 7.18.2 audit (wave-2 validation run; same session as wave 2)
+
+Read first: `docs/product-contracts.md` (ledger v13),
+`docs/assembly-defect-docket-2026-07-18-run5.md` (7.18.2 audit + wave-2.1
+fix list).
+
+- Live run 7.18.2 (trip `51d3bc5f-db85-4b03-8441-9faa26da5a9d`, first
+  wave-2 build run; bundle saved as `run-7.18.2-qa-bundle.json`, sha256
+  `63a17212…f3d8`, currently in Eli's Downloads — move to repo root,
+  gitignored). Wave-2 WINS: geo fields EMITTED for the first time (both
+  grouping rules fired), no provider bleed, transport ticket re-emissions
+  silently absorbed, disjunction singletons, Tour Rome recovered, 0 false
+  P0, 0 credential leaks, 5 stays clean, coverage diagnostic fired as
+  designed (121/393 lines, noisy).
+- Still no-ship. NEW defect mix (see run5 docket): 2 parser-minted
+  FALSE-CONFLICT date questions (both cited dates AGREE; guessedValue equals
+  final state — reconciliation gap), Schönbrunn destroyed by the
+  near-identical collapse letting the "Explore Vienna" heading-fragment card
+  win over the named venue (all 4 Schönbrunn pieces suppressed → components
+  leaked into a bogus researched-list question), geo grouping membership
+  broken now that coords exist (a "Quick look inside Gresham Palace" card
+  owns half of central Pest incl. a timed bridge; 2-decimal coords ≈ 1.1 km
+  quantization defeats the 300 m rule), castle question duplicated, baths
+  question missing (doubt demotion starves the day-title slot rule), stay
+  check-in fragment (#743, 45.75 EUR) fused into the Rome shopping note,
+  collision auto-suppression still absent (4th run), cost cards multiplied,
+  koscom + Szechenyi Baths dropped by the parser AGAIN (4th run — the
+  line-coverage prompt did not fix drops; the diagnostic caught the class,
+  strengthening the case for the RW-EVD-001 bounded recovery call and/or a
+  chunk-stage model A/B).
+- IMMEDIATE NEXT STEP: WAVE 2.1 per the run5 docket order (question
+  hygiene, collapse winner rule + heading fragments, geo calibration,
+  castle consolidation, note-scrub/slot-override/auto-suppression, cost
+  demotion + coverage calibration), fixtures in the same commits, Eli
+  pushes, one fresh extraction. Then extraction pinning (Supabase SQL
+  before deploy).
+
 ### 2026-07-18 — WAVE 2 parser pass (Claude/Cowork session, fresh session)
 
 Read first: `docs/product-contracts.md` (ledger v13),
