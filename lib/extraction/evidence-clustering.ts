@@ -2430,7 +2430,7 @@ function suppressRepresentedTravelAndStayActivities(
     // distinctive title token has to belong to a stay name or check-in/arrival
     // vocabulary for the card to count as routine lodging flow.
     const routineVocabulary =
-      /^(?:check|checkin|checkout|in|into|out|to|the|and|at|drop|bags?|bag|start|arrive|arrival|arriving|hostel|hotel|airbnb|apartment|room|luggage|then|walk|touring|day)$/;
+      /^(?:check|checkin|checkout|in|into|out|to|the|and|at|drop|bags?|bag|start|starting|arrive|arrival|arriving|hostel|hotel|airbnb|apartment|room|luggage|then|walk|tour|touring|spend|spending|land|landing|day)$/;
     const stayNameTokens = new Set(
       stays.flatMap((stay) =>
         foldForSourceSupport(stringValue(stay.payload, "name") ?? "")
@@ -4385,7 +4385,7 @@ function executeCanonicalGroupingDecisions({
       const siteContainer = explicitContainer ?? promotedParent ?? requestedAnchor;
       const containerRawTitle = stringValue(siteContainer.payload, "title") ?? "";
       const multiSiteTitle =
-        /^(.{3,}?)\s+(?:and|&)\s+(.{3,}?)(?:\s+visit)?$/i.test(containerRawTitle) &&
+        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(containerRawTitle) &&
         SAME_SITE_CONTAINER_PATTERN.test(containerRawTitle);
       if (multiSiteTitle) {
         continue;
@@ -4411,11 +4411,16 @@ function executeCanonicalGroupingDecisions({
           geoVerifiedCount += 1;
           return true;
         }
-        const childTitle = normalizedComparable(
-          stringValue(piece.payload, "title")
-        );
+        const childRawTitle = stringValue(piece.payload, "title");
+        const childTitle = normalizedComparable(childRawTitle);
         if (!childTitle) return false;
-        if (childTitle.length >= 6 && containerText.includes(childTitle)) {
+        if (
+          childRawTitle &&
+          containerListsComponent(
+            stringValue(siteContainer.payload, "description"),
+            childRawTitle
+          )
+        ) {
           return true;
         }
         return containerTokens.some(
@@ -5162,6 +5167,96 @@ function absorbLocationFragmentCards(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
+// One unresolved choice is ONE card (RW-QUE-001 disjunction rule; live-run
+// 7.18.1 shipped "Lunch option" + "Lunch in Buda" + "Pest-Buda Bistro" +
+// "Cafe Pierrot" — four cards and a question for one lunch). Two passes:
+// same-day near-identical descriptions collapse to one card, then cards
+// titled after an option named in a surviving card's "X or Y" description
+// fold into that slot card.
+function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
+  const candidates = () =>
+    pieces.filter(
+      (piece) =>
+        committedMentionPieceCandidate(piece) &&
+        piece.payload._canonicalGroupRole !== "parent" &&
+        piece.payload._canonicalGroupRole !== "child"
+    );
+
+  // Pass 1: near-identical same-day descriptions ("Stroll through Castle
+  // Hill and Buda Castle" twice at 10:30) are one plan.
+  let merged = true;
+  while (merged) {
+    merged = false;
+    const current = candidates();
+    outer: for (let i = 0; i < current.length; i += 1) {
+      for (let j = i + 1; j < current.length; j += 1) {
+        const left = current[i];
+        const right = current[j];
+        if (!sameCanonicalDate(left.payload, right.payload)) continue;
+        const leftTime = timeFrom(left.payload);
+        const rightTime = timeFrom(right.payload);
+        if (leftTime && rightTime && leftTime !== rightTime) continue;
+        const leftDesc = identityTokens(
+          stringValue(left.payload, "description") ?? ""
+        );
+        const rightDesc = identityTokens(
+          stringValue(right.payload, "description") ?? ""
+        );
+        if (leftDesc.length < 4 || rightDesc.length < 4) continue;
+        const overlap = overlapCount(leftDesc, rightDesc);
+        const smaller = Math.min(leftDesc.length, rightDesc.length);
+        if (overlap / smaller < 0.9) continue;
+        // The copy carrying the unresolved "X or Y" choice is the slot's most
+        // complete representation and must win the merge — losing it to a
+        // better-titled option card silently resolves the maker's choice.
+        const slotScore = (piece: CanonicalEvidencePiece) =>
+          (/\bor\b/i.test(stringValue(piece.payload, "description") ?? "")
+            ? 10
+            : 0) +
+          (timeFrom(piece.payload) ? 2 : 0) +
+          titleQuality(stringValue(piece.payload, "title"));
+        const target = slotScore(right) > slotScore(left) ? right : left;
+        const source = target === left ? right : left;
+        mergeCanonicalPieceInto({
+          reason:
+            "same plan described twice on one day: near-identical descriptions collapse to one card",
+          source,
+          target,
+        });
+        merged = true;
+        break outer;
+      }
+    }
+  }
+
+  // Pass 2: an option named inside a surviving card's "at X or Y" choice is
+  // that slot's alternative, never its own card — unless it carries its own
+  // time or booking.
+  const optionPattern = /\bat\s+([^.;]{3,60}?)\s+or\s+([^.;]{3,60}?)(?=[.;]|$)/i;
+  for (const slotCard of candidates()) {
+    const description = stringValue(slotCard.payload, "description") ?? "";
+    const match = optionPattern.exec(description);
+    if (!match) continue;
+    const optionNames = [match[1], match[2]]
+      .map((value) => normalizedComparable(value))
+      .filter((value) => value.length >= 4);
+    if (optionNames.length === 0) continue;
+    for (const piece of candidates()) {
+      if (piece === slotCard) continue;
+      if (!sameCanonicalDate(piece.payload, slotCard.payload)) continue;
+      if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) continue;
+      const title = normalizedComparable(stringValue(piece.payload, "title"));
+      if (!title || !optionNames.some((option) => option === title)) continue;
+      mergeCanonicalPieceInto({
+        reason:
+          "alternative-slot option folded into the committed slot card (one unresolved choice, one card)",
+        source: piece,
+        target: slotCard,
+      });
+    }
+  }
+}
+
 function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
   const slots = new Map<string, CanonicalEvidencePiece[]>();
 
@@ -5225,6 +5320,43 @@ function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
       })?.title;
 
     for (const loser of ranked.slice(1)) {
+      // Semantic guard (live-run 7.18.1: "Prague Castle" carried the 12:00
+      // time bled from "Changing of the Guard at 12:00 PM" and slot
+      // collision merged the SITE into the timed EVENT, deleting the castle
+      // from the app — same defect family as castle-as-lodging). Sharing a
+      // slot is only identity evidence when the titles are related (token
+      // overlap), one title is generic, or one text cross-references the
+      // other title AND the pair is not a site-vs-event mismatch.
+      const winnerTitle = stringValue(winner.payload, "title") ?? "";
+      const loserTitle = stringValue(loser.payload, "title") ?? "";
+      const winnerTokens = identityTokens(winnerTitle);
+      const loserTokens = identityTokens(loserTitle);
+      const loserGeneric = distinctiveTitleTokens(loserTitle).length === 0;
+      const winnerGeneric = distinctiveTitleTokens(winnerTitle).length === 0;
+      const titlesRelated = overlapCount(winnerTokens, loserTokens) >= 1;
+      const crossReferenced = (() => {
+        const winnerText = normalizedComparable(
+          `${winnerTitle} ${stringValue(winner.payload, "description") ?? ""}`
+        );
+        const loserText = normalizedComparable(
+          `${loserTitle} ${stringValue(loser.payload, "description") ?? ""}`
+        );
+        const winnerNeedle = normalizedComparable(winnerTitle);
+        const loserNeedle = normalizedComparable(loserTitle);
+        return Boolean(
+          (loserNeedle.length >= 4 && winnerText.includes(loserNeedle)) ||
+            (winnerNeedle.length >= 4 && loserText.includes(winnerNeedle))
+        );
+      })();
+      const siteVsEvent =
+        SAME_SITE_CONTAINER_PATTERN.test(winnerTitle) !==
+        SAME_SITE_CONTAINER_PATTERN.test(loserTitle);
+      const sameEntity =
+        loserGeneric ||
+        winnerGeneric ||
+        titlesRelated ||
+        (crossReferenced && !siteVsEvent);
+      if (!sameEntity) continue;
       mergeCanonicalPieceInto({
         reason:
           "slot collision: same day, time, and category describe one planned entity; duplicate copies merged into the booking-anchored card",
@@ -5529,10 +5661,23 @@ function notesShareSourceSection(
   notePieces: CanonicalEvidencePiece[],
   observationById: Map<string, EvidenceObservation>
 ) {
-  const pieceLabels = new Set(pieceObservationLabels(piece, observationById));
+  // Compare against the card's DAY-PLAN section labels ONLY. A merged copy
+  // from the trailing notes blob must not poison this veto: in live run
+  // 7.18.1 the parser emitted the Vienna venues both as day-section
+  // activities and as a notes-blob reference list, the activity copies
+  // merged (so every card carried the notes-blob label too), the veto saw a
+  // "shared section" everywhere, and the entire Vienna leg folded into the
+  // city note. The question the veto answers is: did the source list this
+  // venue as a reference IN THE SAME DAY SECTION the card came from?
+  const dayPlanLabels = new Set(
+    pieceObservationLabels(piece, observationById).filter((label) =>
+      DAY_PLAN_SECTION_LABEL_PATTERN.test(label)
+    )
+  );
+  if (dayPlanLabels.size === 0) return true;
   return notePieces.some((note) =>
     pieceObservationLabels(note, observationById).some((label) =>
-      pieceLabels.has(label)
+      dayPlanLabels.has(label)
     )
   );
 }
@@ -5897,6 +6042,31 @@ const CROWDED_DAY_VISIBLE_CARDS = 6;
 const SAME_SITE_CONTAINER_PATTERN =
   /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
 
+// Source-listing membership requires a COMPONENT-LIST shape, not a substring
+// of narrative prose (live-run 7.18.1: "Fisherman's Bastion to Castle Hill"
+// carried the whole day's walking narrative in its description, which made
+// every venue it mentioned — including St. Stephen's Basilica across the
+// river — look source-listed). A component is a delimited list entry equal
+// to the child title, or the child title plus a short qualifier ("KGB museum
+// for 1 hour", "Changing of the Guard - 12:00 PM").
+function containerListsComponent(
+  containerDescription: string | null,
+  childTitle: string
+) {
+  if (!containerDescription) return false;
+  const child = normalizedComparable(childTitle);
+  if (!child || child.length < 6) return false;
+  return containerDescription
+    .split(/[,;:•·]|(?:\r?\n)+/)
+    .map((segment) => normalizedComparable(segment.replace(/[.()]/g, " ")))
+    .filter(Boolean)
+    .some(
+      (segment) =>
+        segment === child ||
+        (segment.startsWith(child) && segment.length - child.length <= 24)
+    );
+}
+
 function pieceCoordinates(piece: CanonicalEvidencePiece) {
   const lat = piece.payload.approxLatitude;
   const lng = piece.payload.approxLongitude;
@@ -6038,11 +6208,16 @@ function createDeterministicGeoGroupingDecisions({
         ) {
           return true;
         }
-        const childTitle = normalizedComparable(
-          stringValue(piece.payload, "title")
-        );
+        const childRawTitle = stringValue(piece.payload, "title");
+        const childTitle = normalizedComparable(childRawTitle);
         if (!childTitle) return false;
-        if (childTitle.length >= 6 && containerText.includes(childTitle)) {
+        if (
+          childRawTitle &&
+          containerListsComponent(
+            stringValue(container.payload, "description"),
+            childRawTitle
+          )
+        ) {
           return true;
         }
         return containerTokens.some(
@@ -6364,6 +6539,21 @@ function createDayLabelSlotQuestions(
       return genericScore(leftTitle) - genericScore(rightTitle);
     });
     const subject = ordered[0];
+    // Alias dedupe before asking (second-audit finding on live run 7.18.1:
+    // the baths question offered "Gellert Baths", "Baths", and "Gellert Bath
+    // House" as if they were competing venues — they are one place). Count
+    // DISTINCT venues by their non-slot distinctive tokens; a venue question
+    // needs at least two genuinely different venues, otherwise the options
+    // fold silently and the slot card simply carries the venue.
+    const venueKeys = new Set(
+      ordered
+        .map((piece) =>
+          distinctiveTitleTokens(stringValue(piece.payload, "title") ?? "")
+            .filter((token) => !stems.test(token) && !/^house?s?$/.test(token))
+            .join(" ")
+        )
+        .filter(Boolean)
+    );
     for (const option of ordered.slice(1)) {
       const optionTitle = stringValue(option.payload, "title");
       if (optionTitle) {
@@ -6375,6 +6565,9 @@ function createDayLabelSlotQuestions(
         source: option,
         target: subject,
       });
+    }
+    if (venueKeys.size < 2) {
+      continue;
     }
     const subjectObservation = subject.observationIds
       .map((id) => observationById.get(id))
@@ -7102,6 +7295,38 @@ function unresolvedMissingDetails({
         return Boolean(normalizedClockTime(candidate.payload.departureTime));
       });
       if (answeringRow) {
+        return false;
+      }
+    }
+
+    // Parser question leaks beyond transport fields (live run 7.18.1):
+    // (a) "which X was chosen" — when an active card's description already
+    // carries the unresolved "X or Y" choice, the slot card IS the answer
+    // surface (RW-QUE-001 disjunction: choice in description, no question);
+    // (b) "which X should be added as the planned activity … note" — asking
+    // the maker to promote note-list content is presentation mechanics,
+    // never a material decision (RW-REV-001; the beer-spot question).
+    if (
+      !stringValue(detail, "resolverDecisionId") &&
+      stringValue(detail, "_canonicalReviewDisposition") !== "call"
+    ) {
+      const detailTokens = identityTokens(reviewDetailText(detail));
+      if (/\bwhich\b[\s\S]{0,80}\bchosen\b/.test(questionText)) {
+        const slotCard = pieces.find((piece) => {
+          if (!piece.outputEligible || piece.kind !== "activity") return false;
+          const description = stringValue(piece.payload, "description") ?? "";
+          if (!/\bor\b/i.test(description)) return false;
+          return (
+            overlapCount(detailTokens, identityTokens(description)) >= 2
+          );
+        });
+        if (slotCard) return false;
+      }
+      if (
+        /\bwhich\b[\s\S]{0,90}\bshould be added\b/.test(questionText) ||
+        (/\bshould be added as the planned activity\b/.test(questionText) &&
+          /\bnote\b/.test(questionText))
+      ) {
         return false;
       }
     }
@@ -8214,6 +8439,7 @@ export function clusterExtractedEvidence({
   assignProvisionalActivityDates({ observations, pieces });
   absorbLocationFragmentCards(pieces);
   collapseSlotCollisions(pieces);
+  collapseAlternativeSlotCards(pieces);
   collapseTitleContainmentAliases(pieces);
   resolveUncommittedRepeatMentions(pieces, observations, missingDetails);
   reconcileCardsAgainstCityNotes(pieces, missingDetails, observations);

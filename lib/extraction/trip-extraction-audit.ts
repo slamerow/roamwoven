@@ -83,8 +83,12 @@ export function createTripExtractionAuditReport({
       transport: sourceTransportAnchors,
     },
     structured: {
-      activeActivities: primaryItems.filter((item) => item.itemType === "activity")
-        .length,
+      // One count definition (RW-CNT-001): every top-level activity-umbrella
+      // card, including admin/logistics — the last surface still excluding
+      // admin (68 vs 69 in live run 7.18.1).
+      activeActivities: primaryItems.filter(
+        (item) => item.itemType !== "note" && item.itemType !== "placeholder"
+      ).length,
       activeNotes: primaryItems.filter((item) => item.itemType === "note").length,
       groupedStops: activeItems.filter((item) => Boolean(item.parentItemId)).length,
       hardWarnings: warnings.filter((warning) => warning.severity === "hard")

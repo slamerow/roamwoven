@@ -587,7 +587,7 @@ export default async function run() {
     );
   });
 
-  await test("ground truth run3 (RW-QUE-001): day-title slot options fold into ONE flexible card plus the question", () => {
+  await test("ground truth run3 (RW-QUE-001): day-title slot aliases fold into ONE flexible card with no alias-only question", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -626,11 +626,16 @@ export default async function run() {
       /gellert/i,
       "the folded venue is an option in the description"
     );
+    // Alias dedupe (7.18.1 second-audit finding, Eli-approved): "Gellert
+    // Baths" and "Baths" are one venue, not competing options — with fewer
+    // than two DISTINCT venues the options fold silently and no venue
+    // question fires. (The question returns when a real second venue, e.g.
+    // Szechenyi, is parsed.)
     assert.ok(
-      draft.missingDetails.some((detail) =>
+      !draft.missingDetails.some((detail) =>
         /which one, or keep as ideas/i.test(String(detail.prompt ?? ""))
       ),
-      "the slot question still fires"
+      "no venue question when all candidates are aliases of one venue"
     );
   });
 
