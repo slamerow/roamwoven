@@ -6,6 +6,21 @@
 
 ## Current State
 
+### 2026-07-18 — CEO decisions on the remediation plan (same session)
+
+- Phase order 0 → 2 → 1 → fresh extraction → 3 → 4 APPROVED (Eli: "aligned").
+- Ship bar (Eli): "I'll know it when I see it" — but the floor is: stop the
+  bleeding (P0 classes stay dead), CORRECT system-grouped activities, and
+  all fundamentals right (stays/transport/counts/questions sane). The full
+  answer key remains the internal QA target, not the release gate.
+- Bounded RW-EVD-001 recovery call: build RIGHT AFTER PHASE 2 (approved).
+  Stronger-model A/B only if recovery underperforms.
+- QA cost: not a concern — keep paying per validation run; dev re-extract
+  lane stays backlog (not pulled forward).
+- cleanupAbandonedUnpaidStarterMaterials: WIRE IT on a schedule (approved)
+  — needs a cron-invoked route + Vercel cron config; include in Phase 0/1
+  work with its own route-level coverage per RW-OPS-001.
+
 ### 2026-07-18 — Full codebase audit (same session, after the 7.18.2 audit)
 
 Read first: `docs/code-audit-2026-07-18.md` (rule-conflict, question-
