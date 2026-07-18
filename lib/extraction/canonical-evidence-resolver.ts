@@ -1,3 +1,4 @@
+import { hasCommitmentLanguage } from "@/lib/trip-card-taxonomy";
 import { createHash } from "node:crypto";
 import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
 import type {
@@ -421,9 +422,14 @@ function buildCandidates(stages: EvidenceStageInput[]) {
         hasBookingSignal: /\b(?:booking|confirmation|paid|reservation|ticket|timed|voucher)\b/i.test(
           description
         ),
-        hasPlanSignal: /\b(?:booked|continue|dinner|explore|guided|lunch|plan(?:ned)? to|reservation|reserved|stop|tour|visit|walk|we will|we'll)\b/i.test(
-          structuralText
-        ),
+        // Audit finding B1 (Arc B fix): plan signals come from the shared
+        // commitment lexicon. Bare sight verbs ("explore", "visit",
+        // "walk", "tour", "stop") are parser phrasing, never commitment —
+        // this private regex previously contradicted the taxonomy on the
+        // same string and promoted loose mentions to keep_activity.
+        hasPlanSignal:
+          hasCommitmentLanguage(structuralText) ||
+          /\b(?:breakfast|brunch|dinner|lunch)\b/i.test(structuralText),
         hasRecommendationSignal: /\b(?:ideas?|if time|maybe|notes?|possible|recommendations?|things to check out|where to eat)\b/i.test(
           structuralText
         ),

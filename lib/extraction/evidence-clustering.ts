@@ -27,6 +27,15 @@ import {
 } from "@/lib/extraction/entity-winner";
 import { segmentCarriesIdentityValues } from "@/lib/extraction/identity-prose";
 import {
+  classifyIdeaListSections,
+  classifyOwnTextEvidence,
+  isSiteComponentTitlePair,
+  resolveMentionCommitment,
+  SITE_CONTAINER_NOUN_PATTERN,
+  type IdeaListEntry,
+  type MentionCommitment,
+} from "@/lib/extraction/activity-classifier";
+import {
   classifyDraftActivityCard,
 } from "@/lib/trip-card-taxonomy";
 import {
@@ -1687,6 +1696,45 @@ function suppressCanonicalPiece(
   });
 }
 
+// Intake own-text classification stamp (Arc B): while a piece's payload is
+// still its own evidence (only same-identity intake merges have happened),
+// record whether ITS OWN text carries a hedge marker or fixed commitment.
+// Later merge passes append absorbed sibling text to descriptions; doubt
+// demotion and commitment (PB-8) must keep judging the entity's own words.
+function stampOwnTextClassification(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[]
+) {
+  const byId = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  for (const piece of pieces) {
+    if (piece.kind !== "activity" && piece.kind !== "note") continue;
+    if (typeof piece.payload._ownTextHedge === "boolean") continue;
+    const own = piece.observationIds
+      .map((id) => byId.get(id))
+      .filter(
+        (observation): observation is EvidenceObservation =>
+          Boolean(observation) && observation?.kind === "activity"
+      )
+      .map((observation) => ({
+        ...activityInput(observation.payload),
+        confirmation: stringValue(observation.payload, "confirmation"),
+      }));
+    const judged = own.length
+      ? own
+      : [
+          {
+            ...activityInput(piece.payload),
+            confirmation: stringValue(piece.payload, "confirmation"),
+          },
+        ];
+    const classification = classifyOwnTextEvidence(judged);
+    piece.payload._ownTextHedge = classification.hasHedgeMarker;
+    piece.payload._ownTextFixedCommitment = classification.hasFixedCommitment;
+  }
+}
+
 function mergeCanonicalPieceInto({
   actionType = "attached",
   decisionId,
@@ -1745,6 +1793,23 @@ function mergeCanonicalPieceInto({
     reason,
     type: actionType,
   });
+  // Own-text classification stamps propagate ONLY between copies of the
+  // same entity (comparable titles): a folded repeat's own doubt or own
+  // commitment belongs to the entity; an absorbed fragment's does not.
+  const sourceComparable = mentionComparableTitle(
+    stringValue(source.payload, "title")
+  );
+  const targetComparable = mentionComparableTitle(
+    stringValue(target.payload, "title")
+  );
+  if (sourceComparable && sourceComparable === targetComparable) {
+    if (source.payload._ownTextHedge === true) {
+      target.payload._ownTextHedge = true;
+    }
+    if (source.payload._ownTextFixedCommitment === true) {
+      target.payload._ownTextFixedCommitment = true;
+    }
+  }
   if (!preserveTargetIdentity) {
     refreshCanonicalPieceId(target);
   }
@@ -5374,6 +5439,19 @@ function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
         const left = current[i];
         const right = current[j];
         if (!sameCanonicalDate(left.payload, right.payload)) continue;
+        // A site container and an "X at <site>" component are grouping
+        // structure, never duplicates — sameEntity refuses the pair
+        // outright (Arc B, live-run 7.18.3 PB-2: "Palm house at
+        // Schonbrunn" beat "Schonbrunn Palace visit" here and the palace
+        // was deleted downstream).
+        if (
+          isSiteComponentTitlePair(
+            stringValue(left.payload, "title"),
+            stringValue(right.payload, "title")
+          )
+        ) {
+          continue;
+        }
         const leftTime = timeFrom(left.payload);
         const rightTime = timeFrom(right.payload);
         if (leftTime && rightTime && leftTime !== rightTime) continue;
@@ -5591,8 +5669,27 @@ function piecePayloadTitleLock(piece: CanonicalEvidencePiece) {
 // other's are one entity. Tokens are compared with naive plural folding so
 // "bath house" and "baths" can meet. The more specific title survives.
 
-function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
+function collapseTitleContainmentAliases(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[] = []
+) {
   const containmentTripCities = pieceTripCityNames(pieces);
+  const containmentObservationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  // Post-merge title drift evades noun guards (PB-2b): guards must judge
+  // the titles of a piece's OBSERVATIONS too, not just its current payload
+  // title ("Palm house at Schonbrunn" after a merge still holds the
+  // "Schonbrunn Palace visit" observation).
+  const observationTitles = (piece: CanonicalEvidencePiece) =>
+    piece.observationIds
+      .map((id) => containmentObservationById.get(id))
+      .filter(
+        (observation): observation is EvidenceObservation =>
+          Boolean(observation) && observation?.kind === "activity"
+      )
+      .map((observation) => stringValue(observation.payload, "title"))
+      .filter((title): title is string => Boolean(title));
   const byDate = new Map<
     string,
     Array<{ phrase: string; piece: CanonicalEvidencePiece }>
@@ -5643,9 +5740,27 @@ function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
         if (!` ${specific.phrase} `.includes(` ${genericPhrase} `)) continue;
         // Same-site containers ("River Palace" vs "River Palace Gardens")
         // are parent/child structure for the grouping layer, not aliases.
+        // Judged on payload titles AND observation titles (PB-2b: title
+        // drift after a merge must not evade the noun guard).
+        const guardTitles = [
+          generic.phrase,
+          specific.phrase,
+          ...observationTitles(generic.piece),
+          ...observationTitles(specific.piece),
+        ];
+        if (guardTitles.some((title) => SAME_SITE_CONTAINER_PATTERN.test(title))) {
+          continue;
+        }
+        // A component and its site (or two components of one site) are
+        // never aliases (PB-2).
         if (
-          SAME_SITE_CONTAINER_PATTERN.test(generic.phrase) ||
-          SAME_SITE_CONTAINER_PATTERN.test(specific.phrase)
+          isSiteComponentTitlePair(generic.phrase, specific.phrase) ||
+          observationTitles(specific.piece).some((title) =>
+            isSiteComponentTitlePair(generic.phrase, title)
+          ) ||
+          observationTitles(generic.piece).some((title) =>
+            isSiteComponentTitlePair(title, specific.phrase)
+          )
         ) {
           continue;
         }
@@ -5682,8 +5797,6 @@ function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
 // keep the benefit of the doubt unless they carry a hedge marker such as
 // "maybe", "if time", or "(far away)".
 
-type MentionCommitment = "fixed" | "sequenced" | "none";
-
 function committedMentionPieceCandidate(piece: CanonicalEvidencePiece) {
   return (
     piece.outputEligible &&
@@ -5695,6 +5808,13 @@ function committedMentionPieceCandidate(piece: CanonicalEvidencePiece) {
 }
 
 function pieceHasHedgeMarker(piece: CanonicalEvidencePiece) {
+  // Doubt is judged on the piece's OWN observation text, stamped at intake
+  // (Arc B, live-run 7.18.3 PB-8: Prague Castle was hedge-demoted on a
+  // doubt marker that rode in on ABSORBED sibling description fragments).
+  // Pieces that never went through intake stamping (reapply paths,
+  // fixtures) fall back to the merged-payload judgement.
+  const stamped = piece.payload._ownTextHedge;
+  if (typeof stamped === "boolean") return stamped;
   return classifyDraftActivityCard(activityInput(piece.payload))
     .hasWeakRecommendationMarker;
 }
@@ -5714,22 +5834,26 @@ function mentionCommitment(
   piece: CanonicalEvidencePiece,
   timedCounts: Map<string, number>
 ): MentionCommitment {
-  if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) {
-    return "fixed";
-  }
-  const classification = classifyDraftActivityCard(activityInput(piece.payload));
-  if (classification.hasStrongPlannedActivityLanguage) {
-    return "fixed";
-  }
+  // Fixed commitment: a (merged) time or confirmation on the payload, or
+  // first-person planned language on the piece's OWN text (intake stamp;
+  // absorbed sibling residue never fixes an entity — Arc B). Unstamped
+  // pieces fall back to the merged-payload judgement.
+  const stampedFixed = piece.payload._ownTextFixedCommitment;
+  const hasFixedEvidence = Boolean(
+    timeFrom(piece.payload) ||
+      confirmationFrom(piece.payload) ||
+      (typeof stampedFixed === "boolean"
+        ? stampedFixed
+        : classifyDraftActivityCard(activityInput(piece.payload))
+            .hasStrongPlannedActivityLanguage)
+  );
   const date = stringValue(piece.payload, "date");
-  if (
-    date &&
-    !classification.hasWeakRecommendationMarker &&
-    (timedCounts.get(date) ?? 0) >= 3
-  ) {
-    return "sequenced";
-  }
-  return "none";
+  return resolveMentionCommitment({
+    date,
+    hasFixedEvidence,
+    ownTextHedge: pieceHasHedgeMarker(piece),
+    timedCardCountForDate: date ? timedCounts.get(date) ?? 0 : 0,
+  });
 }
 
 function reviewSubjectTitles(missingDetails: unknown[]) {
@@ -5944,14 +6068,20 @@ function resolveUncommittedRepeatMentions(
     const winner = ranked[0];
 
     if (winner.commitment !== "none") {
-      // Multiple committed copies are affirmative evidence the source plans
-      // the visit more than once — they all stay. Only uncommitted loose
-      // copies fold into the winner.
+      // Only EXPLICITLY committed copies (own time, booking, first-person
+      // language) survive as a second visit — multiple fixed copies are a
+      // genuine planned double visit. A sequence-inherited copy is
+      // placement evidence, not repeat evidence (RW-CAN-001 supersession;
+      // live-run 7.18.3 PB-7: sequence-inheritance + distinct dates kept a
+      // sixth-run Pinball duplicate — that is "dates alone" in disguise).
+      // Sequenced and loose copies fold into the strongest copy.
       for (const entry of ranked.slice(1)) {
-        if (entry.commitment !== "none") continue;
+        if (entry.commitment === "fixed") continue;
         mergeCanonicalPieceInto({
           reason:
-            "repeat mention of a planned activity: the committed copy wins and the loose copy is silently removed",
+            entry.commitment === "sequenced"
+              ? "repeat mention: sequence-inherited copy folds into the strongest copy (distinct dates alone are not repeat evidence)"
+              : "repeat mention of a planned activity: the committed copy wins and the loose copy is silently removed",
           source: entry.piece,
           target: winner.piece,
         });
@@ -6208,6 +6338,88 @@ function reconcileCardsAgainstCityNotes(
   }
 }
 
+// Idea-list section demotion (Arc B centerpiece, RW-CLS-001; live-run
+// 7.18.3 PB-4: the Jan 21 idea list shipped as 8 dated activity cards —
+// Great Synagogue / Konyv Bar / Mazel Tov / gypsy music / Popped-up statue
+// / Pinball / Wine Cellar / Ruszwurm). Judged by the unified classifier on
+// source structure + list shape + commitment language: a same-day source
+// section of 3+ entries with NO fixed commitment anywhere, carrying idea
+// vocabulary or a name-only list shape, is City Notes as a unit. Fixed
+// entries always stay; a section with even one fixed entry is a day plan.
+function demoteIdeaListMentions(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[],
+  missingDetails: unknown[]
+) {
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+
+  // STRUCTURAL labels only (the piece's own sourceSectionLabel or its
+  // observations' section labels) — a stage's sourceLabel is a chunk name,
+  // not source structure, and must never feed the notes-blob signal.
+  const sectionLabelFor = (piece: CanonicalEvidencePiece) => {
+    const own = stringValue(piece.payload, "sourceSectionLabel");
+    if (own) return own;
+    for (const id of piece.observationIds) {
+      const observation = observationById.get(id);
+      const label = observation?.sourceStructure?.sectionLabel ?? null;
+      if (label) return label;
+    }
+    return null;
+  };
+
+  const entries: Array<{ entry: IdeaListEntry; piece: CanonicalEvidencePiece }> = [];
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    if (!title || questionSubjects.has(title)) continue;
+    // Researched entries (prices/hours) belong to the researched-list
+    // question (RW-QUE-001 "planned for this day, or just ideas?"), never
+    // to silent idea-list demotion — the maker decides those.
+    const researchedText = [
+      activityText(piece.payload),
+      stringValue(piece.payload, "evidence") ?? "",
+    ].join(" ");
+    if (
+      PRICE_MARKER_PATTERN.test(researchedText) ||
+      classifyDraftActivityCard(activityInput(piece.payload)).hasAvailabilityMarker
+    ) {
+      continue;
+    }
+    // An unresolved "X or Y" slot is one committed flexible card
+    // (RW-QUE-001) — never an idea-list member.
+    if (/\bor\b/i.test(stringValue(piece.payload, "title") ?? "")) {
+      continue;
+    }
+    entries.push({
+      entry: {
+        category: stringValue(piece.payload, "category"),
+        date: stringValue(piece.payload, "date"),
+        description: stringValue(piece.payload, "description"),
+        hasFixedEvidence: mentionCommitment(piece, timedCounts) === "fixed",
+        headingPath: pieceSourceHeadingPath(piece),
+        id: piece.id,
+        ownTextHedge: pieceHasHedgeMarker(piece),
+        sectionLabel: sectionLabelFor(piece),
+        title: stringValue(piece.payload, "title"),
+      },
+      piece,
+    });
+  }
+
+  const demoted = classifyIdeaListSections(entries.map((item) => item.entry));
+  for (const { entry, piece } of entries) {
+    if (!demoted.has(entry.id)) continue;
+    demoteCanonicalPieceToCityNote(
+      piece,
+      "dated idea list: the section commits nothing, so its entries stay city notes (RW-CLS-001, unified classifier)"
+    );
+  }
+}
+
 function demoteHedgedSingleUncommittedMentions(
   pieces: CanonicalEvidencePiece[],
   missingDetails: unknown[]
@@ -6256,8 +6468,9 @@ const WALK_RADIUS_KM = 1.8;
 const CROWDED_DAY_VISIBLE_CARDS = 6;
 // Exported (Phase 1, audit B4) so audit detectors share the container-noun
 // vocabulary instead of hand-rolling a subset.
-export const SAME_SITE_CONTAINER_PATTERN =
-  /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
+// Defined in the unified classifier so the site↔component merge refusal and
+// same-site grouping share one vocabulary (Arc B).
+export const SAME_SITE_CONTAINER_PATTERN = SITE_CONTAINER_NOUN_PATTERN;
 
 // Source-listing membership requires a COMPONENT-LIST shape, not a substring
 // of narrative prose (live-run 7.18.1: "Fisherman's Bastion to Castle Hill"
@@ -8947,6 +9160,7 @@ export function clusterExtractedEvidence({
     pieces.push(createPiece(observation));
   }
 
+  stampOwnTextClassification(pieces, observations);
   attachCanonicalSourceDecisions(pieces);
   suppressUnsupportedModelInventions(pieces, observations);
   attachArrivalOnlyTransportPieces(pieces);
@@ -9008,9 +9222,10 @@ export function clusterExtractedEvidence({
   absorbLocationFragmentCards(pieces);
   collapseSlotCollisions(pieces);
   collapseAlternativeSlotCards(pieces);
-  collapseTitleContainmentAliases(pieces);
+  collapseTitleContainmentAliases(pieces, observations);
   resolveUncommittedRepeatMentions(pieces, observations, missingDetails);
   reconcileCardsAgainstCityNotes(pieces, missingDetails, observations);
+  demoteIdeaListMentions(pieces, observations, missingDetails);
   demoteHedgedSingleUncommittedMentions(pieces, missingDetails);
   const combinedGroupingDecisions = [
     ...groupingDecisions,

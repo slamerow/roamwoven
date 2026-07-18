@@ -1,4 +1,5 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
+import { classifyRecoveredLineRole } from "@/lib/extraction/activity-classifier";
 import {
   distinctiveLineTokens,
   stageOutputTokenSet,
@@ -175,6 +176,36 @@ export function buildSourceRecoveryStage(
       ? (json as Record<string, unknown>)
       : {};
 
+  // Recovered-line classification (Arc B, live-run 7.18.3 PB-9/PB-4:
+  // "Budapest food ideas" and "Eat some 'Za" shipped as loose-tip activity
+  // cards). A recovered line is judged by the unified classifier exactly
+  // like parser output: loose-tip vocabulary or a hedge with no standalone
+  // anchor makes it a city-note candidate before it ever enters assembly.
+  const activities = Array.isArray(record.activities)
+    ? record.activities.map((activity) => {
+        if (!activity || typeof activity !== "object" || Array.isArray(activity)) {
+          return activity;
+        }
+        const card = activity as Record<string, unknown>;
+        if (typeof card.evidenceRole === "string" && card.evidenceRole) {
+          return activity;
+        }
+        const text = (value: unknown) =>
+          typeof value === "string" ? value : null;
+        const role = classifyRecoveredLineRole({
+          category: text(card.category),
+          confirmation: text(card.confirmation),
+          date: text(card.date),
+          description: text(card.description),
+          endTime: text(card.endTime),
+          itemType: text(card.itemType),
+          startTime: text(card.startTime),
+          title: text(card.title),
+        });
+        return role ? { ...card, evidenceRole: role } : activity;
+      })
+    : [];
+
   return {
     label: SOURCE_RECOVERY_STAGE_LABEL,
     source: "model_chunk",
@@ -183,13 +214,13 @@ export function buildSourceRecoveryStage(
     sourceText: recoveryStageSourceText(plan),
     sourceUploadId: null,
     stage: {
-      activities: [],
       missingDetails: [],
       places: [],
       sensitiveDetails: [],
       stays: [],
       transport: [],
       ...record,
+      activities,
       _sourceRecovery: true,
     },
   };

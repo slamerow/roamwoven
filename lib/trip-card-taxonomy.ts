@@ -43,8 +43,12 @@ const SIGHT_OR_LOOSE_PLACE_PATTERN =
 const AVAILABILITY_MARKER_PATTERN =
   /\b(open until|open til|hours?|free\s*\d|free admission)\b/;
 
+// "if you want (to)" / "if you'd like" joined the hedge family in Arc B
+// (live-run 7.18.3 PB-4: "Buda hills loop — if you want to get out of the
+// city" shipped as a card). Tested against normalizeText() output, so the
+// contraction is matched in its normalized form ("if you d like").
 const WEAK_RECOMMENDATION_PATTERN =
-  /\b(optional|maybe|if time|if we have time|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b/;
+  /\b(optional|maybe|if time|if we have time|if you want|if you d like|if you like|if you feel like|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b/;
 
 const LOOSE_FOOD_SHOPPING_PATTERN =
   /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/;
@@ -314,6 +318,21 @@ export function classifyDraftActivityCard(
     isWeakDatedCityNoteCandidate: weakCityNoteCandidate,
     suggestedKind,
   };
+}
+
+// Shared text-level predicates for the unified classifier
+// (lib/extraction/activity-classifier.ts) and the LLM resolver (audit
+// finding B1: the resolver's private plan-signal regex counted bare sight
+// verbs — "explore", "visit", "walk" — as commitment, contradicting this
+// module on the same string).
+export function hasCommitmentLanguage(value: string | null | undefined) {
+  return PLANNED_ACTIVITY_PATTERN.test(normalizeText(value));
+}
+
+export function hasLooseTipVocabulary(value: string | null | undefined) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  return LOOSE_TIP_PATTERN.test(text) || WEAK_RECOMMENDATION_PATTERN.test(text);
 }
 
 export function isLegCityTipRecord(record: CityTipRecord) {

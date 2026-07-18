@@ -273,4 +273,190 @@ export default async function run() {
       "detector evidence carries the matched signal names"
     );
   });
+
+  await test("ground truth run6 (PB-4, RW-CLS-001): the Jan-21 recommendation dump stays city notes — no dated activity cards", () => {
+    const JAN21_HEADING = "Monday, January 21st Train to Budapest // Budapest Bathing";
+    const listCard = (title: string, category: string, description: string) => ({
+      category,
+      city: "Budapest",
+      date: "2019-01-21",
+      description,
+      itemType: "activity",
+      sourceHeadingPath: [JAN21_HEADING],
+      sourceSectionLabel: JAN21_HEADING,
+      title,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Monday, January 21st", emptyStage({
+          activities: [
+            listCard("Great Synagogue/ Jewish History", "art_culture", "Great Synagogue and Jewish history."),
+            listCard("Hear gypsy music", "social", "Find a space to go hear gypsy music."),
+            listCard("Konyv Bar", "food_dining", "Konyv Bar and drink Tokaji."),
+            listCard("Mazel Tov restaurant", "food_dining", "Mazel Tov restaurant."),
+            listCard("Oldest pastry shop", "food_dining", "Oldest pastry shop (Ruszwerm - roosworm) - serve lots of strudel."),
+            listCard("Wine Cellar in the Hilton", "food_dining", "Wine Cellar in the Hilton."),
+            listCard("Pinball Museum", "nightlife_entertainment", "Pinball Museum."),
+            listCard("Popped up statue", "art_culture", "Popped up statue."),
+          ],
+          places: [
+            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const promoted = draft.activities.filter((item) =>
+      /synagogue|gypsy|konyv|mazel|pastry|wine cellar|pinball|popped/i.test(
+        String(item.title)
+      )
+    );
+    assert.equal(
+      promoted.length,
+      0,
+      `idea-list entries never ship as dated cards (got ${promoted
+        .map((item) => item.title)
+        .join(", ")})`
+    );
+  });
+
+  await test("ground truth run6 (PB-2, RW-CAN-001): a site and its 'X at site' component never merge — the palace survives", () => {
+    const VIENNA_HEADING = "Friday, January 18th // Explore Vienna / Schonbrunn Palace";
+    const sharedDescription =
+      "Visit Schonbrunn Palace and the gardens, see the Palm House and the Gloriette on the grounds.";
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Saturday, January 19th", emptyStage({
+          activities: [
+            {
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: sharedDescription,
+              itemType: "activity",
+              sourceHeadingPath: [VIENNA_HEADING],
+              sourceSectionLabel: VIENNA_HEADING,
+              title: "Schonbrunn Palace visit",
+            },
+            {
+              category: "art_culture",
+              city: "Vienna",
+              date: "2019-01-19",
+              description: sharedDescription,
+              itemType: "activity",
+              sourceHeadingPath: [VIENNA_HEADING],
+              sourceSectionLabel: VIENNA_HEADING,
+              title: "Palm house at Schonbrunn",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-18", city: "Vienna", country: "Austria", leaveDate: "2019-01-21" },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const palace = draft.activities.find((item) =>
+      /schonbrunn palace/i.test(String(item.title))
+    );
+    assert.ok(
+      palace,
+      "the near-identical collapse refuses the site↔component pair; the palace card survives"
+    );
+  });
+
+  await test("ground truth run6 (PB-7, RW-CAN-001): sequence-inherited repeat copies fold — no second Pinball card from dates alone", () => {
+    const timedCard = (title: string, date: string, startTime: string) => ({
+      category: "art_culture",
+      city: "Budapest",
+      date,
+      description: `${title} at ${startTime}.`,
+      itemType: "activity",
+      startTime,
+      title,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Tuesday, January 22nd", emptyStage({
+          activities: [
+            timedCard("Fisherman's Bastion", "2019-01-22", "09:00"),
+            timedCard("Matthias Church", "2019-01-22", "09:45"),
+            timedCard("Chain Bridge", "2019-01-22", "11:00"),
+            {
+              category: "nightlife_entertainment",
+              city: "Budapest",
+              date: "2019-01-22",
+              description: "Pinball Museum.",
+              itemType: "activity",
+              title: "Pinball Museum",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+          ],
+        })),
+        stage("Wednesday, January 23rd", emptyStage({
+          activities: [
+            timedCard("House of Terror", "2019-01-23", "10:00"),
+            timedCard("New York Cafe", "2019-01-23", "13:00"),
+            timedCard("Parliament", "2019-01-23", "15:00"),
+            {
+              category: "nightlife_entertainment",
+              city: "Budapest",
+              date: "2019-01-23",
+              description: "Pinball Museum.",
+              itemType: "activity",
+              title: "Pinball Museum",
+            },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    const pinball = draft.activities.filter((item) =>
+      /pinball/i.test(String(item.title))
+    );
+    assert.equal(
+      pinball.length,
+      1,
+      "sequence-inheritance plus distinct dates is dates alone: one card, not two"
+    );
+  });
+
+  await test("ground truth run6 (RW-CLS-001): 'if you want' is a hedge — Buda hills loop demotes without a question", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("Wednesday, January 23rd", emptyStage({
+          activities: [
+            {
+              category: "outdoor_adventure",
+              city: "Budapest",
+              date: "2019-01-23",
+              description:
+                "If you want to get out of the city, ride the children's train loop in the Buda hills.",
+              itemType: "activity",
+              title: "Buda hills loop",
+            },
+          ],
+          places: [
+            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+          ],
+        })),
+      ],
+      tripOverview: TRIP_OVERVIEW,
+    });
+    const draft = result.draft as Draft;
+    assert.equal(
+      draft.activities.some((item) => /buda hills/i.test(String(item.title))),
+      false,
+      "the 'if you want' hedge demotes the loop to city notes silently"
+    );
+  });
 }
