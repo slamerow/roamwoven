@@ -6,6 +6,34 @@
 
 ## Current State
 
+### 2026-07-18 — Full codebase audit (same session, after the 7.18.2 audit)
+
+Read first: `docs/code-audit-2026-07-18.md` (rule-conflict, question-
+lifecycle, cross-module, and dead-code audit; four parallel passes, key
+claims re-verified in source).
+
+- Headline verified findings: commitment pattern contraction branches have
+  NEVER matched (tested against apostrophe-stripped text); the castle
+  question-consolidation container preference is a dead ternary
+  (`rootIsContainer ? rootId : rootId`); merge-winner scoring is title
+  LENGTH + or-marker, letting day-arc cards beat named venues (the
+  Schönbrunn killer); question filters run before question subjects are
+  final (the date-question escape, structural); six duplicate rules with
+  six similarity definitions; 13 stopword sets, 5 day-heading detectors,
+  4 date parsers; audit detectors re-implement pipeline predicates with
+  diverged vocabularies; stay-content routing has a three-layer gap (the
+  Rome-note mechanism); dead: lib/trip-schema.ts (+zod), @stripe/stripe-js,
+  structured-review-panel.tsx, supabase/client.ts, ~15 symbols; unwired:
+  cleanupAbandonedUnpaidStarterMaterials has no caller.
+- Remediation phases proposed (see report §E): 0 prune + dead-branch fixes,
+  1 shared predicates + one sameEntity/winner module, 2 single final
+  question-reconciliation gate, 3 ordering/claims/stable ids, 4 stage split
+  of evidence-clustering + interaction test suite + extraction pinning.
+  Wave-2.1 docket items fold into Phases 0-2.
+- IMMEDIATE NEXT STEP: Eli approves the phase order, then implementation
+  starts at Phase 0+2 (biggest defect-per-effort), fixtures in the same
+  commits, one fresh extraction after Phases 0-2 land.
+
 ### 2026-07-18 — 7.18.2 audit (wave-2 validation run; same session as wave 2)
 
 Read first: `docs/product-contracts.md` (ledger v13),
