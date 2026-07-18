@@ -116,12 +116,6 @@ export function getCanonicalMaterialMimeType(
   return getMaterialCapability(filename)?.mimeType ?? null;
 }
 
-export function isAcceptedMaterialFilename(
-  filename: string | null | undefined
-) {
-  return Boolean(getMaterialCapability(filename));
-}
-
 export function isMaterialWithinAcceptedSize(
   input: Pick<MaterialCapabilityInput, "fileSizeBytes" | "originalFilename">
 ) {

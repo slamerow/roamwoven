@@ -66,17 +66,6 @@ function hasBookedOrLogisticalEvidence(record: TransportCompletenessRecord) {
   );
 }
 
-export function isCriticalTransportType(
-  transportType: string | null | undefined
-) {
-  const type = transportType ?? "";
-
-  return (
-    criticalTransportTypes.has(type) ||
-    conditionallyCriticalTransportTypes.has(type)
-  );
-}
-
 export function isCriticalTransportRecord(record: TransportCompletenessRecord) {
   const type = record.transportType ?? "";
 

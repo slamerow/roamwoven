@@ -205,16 +205,6 @@ export function formatReadableDate(year: string, month: string, day: string) {
   return `${monthName} ${parsedDayNumber}${ordinalSuffix(parsedDayNumber)}, ${parsed.getUTCFullYear()}`;
 }
 
-export function formatReadableIsoDate(value: string | null) {
-  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-
-  if (!match) {
-    return value ?? "";
-  }
-
-  return formatReadableDate(match[1], match[2], match[3]);
-}
-
 export function cleanTravelerText(value: string | null) {
   return value
     ?.replace(/\b(\d{4})(\d{2})(\d{2})\b/g, (_match, year, month, day) =>

@@ -72,19 +72,6 @@ function ensurePdfParserGlobals() {
   globals.DOMMatrix ??= MinimalDOMMatrix;
 }
 
-export function getNoteExtractionMaterials(
-  uploads: TripUpload[]
-): TripExtractionMaterial[] {
-  return uploads
-    .filter((upload) => upload.userNote?.trim())
-    .map((upload) => ({
-      filename: upload.originalFilename,
-      sourceUploadId: upload.id,
-      text: upload.userNote?.trim() ?? "",
-      type: "note" as const,
-    }));
-}
-
 function isOcrCandidate(upload: TripUpload) {
   const capability = getMaterialCapability(upload.originalFilename);
 
@@ -313,40 +300,6 @@ export async function downloadMaterialFile(upload: TripUpload) {
   return data;
 }
 
-export async function getTextFileExtractionMaterials(
-  uploads: TripUpload[]
-): Promise<TripExtractionMaterial[]> {
-  const textUploads = uploads.filter(
-    (upload) =>
-      upload.storagePath &&
-      getMaterialCapability(upload.originalFilename)?.kind === "text" &&
-      Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_TEXT_FILE_BYTES
-  );
-
-  if (textUploads.length === 0) {
-    return [];
-  }
-
-  const materials: TripExtractionMaterial[] = [];
-
-  for (const upload of textUploads) {
-    const data = await downloadMaterialFile(upload);
-
-    if (!data) {
-      continue;
-    }
-
-    materials.push({
-      filename: upload.originalFilename,
-      sourceUploadId: upload.id,
-      text: await data.text(),
-      type: "file_text",
-    });
-  }
-
-  return materials;
-}
-
 type PdfExtractionResult = {
   embeddedImageCount: number;
   largeEmbeddedImageCount: number;
@@ -445,62 +398,6 @@ async function extractPdfText(file: Blob): Promise<PdfExtractionResult> {
   } finally {
     await document.destroy();
   }
-}
-
-export async function getPdfExtractionMaterials(
-  uploads: TripUpload[]
-): Promise<TripExtractionMaterial[]> {
-  const pdfUploads = uploads.filter(
-    (upload) =>
-      upload.storagePath &&
-      getMaterialCapability(upload.originalFilename)?.kind === "pdf" &&
-      Number(upload.fileSizeBytes ?? 0) <= MAX_INITIAL_PDF_FILE_BYTES
-  );
-
-  if (pdfUploads.length === 0) {
-    return [];
-  }
-
-  const materials: TripExtractionMaterial[] = [];
-
-  for (const upload of pdfUploads) {
-    const data = await downloadMaterialFile(upload);
-
-    if (!data) {
-      continue;
-    }
-
-    try {
-      const result = await extractPdfText(data);
-      const text = result.text;
-
-      if (text.length >= MIN_READABLE_PDF_TEXT_LENGTH) {
-        console.info("trip_material_pdf_text_extracted", {
-              charCount: text.length,
-              embeddedImageCount: result.embeddedImageCount,
-              fileName: upload.originalFilename,
-              largeEmbeddedImageCount: result.largeEmbeddedImageCount,
-              pageCount: result.pageCount,
-              tripId: upload.tripId,
-            });
-        materials.push({
-          filename: upload.originalFilename,
-          sourceUploadId: upload.id,
-          text,
-          type: "pdf_text",
-        });
-      }
-    } catch (error) {
-      console.warn("trip_material_pdf_text_extract_failed", {
-        fileName: upload.originalFilename,
-        message: error instanceof Error ? error.message : "Unknown error.",
-        tripId: upload.tripId,
-      });
-      continue;
-    }
-  }
-
-  return materials;
 }
 
 function isFailedOcrCheckpoint(
@@ -880,8 +777,4 @@ export async function getTripExtractionMaterialsWithSummary(
     materials: materialLists.flat().filter((material) => material.text.trim()),
     uploads,
   });
-}
-
-export async function getTripExtractionMaterials(uploads: TripUpload[]) {
-  return (await getTripExtractionMaterialsWithSummary(uploads)).materials;
 }

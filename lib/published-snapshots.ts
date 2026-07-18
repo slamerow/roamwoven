@@ -49,16 +49,6 @@ export class PublicSnapshotPrivacyError extends Error {
   }
 }
 
-export type PublishedTripPrivateDetail = {
-  detailId: string;
-  label: string;
-  reason: string | null;
-  subjectId: string;
-  subjectType: string;
-  value: string;
-  visibility: string;
-};
-
 type PublishedTripSnapshotRow = {
   created_at: string | null;
   id: string;

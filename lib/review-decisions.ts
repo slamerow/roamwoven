@@ -341,14 +341,3 @@ export async function saveTripReviewDecision(decision: TripReviewDecisionInput) 
 
   return normalized;
 }
-
-export async function applySavedTripReviewDecisions({
-  records,
-  tripId,
-}: {
-  records: StructuredTripRecords;
-  tripId: string;
-}) {
-  const decisions = await listTripReviewDecisions(tripId);
-  return applyReviewDecisions(records, decisions);
-}

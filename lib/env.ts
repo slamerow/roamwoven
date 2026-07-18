@@ -86,11 +86,6 @@ export function getOpenAIConfig() {
   };
 }
 
-export function hasSupabaseBrowserConfig() {
-  const config = getSupabaseConfig();
-  return Boolean(config.url && config.anonKey);
-}
-
 export function hasStripeCheckoutConfig() {
   const config = getStripeConfig();
   return Boolean(config.secretKey && config.tripPriceId);

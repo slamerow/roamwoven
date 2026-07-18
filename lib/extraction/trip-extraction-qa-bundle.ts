@@ -35,10 +35,6 @@ export type TripExtractionQaBundleOptions = {
   includePrivate?: boolean;
 };
 
-export type TripExtractionQaBundle = ReturnType<
-  typeof createTripExtractionQaBundlePayload
->;
-
 function countBy<T extends string>(values: T[]) {
   return values.reduce(
     (counts, value) => {

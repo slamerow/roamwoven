@@ -8,16 +8,6 @@ export function canStartStripeCheckout() {
   return hasStripeCheckoutConfig();
 }
 
-export function getStripeSetupState() {
-  const config = getStripeConfig();
-
-  return {
-    hasSecretKey: Boolean(config.secretKey),
-    hasTripPriceId: Boolean(config.tripPriceId),
-    hasWebhookSecret: Boolean(config.webhookSecret),
-  };
-}
-
 export function createStripeClient() {
   const { secretKey } = getStripeConfig();
 

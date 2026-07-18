@@ -200,17 +200,6 @@ export function inferTravelBoundaryTransportKind(
   return null;
 }
 
-export function isSeparateLocalMovementCandidate(record: TravelBoundaryRecord) {
-  const text = travelBoundaryText(record);
-
-  return (
-    /\b(take|catch|ride|get on|board|leave for|go to)\b/.test(text) &&
-    /\b(metro|subway|bus|tram|taxi|uber|lyft|shuttle|driver|private transfer|car service|pickup|pick up)\b/.test(
-      text
-    )
-  );
-}
-
 export function isTravelActionCandidate(record: TravelBoundaryRecord) {
   const text = travelBoundaryText(record);
 

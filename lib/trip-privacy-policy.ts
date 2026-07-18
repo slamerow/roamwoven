@@ -125,11 +125,6 @@ function normalizedText(parts: Array<string | null | undefined>) {
     .join(" ");
 }
 
-export function isCommercialStayContext(value: string | null | undefined) {
-  const text = value?.trim();
-  return Boolean(text && commercialStayPattern.test(text));
-}
-
 export function isPrivateLodgingContext(value: string | null | undefined) {
   const text = value?.trim();
   return Boolean(text && privateLodgingPattern.test(text));

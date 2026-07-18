@@ -42,18 +42,3 @@ export function getStringFromKeys(value: DraftObject | null, keys: string[]) {
 
   return null;
 }
-
-export function getNumber(value: DraftObject | null, key: string) {
-  const child = value?.[key];
-
-  if (typeof child === "number" && Number.isFinite(child)) {
-    return child;
-  }
-
-  if (typeof child === "string" && child.trim()) {
-    const parsed = Number(child);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-}

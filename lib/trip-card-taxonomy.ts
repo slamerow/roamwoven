@@ -8,25 +8,6 @@ export type TravelerCardKind =
   | "travel"
   | "untimed_planned_activity";
 
-export type GroupingKind =
-  | "open_day_options"
-  | "option_set"
-  | "planned_area"
-  | "route_or_tour"
-  | "same_site";
-
-export const MAKER_VISIBLE_GROUPING_KINDS: readonly GroupingKind[] = [
-  "open_day_options",
-  "option_set",
-  "planned_area",
-  "route_or_tour",
-  "same_site",
-];
-
-const makerVisibleGroupingKindSet = new Set<GroupingKind>(
-  MAKER_VISIBLE_GROUPING_KINDS
-);
-
 const CITY_TIP_HEADER_PATTERN =
   /\b(notes?\s*&\s*tips?|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|local notes?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|also noted|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i;
 
@@ -49,8 +30,12 @@ const LOOSE_TIP_PATTERN =
 // "inside", "route") are parser phrasing, not evidence of a plan. Live runs
 // 7.17.1/7.17.2 kept Museum of Communism and Pinball Museum as activity
 // cards on the strength of that phrasing alone.
+// Tested against normalizeText() output, which strips apostrophes — so
+// contractions must be matched in their normalized forms ("we ll", "we re",
+// "we d like"). The raw-apostrophe alternations were dead for weeks
+// (docs/code-audit-2026-07-18.md, finding B1).
 const PLANNED_ACTIVITY_PATTERN =
-  /\b(we will|we'll|we are|we're|we want|we'd like|we would like|going to|plan to|planned|definitely|booked|reserved|reservation|take a tour|guided tour|doing this)\b/;
+  /\b(we will|we ?ll|we are|we ?re|we want|we ?d like|we would like|going to|plan to|planned|definitely|booked|reserved|reservation|take a tour|guided tour|doing this)\b/;
 
 const SIGHT_OR_LOOSE_PLACE_PATTERN =
   /\b(aquarium|basilica|cathedral|church|gallery|garden|hall|haus|house|landmark|market|monument|museum|park|palace|square|statue|synagogue|temple|tower|wheel)\b/;
@@ -179,20 +164,6 @@ export function isPlannedAreaActivityGroup(input: DraftActivityCardInput) {
       text
     )
   );
-}
-
-export function getDraftActivityGroupingKind(
-  input: DraftActivityCardInput
-): GroupingKind {
-  if (isSameSiteActivityGroup(input)) {
-    return "same_site";
-  }
-
-  if (isPlannedAreaActivityGroup(input)) {
-    return "planned_area";
-  }
-
-  return "route_or_tour";
 }
 
 export function hasCityTipSignal(value: string | null | undefined) {
@@ -363,13 +334,5 @@ export function isLegCityTipRecord(record: CityTipRecord) {
     record.itemType === "note" &&
     Boolean(record.legId) &&
     hasCityTipSignal(text)
-  );
-}
-
-export function isMakerVisibleGroupingKind(
-  groupingKind: GroupingKind | null | undefined
-): groupingKind is GroupingKind {
-  return Boolean(
-    groupingKind && makerVisibleGroupingKindSet.has(groupingKind)
   );
 }
