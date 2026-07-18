@@ -17,8 +17,14 @@ import {
   normalizeTripClockTime,
   normalizeText,
   normalizeTripDate,
+  PRICE_SIGNAL_PATTERN,
   tripDatesMatch,
 } from "@/lib/extraction/traveler-text";
+import {
+  chooseMergeWinner,
+  classifyMergeEligibility,
+  type MergeWinnerCard,
+} from "@/lib/extraction/entity-winner";
 import {
   classifyDraftActivityCard,
 } from "@/lib/trip-card-taxonomy";
@@ -595,7 +601,10 @@ function locationQuality(value: unknown) {
   return normalized.split(" ").length >= 2 ? 3 : 2;
 }
 
-function identityTokens(value: unknown) {
+// Phase 1 (audit B4): exported so audit detectors join titles with the
+// pipeline's OWN identity tokenizer (plural folding + one stopword set)
+// instead of a diverged private token model.
+export function identityTokens(value: unknown) {
   return normalizedComparable(value)
     .split(/\s+/)
     .map((token) =>
@@ -1132,6 +1141,69 @@ function isGenericTitle(value: unknown) {
   return /^(activity|stay|transport|travel|train|flight|return flight home|note)$/i.test(
     typeof value === "string" ? value.trim() : ""
   );
+}
+
+// --- Phase 1 winner-ladder adapters (audit findings A1/A4) ---
+//
+// Every collapse/dedup rule keeps its own trigger but shares ONE winner
+// decision (lib/extraction/entity-winner.ts): eligibility first (overview,
+// day-arc, and heading-fragment cards can never win a merge), then
+// booking > named-venue tokens > commitment > specificity > title quality.
+
+function pieceTripCityNames(pieces: CanonicalEvidencePiece[]) {
+  return pieces
+    .filter((piece) => piece.kind === "place")
+    .flatMap((piece) => [
+      stringValue(piece.payload, "city"),
+      stringValue(piece.payload, "name"),
+      stringValue(piece.payload, "title"),
+    ])
+    .filter((value): value is string => Boolean(value));
+}
+
+function pieceSourceHeadingPath(piece: CanonicalEvidencePiece) {
+  const headingPath = piece.payload.sourceHeadingPath;
+
+  return Array.isArray(headingPath)
+    ? headingPath.filter((value): value is string => typeof value === "string")
+    : null;
+}
+
+function mergeWinnerCardForPiece(
+  piece: CanonicalEvidencePiece,
+  timedCounts: Map<string, number>
+): MergeWinnerCard {
+  const commitmentRankByLevel: Record<MentionCommitment, number> = {
+    fixed: 2,
+    none: 0,
+    sequenced: 1,
+  };
+
+  return {
+    city: stringValue(piece.payload, "city"),
+    commitmentRank: commitmentRankByLevel[mentionCommitment(piece, timedCounts)],
+    confirmation: confirmationFrom(piece.payload) || null,
+    description: stringValue(piece.payload, "description"),
+    sourceHeadingPath: pieceSourceHeadingPath(piece),
+    sourceSectionLabel: stringValue(piece.payload, "sourceSectionLabel"),
+    time: timeFrom(piece.payload) || null,
+    title: stringValue(piece.payload, "title"),
+  };
+}
+
+function pieceCanWinMerge(
+  piece: CanonicalEvidencePiece,
+  tripCities: string[]
+) {
+  return classifyMergeEligibility(
+    {
+      city: stringValue(piece.payload, "city"),
+      sourceHeadingPath: pieceSourceHeadingPath(piece),
+      sourceSectionLabel: stringValue(piece.payload, "sourceSectionLabel"),
+      title: stringValue(piece.payload, "title"),
+    },
+    { tripCities }
+  ).eligible;
 }
 
 function uniqueDescription(left: unknown, right: unknown) {
@@ -2143,6 +2215,13 @@ function attachGenericActivityPlaceholders(pieces: CanonicalEvidencePiece[]) {
     }
 
     const target = candidates[0];
+
+    // Shared winner-ladder veto (Phase 1): a day-arc/heading-fragment card
+    // can never be the surviving home for generic evidence.
+    if (!pieceCanWinMerge(target, pieceTripCityNames(pieces))) {
+      continue;
+    }
+
     target.payload.description = uniqueDescription(
       target.payload.description,
       generic.payload.description
@@ -2694,7 +2773,7 @@ function isWeakStayFragmentName(value: unknown) {
       /\b(?:double|ensuite|night|nights|private|room|shared|single)\b/.test(
         normalized
       ) &&
-      (/(?:[$€£]\s*\d|\b\d{2,4}\s*(?:usd|eur|gbp)\b)/i.test(raw) ||
+      (/(?:[$€£]\s*\d|\b\d{2,4}\s*(?:usd|eur|gbp|czk|kc|huf|ft)\b)/i.test(raw) ||
         /\b(?:private|shared|single|double)\s+(?:room|bathroom)|\broom\s+(?:ensuite|en suite)\b/.test(
           normalized
         ))
@@ -4396,7 +4475,12 @@ function executeCanonicalGroupingDecisions({
       if (multiSiteTitle) {
         continue;
       }
-      const origin = pieceCoordinates(siteContainer);
+      // Run5 PB-4: a passing mention is never a visit container, whichever
+      // layer proposed the decision.
+      if (PASSING_MENTION_TITLE_PATTERN.test(containerRawTitle)) {
+        continue;
+      }
+      const origin = precisePieceCoordinates(siteContainer);
       const containerText = normalizedComparable(
         [siteContainer.payload.title, siteContainer.payload.description]
           .filter(Boolean)
@@ -4408,10 +4492,20 @@ function executeCanonicalGroupingDecisions({
         if (piece === siteContainer) return true;
         const text = activityText(piece.payload);
         if (COSTS_CONTENT_PATTERN.test(text)) return false;
-        const coords = pieceCoordinates(piece);
+        // Run5 PB-4: the geo path requires precise coordinates on both
+        // ends; a timed stop joins by coordinates only when it shares the
+        // container's category (RW-GRP-001 timed-child rule). Source
+        // hierarchy below still admits timed children.
+        const coords = precisePieceCoordinates(piece);
+        const timedCategoryOk =
+          !timeFrom(piece.payload) ||
+          (Boolean(stringValue(piece.payload, "category")) &&
+            stringValue(piece.payload, "category") ===
+              stringValue(siteContainer.payload, "category"));
         if (
           origin &&
           coords &&
+          timedCategoryOk &&
           haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
         ) {
           geoVerifiedCount += 1;
@@ -5116,6 +5210,7 @@ const LOCATION_GENERIC_TOKENS = new Set([
 ]);
 
 function absorbLocationFragmentCards(pieces: CanonicalEvidencePiece[]) {
+  const absorbTripCities = pieceTripCityNames(pieces);
   const cityTokens = new Set(
     pieces
       .filter((piece) => piece.kind === "place")
@@ -5160,7 +5255,10 @@ function absorbLocationFragmentCards(pieces: CanonicalEvidencePiece[]) {
           candidate !== fragment &&
           candidate.outputEligible &&
           distinctiveTitleTokens(stringValue(candidate.payload, "title") ?? "")
-            .length > 0
+            .length > 0 &&
+          // Shared winner-ladder veto (Phase 1): an overview/day-arc/heading-
+          // fragment card can never absorb a fragment as merge winner.
+          pieceCanWinMerge(candidate, absorbTripCities)
       );
       if (!target) continue;
       mergeCanonicalPieceInto({
@@ -5180,6 +5278,8 @@ function absorbLocationFragmentCards(pieces: CanonicalEvidencePiece[]) {
 // titled after an option named in a surviving card's "X or Y" description
 // fold into that slot card.
 function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
+  const winnerTimedCounts = timedActivityCountsByDate(pieces);
+  const winnerTripCities = pieceTripCityNames(pieces);
   const candidates = () =>
     pieces.filter(
       (piece) =>
@@ -5215,13 +5315,24 @@ function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
         // The copy carrying the unresolved "X or Y" choice is the slot's most
         // complete representation and must win the merge — losing it to a
         // better-titled option card silently resolves the maker's choice.
-        const slotScore = (piece: CanonicalEvidencePiece) =>
-          (/\bor\b/i.test(stringValue(piece.payload, "description") ?? "")
-            ? 10
-            : 0) +
-          (timeFrom(piece.payload) ? 2 : 0) +
-          titleQuality(stringValue(piece.payload, "title"));
-        const target = slotScore(right) > slotScore(left) ? right : left;
+        // EXCEPT against merge-ineligible cards: a day-arc/heading-fragment
+        // card ("Explore Vienna") whose description merely summarizes the day
+        // can never beat a named venue ("Schonbrunn Palace") — the exact live
+        // run 7.18.2 mechanism that deleted Schönbrunn (PB-3, audit A1).
+        const orBonus = (piece: CanonicalEvidencePiece) =>
+          /\bor\b/i.test(stringValue(piece.payload, "description") ?? "")
+            ? 1
+            : 0;
+        const decision = chooseMergeWinner(
+          mergeWinnerCardForPiece(left, winnerTimedCounts),
+          mergeWinnerCardForPiece(right, winnerTimedCounts),
+          {
+            leftBonus: orBonus(left),
+            rightBonus: orBonus(right),
+            tripCities: winnerTripCities,
+          }
+        );
+        const target = decision.winner === "left" ? left : right;
         const source = target === left ? right : left;
         mergeCanonicalPieceInto({
           reason:
@@ -5264,6 +5375,8 @@ function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
 }
 
 function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
+  const winnerTimedCounts = timedActivityCountsByDate(pieces);
+  const winnerTripCities = pieceTripCityNames(pieces);
   const slots = new Map<string, CanonicalEvidencePiece[]>();
 
   for (const piece of pieces) {
@@ -5290,40 +5403,20 @@ function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
     // Two different booking codes = two real bookings; leave untouched.
     if (confirmations.size > 1) continue;
 
-    const ranked = [...slot].sort(
-      (left, right) =>
-        (confirmationFrom(right.payload) ? 1_000 : 0) +
-        titleQuality(stringValue(right.payload, "title")) -
-        ((confirmationFrom(left.payload) ? 1_000 : 0) +
-          titleQuality(stringValue(left.payload, "title")))
+    // Winner comes from the shared ladder (Phase 1, audit A1/A4):
+    // eligibility (day-arc/heading-fragment cards can never win) > booking >
+    // named venue > commitment > specificity > title quality.
+    const ranked = [...slot].sort((left, right) =>
+      chooseMergeWinner(
+        mergeWinnerCardForPiece(left, winnerTimedCounts),
+        mergeWinnerCardForPiece(right, winnerTimedCounts),
+        { tripCities: winnerTripCities }
+      ).winner === "left"
+        ? -1
+        : 1
     );
     const winner = ranked[0];
-
-    // The venue name wins the label: a copy's title that is cross-referenced
-    // inside another copy's text ("Restaurant Festival reservation at U
-    // Maliru 1543") is the entity's real name.
-    const slotTexts = slot.map((piece) =>
-      normalizedComparable(
-        `${stringValue(piece.payload, "title") ?? ""} ${
-          stringValue(piece.payload, "description") ?? ""
-        }`
-      )
-    );
-    const crossReferencedTitle = slot
-      .map((piece, index) => ({
-        index,
-        title: stringValue(piece.payload, "title"),
-      }))
-      .find(({ index, title }) => {
-        if (!title || title.length < 4) return false;
-        // Generic meal-slot words ("Lunch") are not venue names.
-        if (distinctiveTitleTokens(title).length === 0) return false;
-        const needle = normalizedComparable(title);
-        if (!needle || needle.length < 4) return false;
-        return slotTexts.some(
-          (text, textIndex) => textIndex !== index && text.includes(needle)
-        );
-      })?.title;
+    const mergedLosers: CanonicalEvidencePiece[] = [];
 
     for (const loser of ranked.slice(1)) {
       // Semantic guard (live-run 7.18.1: "Prague Castle" carried the 12:00
@@ -5369,9 +5462,40 @@ function collapseSlotCollisions(pieces: CanonicalEvidencePiece[]) {
         source: loser,
         target: winner,
       });
+      mergedLosers.push(loser);
     }
 
-    if (crossReferencedTitle) {
+    // The venue name wins the label: a copy's title that is cross-referenced
+    // inside another copy's text ("Restaurant Festival reservation at U
+    // Maliru 1543") is the entity's real name. The retitle only considers
+    // copies that actually merged (audit A2: the old whole-slot scan could
+    // retitle the winner after an excluded site card's name even though that
+    // site never merged, re-opening the castle-eaten-by-event path).
+    const retitleParticipants = [winner, ...mergedLosers];
+    const participantTexts = retitleParticipants.map((piece) =>
+      normalizedComparable(
+        `${stringValue(piece.payload, "title") ?? ""} ${
+          stringValue(piece.payload, "description") ?? ""
+        }`
+      )
+    );
+    const crossReferencedTitle = retitleParticipants
+      .map((piece, index) => ({
+        index,
+        title: stringValue(piece.payload, "title"),
+      }))
+      .find(({ index, title }) => {
+        if (!title || title.length < 4) return false;
+        // Generic meal-slot words ("Lunch") are not venue names.
+        if (distinctiveTitleTokens(title).length === 0) return false;
+        const needle = normalizedComparable(title);
+        if (!needle || needle.length < 4) return false;
+        return participantTexts.some(
+          (text, textIndex) => textIndex !== index && text.includes(needle)
+        );
+      })?.title;
+
+    if (mergedLosers.length > 0 && crossReferencedTitle) {
       winner.payload.title = crossReferencedTitle;
       piecePayloadTitleLock(winner);
     }
@@ -5393,6 +5517,7 @@ function piecePayloadTitleLock(piece: CanonicalEvidencePiece) {
 // "bath house" and "baths" can meet. The more specific title survives.
 
 function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
+  const containmentTripCities = pieceTripCityNames(pieces);
   const byDate = new Map<
     string,
     Array<{ phrase: string; piece: CanonicalEvidencePiece }>
@@ -5446,6 +5571,15 @@ function collapseTitleContainmentAliases(pieces: CanonicalEvidencePiece[]) {
         if (
           SAME_SITE_CONTAINER_PATTERN.test(generic.phrase) ||
           SAME_SITE_CONTAINER_PATTERN.test(specific.phrase)
+        ) {
+          continue;
+        }
+        // Shared winner-ladder veto (Phase 1, audit A1/A4): the longer
+        // phrase wins containment by design, but a merge-ineligible card
+        // (overview/day-arc/heading fragment) can never absorb a real card.
+        if (
+          !pieceCanWinMerge(specific.piece, containmentTripCities) &&
+          pieceCanWinMerge(generic.piece, containmentTripCities)
         ) {
           continue;
         }
@@ -6045,7 +6179,9 @@ const SAME_SITE_RADIUS_KM = 0.3;
 // gates carry the discrimination burden, not this radius.
 const WALK_RADIUS_KM = 1.8;
 const CROWDED_DAY_VISIBLE_CARDS = 6;
-const SAME_SITE_CONTAINER_PATTERN =
+// Exported (Phase 1, audit B4) so audit detectors share the container-noun
+// vocabulary instead of hand-rolling a subset.
+export const SAME_SITE_CONTAINER_PATTERN =
   /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
 
 // Source-listing membership requires a COMPONENT-LIST shape, not a substring
@@ -6084,6 +6220,82 @@ function pieceCoordinates(piece: CanonicalEvidencePiece) {
     (lat !== 0 || lng !== 0)
     ? { lat, lng }
     : null;
+}
+
+// Run5 geo calibration (live run 7.18.2, PB-4): 2-decimal model coordinates
+// quantize to ~1.1 km, which collapsed half of central Pest onto shared
+// rounded points and let a "Quick look inside the Gresham Palace" card claim
+// St. Istvan's Basilica (~650 m away) "within 300 m". Coordinates below
+// 3-decimal precision are ineligible for any geo-radius rule; they can still
+// support membership through source hierarchy (listing / "X at Site").
+const COORDINATE_MIN_DECIMALS = 3;
+
+function coordinateDecimals(value: number) {
+  const text = String(value);
+
+  if (text.includes("e") || text.includes("E")) {
+    return 0;
+  }
+
+  const dot = text.indexOf(".");
+
+  return dot === -1 ? 0 : text.length - dot - 1;
+}
+
+function precisePieceCoordinates(piece: CanonicalEvidencePiece) {
+  const coords = pieceCoordinates(piece);
+
+  // Quantization hits BOTH components at once; a single round-number
+  // component (50.09, 14.4106) is not quantization evidence, and JSON
+  // numbers cannot preserve trailing zeros ("50.090" parses to 50.09).
+  return coords &&
+    (coordinateDecimals(coords.lat) >= COORDINATE_MIN_DECIMALS ||
+      coordinateDecimals(coords.lng) >= COORDINATE_MIN_DECIMALS)
+    ? coords
+    : null;
+}
+
+// A same-site container must be an actual site-visit card (run5 PB-4): a
+// passing mention ("Quick look inside the Gresham Palace") never owns other
+// stops as a visit container.
+const PASSING_MENTION_TITLE_PATTERN =
+  /\b(?:quick (?:look|peek|stop)|peek (?:inside|at)|glimpse|pass(?:ing)? by|walk (?:past|by)|drive by|photo (?:stop|op)|look (?:inside|at)|view (?:of|from)|from (?:the )?outside)\b/i;
+
+// A discovered walk's members must match the walk's area label from their
+// OWN source context (run5 PB-4: "Old Town walk" absorbed Dancing House and
+// Lucerna Arcade, which are in Nové Město — the parser invented their area).
+// The contract already requires area to come from the source day title or
+// heading; this verifies it per piece instead of trusting the model field.
+function pieceAreaSourceSupported(piece: CanonicalEvidencePiece) {
+  const area = stringValue(piece.payload, "area");
+
+  if (!area) {
+    return false;
+  }
+
+  const sectionLabel = stringValue(piece.payload, "sourceSectionLabel");
+  const headingPath = pieceSourceHeadingPath(piece) ?? [];
+
+  // Pieces without source-structure context are never judged (the same
+  // posture as source-text support: structure-less fixtures fail open; live
+  // parser output, which always carries section labels, is verified).
+  if (!sectionLabel && headingPath.length === 0) {
+    return true;
+  }
+
+  const areaComparable = normalizedComparable(area);
+  const corpus = normalizedComparable(
+    [
+      sectionLabel,
+      ...headingPath,
+      stringValue(piece.payload, "title"),
+      stringValue(piece.payload, "description"),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  return areaComparable.length > 0 && corpus.includes(areaComparable);
 }
 
 function haversineKm(
@@ -6196,7 +6408,11 @@ function createDeterministicGeoGroupingDecisions({
       ) {
         continue;
       }
-      const origin = pieceCoordinates(container);
+      // Run5 PB-4: a passing mention is never a visit container.
+      if (PASSING_MENTION_TITLE_PATTERN.test(containerTitle)) {
+        continue;
+      }
+      const origin = precisePieceCoordinates(container);
       const containerText = normalizedComparable(
         [container.payload.title, container.payload.description]
           .filter(Boolean)
@@ -6206,10 +6422,22 @@ function createDeterministicGeoGroupingDecisions({
       const children = dayPieces.filter((piece) => {
         if (piece === container || grouped.has(piece)) return false;
         if (confirmationFrom(piece.payload)) return false;
-        const coords = pieceCoordinates(piece);
+        // Run5 PB-4: the geo-radius path needs precise coordinates on both
+        // ends. A TIMED stop joins by coordinates only when it shares the
+        // container's own category (RW-GRP-001 keeps the timed
+        // guard-changing inside the castle visit; the timed Chain Bridge
+        // crossing pulled into the Gresham "300 m" claim does not qualify).
+        // Source-hierarchy membership below still admits timed children.
+        const coords = precisePieceCoordinates(piece);
+        const timedCategoryOk =
+          !timeFrom(piece.payload) ||
+          (Boolean(stringValue(piece.payload, "category")) &&
+            stringValue(piece.payload, "category") ===
+              stringValue(container.payload, "category"));
         if (
           origin &&
           coords &&
+          timedCategoryOk &&
           haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
         ) {
           return true;
@@ -6236,9 +6464,16 @@ function createDeterministicGeoGroupingDecisions({
       // Call claims state the actual rule that fired (doctrine v3).
       const geoChildCount = origin
         ? children.filter((piece) => {
-            const coords = pieceCoordinates(piece);
+            const coords = precisePieceCoordinates(piece);
+            const timedOk =
+              !timeFrom(piece.payload) ||
+              (Boolean(stringValue(piece.payload, "category")) &&
+                stringValue(piece.payload, "category") ===
+                  stringValue(container.payload, "category"));
             return Boolean(
-              coords && haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
+              coords &&
+                timedOk &&
+                haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
             );
           }).length
         : 0;
@@ -6290,6 +6525,10 @@ function createDeterministicGeoGroupingDecisions({
       const normalizedArea = normalizedComparable(area);
       // A trip city or day-trip town is never a walking route.
       if (!normalizedArea || tripCities.has(normalizedArea)) continue;
+      // Run5 PB-4: a walk member's area label must come from its OWN source
+      // context — a model-invented area cannot pull a Nové Město sight into
+      // an "Old Town walk".
+      if (!pieceAreaSourceSupported(piece)) continue;
       const group = byArea.get(normalizedArea);
       if (group) group.push(piece);
       else byArea.set(normalizedArea, [piece]);
@@ -6298,8 +6537,11 @@ function createDeterministicGeoGroupingDecisions({
     const bestWalk = [...byArea.values()]
       .filter((group) => group.length >= 3)
       .filter((group) => {
+        // Run5 PB-4: the 15-minute-walk radius is only meaningful on
+        // precise coordinates; 2-decimal quantization (~1.1 km) makes far
+        // sights look adjacent, so imprecise members fail the walk check.
         const coords = group
-          .map(pieceCoordinates)
+          .map(precisePieceCoordinates)
           .filter((value): value is { lat: number; lng: number } =>
             Boolean(value)
           );
@@ -6342,8 +6584,9 @@ function createDeterministicGeoGroupingDecisions({
 // generate ONE question — "planned for this day, or just ideas?" — instead of
 // silently becoming activities or city notes.
 
-const PRICE_MARKER_PATTERN =
-  /\b\d+(?:[.,]\d+)?\s*(?:eur|euros?|czk|kc|huf|ft|usd)\b|[€$]\s?\d/i;
+// Phase 1 (audit B5): the price marker now comes from the shared detector in
+// traveler-text.ts — the private copy here was missing £/gbp entirely.
+const PRICE_MARKER_PATTERN = PRICE_SIGNAL_PATTERN;
 
 function createResearchedListQuestions(
   pieces: CanonicalEvidencePiece[],
@@ -6374,8 +6617,33 @@ function createResearchedListQuestions(
     }
     if (questionSubjectPieceIds.has(piece.id)) continue;
     const date = stringValue(piece.payload, "date");
-    const title = normalizedComparable(stringValue(piece.payload, "title"));
+    const rawTitle = stringValue(piece.payload, "title") ?? "";
+    const title = normalizedComparable(rawTitle);
     if (!date || !title || questionSubjects.has(title)) continue;
+    // "X at Site" component titles are same-site grouping structure, never
+    // researched ideas (run5 PB-3: the orphaned "Orangeriegarten at
+    // Schönbrunn" component leaked into a bogus planned-or-ideas question).
+    // The site is recognized by the container-noun vocabulary OR by another
+    // same-day activity carrying the site's name in its own title.
+    const atSiteTail = /\s+at\s+(.+)$/i.exec(rawTitle)?.[1];
+    if (atSiteTail) {
+      const tailComparable = normalizedComparable(atSiteTail);
+      // Any piece may name the site — in live run 7.18.2 the Schönbrunn
+      // container itself was suppressed when the components leaked into the
+      // question, so suppressed and demoted copies count as site evidence.
+      const siteNamedByPeer =
+        tailComparable.length >= 4 &&
+        pieces.some(
+          (peer) =>
+            peer !== piece &&
+            ` ${normalizedComparable(stringValue(peer.payload, "title"))} `.includes(
+              ` ${tailComparable} `
+            )
+        );
+      if (SAME_SITE_CONTAINER_PATTERN.test(atSiteTail) || siteNamedByPeer) {
+        continue;
+      }
+    }
     if (mentionCommitment(piece, timedCounts) !== "none") continue;
     if (pieceHasHedgeMarker(piece)) continue;
     // Research markers can sit in any parser text field (live run 7.17.1

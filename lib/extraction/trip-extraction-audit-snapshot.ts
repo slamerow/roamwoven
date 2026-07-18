@@ -35,6 +35,12 @@ function summarizeActivity(value: unknown, index: number): DraftRecordSummary {
     itemType: getString(record, "itemType"),
     locationName: getString(record, "locationName"),
     sourceFilename: getString(record, "sourceFilename"),
+    sourceHeadingPath: Array.isArray(record.sourceHeadingPath)
+      ? record.sourceHeadingPath.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : null,
+    sourceSectionLabel: getString(record, "sourceSectionLabel"),
     startTime: getStringFromKeys(record, ["startTime", "time", "departureTime"]),
     title: titleFrom(record, ["title"], `Activity ${index + 1}`),
   };
@@ -157,18 +163,69 @@ export function createExtractionSummary(usage: unknown) {
             succeeded: Number(activityChunks.succeeded) || 0,
           }
         : null,
-    // Deterministic day-section coverage counts (wave 2, RW-EVD-001) —
-    // counts only; uncovered-line excerpts stay in internal usage.
+    // Deterministic day-section coverage (wave 2 + Arc A calibration,
+    // RW-EVD-001). The FULL residual uncovered list ships in the audit so
+    // drops are verifiable from the QA bundle (run5 calibration item —
+    // previously only counts plus 10 capped evidence lines were visible).
     sourceCoverage:
       Object.keys(sourceCoverage).length > 0
         ? {
+            crossStageCoveredLineCount:
+              Number(sourceCoverage.crossStageCoveredLineCount) || 0,
             daySectionCount: Number(sourceCoverage.daySectionCount) || 0,
             meaningfulLineCount:
               Number(sourceCoverage.meaningfulLineCount) || 0,
             uncoveredLineCount:
               Number(sourceCoverage.uncoveredLineCount) || 0,
+            uncoveredLines: Array.isArray(sourceCoverage.stages)
+              ? sourceCoverage.stages.flatMap((stage) => {
+                  const record = asRecord(stage);
+                  const lines = Array.isArray(record.uncoveredLines)
+                    ? record.uncoveredLines
+                    : [];
+
+                  return lines.flatMap((line) => {
+                    const lineRecord = asRecord(line);
+
+                    return typeof lineRecord.excerpt === "string"
+                      ? [
+                          {
+                            excerpt: lineRecord.excerpt,
+                            label:
+                              typeof record.label === "string"
+                                ? record.label
+                                : "",
+                          },
+                        ]
+                      : [];
+                  });
+                })
+              : [],
           }
         : null,
+    // RW-EVD-001 bounded recovery call telemetry (separate usage lane).
+    sourceRecovery: (() => {
+      const sourceRecovery = asRecord(openai.sourceRecovery);
+
+      return Object.keys(sourceRecovery).length > 0
+        ? {
+            batchedLineCount: Number(sourceRecovery.batchedLineCount) || 0,
+            droppedLineCount: Number(sourceRecovery.droppedLineCount) || 0,
+            model:
+              typeof sourceRecovery.model === "string"
+                ? sourceRecovery.model
+                : null,
+            outcome:
+              typeof sourceRecovery.outcome === "string"
+                ? sourceRecovery.outcome
+                : "unknown",
+            recoveredLineCount:
+              Number(sourceRecovery.recoveredLineCount) || 0,
+            residualUncoveredLineCount:
+              Number(sourceRecovery.residualUncoveredLineCount) || 0,
+          }
+        : null;
+    })(),
     staged: openai.staged === true,
   };
 }

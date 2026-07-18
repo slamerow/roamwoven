@@ -13,6 +13,7 @@ import {
   extractSourceTransportAnchorsFromMaterials,
 } from "@/lib/extraction/source-transport-anchors";
 import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
+import { isDayHeadingLine } from "@/lib/extraction/parser-artifact-normalization";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
 
@@ -384,7 +385,7 @@ const systemPrompt = [
   "Preserve the traveler's mental model, but do not create activity cards that merely summarize a whole day. Full-day overview, theme, and day-title lines belong outside activities; extract the concrete traveler cards instead.",
   "For every traveler card in activities, set itemType to activity, note, admin, rest_day, social, or placeholder. Dining reservations, restaurants, cafes, bars, winery visits, and meal plans should usually be itemType activity with category food_dining.",
   "For every traveler card in activities, set city to the specific trip city/leg named by the source chunk or surrounding source header when clear; set city to null when the source does not clearly indicate one. Do not guess city from public landmark knowledge.",
-  "Geo fields are REQUIRED output, not optional metadata: every activity card for a named landmark, museum, gallery, castle, palace, church, cathedral, bridge, square, market, baths, park, monument, or other specific named venue MUST carry approxLatitude and approxLongitude — the place's approximate coordinates (2-3 decimal places is enough) from your own knowledge of the landmark. A famous sight with null coordinates is an extraction defect. Reserve null for generic meals, errands, unbranded venues, or places you genuinely cannot identify. Coordinates are used only to verify which sights are genuinely within a short walk of each other; they must never change a card's city, date, or intent.",
+  "Geo fields are REQUIRED output, not optional metadata: every activity card for a named landmark, museum, gallery, castle, palace, church, cathedral, bridge, square, market, baths, park, monument, or other specific named venue MUST carry approxLatitude and approxLongitude — the place's approximate coordinates with AT LEAST 3 decimal places (4 preferred — 2-decimal coordinates quantize to about 1.1 km and are ignored by grouping) from your own knowledge of the landmark. A famous sight with null coordinates is an extraction defect. Reserve null for generic meals, errands, unbranded venues, or places you genuinely cannot identify. Coordinates are used only to verify which sights are genuinely within a short walk of each other; they must never change a card's city, date, or intent.",
   "For sightseeing activity cards, set area to a SUB-CITY walkable neighborhood label only when the source text itself names one (a day title or heading such as 'Lesser Town' or 'Old Town'). Never use the city name, a day-trip town name, or a district you inferred from your own knowledge as the area. Set area to null when unsure. It must never change a card's city, date, or intent.",
   "Line-coverage rule: every meaningful line inside a dated day section must be represented in your output as an activity, note, stay, transport record, sensitive detail, or question. Never skip a line because it is short, odd, hedged, or unfamiliar: an unknown proper noun ('go to koscom'), a hedged mention ('maybe communism museum' — emit as city_note_candidate per the doubt-marker rule), a bath-house or venue option under a day title ('Szechenyi' or 'Gellert'), and a sparse committed item ('Tour Rome' — emit as placeholder or flexible card) must all still be emitted. Dropping a source line is an extraction defect.",
   "Day-title rule: a day heading or its title fragment ('We Explore Budapest', 'Walking tour / Jewish History / Old Town free time') is never an activity card title. Extract the concrete traveler items underneath instead; keep the heading itself in sourceSectionLabel only.",
@@ -492,28 +493,11 @@ function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+// Phase 1 (audit B5): chunking uses the SAME day-heading detector as
+// coverage and artifact repair — this function was previously a
+// byte-duplicated regex battery that could disagree with them.
 function isLikelyDayHeading(line: string) {
-  const trimmed = normalizeWhitespace(line)
-    .replace(/^#+\s*/, "")
-    .replace(/[*_`]/g, "");
-
-  if (!trimmed || trimmed.length > 140) {
-    return false;
-  }
-
-  const month =
-    "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
-  const weekday =
-    "(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)";
-  const ordinal = "\\d{1,2}(?:st|nd|rd|th)?";
-  const patterns = [
-    new RegExp(`^${weekday},?\\s+${month}\\s+${ordinal}\\b`, "i"),
-    new RegExp(`^day\\s+\\d+\\b.*\\b${month}\\s+${ordinal}\\b`, "i"),
-    new RegExp(`^${month}\\s+${ordinal}\\b`, "i"),
-    /^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/,
-  ];
-
-  return patterns.some((pattern) => pattern.test(trimmed));
+  return isDayHeadingLine(line);
 }
 
 function getSectionLabel(text: string, fallback: string) {
@@ -753,7 +737,7 @@ function formatActivityChunkInput({
       "Extract every source-backed activity, city note/tip, place, stay, transport segment, sensitive detail, and genuine unresolved material question from this chunk.",
       "If this chunk contains multiple named dated venues, preserve them as separate cards unless the source clearly makes them one tour, route, complex, or pick-one cluster.",
       "Preserve the chunk's heading/list hierarchy in sourceHeadingPath, sourceSectionLabel, sourceSectionType, and evidenceRole. Do not promote recommendations from a city-reference section merely because a dated section appeared above them.",
-      "Cover every meaningful source line in this chunk with at least one output record, and fill approxLatitude/approxLongitude for every named landmark or venue card you emit.",
+      "Cover every meaningful source line in this chunk with at least one output record, and fill approxLatitude/approxLongitude (at least 3 decimal places; 2-decimal coordinates are too coarse and are ignored) for every named landmark or venue card you emit.",
       rescueInstructions,
     ].join("\n"),
     formatMaterials(chunk.materials),

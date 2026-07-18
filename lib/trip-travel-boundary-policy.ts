@@ -1,3 +1,4 @@
+import { normalizeText } from "@/lib/extraction/traveler-text";
 export type TravelBoundaryTransportType =
   | "bus"
   | "drive"
@@ -70,17 +71,7 @@ export function isIntercityRentalCarCandidate(record: TravelBoundaryRecord) {
   return explicitIntercityRoute || differentHandoffDates;
 }
 
-function normalizeText(value: string | null | undefined) {
-  return (
-    value
-      ?.toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/&/g, " and ")
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim() ?? ""
-  );
-}
+
 
 export function normalizeTravelBoundaryTransportType(
   value: string | null | undefined

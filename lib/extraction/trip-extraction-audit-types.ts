@@ -26,6 +26,10 @@ export type DraftRecordSummary = {
   itemType: string | null;
   locationName: string | null;
   sourceFilename: string | null;
+  // Source-structure context (Phase 1, audit B4): lets audit detectors run
+  // the pipeline's own heading-fragment predicate instead of a private one.
+  sourceHeadingPath: string[] | null;
+  sourceSectionLabel: string | null;
   startTime: string | null;
   title: string;
 };
@@ -92,6 +96,11 @@ export type TripExtractionAuditLineageRow = {
   mergeReasons: string[];
   matchMethod: "canonical_id" | "none" | "semantic_fallback";
   observations: Array<{
+    // Geo/area hints ride on lineage observations so grouping-radius claims
+    // are verifiable from the QA bundle (run5 PB-4 audit-visibility gap).
+    approxLatitude: number | null;
+    approxLongitude: number | null;
+    area: string | null;
     date: string | null;
     id: string;
     kind: EvidenceKind;
@@ -184,9 +193,19 @@ export type TripExtractionAuditReport = {
       succeeded: number;
     } | null;
     sourceCoverage: {
+      crossStageCoveredLineCount: number;
       daySectionCount: number;
       meaningfulLineCount: number;
       uncoveredLineCount: number;
+      uncoveredLines: Array<{ excerpt: string; label: string }>;
+    } | null;
+    sourceRecovery: {
+      batchedLineCount: number;
+      droppedLineCount: number;
+      model: string | null;
+      outcome: string;
+      recoveredLineCount: number;
+      residualUncoveredLineCount: number;
     } | null;
     staged: boolean;
   };

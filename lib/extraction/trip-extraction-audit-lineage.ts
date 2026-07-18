@@ -1,4 +1,5 @@
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
+import { identityTokens } from "@/lib/extraction/evidence-clustering";
 import type { EvidenceArtifactBundle } from "@/lib/extraction/evidence-artifacts";
 import { getAuditSnapshotFromUsage } from "@/lib/extraction/trip-extraction-audit-snapshot";
 import type {
@@ -24,35 +25,11 @@ function lineageKey({ date, title }: { date: string | null; title: string }) {
 }
 
 function tokenSet(value: string) {
-  const stopWords = new Set([
-    "and",
-    "arrive",
-    "arrives",
-    "arrival",
-    "at",
-    "car",
-    "check",
-    "departure",
-    "drive",
-    "fly",
-    "from",
-    "guided",
-    "in",
-    "pick",
-    "pickup",
-    "the",
-    "to",
-    "tour",
-    "train",
-    "up",
-    "visit",
-  ]);
-
-  return new Set(
-    normalizeAuditIdentity(value)
-      .split(" ")
-      .filter((token) => token.length > 2 && !stopWords.has(token))
-  );
+  // Phase 1 (audit B4): the audit joins titles with the pipeline's OWN
+  // identity tokenizer (plural folding + the pipeline stopword set). The
+  // previous private token model produced phantom duplicate/missing
+  // findings whenever the two tokenizers disagreed.
+  return new Set(identityTokens(value));
 }
 
 export function hasAuditTokenOverlap(a: string, b: string) {
@@ -429,6 +406,12 @@ function candidateFromArtifactPiece(
     itemType: recordValue(payload, "itemType"),
     locationName: recordValue(payload, "locationName"),
     sourceFilename: recordValue(payload, "sourceFilename"),
+    sourceHeadingPath: Array.isArray(payload.sourceHeadingPath)
+      ? payload.sourceHeadingPath.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : null,
+    sourceSectionLabel: recordValue(payload, "sourceSectionLabel"),
     startTime:
       recordValue(payload, "startTime") ?? recordValue(payload, "time"),
     title,
@@ -502,7 +485,17 @@ function createArtifactLineageRows({
 
         if (!observation) return [];
 
+        const observationNumber = (key: string) => {
+          const value = observation.payload[key];
+          return typeof value === "number" && Number.isFinite(value)
+            ? value
+            : null;
+        };
+
         return [{
+          approxLatitude: observationNumber("approxLatitude"),
+          approxLongitude: observationNumber("approxLongitude"),
+          area: recordValue(observation.payload, "area"),
           date:
             recordValue(observation.payload, "date") ??
             recordValue(observation.payload, "checkIn"),

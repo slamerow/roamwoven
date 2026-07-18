@@ -8,6 +8,32 @@ export function normalizeText(value: string | null | undefined) {
     .trim() ?? "";
 }
 
+// Shared comparable fold (remediation Phase 1, audit finding B5): the
+// NFKD-based fold previously copy-pasted into parser-artifact-normalization,
+// source-coverage, and extraction-qa. One implementation, one tokenization \u2014
+// divergent normalizers were producing phantom "uncovered"/"duplicate"
+// findings when two modules disagreed about the same string.
+export function foldComparableText(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+export function comparableTokens(value: string | null | undefined) {
+  return foldComparableText(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+}
+
+// Shared price/cost signal (remediation Phase 1, audit finding B5): the four
+// previous price regexes each covered a different currency subset \u2014 the
+// researched-list marker was missing \u00a3/gbp entirely and no pattern knew the
+// forint "Ft" symbol. One detector, superset of every prior vocabulary.
+export const PRICE_SIGNAL_PATTERN =
+  /\b\d+(?:[.,]\d+)?\s*(?:eur(?:os?)?|czk|kc|korunas?|huf|ft|forints?|usd|dollars?|gbp|pounds?)\b|[\u20ac$\u00a3]\s?\d/i;
+
 export function normalizeTripClockTime(
   value: string | null | undefined
 ) {
@@ -17,8 +43,13 @@ export function normalizeTripClockTime(
     return null;
   }
 
+  // Dot-times ("14.30", European itineraries) are accepted alongside
+  // colon-times (remediation Phase 1, audit finding B5: dot-times counted as
+  // transport time EVIDENCE but parsed nowhere, manufacturing missing-time
+  // P0s). Two digits are required after the separator, so "3.5" (a duration)
+  // and "45.75" (a price) still fail closed.
   const timeOnly = raw.match(
-    /^(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i
+    /^(?:at\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/i
   );
   const isoDateTime = raw.match(
     /^\d{4}-\d{2}-\d{2}[T\s](\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/i
@@ -113,13 +144,27 @@ export function normalizeTripDate(
       Number(existingIso[3])
     );
   }
-  const numericDayFirst = /\b(\d{1,2})[.](\d{1,2})[.](\d{4})\b/.exec(trimmed);
+  // Numeric day-first dates accept both dot and slash separators
+  // (remediation Phase 1, audit finding B5: "16/1/2026" day headings parsed
+  // in transport anchors but not in activities, manufacturing date
+  // disagreements between the two lanes). Two-digit years expand to 2000+.
+  // Day-first is tried before month-first, matching the anchor parser.
+  const numericDayFirst = /\b(\d{1,2})([./])(\d{1,2})\2(\d{2}|\d{4})\b/.exec(
+    trimmed
+  );
 
   if (numericDayFirst) {
-    return isoDate(
+    const rawYear = Number(numericDayFirst[4]);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    const dayFirstIso = isoDate(
+      year,
       Number(numericDayFirst[3]),
-      Number(numericDayFirst[2]),
       Number(numericDayFirst[1])
+    );
+
+    return (
+      dayFirstIso ??
+      isoDate(year, Number(numericDayFirst[1]), Number(numericDayFirst[3]))
     );
   }
 

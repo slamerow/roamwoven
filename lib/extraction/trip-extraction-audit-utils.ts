@@ -1,3 +1,4 @@
+import { normalizeText } from "@/lib/extraction/traveler-text";
 import type { DraftObject } from "@/lib/extraction/trip-extraction-audit-types";
 
 export function asRecord(value: unknown): DraftObject {
@@ -58,12 +59,11 @@ export function findOpenAIUsage(usage: unknown) {
 }
 
 export function normalizeAuditIdentity(value: string | null | undefined) {
-  return (value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^\w\s]/g, " ")
+  // Phase 1 (audit B4/B5): fold with the pipeline's canonical normalizeText
+  // (the old private fold kept underscores, so the audit and the pipeline
+  // disagreed about identity for the same string), then strip the audit's
+  // role-word stopwords.
+  return normalizeText(value)
     .replace(
       /\b(at|the|a|an|guided|guide|tour|visit|optional|breakfast|lunch|dinner|meal|fly|flight)\b/g,
       " "

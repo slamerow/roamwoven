@@ -1,4 +1,13 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
+import {
+  comparableTokens,
+  foldComparableText,
+  PRICE_SIGNAL_PATTERN,
+} from "@/lib/extraction/traveler-text";
+import {
+  isHeadingFragmentTitle,
+  tripCityTokenSet,
+} from "@/lib/extraction/entity-winner";
 
 // Deterministic parser-artifact normalization (wave 2, live-run 7.18.0/7.18.1
 // shapes; docs/assembly-defect-docket-2026-07-17-run3.md addendum and
@@ -30,6 +39,7 @@ export type ParserArtifactRepair = {
     | "day_title_card"
     | "degenerate_end_time"
     | "disjunction_split"
+    | "heading_fragment_card"
     | "opening_hours_end_time"
     | "provider_text_bleed"
     | "ticket_page_activity";
@@ -57,21 +67,18 @@ function stringValue(record: Record<string, unknown>, field: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+// Phase 1 (audit B5): the comparable fold and tokenizer now come from the
+// shared text module \u2014 this file previously carried its own NFKD copies.
 function foldText(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  return foldComparableText(value);
 }
 
 function normalizeComparable(value: string) {
-  return foldText(value)
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return comparableTokens(value).join(" ");
 }
 
 function tokensOf(value: string) {
-  return normalizeComparable(value).split(" ").filter(Boolean);
+  return comparableTokens(value);
 }
 
 const DAY_HEADING_MONTH =
@@ -93,8 +100,12 @@ const DAY_HEADING_PATTERNS = [
 ];
 
 export function isDayHeadingLine(line: string) {
+  // Bullet/list prefixes are stripped before matching (Phase 1, audit B5:
+  // bullet-prefixed and starred day headings split chunking vs coverage vs
+  // repair differently because only some detectors stripped them).
   const trimmed = line
     .replace(/\s+/g, " ")
+    .replace(/^[-*•●▪◦>·]+\s*/, "")
     .replace(/^#+\s*/, "")
     .replace(/[*_`]/g, "")
     .trim();
@@ -268,6 +279,7 @@ function repairTransportProvider(
 function repairDayTitleCard(
   activity: Record<string, unknown>,
   headingRemainders: string[],
+  tripCityNames: string[],
   stageLabel: string,
   repairs: ParserArtifactRepair[]
 ) {
@@ -286,6 +298,36 @@ function repairDayTitleCard(
   const normalizedTitle = normalizeComparable(title);
 
   if (normalizedTitle.length < 6) {
+    return;
+  }
+
+  // Heading-fragment demotion (run5 PB-3, shared predicate): a card whose
+  // title is a day-arc phrase ("Explore Vienna", "We Explore Budapest") or
+  // one verb+city segment of its OWN day heading is heading noise, never a
+  // traveler card — even when it ships on a different day than its heading
+  // (live run 7.18.2 shipped "Explore Vienna" on Jan 19). A venue named
+  // inside a multi-part heading keeps its own content tokens and survives
+  // ("Prague Castle" under "Lesser Town & Prague Castle").
+  const cityTokens = tripCityTokenSet([
+    ...tripCityNames,
+    stringValue(activity, "city"),
+  ]);
+  const activityHeadingTexts = [
+    ...headingRemainders,
+    stringValue(activity, "sourceSectionLabel"),
+    ...asArray(activity.sourceHeadingPath).filter(
+      (value): value is string => typeof value === "string"
+    ),
+  ];
+
+  if (isHeadingFragmentTitle(title, activityHeadingTexts, cityTokens)) {
+    activity.evidenceRole = "context";
+    repairs.push({
+      detail: `Title "${title}" is a day-arc/heading fragment of its own day heading, not a traveler card (live-run 7.18.2: "Explore Vienna" from the Jan 18 heading shipped as a Jan 19 card). Demoted to context evidence.`,
+      kind: "heading_fragment_card",
+      stageLabel,
+      title,
+    });
     return;
   }
 
@@ -330,7 +372,9 @@ function repairDayTitleCard(
 
 // --- Rule 4: standalone cost-line cards -------------------------------------
 
-const COST_PATTERN = /(?:[$€£]\s?\d+|\b\d+\s?(?:usd|eur|gbp|huf|czk)\b)/i;
+// Phase 1 (audit B5): delegate to the shared price detector — the private
+// copy here was missing the forint "Ft" and koruna "Kc" markers.
+const COST_PATTERN = PRICE_SIGNAL_PATTERN;
 const COST_VOCABULARY = new Set([
   "airbnb",
   "apartment",
@@ -555,6 +599,26 @@ export function normalizeParserStageArtifacts(
   stages: EvidenceStageInput[]
 ): ParserArtifactNormalizationResult {
   const repairs: ParserArtifactRepair[] = [];
+  // Trip city names across ALL stages (spine places included) feed the
+  // day-arc predicate: "Explore Vienna" is only heading noise because Vienna
+  // is a trip city.
+  const tripCityNames: string[] = [];
+  for (const stageInput of stages) {
+    const stage = asRecord(stageInput.stage);
+    for (const place of asArray(stage.places)) {
+      const record = asRecord(place);
+      for (const key of ["city", "name", "title"]) {
+        const value = stringValue(record, key);
+        if (value) tripCityNames.push(value);
+      }
+    }
+    for (const collection of [stage.activities, stage.stays]) {
+      for (const item of asArray(collection)) {
+        const value = stringValue(asRecord(item), "city");
+        if (value) tripCityNames.push(value);
+      }
+    }
+  }
   const nextStages = stages.map((stageInput) => {
     const stage = asRecord(stageInput.stage);
     const rawActivities = asArray(stage.activities);
@@ -583,7 +647,13 @@ export function normalizeParserStageArtifacts(
 
     for (const activity of activities) {
       repairDegenerateTimes(activity, stageInput.label, repairs);
-      repairDayTitleCard(activity, headingRemainders, stageInput.label, repairs);
+      repairDayTitleCard(
+        activity,
+        headingRemainders,
+        tripCityNames,
+        stageInput.label,
+        repairs
+      );
       repairCostLineCard(activity, stageInput.label, repairs);
       repairTicketPageActivity(activity, stageInput, repairs);
     }

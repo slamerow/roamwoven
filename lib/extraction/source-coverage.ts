@@ -1,5 +1,6 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 import { isDayHeadingLine } from "@/lib/extraction/parser-artifact-normalization";
+import { comparableTokens } from "@/lib/extraction/traveler-text";
 
 // Deterministic day-section source coverage (wave 2; RW-EVD-001).
 //
@@ -29,14 +30,32 @@ export type SourceCoverageStageReport = {
 };
 
 export type SourceCoverageSummary = {
+  // Lines whose tokens another stage's output covers (the spine, or a
+  // different chunk) — cross-stage content, not a drop (run5 calibration:
+  // "JFK -> FCO" was covered by the SPINE stage, "Catacombs tour" by a
+  // different chunk; 121/393 flagged lines were mostly this noise).
+  crossStageCoveredLineCount: number;
   daySectionCount: number;
   meaningfulLineCount: number;
   stages: SourceCoverageStageReport[];
   uncoveredLineCount: number;
-  version: 1;
+  version: 2;
 };
 
 const EXCERPT_MAX_CHARS = 120;
+
+// Run5 coverage calibration: OCR page markers and ticket boilerplate are
+// document plumbing, never meaningful day-section lines.
+const BOILERPLATE_LINE_PATTERNS = [
+  /^=+\s*page\s+\d+\s*=*$/i,
+  /^page\s+\d+(?:\s+of\s+\d+)?$/i,
+  /^order\s+(?:summary|number|total)\b/i,
+  /^(?:booking|reservation|ticket)\s+(?:reference|number|code)\s*:/i,
+];
+
+export function isBoilerplateSourceLine(line: string) {
+  return BOILERPLATE_LINE_PATTERNS.some((pattern) => pattern.test(line.trim()));
+}
 
 const LINE_STOPWORDS = new Set([
   "about",
@@ -81,21 +100,12 @@ const LINE_STOPWORDS = new Set([
   "your",
 ]);
 
-function foldText(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
+// Phase 1 (audit B5): the fold/tokenizer comes from the shared text module.
 function tokensOf(value: string) {
-  return foldText(value)
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter(Boolean);
+  return comparableTokens(value);
 }
 
-function distinctiveLineTokens(line: string) {
+export function distinctiveLineTokens(line: string) {
   return tokensOf(line).filter(
     (token) =>
       token.length >= 4 &&
@@ -138,7 +148,7 @@ function collectStrings(value: unknown, into: string[], depth = 0) {
   }
 }
 
-function stageOutputTokenSet(stage: unknown) {
+export function stageOutputTokenSet(stage: unknown) {
   const strings: string[] = [];
   collectStrings(stage, strings);
   const tokens = new Set<string>();
@@ -167,6 +177,18 @@ function stageHasRecoveryPlaceholder(stage: unknown) {
   );
 }
 
+// The bounded recovery call's own synthesized stage (RW-EVD-001) is never a
+// day-section stage — judging it would re-flag the very excerpts it exists
+// to repair.
+function stageIsSourceRecovery(stage: unknown) {
+  const record =
+    stage && typeof stage === "object" && !Array.isArray(stage)
+      ? (stage as Record<string, unknown>)
+      : {};
+
+  return record._sourceRecovery === true;
+}
+
 function findDaySection(stageInput: EvidenceStageInput) {
   const rawLines = (stageInput.sourceText ?? "").split(/\r?\n/);
   const lines = rawLines.map(stripLineDecorations);
@@ -192,9 +214,21 @@ export function computeDaySectionSourceCoverage(
   stages: EvidenceStageInput[]
 ): SourceCoverageSummary {
   const reports: SourceCoverageStageReport[] = [];
+  let crossStageCoveredLineCount = 0;
   let daySectionCount = 0;
   let meaningfulLineCount = 0;
   let uncoveredLineCount = 0;
+
+  // Run5 calibration: a line is only a DROP when NO stage's output covers
+  // it. Per-chunk matching stays preferred (it proves the producing chunk
+  // extracted the line); the cross-stage union (spine included) absorbs
+  // content legitimately owned by another stage.
+  const allStageTokens = new Set<string>();
+  for (const stageInput of stages) {
+    for (const token of stageOutputTokenSet(stageInput.stage)) {
+      allStageTokens.add(token);
+    }
+  }
 
   for (const stageInput of stages) {
     if (stageInput.source !== "model_chunk" || !stageInput.sourceText?.trim()) {
@@ -202,8 +236,12 @@ export function computeDaySectionSourceCoverage(
     }
 
     // Sections that already failed extraction carry a recovery placeholder
-    // and one maker question — re-flagging every line would be noise.
-    if (stageHasRecoveryPlaceholder(stageInput.stage)) {
+    // and one maker question — re-flagging every line would be noise. The
+    // recovery call's own stage is likewise never judged.
+    if (
+      stageHasRecoveryPlaceholder(stageInput.stage) ||
+      stageIsSourceRecovery(stageInput.stage)
+    ) {
       continue;
     }
 
@@ -227,6 +265,12 @@ export function computeDaySectionSourceCoverage(
         return;
       }
 
+      // OCR page markers and ticket boilerplate are plumbing, not itinerary
+      // content (run5: "=== Page 2 ===", "Order summary:").
+      if (isBoilerplateSourceLine(line)) {
+        return;
+      }
+
       const distinctive = distinctiveLineTokens(line);
 
       if (distinctive.length === 0) {
@@ -238,6 +282,15 @@ export function computeDaySectionSourceCoverage(
       const requiredCoverage = Math.ceil(distinctive.length / 2);
 
       if (covered.length >= requiredCoverage) {
+        return;
+      }
+
+      const crossStageCovered = distinctive.filter((token) =>
+        allStageTokens.has(token)
+      );
+
+      if (crossStageCovered.length >= requiredCoverage) {
+        crossStageCoveredLineCount += 1;
         return;
       }
 
@@ -264,10 +317,11 @@ export function computeDaySectionSourceCoverage(
   }
 
   return {
+    crossStageCoveredLineCount,
     daySectionCount,
     meaningfulLineCount,
     stages: reports,
     uncoveredLineCount,
-    version: 1,
+    version: 2,
   };
 }

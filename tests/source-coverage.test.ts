@@ -75,6 +75,82 @@ export default async function run() {
     assert.match(coverage.stages[0].uncoveredLines[0].excerpt, /koscom/i);
   });
 
+  await test("run5 calibration: page markers and ticket boilerplate are never meaningful lines", () => {
+    const coverage = computeDaySectionSourceCoverage([
+      chunkStage(
+        "Friday, January 25th",
+        [
+          "Friday, January 25th",
+          "=== Page 2 ===",
+          "Order summary: 2x Colosseum entry",
+          "Booking reference: QX123ABC",
+          "Visit the Pantheon in the morning",
+        ].join("\n"),
+        {
+          activities: [
+            {
+              date: "2019-01-25",
+              itemType: "activity",
+              title: "Pantheon morning visit",
+            },
+          ],
+        }
+      ),
+    ]);
+
+    assert.equal(coverage.uncoveredLineCount, 0);
+    assert.equal(coverage.stages.length, 0);
+  });
+
+  await test("run5 calibration: a line covered by ANOTHER stage's output is cross-stage content, not a drop", () => {
+    const coverage = computeDaySectionSourceCoverage([
+      {
+        label: "trip spine",
+        source: "model_spine" as const,
+        stage: {
+          transport: [
+            {
+              arrival: "FCO",
+              departure: "JFK",
+              title: "Flight JFK to FCO",
+            },
+          ],
+        },
+      },
+      chunkStage(
+        "Saturday, January 12th",
+        [
+          "Saturday, January 12th",
+          "Flight JFK -> FCO overnight",
+          "Catacombs tour with the guide",
+        ].join("\n"),
+        {
+          activities: [],
+        }
+      ),
+      chunkStage(
+        "appendix pages",
+        "reference text with no day heading",
+        {
+          activities: [
+            {
+              date: "2019-01-13",
+              itemType: "activity",
+              title: "Catacombs tour",
+            },
+          ],
+        }
+      ),
+    ]);
+
+    assert.equal(
+      coverage.uncoveredLineCount,
+      0,
+      "spine-covered and other-chunk-covered lines are not drops"
+    );
+    assert.equal(coverage.crossStageCoveredLineCount, 2);
+  });
+
   await test("an extracted day section reports full coverage", () => {
     const coverage = computeDaySectionSourceCoverage([
       chunkStage("Thursday, January 17th", KUTNA_HORA_SOURCE, {

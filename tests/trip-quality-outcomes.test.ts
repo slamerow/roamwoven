@@ -74,7 +74,7 @@ function report(
       stays: [],
       transport: [],
     },
-    extraction: { activityChunks: null, sourceCoverage: null, staged: true },
+    extraction: { activityChunks: null, sourceCoverage: null, sourceRecovery: null, staged: true },
     fingerprints: {
       hash: "fingerprint",
       sections: {},

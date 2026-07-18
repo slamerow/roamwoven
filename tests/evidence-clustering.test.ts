@@ -2154,7 +2154,7 @@ export default async function run() {
       stages: [stage("castle-and-daytrip", emptyStage({
         activities: [
           // Prague Castle complex, all within ~250 m.
-          locatedActivity("Prague Castle complex", "2019-01-16", 50.0900, 14.4000),
+          locatedActivity("Prague Castle complex", "2019-01-16", 50.0901, 14.3999),
           locatedActivity("Changing of the Guard", "2019-01-16", 50.0902, 14.4008, { startTime: "12:00" }),
           locatedActivity("St. Vitus Cathedral", "2019-01-16", 50.0906, 14.4006),
           // Kutná Hora day trip: spread far apart, small day.

@@ -58,6 +58,10 @@ test("wave-2 prompt hardening: geo fields, line coverage, and artifact rules are
   assert.match(parserSource, /Provider rule:/);
   assert.match(
     parserSource,
-    /fill approxLatitude\/approxLongitude for every named landmark/i
+    /fill approxLatitude\/approxLongitude \(at least 3 decimal places/i
   );
+  // Run5 PB-4: 2-decimal coordinates quantize to ~1.1 km; the prompt must
+  // demand >=3-decimal precision in BOTH the system prompt and the per-chunk
+  // reminder.
+  assert.match(parserSource, /AT LEAST 3 decimal places \(4 preferred/);
 });

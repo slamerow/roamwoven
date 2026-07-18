@@ -1,3 +1,4 @@
+import { comparableTokens } from "@/lib/extraction/traveler-text";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 
 type TimelineRecordType = "callout" | "item" | "question" | "stay" | "transport";
@@ -69,13 +70,9 @@ export type ExtractionQaReport = {
   score: number;
 };
 
+// Phase 1 (audit B5): the comparable fold comes from the shared text module.
 function normalizeSearchText(value: string | null | undefined) {
-  return (value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return comparableTokens(value).join(" ");
 }
 
 function containsKeyword(searchText: string, keyword: string) {

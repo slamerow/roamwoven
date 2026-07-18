@@ -26,7 +26,21 @@ import {
   isCriticalTransportRecord as isPolicyCriticalTransportRecord,
   type TransportCompletenessRecord,
 } from "@/lib/trip-transport-policy";
-import { isDayOverviewActivityTitle } from "@/lib/trip-card-taxonomy";
+import {
+  hasAvailabilityMarker,
+  hasStandaloneActivityAnchor,
+  hasStrongPlannedActivityLanguage,
+  hasWeakRecommendationMarker,
+  isDayOverviewActivityTitle,
+  isLooseTipActivity,
+  isSightOrLoosePlaceText,
+  type DraftActivityCardInput,
+} from "@/lib/trip-card-taxonomy";
+import { SAME_SITE_CONTAINER_PATTERN } from "@/lib/extraction/evidence-clustering";
+import {
+  isHeadingFragmentTitle,
+  tripCityTokenSet,
+} from "@/lib/extraction/entity-winner";
 import {
   inferTravelBoundaryTransportKind,
   shouldBeTravelRow,
@@ -148,29 +162,50 @@ function noteTextFor(records: StructuredTripRecords) {
     .join("\n");
 }
 
+function draftCardInputForCandidate(
+  candidate: DraftLineageCandidate
+): DraftActivityCardInput {
+  return {
+    category: "category" in candidate ? candidate.category : null,
+    date: candidate.date ?? null,
+    description: "description" in candidate ? candidate.description : null,
+    endTime: "endTime" in candidate ? candidate.endTime : null,
+    itemType: "itemType" in candidate ? candidate.itemType : null,
+    startTime: "startTime" in candidate ? candidate.startTime : null,
+    title: candidate.title,
+  };
+}
+
 function hasWeakNoteMarker(candidate: DraftLineageCandidate) {
-  return /\b(optional|maybe|if time|could visit|ideas?|recommendations?|possible sights?|open until|open til|hours?|free\s*\d|free admission|would recommend|recommended)\b/.test(
-    textForAudit(candidate).toLowerCase()
-  );
+  // Phase 1 (audit B4): the audit imports the pipeline's own hedge and
+  // availability predicates — the private regex here missed five hedge
+  // phrases the pipeline demotes on, producing false P1s.
+  const input = draftCardInputForCandidate(candidate);
+
+  return hasWeakRecommendationMarker(input) || hasAvailabilityMarker(input);
 }
 
 function hasHighIntentActivitySignal(candidate: DraftLineageCandidate) {
-  const text = textForAudit(candidate).toLowerCase();
-  const title = candidate.title.toLowerCase();
-  const startTime = "startTime" in candidate ? candidate.startTime : null;
-  const endTime = "endTime" in candidate ? candidate.endTime : null;
+  // Phase 1 (audit B4): high-intent detection now imports the pipeline's own
+  // anchor/commitment/sight predicates plus the shared same-site container
+  // vocabulary instead of a hand-rolled subset.
+  const input = draftCardInputForCandidate(candidate);
+
+  if (input.startTime || input.endTime) {
+    return true;
+  }
 
   if (
-    startTime ||
-    endTime ||
-    /\b(ticket|tickets|timed|reserved|reservation|booking|confirmation|provider|paid|paypal|guided tour|tour at|starts at)\b/.test(
-      text
-    )
+    hasStandaloneActivityAnchor(input) ||
+    hasStrongPlannedActivityLanguage(input)
   ) {
     return true;
   }
 
-  return /\b(palace|castle|church|cathedral|basilica|synagogue)\b/.test(title);
+  return (
+    isSightOrLoosePlaceText(candidate.title) ||
+    SAME_SITE_CONTAINER_PATTERN.test(candidate.title)
+  );
 }
 
 function looksLikeIncludedStopCluster(candidate: DraftLineageCandidate) {
@@ -777,19 +812,18 @@ export function createAuditDiagnostics({
     });
   }
 
-  const looseActivityExamples = activeActivities.filter((item) => {
-    const text = [item.title, item.description, item.categoryId]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return (
-      !item.startTime &&
-      /\b(cafe ideas|food ideas|ideas|museums|notes|optional|shopping ideas|tip|tips|transit tip|wine notes)\b/.test(
-        text
-      )
-    );
-  });
+  // Phase 1 (audit B4): loose-tip detection imports the pipeline classifier
+  // (booking guard + time guard included) instead of a private keyword list.
+  const looseActivityExamples = activeActivities.filter((item) =>
+    isLooseTipActivity({
+      category: item.categoryId ?? null,
+      description: item.description ?? null,
+      endTime: item.endTime ?? null,
+      itemType: item.itemType ?? null,
+      startTime: item.startTime ?? null,
+      title: item.title,
+    })
+  );
 
   if (looseActivityExamples.length > 0) {
     diagnostics.push({
@@ -810,9 +844,38 @@ export function createAuditDiagnostics({
     });
   }
 
-  const visibleDayOverviews = activeActivities.filter((item) =>
-    isDayOverviewActivityTitle(item.title)
+  // Phase 1 (audit B4): the day-overview detector was blind to
+  // heading-remainder titles — the "Explore Vienna" family survived as a
+  // visible card in live run 7.18.2 without any audit finding. The detector
+  // now also runs the pipeline's own heading-fragment predicate against each
+  // card's source-heading context from lineage.
+  const lineageCandidateByFinalId = new Map<string, DraftLineageCandidate>();
+  for (const row of lineage) {
+    if (!row.canonical) continue;
+    for (const record of row.finalRecords) {
+      lineageCandidateByFinalId.set(record.id, row.canonical);
+    }
+  }
+  const tripCityTokens = tripCityTokenSet(
+    records.legs.map((leg) => leg.city)
   );
+  const visibleDayOverviews = activeActivities.filter((item) => {
+    if (isDayOverviewActivityTitle(item.title)) {
+      return true;
+    }
+
+    const candidate = lineageCandidateByFinalId.get(item.id);
+
+    if (!candidate || !("sourceSectionLabel" in candidate)) {
+      return false;
+    }
+
+    return isHeadingFragmentTitle(
+      item.title,
+      [candidate.sourceSectionLabel, ...(candidate.sourceHeadingPath ?? [])],
+      tripCityTokens
+    );
+  });
 
   if (visibleDayOverviews.length > 0) {
     diagnostics.push({
