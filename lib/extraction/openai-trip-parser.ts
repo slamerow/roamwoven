@@ -13,6 +13,10 @@ import {
   extractSourceTransportAnchorsFromMaterials,
 } from "@/lib/extraction/source-transport-anchors";
 import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
+import {
+  runBoundedSourceRecovery,
+  SOURCE_RECOVERY_SYSTEM_PROMPT,
+} from "@/lib/extraction/source-recovery";
 import { isDayHeadingLine } from "@/lib/extraction/parser-artifact-normalization";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
@@ -1371,6 +1375,39 @@ export async function extractTripDraftWithOpenAI({
     }),
     ...recoveryStages,
   ];
+  // RW-EVD-001 bounded recovery call: the deterministic coverage diagnostic
+  // is its ONLY trigger. It runs BEFORE the resolver so the recovered stage
+  // enters assembly as a completely normal late stage (resolver → clustering
+  // → source-truth verification), and its usage is recorded separately.
+  const preRecoveryCoverage = computeDaySectionSourceCoverage(evidenceStages);
+  const recovery = await runBoundedSourceRecovery({
+    coverage: preRecoveryCoverage,
+    requestRecovery: async ({ input, maxInputChars, maxOutputTokens, model }) =>
+      createOpenAIStructuredResponse({
+        input,
+        maxInputChars,
+        maxOutputTokens,
+        model,
+        retryOnIncompleteOutput: false,
+        schema: tripActivitiesSchema,
+        schemaName: "roamwoven_trip_recovery",
+        system: SOURCE_RECOVERY_SYSTEM_PROMPT,
+      }),
+    stages: evidenceStages,
+  });
+
+  if (recovery.usage.outcome === "failed") {
+    console.error("trip_source_recovery_call_failed", {
+      error: recovery.usage.error,
+      tripName,
+      uncoveredLineCount: recovery.usage.triggeredByUncoveredLineCount,
+    });
+  }
+
+  if (recovery.stage) {
+    evidenceStages.push(recovery.stage);
+  }
+
   let resolvedEvidenceStages = {
     groupingDecisions: [] as CanonicalGroupingDecision[],
     metadata: null as unknown,
@@ -1388,7 +1425,10 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
-  const sourceCoverage = computeDaySectionSourceCoverage(evidenceStages);
+  // Reported coverage is reconciled against the recovery output: recovered
+  // lines clear, residual drops stay flagged (the quiet P2 advisory keeps
+  // firing on what is still missing).
+  const sourceCoverage = recovery.coverage;
   const evidence = clusterExtractedEvidence({
     groupingDecisions: resolvedEvidenceStages.groupingDecisions,
     resolverMetadata: resolvedEvidenceStages.metadata,
@@ -1447,6 +1487,7 @@ export async function extractTripDraftWithOpenAI({
       evidence: evidence.summary,
       parserArtifactRepairs: evidence.parserArtifactRepairs,
       sourceCoverage,
+      sourceRecovery: recovery.usage,
       sourceAnchors: {
         transport: sourceTransportAnchors,
       },

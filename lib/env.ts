@@ -83,6 +83,23 @@ export function getOpenAIConfig() {
       "OPENAI_EXTRACTION_MAX_OUTPUT_TOKENS",
       12000
     ),
+    // RW-EVD-001 bounded recovery call: one excerpt-only re-ask per build,
+    // hard input/output caps, extraction model unless overridden.
+    recoveryModel:
+      getOptionalEnv("OPENAI_RECOVERY_MODEL") ??
+      (getOptionalEnv("OPENAI_EXTRACTION_MODEL") ?? "gpt-5.4-mini"),
+    recoveryMaxInputChars: getOptionalPositiveInteger(
+      "OPENAI_RECOVERY_MAX_INPUT_CHARS",
+      16000
+    ),
+    recoveryMaxOutputTokens: getOptionalPositiveInteger(
+      "OPENAI_RECOVERY_MAX_OUTPUT_TOKENS",
+      8000
+    ),
+    recoveryMaxLines: getOptionalPositiveInteger(
+      "OPENAI_RECOVERY_MAX_LINES",
+      60
+    ),
   };
 }
 

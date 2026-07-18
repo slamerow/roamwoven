@@ -302,6 +302,9 @@ function parseStructuredResponseBody(body: OpenAIResponseBody) {
 export async function createOpenAIStructuredResponse({
   input,
   maxInputChars,
+  maxOutputTokens,
+  model,
+  retryOnIncompleteOutput = true,
   schema,
   schemaName,
   system,
@@ -309,6 +312,15 @@ export async function createOpenAIStructuredResponse({
 }: {
   input: string;
   maxInputChars?: number;
+  // Hard output cap override (RW-EVD-001 bounded recovery call): when set,
+  // it is used as-is — no minimum floor, no incomplete-output retry bump.
+  maxOutputTokens?: number;
+  // Model override (OPENAI_RECOVERY_MODEL lane); defaults to the configured
+  // extraction model.
+  model?: string;
+  // The bounded recovery call never retries itself; everything else keeps
+  // the one incomplete-output retry.
+  retryOnIncompleteOutput?: boolean;
   schema: Record<string, unknown>;
   schemaName: string;
   system: string;
@@ -328,20 +340,25 @@ export async function createOpenAIStructuredResponse({
     );
   }
 
-  const initialMaxOutputTokens = Math.max(
-    config.maxOutputTokens,
-    MIN_STRUCTURED_OUTPUT_TOKENS
-  );
-  const effectiveMaxInputChars = Math.max(
-    config.maxInputChars,
-    Math.min(maxInputChars ?? config.maxInputChars, 120000)
-  );
+  const requestModel = model ?? config.extractionModel;
+  // An explicit maxOutputTokens is a HARD cap (bounded recovery lane): no
+  // minimum floor, and maxInputChars is honored as a hard input cap too.
+  const hardCaps = maxOutputTokens !== undefined;
+  const initialMaxOutputTokens =
+    maxOutputTokens ??
+    Math.max(config.maxOutputTokens, MIN_STRUCTURED_OUTPUT_TOKENS);
+  const effectiveMaxInputChars = hardCaps
+    ? Math.min(maxInputChars ?? config.maxInputChars, 120000)
+    : Math.max(
+        config.maxInputChars,
+        Math.min(maxInputChars ?? config.maxInputChars, 120000)
+      );
   const firstBody = await requestStructuredResponse({
     apiKey: config.apiKey,
     input,
     maxInputChars: effectiveMaxInputChars,
     maxOutputTokens: initialMaxOutputTokens,
-    model: config.extractionModel,
+    model: requestModel,
     schema,
     schemaName,
     system,
@@ -355,6 +372,7 @@ export async function createOpenAIStructuredResponse({
     parsed = parseStructuredResponseBody(firstBody);
   } catch (error) {
     if (
+      retryOnIncompleteOutput &&
       error instanceof OpenAIExtractionRequestError &&
       error.message.includes("incomplete structured response")
     ) {
@@ -367,7 +385,7 @@ export async function createOpenAIStructuredResponse({
         input,
         maxInputChars: effectiveMaxInputChars,
         maxOutputTokens: RETRY_STRUCTURED_OUTPUT_TOKENS,
-        model: config.extractionModel,
+        model: requestModel,
         schema,
         schemaName,
         system,
@@ -381,7 +399,7 @@ export async function createOpenAIStructuredResponse({
 
   return {
     json: parsed.json,
-    model: config.extractionModel,
+    model: requestModel,
     rawText: parsed.rawText,
     sources: getWebSearchSources(body),
     usage: body.usage ?? null,
