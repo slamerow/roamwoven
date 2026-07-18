@@ -118,13 +118,20 @@ export function createReviewQuestions({
       const requestedAnswerType = getAnswerType(
         getString(detail, "answerType")
       );
-      const answerType =
+      const coercedAnswerType =
         requestedAnswerType === "multi_select" ||
         ((requestedAnswerType === "choice" ||
           requestedAnswerType === "single_choice") &&
           answerOptions.length < 2)
           ? "text"
           : requestedAnswerType;
+      // A date-target question always gets a date control (RW-QUE-001;
+      // live-run 7.18.2 shipped trip/date questions with free-text inputs).
+      const targetFieldValue = getString(detail, "targetField") ?? "";
+      const answerType =
+        coercedAnswerType === "text" && /date/i.test(targetFieldValue)
+          ? "date"
+          : coercedAnswerType;
 
       const memberSnapshots = getArray(detail, "_canonicalMemberSnapshots")
         .flatMap((snapshot) => {

@@ -6780,17 +6780,6 @@ function assignCanonicalEvidenceDispositions({
         candidate.type === "superseded" &&
         candidate.observationIds.includes(observation.id)
     );
-    const mergedAway = Boolean(
-      !owner?.outputEligible &&
-      owners.some((piece) =>
-        piece.actions.some(
-          (candidate) =>
-            candidate.type === "rejected" &&
-            candidate.observationIds.includes(observation.id)
-        )
-      )
-    );
-
     observation.disposition = owner?.outputEligible
       ? {
           canonicalPieceId: owner.id,
@@ -6834,9 +6823,7 @@ function assignCanonicalEvidenceDispositions({
                 ? "source_context"
                 : rejected
                   ? "rejected"
-                  : mergedAway
-                    ? "superseded_or_duplicate"
-                    : "superseded_or_duplicate",
+                  : "superseded_or_duplicate",
         };
   }
 }
@@ -7154,6 +7141,13 @@ function unresolvedMissingDetails({
 
   return dedupeObjects(details).filter((value) => {
     const detail = asRecord(value);
+
+    // Internal-trace details are already marked dismissed by subject
+    // resolution; they pass through untouched (projection hides them).
+    if (stringValue(detail, "_canonicalReviewDisposition") === "dismissed") {
+      return true;
+    }
+
     const questionText = normalizeText(
       [detail.prompt, detail.reason].filter(Boolean).join(" ")
     );
@@ -7273,8 +7267,9 @@ function unresolvedMissingDetails({
     // maker's problem once assembly has the answer).
     if (
       (subjectType === "transport" || subjectType === "trip") &&
-      /(?:departuretime|arrivaltime|confirmation|time)/.test(targetField)
+      /(?:departuretime|arrivaltime|confirmation|time|date)/.test(targetField)
     ) {
+      const detailGuess = stringValue(detail, "guessedValue");
       const detailTokens = identityTokens(reviewDetailText(detail));
       const answeringRow = pieces.find((candidate) => {
         if (!candidate.outputEligible || candidate.kind !== "transport") {
@@ -7294,6 +7289,22 @@ function unresolvedMissingDetails({
         if (overlapCount(detailTokens, rowTokens) < 2) return false;
         if (/confirmation/.test(targetField)) {
           return Boolean(confirmationFrom(candidate.payload));
+        }
+        if (/date/.test(targetField)) {
+          // Wave-2.1 (live-run 7.18.2 PB-2): a transport date question is
+          // source-obvious when the matched final row already carries a firm
+          // date and the question proposes nothing different.
+          const rowDate = stringValue(candidate.payload, "date");
+          const provisional =
+            Array.isArray(candidate.payload._canonicalProvisionalFields) &&
+            (candidate.payload._canonicalProvisionalFields as unknown[]).includes(
+              "date"
+            );
+          return Boolean(
+            rowDate &&
+              !provisional &&
+              (!detailGuess || tripDatesMatch(detailGuess, rowDate))
+          );
         }
         if (/arrivaltime/.test(targetField)) {
           return Boolean(normalizedClockTime(candidate.payload.arrivalTime));
@@ -7406,9 +7417,6 @@ function unresolvedMissingDetails({
       piece.kind === "activity" &&
       !isGenericTitle(piece.payload.title)
     ) {
-      if (stringValue(detail, "_canonicalQuestionKind") === "alternative_slot") {
-        return true;
-      }
       return false;
     }
 
@@ -7472,7 +7480,12 @@ function unresolvedMissingDetails({
     }
 
     if (/(?:placement|date)/.test(targetField) && payload.date) {
-      return false;
+      // Guess-aware (Phase 2): a question proposing a DIFFERENT date than the
+      // bound piece is a genuine disagreement and must reach the maker.
+      const dateGuess = stringValue(detail, "guessedValue");
+      if (!dateGuess || tripDatesMatch(dateGuess, String(payload.date))) {
+        return false;
+      }
     }
 
     if (/(?:city|leg)/.test(targetField) && payload.city) {
@@ -7481,14 +7494,6 @@ function unresolvedMissingDetails({
 
     if (targetField === "address" && payload.address) {
       return false;
-    }
-
-    if (
-      stringValue(detail, "answerType") === "single_choice" &&
-      Array.isArray(detail.answerOptions) &&
-      detail.answerOptions.length >= 2
-    ) {
-      return true;
     }
 
     return true;
@@ -8036,11 +8041,194 @@ function canonicalReviewSemanticTarget(detail: Record<string, unknown>) {
   return normalizeText(String(detail.targetField ?? "general"));
 }
 
-export function canonicalizeCanonicalReviewDetails(
-  details: unknown[],
+// Maps a question's targetField to the canonical value the final piece
+// already carries (Phase 2 question gate, docs/code-audit-2026-07-18.md §C).
+function canonicalReviewFieldValue(
+  piece: CanonicalEvidencePiece,
+  targetField: string
+): { field: string; value: string } | null {
+  const payload = piece.payload;
+  const pick = (field: string, value: unknown) => {
+    const text = typeof value === "number" ? String(value) : stringValue(asRecord({ value }), "value");
+    return text ? { field, value: text } : null;
+  };
+
+  if (/checkin/.test(targetField)) {
+    return (
+      pick("checkIn", payload.checkIn) ??
+      pick("firstNightDate", payload.firstNightDate)
+    );
+  }
+  if (/checkout/.test(targetField)) return pick("checkOut", payload.checkOut);
+  if (/nights/.test(targetField)) return pick("nights", payload.nights);
+  if (/date|placement/.test(targetField)) {
+    return (
+      pick("date", payload.date) ??
+      pick("checkIn", payload.checkIn) ??
+      pick("departureDate", payload.departureDate)
+    );
+  }
+  if (/departuretime|starttime|^time$/.test(targetField)) {
+    return (
+      pick("departureTime", payload.departureTime) ??
+      pick("startTime", payload.startTime)
+    );
+  }
+  if (/arrivaltime|endtime/.test(targetField)) {
+    return (
+      pick("arrivalTime", payload.arrivalTime) ?? pick("endTime", payload.endTime)
+    );
+  }
+  if (/confirmation/.test(targetField)) {
+    const confirmation = confirmationFrom(payload);
+    return confirmation ? { field: "confirmation", value: confirmation } : null;
+  }
+  if (/address/.test(targetField)) return pick("address", payload.address);
+  if (/city/.test(targetField)) return pick("city", payload.city);
+  if (/name|title/.test(targetField)) {
+    return pick("name", payload.name) ?? pick("title", payload.title);
+  }
+  return null;
+}
+
+function reviewValuesMatch(field: string, guessed: string, finalValue: string) {
+  if (/date|checkin|checkout/i.test(field)) {
+    return tripDatesMatch(guessed, finalValue);
+  }
+  if (/time/i.test(field)) {
+    const left = normalizedClockTime(guessed);
+    const right = normalizedClockTime(finalValue);
+    return Boolean(left && right && left === right);
+  }
+  return normalizedComparable(guessed) === normalizedComparable(finalValue);
+}
+
+function resolveReviewPieceWithFold(
+  detail: Record<string, unknown>,
   pieces: CanonicalEvidencePiece[]
 ) {
-  const canonical: Record<string, unknown>[] = details.map((value) => {
+  const direct = pieceForMissingDetail(detail, pieces);
+  if (!direct) return null;
+  if (direct.outputEligible) return direct;
+  // Follow the fold chain: a question about a suppressed duplicate should
+  // reconcile against the surviving representative (audit gap C-12).
+  const representedBy = stringValue(direct.payload, "_representedByPieceId");
+  if (representedBy) {
+    const survivor = pieces.find(
+      (piece) => piece.id === representedBy && piece.outputEligible
+    );
+    if (survivor) return survivor;
+  }
+  return direct;
+}
+
+// Phase-2 final reconciliation gate: runs AFTER subject resolution and the
+// legacy filters, on FINAL canonical subjects and values. Every question
+// crosses one semantic gate before the maker sees it (RW-QA-001/RW-QUE-001;
+// live-run 7.18.2 PB-2: two false-conflict date questions shipped whose
+// guessedValue equaled the final canonical state).
+function applyFinalReviewReconciliation(
+  details: Record<string, unknown>[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
+  const outputPieces = pieces.filter((piece) => piece.outputEligible);
+
+  return details.filter((detail) => {
+    const disposition = stringValue(detail, "_canonicalReviewDisposition");
+
+    if (disposition === "dismissed") return true;
+
+    if (disposition === "call") {
+      // R7 — a call anchored to a piece that is no longer output is stale.
+      // Exception: source-update calls (RW-SRC-001) explain cancellations,
+      // so their subject is suppressed BY DESIGN.
+      const targetFieldForCall = normalizedComparable(detail.targetField);
+      if (targetFieldForCall !== "source update") {
+        const relatedId = stringValue(detail, "relatedCanonicalPieceId");
+        if (relatedId) {
+          const related = pieceById.get(relatedId);
+          if (related && !related.outputEligible) return false;
+        }
+      }
+      return true;
+    }
+
+    const targetField = normalizedComparable(detail.targetField).replace(
+      /\s+/g,
+      ""
+    );
+    const guessed = stringValue(detail, "guessedValue");
+    const piece = resolveReviewPieceWithFold(detail, pieces);
+
+    if (piece) {
+      const resolved = canonicalReviewFieldValue(piece, targetField);
+      if (resolved) {
+        const provisional =
+          Array.isArray(piece.payload._canonicalProvisionalFields) &&
+          (piece.payload._canonicalProvisionalFields as unknown[]).includes(
+            resolved.field
+          );
+        const conflicted = piece.conflicts.some(
+          (conflict) => conflict.requiresReview && conflict.field === resolved.field
+        );
+
+        if (!provisional && !conflicted) {
+          // R2 — the question's own suggested answer equals the final
+          // canonical state: resolve silently (RW-SRC-001 posture).
+          if (guessed && reviewValuesMatch(resolved.field, guessed, resolved.value)) {
+            return false;
+          }
+          // R1 — canon already holds a firm value for the asked field and
+          // the question proposes nothing different: nothing to decide.
+          if (
+            !guessed &&
+            /date|checkin|checkout|time|confirmation/.test(targetField)
+          ) {
+            return false;
+          }
+        }
+      }
+    }
+
+    // R2 without a piece binding (the 7.18.2 escape): a date question whose
+    // guessed date already sits on a token-matching final transport/stay row.
+    if (guessed && /date/.test(targetField)) {
+      const detailTokens = identityTokens(reviewDetailText(detail));
+      const answering = outputPieces.find((candidate) => {
+        if (candidate.kind !== "transport" && candidate.kind !== "stay") {
+          return false;
+        }
+        const candidateTokens = identityTokens(
+          [
+            candidate.payload.title,
+            candidate.payload.name,
+            candidate.payload.departure,
+            candidate.payload.arrival,
+            candidate.payload.city,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
+        if (overlapCount(detailTokens, candidateTokens) < 2) return false;
+        const candidateDate =
+          stringValue(candidate.payload, "date") ??
+          stringValue(candidate.payload, "checkIn");
+        return Boolean(candidateDate && tripDatesMatch(guessed, candidateDate));
+      });
+      if (answering) return false;
+    }
+
+    return true;
+  });
+}
+
+export function canonicalizeCanonicalReviewDetails(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[],
+  tripOverview: unknown = {}
+) {
+  const subjectResolved: Record<string, unknown>[] = details.map((value) => {
     const detail = asRecord(value);
     const piece = pieceForMissingDetail(detail, pieces);
     const reviewText = normalizeText(reviewDetailText(detail));
@@ -8069,6 +8257,16 @@ export function canonicalizeCanonicalReviewDetails(
         : detail.subjectType ?? "trip",
     };
   });
+  // Phase-2 ordering fix (audit finding A3): the legacy filters used to run
+  // BEFORE subject resolution, so a question whose subject was rewritten
+  // afterwards escaped every subject-keyed check. Filters now see FINAL
+  // subjects, then the reconciliation gate checks final values.
+  const filtered = unresolvedMissingDetails({
+    details: subjectResolved,
+    pieces,
+    tripOverview,
+  }) as Record<string, unknown>[];
+  const canonical = applyFinalReviewReconciliation(filtered, pieces);
   // Ticket/tour decision consolidation (defect docket 2026-07-17): one
   // source decision ("Need to decide which ticket") scattered into four
   // question variants across the castle, its sub-stops, and a parser meta
@@ -8112,7 +8310,15 @@ export function canonicalizeCanonicalReviewDetails(
       }
       const otherPiece = pieceById.get(otherId);
       if (!otherPiece) continue;
-      if (stringValue(otherPiece.payload, "date") !== rootDate) continue;
+      const otherDate = stringValue(otherPiece.payload, "date");
+      const sameVenue =
+        overlapCount(
+          identityTokens(stringValue(rootPiece.payload, "title") ?? ""),
+          identityTokens(stringValue(otherPiece.payload, "title") ?? "")
+        ) >= 2;
+      // An undated same-venue subject (live-run 7.18.2: the "Prague Castle"
+      // placeholder) folds into the dated root; otherwise dates must match.
+      if (otherDate ? otherDate !== rootDate : !sameVenue) continue;
       const rootIsContainer = SAME_SITE_CONTAINER_PATTERN.test(
         stringValue(rootPiece.payload, "title") ?? ""
       );
@@ -8120,7 +8326,7 @@ export function canonicalizeCanonicalReviewDetails(
         stringValue(otherPiece.payload, "title") ?? ""
       );
       if (!rootIsContainer && otherIsContainer) continue; // handled from the other side
-      const keepId = rootIsContainer ? rootId : rootId;
+      const keepId = rootId; // container preference: the non-container side was skipped above
       const foldId = otherId;
       ticketRoots.set(keepId, [
         ...(ticketRoots.get(keepId) ?? []),
@@ -8520,22 +8726,19 @@ export function clusterExtractedEvidence({
     tripOverview,
   });
   const finalMissingDetails = canonicalizeCanonicalReviewDetails(
-    unresolvedMissingDetails({
-      details: [
-        ...canonicalGroupingCalls,
-        ...canonicalDuplicateFoldCalls,
-        ...canonicalSourceUpdateCalls,
-        ...canonicalConflictQuestions,
-        ...canonicalOwnedQuestions,
-        ...researchedListQuestions,
-        ...dayLabelSlotQuestions,
-        ...canonicalSpineQuestions,
-        ...missingDetails,
-      ],
-      pieces,
-      tripOverview,
-    }),
-    pieces
+    [
+      ...canonicalGroupingCalls,
+      ...canonicalDuplicateFoldCalls,
+      ...canonicalSourceUpdateCalls,
+      ...canonicalConflictQuestions,
+      ...canonicalOwnedQuestions,
+      ...researchedListQuestions,
+      ...dayLabelSlotQuestions,
+      ...canonicalSpineQuestions,
+      ...missingDetails,
+    ],
+    pieces,
+    tripOverview
   );
   assignCanonicalEvidenceDispositions({ observations, pieces });
   const draft = {
