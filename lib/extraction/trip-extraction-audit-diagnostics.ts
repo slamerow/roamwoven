@@ -37,6 +37,7 @@ import {
   type DraftActivityCardInput,
 } from "@/lib/trip-card-taxonomy";
 import { SAME_SITE_CONTAINER_PATTERN } from "@/lib/extraction/evidence-clustering";
+import { findIdentityProseSignals } from "@/lib/extraction/identity-prose";
 import {
   isHeadingFragmentTitle,
   tripCityTokenSet,
@@ -745,6 +746,45 @@ export function createAuditDiagnostics({
         .map((record) => `${record.date ?? "undated"} - ${record.title}`),
       severity: "p1",
       title: "Transport cards include non-transport details",
+    });
+  }
+
+  // Identity-leak P0 (RW-PRI-001 / RW-AUD-001, live-run 7.18.3 PB-1): no
+  // detector previously scanned PUBLIC card prose for identity-shaped
+  // values, and the QA bundle's redaction markers made the run LOOK clean
+  // to the auditor. This detector runs on the UNREDACTED structured
+  // records — the same prose travelers see — and imports the exact
+  // predicates the pipeline scrub uses (identity-prose.ts), so scrub and
+  // detector can never drift (B4). Evidence names the signal shape, never
+  // the value itself, so the diagnostic is safe in redacted bundles.
+  const identityLeakItems = records.items
+    .filter((item) => item.status !== "ignored")
+    .map((item) => {
+      const prose = [item.title, item.description, item.summary, item.address, item.locationName]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join(" ");
+      return { item, signals: findIdentityProseSignals(prose) };
+    })
+    .filter((entry) => entry.signals.length > 0);
+
+  if (identityLeakItems.length > 0) {
+    const leakedRecordIds = new Set(identityLeakItems.map((entry) => entry.item.id));
+    diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) => leakedRecordIds.has(record.id))
+      ),
+      code: "identity_value_in_public_prose",
+      detail:
+        "Public activity or note prose carries identity-shaped values (a role-labelled traveler name, a postal home address, a phone number, or an email). Personal identity data is not trip content at all (RW-PRI-001): the output-boundary scrub should have removed it before projection.",
+      evidence: identityLeakItems
+        .slice(0, 10)
+        .map(
+          (entry) =>
+            `${entry.item.date ?? "undated"} - ${entry.item.title} [${entry.signals.join(", ")}]`
+        ),
+      severity: "p0",
+      title: "Identity-shaped values shipped in public card prose",
     });
   }
 

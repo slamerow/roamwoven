@@ -388,6 +388,54 @@ export default async function run() {
     );
   });
 
+  await test("an activity-shaped ticket-page card (Skip the Line, quantity/price/ticket number) demotes to accessory evidence", () => {
+    const result = normalizeParserStageArtifacts([
+      stage("prague-castle-ticket.pdf", emptyStage({
+        activities: [
+          {
+            category: "sightseeing",
+            date: "2019-01-15",
+            description: "1 x 380.00 K\u010d, ticket number 19183727.",
+            itemType: "activity",
+            title: "Skip the Line ticket",
+          },
+        ],
+      })),
+    ]);
+    const activities = firstStage(result).activities;
+
+    assert.equal(activities[0].evidenceRole, "accessory_detail");
+    assert.equal(
+      result.repairs.filter((repair) => repair.kind === "ticket_page_activity")
+        .length,
+      1
+    );
+  });
+
+  await test("a ticket-titled card naming a real venue keeps its activity role", () => {
+    const result = normalizeParserStageArtifacts([
+      stage("day-plan.pdf", emptyStage({
+        activities: [
+          {
+            category: "sightseeing",
+            date: "2019-01-15",
+            description: "Buy the circuit B ticket at the gate, 1 x 250 CZK.",
+            itemType: "activity",
+            title: "Prague Castle ticket",
+          },
+        ],
+      })),
+    ]);
+    const activities = firstStage(result).activities;
+
+    assert.notEqual(activities[0].evidenceRole, "accessory_detail");
+    assert.equal(
+      result.repairs.filter((repair) => repair.kind === "ticket_page_activity")
+        .length,
+      0
+    );
+  });
+
   await test("integration: normalized artifacts never surface as traveler cards through clustering", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],

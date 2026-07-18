@@ -132,6 +132,7 @@ export type TripExtractionAuditDiagnostic = {
     | "critical_transport_source_anchor_missing_details"
     | "critical_transport_source_anchor_missing_soft_details"
     | "day_section_source_line_unextracted"
+    | "identity_value_in_public_prose"
     | "transport_times_disagree_with_source_anchor"
     | "day_overview_activity_survived"
     | "duplicate_same_venue_activity"

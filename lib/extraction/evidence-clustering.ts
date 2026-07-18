@@ -25,6 +25,7 @@ import {
   classifyMergeEligibility,
   type MergeWinnerCard,
 } from "@/lib/extraction/entity-winner";
+import { segmentCarriesIdentityValues } from "@/lib/extraction/identity-prose";
 import {
   classifyDraftActivityCard,
 } from "@/lib/trip-card-taxonomy";
@@ -2311,6 +2312,29 @@ function attachRentalCarReturns(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
+// Transport-shaped text: the movement-word gate plus the airline flight-code
+// shape. Live-run 7.18.3 PB-1(b): "Ryanair FR8331 to Prague" carries no
+// movement word at all, so the word-only gate never entered the shadow
+// branch and the duplicate activity shipped WITH its confirmation code in
+// public prose. A carrier-prefix flight code (two uppercase letters plus a
+// 3-4 digit number) is transport shape on its own; so is sharing a
+// confirmation code with any canonical transport segment.
+const TRANSPORT_SHAPE_WORD_PATTERN = /\b(?:flight|fly|train|bus|ferry|transfer)\b/;
+const FLIGHT_CODE_PATTERN = /\b[A-Z]{2} ?\d{3,4}\b/;
+
+function rawActivityTransportText(record: Record<string, unknown>) {
+  return [record.title, record.description]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+function isTransportShapedActivityPayload(record: Record<string, unknown>) {
+  return (
+    TRANSPORT_SHAPE_WORD_PATTERN.test(activityText(record)) ||
+    FLIGHT_CODE_PATTERN.test(rawActivityTransportText(record))
+  );
+}
+
 function suppressRepresentedTravelAndStayActivities(
   pieces: CanonicalEvidencePiece[]
 ) {
@@ -2326,8 +2350,19 @@ function suppressRepresentedTravelAndStayActivities(
 
   for (const activity of activities) {
     const text = activityText(activity.payload);
+    const activityConfirmationForGate = confirmationFrom(activity.payload);
+    const sharesTransportConfirmation = Boolean(
+      activityConfirmationForGate &&
+        transports.some(
+          (transport) =>
+            confirmationFrom(transport.payload) === activityConfirmationForGate
+        )
+    );
 
-    if (/\b(?:flight|fly|train|bus|ferry|transfer)\b/.test(text)) {
+    if (
+      isTransportShapedActivityPayload(activity.payload) ||
+      sharesTransportConfirmation
+    ) {
       const movementKind = /\b(?:flight|fly)\b/.test(text)
         ? "flight"
         : /\btrain\b/.test(text)
@@ -3385,6 +3420,15 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
 const CREDENTIAL_SENTENCE_PATTERN =
   /\b(?:wi-?fi(?:\s+(?:password|network|name))?\s*:|wi-?fi\s+password|password\s*:|door\s+code|access\s+code|entry\s+code|lock\s*box(?:\s+code)?|buzzer(?:\s+number)?|(?:^|\s)code\s+[A-Z0-9]{6,})/i;
 
+// Inter-city travel booking identifiers are protected class (RW-PRI-001
+// Δ2 scope) even when they ride on an ACTIVITY-shaped card: a transport
+// shadow that survives every suppression pass (live-run 7.18.3 PB-1(b):
+// "Ryanair FR8331 to Prague" as a Jan 14 activity) must still not ship its
+// confirmation code in public prose. Activity/tour/restaurant booking
+// references on NON-transport-shaped cards stay public.
+const TRAVEL_CONFIRMATION_SENTENCE_PATTERN =
+  /\b(?:confirmation(?:\s+(?:code|number))?|booking\s+(?:code|number|reference)|reservation\s+(?:code|number)|ticket\s*code|travel\s+code|pnr)\b\s*[:#]?\s*[A-Za-z0-9]/i;
+
 function collectProtectedValueDenyList(pieces: CanonicalEvidencePiece[]) {
   const values: string[] = [];
   const push = (value: unknown) => {
@@ -3451,6 +3495,32 @@ function scrubProtectedValuesFromPublicProse(pieces: CanonicalEvidencePiece[]) {
     if (!piece.outputEligible) continue;
     if (piece.kind !== "activity" && piece.kind !== "note") continue;
     let scrubbed = false;
+    const transportShaped =
+      piece.kind === "activity" &&
+      isTransportShapedActivityPayload(piece.payload);
+    if (transportShaped) {
+      for (const field of ["confirmation", "confirmationLabel", "bookingReference"]) {
+        if (stringValue(piece.payload, field)) {
+          piece.payload[field] = null;
+          scrubbed = true;
+        }
+      }
+      const description = stringValue(piece.payload, "description");
+      if (description) {
+        const kept = description
+          .split(PROSE_SEGMENT_SPLIT)
+          .filter(
+            (segment) => !TRAVEL_CONFIRMATION_SENTENCE_PATTERN.test(segment)
+          )
+          .join(" ")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+        if (kept !== description) {
+          piece.payload.description = kept || null;
+          scrubbed = true;
+        }
+      }
+    }
     for (const field of ["description", "title", "address", "locationName", "location"]) {
       const value = stringValue(piece.payload, field);
       if (!value) continue;
@@ -3767,8 +3837,13 @@ function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
 // deliberately NOT stripped here — under the 2026-07-17 privacy scope,
 // activity booking references are public; personal identity data is not trip
 // content at all.
-const CARD_IDENTITY_SENTENCE_PATTERN =
-  /\b(?:customer|renter|driver|passenger|lead (?:traveler|guest))\s*:|\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b|(?:\+?\d[\d\s().-]{8,}\d)\s*$|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/i;
+//
+// Live-run 7.18.3 PB-1: the private pattern here required "Customer:" WITH a
+// colon, so the colon-less "Customer Eli kamerow. 1225 Harvard street nw,
+// 20009 Washington, USA." block shipped verbatim (phrasing evasion, not an
+// ordering defect — this pass runs after every merge). The identity shapes
+// now live in lib/extraction/identity-prose.ts, shared with the audit's
+// identity-leak P0 detector so scrub and detector can never drift (B4).
 
 
 // Sentence segmentation that never splits after a title abbreviation:
@@ -3789,7 +3864,7 @@ function sanitizeCanonicalCardDescription(value: string | null) {
   const keptTokenSets: Array<Set<string>> = [];
 
   for (const segment of segments) {
-    if (CARD_IDENTITY_SENTENCE_PATTERN.test(segment)) continue;
+    if (segmentCarriesIdentityValues(segment)) continue;
     const normalized = normalizeText(segment).replace(/[^a-z0-9 ]/g, "");
     if (normalized && seen.has(normalized)) continue;
     const tokens = new Set(normalized.split(" ").filter(Boolean));
@@ -8924,6 +8999,12 @@ export function clusterExtractedEvidence({
     tripYear,
   });
   assignProvisionalActivityDates({ observations, pieces });
+  // Second shadow-suppression pass now that structural + provisional dates
+  // are final (audit A11: the first pass runs before dates resolve, so a
+  // transport shadow whose date was assigned late — the 7.18.3 FR8331
+  // Jan 14 duplicate — was invisible to same-date matching). The pass only
+  // suppresses represented duplicates, so re-running it is safe.
+  suppressRepresentedTravelAndStayActivities(pieces);
   absorbLocationFragmentCards(pieces);
   collapseSlotCollisions(pieces);
   collapseAlternativeSlotCards(pieces);

@@ -554,10 +554,39 @@ function repairSplitDisjunctions(
 // --- Rule 6: ticket-page re-emission ----------------------------------------
 
 const TICKET_PAGE_SOURCE_PATTERN =
-  /\b(?:ticketcode|e-?ticket|booking\s+(?:number|code|reference)|travel\s+code|reservation\s+(?:number|code))\b/i;
+  /\b(?:ticketcode|e-?ticket|booking\s+(?:number|code|reference)|travel\s+code|reservation\s+(?:number|code)|tickets?\s+(?:number|no\.?|#))\b/i;
 const TICKET_COPY_TEXT_PATTERN =
-  /\b(?:ticketcode|booking\s+(?:number|code|reference)|travel\s+code|reservation\s+(?:number|code))\b/i;
+  /\b(?:ticketcode|booking\s+(?:number|code|reference)|travel\s+code|reservation\s+(?:number|code)|tickets?\s+(?:number|no\.?|#)\s*:?\s*\d{4,})\b/i;
 const TRANSPORT_TITLE_PATTERN = /\b(?:flight|train|bus|ferry)\b/i;
+
+// The ACTIVITY-shaped ticket-page family (live-run 7.18.3 PB-1(c): "Skip
+// the Line ticket, 1 x 380.00 Kč, ticket number 19183727" shipped as a
+// Jan 15 activity — the run5 docket marked this family "uncovered"). A card
+// whose title is pure ticket vocabulary and whose text is quantity/price/
+// ticket-number boilerplate is a ticket page re-emission, never a planned
+// stop. A ticket-titled card naming a real venue ("Prague Castle ticket")
+// keeps its distinctive tokens and stays untouched.
+const TICKET_TITLE_VOCABULARY = new Set([
+  "a", "admission", "adult", "child", "concession", "day", "e-ticket",
+  "entry", "eticket", "fast", "line", "one", "pass", "priority", "senior",
+  "skip", "skip-the-line", "student", "the", "ticket", "tickets", "track",
+  "x",
+]);
+const TICKET_QUANTITY_PATTERN =
+  /\b\d+\s*x\s*\d+(?:[.,]\d{2})?|\btickets?\s*(?:number|no\.?|#)\s*:?\s*\d{4,}/i;
+
+function isTicketVocabularyTitle(title: string) {
+  const tokens = title
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return false;
+  }
+  return tokens.every(
+    (token) => TICKET_TITLE_VOCABULARY.has(token) || /^\d+$/.test(token)
+  );
+}
 
 function repairTicketPageActivity(
   activity: Record<string, unknown>,
@@ -576,17 +605,29 @@ function repairTicketPageActivity(
     stage.sourceText && TICKET_PAGE_SOURCE_PATTERN.test(stage.sourceText)
   );
 
-  if (sectionType !== "booking_detail" && !ticketPageSource) {
-    return;
-  }
+  const transportTicketCopy =
+    (sectionType === "booking_detail" || ticketPageSource) &&
+    TRANSPORT_TITLE_PATTERN.test(title) &&
+    TICKET_COPY_TEXT_PATTERN.test(text);
 
-  if (!TRANSPORT_TITLE_PATTERN.test(title) || !TICKET_COPY_TEXT_PATTERN.test(text)) {
+  // Activity-shaped branch: an all-ticket-vocabulary title plus explicit
+  // quantity-x-price or ticket-number boilerplate is self-evident ticket
+  // copy even without a booking_detail section tag.
+  const activityTicketCopy =
+    isTicketVocabularyTitle(title) &&
+    (TICKET_QUANTITY_PATTERN.test(text) ||
+      ((sectionType === "booking_detail" || ticketPageSource) &&
+        TICKET_COPY_TEXT_PATTERN.test(text)));
+
+  if (!transportTicketCopy && !activityTicketCopy) {
     return;
   }
 
   activity.evidenceRole = "accessory_detail";
   repairs.push({
-    detail: `Transport-titled card carrying booking/ticket codes from a ticket page is booking evidence for the transport record, never a new dated activity (live-run 7.18.0: RegioJet and ÖBB tickets re-emitted as Jan 24 cards).`,
+    detail: transportTicketCopy
+      ? `Transport-titled card carrying booking/ticket codes from a ticket page is booking evidence for the transport record, never a new dated activity (live-run 7.18.0: RegioJet and ÖBB tickets re-emitted as Jan 24 cards).`
+      : `Ticket-vocabulary card carrying quantity/price/ticket-number boilerplate is a ticket-page re-emission, never a new dated activity (live-run 7.18.3 PB-1(c): "Skip the Line ticket, 1 x 380.00 Kč, ticket number 19183727" shipped as a Jan 15 activity).`,
     kind: "ticket_page_activity",
     stageLabel: stage.label,
     title,

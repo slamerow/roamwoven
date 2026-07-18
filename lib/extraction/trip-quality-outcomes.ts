@@ -47,6 +47,7 @@ function diagnosticClassification(
     case "critical_transport_not_travel_row":
     case "day_overview_activity_survived":
     case "duplicate_same_venue_activity":
+    case "identity_value_in_public_prose":
     case "loose_tip_promoted_to_activity":
     case "planned_activity_buried_in_city_notes":
     case "transport_description_contaminated":
