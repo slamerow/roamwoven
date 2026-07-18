@@ -6,6 +6,64 @@
 
 ## Current State
 
+### 2026-07-18 — 7.18.3 audited (Arc A validation): recovery lane works, privacy P0 resurfaced, classification is now THE bottleneck (same cloud session)
+
+Read first: `docs/product-contracts.md` (ledger v15),
+`docs/assembly-defect-docket-2026-07-18-run6.md` (the 7.18.3 audit — blind
+audit + Eli's blind pass reconciled, audit-gap entries, Arc B order).
+
+- Live run 7.18.3 (trip `3cf92459-edf5-4a7c-a285-246d286b62cc`, ran on
+  290df39; bundle `run-7.18.3-qa-bundle.json` sha256 `ffc0d28c…9bb9`, in
+  Eli's Downloads — move to repo root, gitignored). BLIND-FIRST audit
+  protocol (keep it): Claude audited cold, Eli's blind list diffed after —
+  Eli caught the P0 privacy leak, corrupted provider FIELDS, and the full
+  Jan-21 idea-list promotion; each miss is an RW-AUD-001 audit-gap entry in
+  the run6 docket.
+- HEADLINES: RW-EVD-001 recovery lane WORKED end-to-end first live firing
+  (60 lines batched, 53 recovered, separate usage, fail-soft) and coverage
+  noise fell 121→9 — but per-line cross-stage matching MASKED koscom and
+  Szechenyi (multi-entity lines; PB-3, must fix before 7.18.4). P0 PRIVACY
+  RESURFACED: rental-car card ships name+home address+phone in prose (the
+  7.17.2 defect back — scrub did not fire), Ryanair FR8331 duplicate
+  activity carries its confirmation code, Skip-the-Line ticket-page
+  activity carries a ticket number; NO audit detector covers identity-
+  shaped values in prose (gap). Schönbrunn died via a NEW chain
+  (site↔component fusion + title-containment after title drift — the
+  heading-fragment kill itself is dead ✓). Castle hedge-demoted on
+  ABSORBED sibling text. Jan 21 idea list promoted to 8 cards (A-6
+  verbatim). Providers corrupted in the provider FIELD ("PM Delta",
+  "Home Delta", "Za Wizz Air", "D 143"). 0 wrong groups (run5 calibration
+  held) but 0 groups at all. 3 questions, 0 bogus dates (Phase 2 held).
+  5 stays / 8 transport / 0 false P0 (4th run) / counts unified (84+8=92).
+- CEO decisions (Eli, this session): privacy P0 fixes ship INSIDE the Arc
+  B push, FIRST in commit order (no separate hotfix run); stronger-model
+  chunk A/B HELD unless 7.18.4 still shows parser-drop dominance;
+  blind-first audit protocol is standing; train-code sighting declassified
+  (protected fields on their designed maker transport surface, not a
+  leak). Extraction pinning moves to IMMEDIATELY after 7.18.4 validates —
+  parser variance is a first-order drag (koscom dropped 5 straight runs, a
+  materially different parse per run).
+- IMMEDIATE NEXT STEP — ARC B SESSION (fresh session, one push, one
+  extraction "7.18.4"), commit order per the run6 docket §Arc B order:
+  (1) privacy wave (P0): identity-scrub trace+fix, travel-confirmation
+  scrub + FR8331 shadow suppression, ticket-page ACTIVITY family, NEW
+  identity-leak P0 detector, unredacted-prose audit procedure;
+  (2) PB-3 per-clause coverage matching (recovery trigger integrity);
+  (3) unified classifier (CEO-approved centerpiece) — acceptance
+  criteria: Jan-21/A-6 idea list demoted, site↔component never merges,
+  doubt demotion on OWN text only, explicit-commitment-only repeat
+  survival (kills Pinball per RW-CAN-001 supersession), "if you want"
+  hedges, recovered-line classification; (4) geocoding verification lane
+  (standing decision); (5) riders: provider-field repairs, recovery date
+  bounds, St. Stephen's cross-day fold, cost-note demotion, baths slot
+  override, collision auto-suppression. Fixtures from 7.18.3 lineage
+  shapes in the same commits. 7.18.4 validation floor (Eli's ship bar):
+  castle + Schönbrunn CORRECT (survive AND group), zero wrong groups,
+  zero identity/booking values in public prose, idea lists stay notes,
+  question mix sane, wave wins hold. Then: extraction pinning (own push,
+  Supabase SQL BEFORE deploy) → generalization round (5-10 diverse
+  itineraries, answer-key-lite) → Phases 3-4.
+
 ### 2026-07-18 — ARC A IMPLEMENTED: recovery call + Phase 1 predicates/winner ladder + geo calibration + cron hardening (Claude/Cowork cloud session)
 
 Read first: `docs/product-contracts.md` (ledger v15),
