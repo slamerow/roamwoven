@@ -6,6 +6,75 @@
 
 ## Current State
 
+### 2026-07-18 — Handoff for the NEXT ARC: recovery call + Phase 1 + geocoding (fresh session)
+
+Read first: `docs/product-contracts.md` (ledger v14),
+`docs/code-audit-2026-07-18.md` (audit + phased plan; Phases 0+2 are DONE),
+`docs/assembly-defect-docket-2026-07-18-run5.md` (7.18.2 defects still open).
+
+CEO decisions recorded this session (Eli, end of session):
+- GEOCODING LANE: build NOW, in this arc — stop waiting on model-emitted
+  coordinates (4 runs of failure). Real geocoding lookup behind an env key,
+  hard per-trip budget, fail-soft, results attached as VERIFIED coords with
+  provenance, used ONLY to verify grouping proximity (RW-EVD-001: lookups
+  never change intent/date/city). V1: no new DB table — results ride in the
+  run's usage JSON (no Supabase SQL, no deploy sequencing trap); durable
+  caching is a later additive migration alongside pinning.
+- NO BESPOKE BACKSTOPS (A-6): rejected the shape-based demotion backstop as
+  un-scalable. The fix is Phase 1's UNIFIED classifier: ONE
+  activity-vs-city-note / commitment module (source structure + list shape
+  + commitment language, never venue knowledge) that the parser-output
+  layer, demotion rules, and audit detectors all import — replacing the 4
+  divergent implementations the audit found (B1/B4/1.5). A-6 (gypsy music /
+  Konyv Bar / Children's train promotions) is an ACCEPTANCE CRITERION of
+  that module, not a special case.
+- Ship-bar grouping floor: source-authored groups (castle, Schönbrunn) must
+  be correct with honest calls and NOTHING may group wrongly; the Lesser
+  Town discovered walk forms when verified coordinates support it (which
+  the geocoding lane should now make reliable).
+- Generalization round (the queued 5-10 diverse itineraries + friends'
+  docs, answer-key-lite) is scheduled RIGHT AFTER this arc's validation
+  run — it is the unified classifier's real exam, not the Czech PDF.
+
+THE ARC (one push at the end, then ONE fresh extraction):
+1. RW-EVD-001 bounded recovery call: coverage diagnostic's uncovered
+   day-section lines -> ONE excerpt-only batched re-ask (hard input/output
+   caps, separate usage recording, never retries itself, one per build);
+   recovered observations enter assembly as a normal late stage; on failure
+   the draft survives and at most one precise maker question per RW-EVD-001.
+   Model = extraction model, env-overridable (OPENAI_RECOVERY_MODEL).
+2. Phase 1 shared predicates (audit §E): one text-normalization module, one
+   day-heading detector, one date/time/price set, ONE sameEntity/winner
+   module (booking > named-venue tokens > commitment > specificity >
+   length; overview/day-arc/heading-fragment cards INELIGIBLE to win any
+   merge — the Schönbrunn killer), audit detectors import pipeline
+   predicates. Includes run5 geo calibration: real-site containers only
+   (no "quick look" cards), timed stops never join, walk members must match
+   the area label, model coords below precision are ineligible for the
+   300 m rule (verified geocoded coords are preferred when present).
+3. Unified classifier (see CEO decision above) with fixtures for BOTH
+   directions (real plans survive; recommendation runs demote) drawn from
+   all four QA bundles, not just the key.
+4. Geocoding verification lane (see CEO decision above).
+5. Cheap cron hardening promised to Eli: timing-safe CRON_SECRET compare +
+   log rejected attempts (app/api/cron/cleanup-unpaid-materials/route.ts).
+Then: Eli pushes, ONE fresh extraction ("7.18.3"), audit against ground
+truth v2 + Δ2 + the run5 wave-2.1 targets + Eli's ship-bar floor. After
+validation: generalization round, then Phases 3-4 + extraction pinning
+(Supabase SQL before deploy).
+
+Status of this session's work: Phases 0+2 committed (b0818af, ad01d85,
+131d774) and PUSHED by Eli; CRON_SECRET configured in Vercel Production and
+redeployed — the nightly cleanup cron is live pending its first 3 AM run
+(check function logs for unpaid_starter_material_cleanup_completed).
+Suite at HEAD: 46 test files green, typecheck + build clean.
+Open small items carried forward: coverage-diagnostic calibration (cross-
+stage corpus, boilerplate/page-marker exclusion, full uncovered list in the
+QA bundle, geo fields in bundle lineage), Rome-note stay-fragment scrub
+(run5 PB-1), baths day-title slot override (PB-6), collision
+auto-suppression (PB-7 — 4 runs), Old Town Square absorption, Pinball
+duplicate. These fold into Phase 1 or ride with Phase 3.
+
 ### 2026-07-18 — Remediation Phases 0+2 implemented (same session)
 
 Read first: `docs/product-contracts.md` (ledger v14),
