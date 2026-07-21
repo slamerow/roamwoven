@@ -6,6 +6,48 @@
 
 ## Current State
 
+### 2026-07-22 — ARC D + A/B DAY (read the WHOLE entry before touching anything; costly day, discipline rules born from it)
+
+Read first: AGENTS.md §Operating discipline (BINDING), docs/assembly-defect-docket-2026-07-21-run8.md, ledger v17.
+
+- REPO at f1b8ab1: Arc D complete (restore-filter P0 fix, question-gate v2
+  extensions incl accessCode/cut-off families, twin transport-row fold,
+  geocode walk-pool ranking, evidence-in-lineage, junk-card families,
+  maxDuration 800, AGENTS.md discipline). All pushed. Suite 53 green.
+- A/B VERDICT: gpt-5.6-luna LOSES (run 7.22.3 trip 6119a50e: 6 legs, 0
+  groups, undated records, zero evidence compliance). Pipeline is
+  SHAPE-CALIBRATED to gpt-5.4-mini — model changes are migrations (see
+  AGENTS.md). Env is back on mini. Also learned: OCR env fragile
+  (OPENAI_OCR_MODEL must be unset or gpt-5.6-luna); two runs died at the
+  300s cap before maxDuration 800 shipped; deploys invalidate open tabs.
+- LATEST MINI RUN 7.22.4 (trip 59ccd1e3, bundle NOT saved to repo — refetch
+  via /data/audit/qa-bundle?includePrivate=1 if needed): FLOOR FAIL — 0
+  calls/groups. ROOT CAUSE FOUND in lineage: the repeated-but-never-
+  committed fold rule suppressed Schoenbrunn Palace + components (and
+  likely the castle) because the PDF lists sights twice (day plan + notes
+  blob) and THIS parse gave copies no times/dates. Privacy clean, legs 5,
+  but transport only 6 rows, Jan-21 empty, new which-day questions from
+  undated records. 4 mini runs = 4 materially different parses.
+- NEXT ARC (paper-plan first, then ONE push, ONE run):
+  1. Repeat-fold day-plan guard: a copy inside a dated day section is a
+     PLAN copy; only notes-blob copies are reference copies; never fold a
+     day-plan copy because its summary twin is uncommitted (Schoenbrunn
+     killer, surgical).
+  2. Evidence retention is provably dead (mini nulls the schema-required
+     field; 0 evidence in run 7.22.4 lineage). Fix WITHOUT model
+     cooperation: deterministically inject verbatim source lines into
+     evidence by line-matching at intake, or validation-retry chunks.
+  3. EXTRACTION PINNING (CEO-queued, now urgent): persist + reuse parses,
+     temperature/seed control. Variance is THE product risk.
+  4. Perf: parallelize chunk calls (~5 wide) + geocode lookups (8 wide) —
+     Arc C/D made runs 50-100% slower (evidence tokens, 50 lookups,
+     recovery 120); parallelization beats old baseline. One commit.
+- Eli is (rightly) frustrated after 5 broken runs today. Bring receipts,
+  state confidence + cost-if-wrong + rollback on every live recommendation,
+  and stop after two uninformative failures. Bundles on disk: run-7.21.0,
+  run-7.21.1a/b (repo root).
+
+
 ### 2026-07-21 — ARC C IMPLEMENTED: run7 audit + grouping/classifier/notes/transport/question fixes + parser evidence retention (Claude/Cowork cloud session)
 
 Read first: `docs/product-contracts.md` (ledger v17),
