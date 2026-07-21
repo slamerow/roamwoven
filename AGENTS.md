@@ -59,3 +59,37 @@ For customer-visible or product-sensitive behavior, provide Assumptions before
 code and wait for explicit approval when an `OPEN` decision materially changes
 the experience. Technical implementation choices that preserve all locked
 contracts do not require reopening those decisions.
+
+## Operating discipline (added 2026-07-22 after a costly day — binding on every session)
+
+Derived from real failures: a model swap that broke every downstream
+calibration, a predictable timeout that was not arithmetic-checked, an env
+cleanup that silently broke OCR, and two wasted runs on a stale deployment.
+
+1. MODEL/INFRA CHANGES ARE MIGRATIONS, NOT SETTINGS. Changing any model
+   (extraction, OCR, recovery), prompt contract, or runtime limit requires,
+   BEFORE the live run: (a) the arithmetic — expected latency × call count
+   vs maxDuration, with ≥40% headroom; (b) a written list of expected
+   failure modes and what each costs; (c) a single-chunk smoke test of the
+   new model's output SHAPE against current fixtures where feasible;
+   (d) exactly one variable changed per run. The pipeline is
+   SHAPE-CALIBRATED to the current extraction model — prompts, artifact
+   families, classifier vocabulary, and fixtures encode its idiosyncrasies.
+   "Fixture-green" is necessary, never sufficient, across models.
+2. ENV-VAR SURGERY PROTOCOL. Before touching hosted env vars: inventory
+   every variable name + scope and record it in the session notes. Change
+   one variable at a time. Verification is run telemetry (the model/values
+   the run actually used), never the console UI. Every change states its
+   undo in the same breath.
+3. PRE-FLIGHT BEFORE EVERY LIVE RUN: deploy green, fresh browser tab
+   (deploys invalidate open tabs), env verified from the PREVIOUS run's
+   telemetry, duration headroom re-checked if anything got slower.
+4. PREDICTION DISCIPLINE. Recommendations that touch live systems carry an
+   explicit confidence level, the cost if wrong, and the rollback. "I
+   expect X" without those three is not advice.
+5. RUN BUDGET. State the expected number of live runs before starting an
+   arc. Two consecutive runs that fail without producing NEW information
+   is a hard stop: re-plan on paper before spending a third.
+6. OPS INSTRUCTIONS ARE CODE. Steps a human executes in a console get the
+   same rigor as a commit: numbered, with a verification step and an undo
+   step, and an "inventory first" rule when state is unknown.
