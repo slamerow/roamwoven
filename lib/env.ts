@@ -98,7 +98,10 @@ export function getOpenAIConfig() {
     ),
     recoveryMaxLines: getOptionalPositiveInteger(
       "OPENAI_RECOVERY_MAX_LINES",
-      60
+      // Live-run 7.21.0: the 60-line cap dropped 27 candidate lines (up
+      // from 2 in 7.18.3) and became the main content-loss driver (run7
+      // PC-7). Env-tunable in Vercel.
+      120
     ),
   };
 }

@@ -34,6 +34,12 @@ export type SourceCoverageStageReport = {
   uncoveredLines: SourceCoverageUncoveredLine[];
 };
 
+export type SourceCoverageWeakCreditLine = {
+  clauses: string[];
+  excerpt: string;
+  label: string;
+};
+
 export type SourceCoverageSummary = {
   // Lines whose tokens another stage's output covers (the spine, or a
   // different chunk) — cross-stage content, not a drop (run5 calibration:
@@ -44,6 +50,12 @@ export type SourceCoverageSummary = {
   meaningfulLineCount: number;
   stages: SourceCoverageStageReport[];
   uncoveredLineCount: number;
+  // Lines whose coverage credit comes ONLY from note/context-role output
+  // (live-run 7.21.0, run7 PC-6: "go to koscom" counted covered because the
+  // koscom token sat inside a city-note candidate's prose — which assembly
+  // later stripped; koscom shipped nowhere and was unflagged for the 7th
+  // run). Weak credit is not a drop, but it is the audit's tripwire.
+  weakCreditLines: SourceCoverageWeakCreditLine[];
   version: 3;
 };
 
@@ -186,6 +198,49 @@ export function stageOutputTokenSet(stage: unknown) {
   return tokens;
 }
 
+// ANCHOR tokens: output that becomes (or supports) real traveler records —
+// activities that are not note/context candidates, plus stays, transport,
+// and places. Credit that exists ONLY outside this set (note prose, context
+// sightings) is weak: assembly may legally strip or fold it, and the
+// content then ships nowhere (run7 PC-6, the koscom shape).
+export function stageAnchorTokenSet(stage: unknown) {
+  const record =
+    stage && typeof stage === "object" && !Array.isArray(stage)
+      ? (stage as Record<string, unknown>)
+      : {};
+  const strings: string[] = [];
+  const activities = Array.isArray(record.activities) ? record.activities : [];
+  for (const item of activities) {
+    const activity =
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as Record<string, unknown>)
+        : {};
+    const itemType =
+      typeof activity.itemType === "string" ? activity.itemType : null;
+    const role =
+      typeof activity.evidenceRole === "string" ? activity.evidenceRole : null;
+    if (itemType === "note") continue;
+    if (
+      role === "city_note_candidate" ||
+      role === "context" ||
+      role === "rejected"
+    ) {
+      continue;
+    }
+    collectStrings(activity, strings);
+  }
+  for (const key of ["stays", "transport", "places"]) {
+    collectStrings(record[key], strings);
+  }
+  const tokens = new Set<string>();
+  for (const value of strings) {
+    for (const token of tokensOf(value)) {
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
 function stageHasRecoveryPlaceholder(stage: unknown) {
   const record =
     stage && typeof stage === "object" && !Array.isArray(stage)
@@ -248,11 +303,16 @@ export function computeDaySectionSourceCoverage(
   // extracted the line); the cross-stage union (spine included) absorbs
   // content legitimately owned by another stage.
   const allStageTokens = new Set<string>();
+  const allAnchorTokens = new Set<string>();
   for (const stageInput of stages) {
     for (const token of stageOutputTokenSet(stageInput.stage)) {
       allStageTokens.add(token);
     }
+    for (const token of stageAnchorTokenSet(stageInput.stage)) {
+      allAnchorTokens.add(token);
+    }
   }
+  const weakCreditLines: SourceCoverageWeakCreditLine[] = [];
 
   for (const stageInput of stages) {
     if (stageInput.source !== "model_chunk" || !stageInput.sourceText?.trim()) {
@@ -317,6 +377,7 @@ export function computeDaySectionSourceCoverage(
 
       let usedCrossStageCredit = false;
       const uncoveredClauses: string[] = [];
+      const weakCreditClauses: string[] = [];
 
       for (const entry of judged) {
         // In a MULTI-entity line, a short clause ("Szechenyi Baths",
@@ -330,10 +391,16 @@ export function computeDaySectionSourceCoverage(
           judged.length >= 2 && entry.distinctive.length <= 2
             ? entry.distinctive.length
             : Math.ceil(entry.distinctive.length / 2);
+        const anchorCovered = entry.distinctive.filter((token) =>
+          allAnchorTokens.has(token)
+        );
         const ownCovered = entry.distinctive.filter((token) =>
           outputTokens.has(token)
         );
         if (ownCovered.length >= required) {
+          if (anchorCovered.length < required) {
+            weakCreditClauses.push(entry.clause);
+          }
           continue;
         }
         // Cross-stage credit is granted per clause, never pooled across
@@ -343,9 +410,23 @@ export function computeDaySectionSourceCoverage(
         );
         if (crossCovered.length >= required) {
           usedCrossStageCredit = true;
+          if (anchorCovered.length < required) {
+            weakCreditClauses.push(entry.clause);
+          }
           continue;
         }
         uncoveredClauses.push(entry.clause);
+      }
+
+      if (weakCreditClauses.length > 0 && weakCreditLines.length < 30) {
+        weakCreditLines.push({
+          clauses: weakCreditClauses,
+          excerpt:
+            line.length > EXCERPT_MAX_CHARS
+              ? `${line.slice(0, EXCERPT_MAX_CHARS - 1)}…`
+              : line,
+          label: stageInput.label,
+        });
       }
 
       if (uncoveredClauses.length === 0) {
@@ -384,6 +465,7 @@ export function computeDaySectionSourceCoverage(
     meaningfulLineCount,
     stages: reports,
     uncoveredLineCount,
+    weakCreditLines,
     version: 3,
   };
 }

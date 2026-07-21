@@ -632,4 +632,173 @@ export default async function run() {
       "a Rome venue's ticket never lands inside a Prague tour's description"
     );
   });
+
+  await test("run7 PC-5: a route-less time-less ticket fragment never mints a travel row or a departure-time question", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "recovery",
+          emptyStage({
+            transport: [
+              // The live GOEURO shape: recovered receipt boilerplate with a
+              // provider and nothing else.
+              {
+                arrival: null,
+                arrivalTime: null,
+                confirmation: "GOEURO",
+                date: "2019-01-24",
+                departure: null,
+                departureTime: null,
+                itemType: "transport",
+                provider: "Österreichische Bundesbahnen AG",
+                sourceFilename: "czech-out.pdf",
+                title: "GOEURO",
+                type: "train",
+              },
+              // A real segment stays.
+              {
+                arrival: "Rome Fiumicino",
+                arrivalTime: "14:10",
+                confirmation: "RDGHMT",
+                date: "2019-01-24",
+                departure: "Budapest",
+                departureTime: "12:20",
+                itemType: "transport",
+                provider: "Wizz Air",
+                sourceFilename: "czech-out.pdf",
+                title: "Wizz Air Flight W6 2339",
+                type: "flight",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      transport: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    assert.equal(draft.transport.length, 1, "only the real segment ships");
+    assert.equal(
+      /goeuro/i.test(String(draft.transport[0].title ?? draft.transport[0].provider ?? "")),
+      false,
+      "the fragment is not the surviving row"
+    );
+    const timeQuestion = draft.missingDetails.find((item) =>
+      /goeuro/i.test(String(item.prompt ?? ""))
+    );
+    assert.equal(timeQuestion, undefined, "no departure-time question rides on a dead fragment");
+  });
+
+  await test("run7 PC-8: off-contract question families are dismissed and the Δ2 same-section fold holds", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "questions",
+          emptyStage({
+            missingDetails: [
+              {
+                answerType: "date",
+                confidence: "medium",
+                evidence:
+                  "Sunday, January 13th Explore Rome // Land at 10:15 and tour.",
+                guessedValue: "January 13th",
+                prompt: "What date should be used for the Rome sightseeing day?",
+                reason: "The spine needs one explicit date value.",
+                targetField: "date",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-date",
+              },
+              {
+                answerType: "text",
+                confidence: "medium",
+                evidence: "Thursday, January 17th Kutna Hora: 'Pick up car at 9 am'",
+                guessedValue: "rental car pickup",
+                prompt: "What is the travel mode for the 9:00 AM pick-up?",
+                reason: "The exact transport type is not named.",
+                targetField: "type",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-type",
+              },
+              {
+                answerType: "text",
+                confidence: "medium",
+                evidence: "Page 6 lists '",
+                guessedValue: null,
+                prompt:
+                  "Should the customer contact details from the car reservation be stored as sensitive details?",
+                reason: "Personal contact information appears on the page.",
+                targetField: "sensitiveDetails",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-sensitive",
+              },
+              {
+                answerType: "text",
+                confidence: "medium",
+                evidence:
+                  "Adult 16+ x 1 x 395CZK / TOTAL 395CZK / Status: paid (PayPal) / [private contact removed]",
+                guessedValue: null,
+                prompt: "What is the title/name of the booked item referenced by these lines?",
+                reason: "The excerpt lists payment details but not a title.",
+                targetField: "title",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-receipt",
+              },
+              {
+                answerType: "text",
+                confidence: "medium",
+                evidence:
+                  "Wednesday, January 16th Lesser Town & Prague Castle: 'Need to decide which ticket to get'",
+                guessedValue: null,
+                prompt: "Which ticket or entry option was chosen for the Prague Castle visit?",
+                reason: "The source says a ticket decision is still needed.",
+                relatedTitle: "Prague Castle",
+                targetField: "ticketType",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-castle-ticket",
+              },
+              {
+                answerType: "text",
+                confidence: "medium",
+                evidence:
+                  "Wednesday, January 16th Lesser Town & Prague Castle: 'St. Vitus Cathedral (stained glass inside) get tour?'",
+                guessedValue: null,
+                prompt: "Was a tour of St. Vitus Cathedral actually booked or chosen?",
+                reason: "The source leaves the cathedral visit unresolved.",
+                relatedTitle: "St. Vitus Cathedral",
+                targetField: "bookingStatus",
+                _canonicalReviewDisposition: "question",
+                resolverDecisionId: "q-vitus",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const details = (result.draft as { missingDetails: Array<Record<string, unknown>> })
+      .missingDetails;
+    const open = details.filter(
+      (item) =>
+        item._canonicalReviewDisposition === "question" &&
+        // The empty-fixture spine question is unrelated scaffolding.
+        !/first trip draft/i.test(String(item.prompt ?? ""))
+    );
+    const openPrompts = open.map((item) => String(item.prompt ?? ""));
+    assert.equal(
+      openPrompts.length,
+      1,
+      `only the castle ticket question stays open (got: ${openPrompts.join(" | ")})`
+    );
+    assert.match(openPrompts[0], /ticket or entry option/i);
+    const vitus = details.find((item) => /st\. vitus/i.test(String(item.prompt ?? "")));
+    assert.equal(
+      vitus?._canonicalReviewDisposition,
+      "dismissed",
+      "the St. Vitus angle folds into the castle decision (Δ2)"
+    );
+  });
 }

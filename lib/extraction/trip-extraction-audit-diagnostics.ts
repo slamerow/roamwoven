@@ -518,6 +518,32 @@ export function createAuditDiagnostics({
     });
   }
 
+  // Weak-credit tripwire (live-run 7.21.0, run7 PC-6): a clause whose only
+  // coverage credit is note/context prose is one assembly strip away from
+  // silent loss — "go to koscom" counted covered for a 7th straight run
+  // because its token sat inside note prose that the final note never kept.
+  const weakCreditLines = Array.isArray(sourceCoverage.weakCreditLines)
+    ? sourceCoverage.weakCreditLines
+    : [];
+  if (weakCreditLines.length > 0) {
+    diagnostics.push({
+      code: "day_section_line_covered_only_by_note_output",
+      detail:
+        "These day-section clauses are covered ONLY by note/context prose, not by any activity, stay, or transport record. If assembly strips or folds that prose, the content ships nowhere (RW-EVD-001 candidate finding; verify the final note text carries it).",
+      evidence: weakCreditLines.slice(0, 10).flatMap((line) => {
+        const record = asRecord(line);
+        const clauses = Array.isArray(record.clauses) ? record.clauses : [];
+        return typeof record.excerpt === "string"
+          ? [
+              `${String(record.label ?? "day section")}: "${record.excerpt}" (weak: ${clauses.join(" | ")})`,
+            ]
+          : [];
+      }),
+      severity: "p2",
+      title: "Day-section clauses covered only by note/context output",
+    });
+  }
+
   // Time-corruption tripwire (defect docket 2026-07-17): the detector missed
   // Delta 5925 shipping 2:30-5:00 against a source anchor saying 5:00-6:41.
   // A matched anchor's times are source truth; a final row that disagrees is

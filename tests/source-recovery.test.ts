@@ -37,6 +37,7 @@ function coverageWith(
     meaningfulLineCount: uncoveredLineCount + 5,
     stages,
     uncoveredLineCount,
+    weakCreditLines: [],
     version: 3,
   };
 }

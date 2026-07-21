@@ -4,6 +4,33 @@ import { MakerProgress } from "@/components/maker-progress";
 import { CopyLinkButton, RefreshAppButton } from "@/components/publish-actions";
 import { getAppUrl } from "@/lib/env";
 import { getMakerTrip } from "@/lib/trips";
+import { getLatestTripProcessingRun } from "@/lib/extraction/processing-runs";
+
+// Surviving confirmed output defects from the latest run's remediation
+// outcomes. Publish is NEVER blocked (CEO decision, run7: the maker — a
+// detail-oriented planner — is the quality gate and republishing is cheap),
+// but the page must say what the audit knows instead of "ready".
+function countSurvivingOutputDefects(usage: unknown) {
+  const record =
+    usage && typeof usage === "object" && !Array.isArray(usage)
+      ? (usage as Record<string, unknown>)
+      : {};
+  const remediation =
+    record.qualityRemediation &&
+    typeof record.qualityRemediation === "object"
+      ? (record.qualityRemediation as Record<string, unknown>)
+      : {};
+  const outcomes = Array.isArray(remediation.outcomes)
+    ? remediation.outcomes
+    : [];
+  return outcomes.filter(
+    (outcome) =>
+      outcome &&
+      typeof outcome === "object" &&
+      (outcome as Record<string, unknown>).classification ===
+        "confirmed_output_defect"
+  ).length;
+}
 
 export default async function PublishPage({
   params,
@@ -17,6 +44,10 @@ export default async function PublishPage({
   const trip = await getMakerTrip(tripId);
   const token = trip.publishedAppToken ?? (trip.isDemo ? "demo" : null);
   const shareUrl = token ? `${getAppUrl()}/t/${token}` : null;
+  const latestRun = await getLatestTripProcessingRun(tripId).catch(() => null);
+  const survivingDefects = countSurvivingOutputDefects(
+    latestRun?.openaiUsage ?? null
+  );
 
   return (
     <main className="min-h-screen bg-paper px-6 py-8 md:px-10">
@@ -56,13 +87,27 @@ export default async function PublishPage({
           </p>
         ) : null}
 
+        {survivingDefects > 0 ? (
+          <p className="mt-6 rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">
+            The latest extraction audit preserved {survivingDefects} confirmed
+            output {survivingDefects === 1 ? "defect" : "defects"} for review.
+            Publishing stays available — review them on the Data page first if
+            you have not.
+          </p>
+        ) : null}
+
         <section className="mt-8 grid gap-6 lg:grid-cols-[0.58fr_0.42fr]">
           <div className="rounded-md border border-ink/10 bg-white p-5">
             <div className="flex items-center gap-3">
-              <ShieldCheck className="text-moss" size={24} />
+              <ShieldCheck
+                className={survivingDefects > 0 ? "text-clay" : "text-moss"}
+                size={24}
+              />
               <div>
                 <h2 className="text-xl font-semibold text-ink">
-                  Private app is ready
+                  {survivingDefects > 0
+                    ? "Private app has open audit findings"
+                    : "Private app is ready"}
                 </h2>
                 <p className="mt-1 text-sm text-ink/60">
                   {shareUrl

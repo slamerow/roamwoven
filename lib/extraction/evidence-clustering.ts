@@ -1650,6 +1650,185 @@ function suppressRedundantTransportParents(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
+// Question gate v2 (live-run 7.21.0, run7 PC-8/PC-1; RW-QUE-001 "material
+// decisions only", Δ2 amendment 2). Four off-contract families are
+// dismissed in place — dismissal keeps the record and its reason auditable
+// while removing the maker interruption:
+// - date questions carrying a parseable guessed value (the pipeline already
+//   dated the day's records; asking is the bogus-date family back);
+// - type/travel-mode questions with a guessed value ("what is the travel
+//   mode for the 9:00 AM pick-up" — the source names the action);
+// - sensitive-details questions (RW-PRI-001: identity protection is
+//   automatic and final, never a maker decision);
+// - receipt-identification questions (asking the maker to name raw
+//   booking/payment fragments);
+// plus the Δ2 fold: when several OPEN decision questions rise from the SAME
+// day section and one targets the section's heading-named entity, the
+// sub-component questions fold into that container question (St. Vitus's
+// tour angle belongs inside the one castle ticket decision).
+function gateOffContractQuestions(details: unknown[]) {
+  const records = details
+    .map((detail) => asRecord(detail))
+    .filter(
+      (record) =>
+        stringValue(record, "_canonicalReviewDisposition") === "question"
+    );
+
+  const dismiss = (record: Record<string, unknown>, reason: string) => {
+    record._canonicalReviewDisposition = "dismissed";
+    record._canonicalQuestionGate = reason;
+  };
+
+  for (const record of records) {
+    const targetField = stringValue(record, "targetField") ?? "";
+    const guessed = stringValue(record, "guessedValue");
+    const evidence = stringValue(record, "evidence") ?? "";
+    if (
+      /date/i.test(targetField) &&
+      guessed &&
+      normalizeTripDate(guessed, 2000) !== null
+    ) {
+      dismiss(
+        record,
+        "auto-applied guessed date: the surrounding itinerary already dates this day (Phase 2 bogus-date family)"
+      );
+      continue;
+    }
+    if (/^(?:type|itemtype)$/i.test(targetField) && guessed) {
+      dismiss(
+        record,
+        "the source names the action; mode/type curiosity is not a material decision (RW-QUE-001)"
+      );
+      continue;
+    }
+    if (/sensitive/i.test(targetField)) {
+      dismiss(
+        record,
+        "identity protection is automatic and final (RW-PRI-001), never a maker question"
+      );
+      continue;
+    }
+    if (
+      /^title$/i.test(targetField) &&
+      /status\s*:\s*paid|total\s+\d|\bx\s*\d+\s*x\b|\[private contact removed\]/i.test(
+        evidence
+      )
+    ) {
+      dismiss(
+        record,
+        "receipt/payment fragments identify themselves through booking anchors; naming them is not a maker decision"
+      );
+    }
+  }
+
+  // Δ2 same-section fold: group remaining OPEN questions by the day-heading
+  // prefix of their evidence.
+  const open = records.filter(
+    (record) =>
+      stringValue(record, "_canonicalReviewDisposition") === "question"
+  );
+  const headingOf = (record: Record<string, unknown>) => {
+    const evidence = stringValue(record, "evidence") ?? "";
+    const match =
+      /^((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)[^:]{0,80}?)(?::|$)/i.exec(
+        evidence.trim()
+      );
+    return match ? normalizedComparable(match[1]) : null;
+  };
+  const byHeading = new Map<string, Array<Record<string, unknown>>>();
+  for (const record of open) {
+    const heading = headingOf(record);
+    if (!heading) continue;
+    byHeading.set(heading, [...(byHeading.get(heading) ?? []), record]);
+  }
+  for (const [heading, group] of byHeading) {
+    if (group.length < 2) continue;
+    const paddedHeading = ` ${heading} `;
+    const container = group.find((record) => {
+      const related = normalizedComparable(
+        stringValue(record, "relatedTitle") ?? ""
+      );
+      const tokens = related
+        .split(" ")
+        .filter((token) => token.length >= 4)
+        .filter((token) => paddedHeading.includes(` ${token} `));
+      return tokens.length >= 2 || /castle|palace|complex/.test(related);
+    });
+    if (!container) continue;
+    for (const record of group) {
+      if (record === container) continue;
+      dismiss(
+        record,
+        "folded into the container's open decision (Δ2: one venue complex, one open decision)"
+      );
+    }
+  }
+}
+
+// A route-less, time-less, number-less transport piece is a ticket
+// fragment, never a travel row (live-run 7.21.0, run7 PC-5: a recovered
+// GoEuro receipt line minted a 9th "GOEURO" train row on Jan 24 with no
+// route and no times, plus a "What time does GOEURO depart?" question — the
+// real segment was the Jan-21 ÖBB train already represented). If a specific
+// segment shares its confirmation or provider, the fragment folds there as
+// evidence; otherwise it is rejected with a recorded disposition. Deleting
+// beats asking (CEO direction, run7).
+function suppressRouteLessTransportFragments(pieces: CanonicalEvidencePiece[]) {
+  const transportPieces = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+
+  for (const piece of transportPieces) {
+    if (
+      hasSpecificTransportRoute(piece.payload) ||
+      transportNumber(piece.payload) ||
+      timeFrom(piece.payload) ||
+      stringValue(piece.payload, "departureTime") ||
+      stringValue(piece.payload, "arrivalTime")
+    ) {
+      continue;
+    }
+
+    const confirmation = normalizedComparable(
+      confirmationFrom(piece.payload) ?? ""
+    );
+    const provider = normalizedComparable(
+      stringValue(piece.payload, "provider") ?? ""
+    );
+    const host = transportPieces.find(
+      (candidate) =>
+        candidate !== piece &&
+        candidate.outputEligible &&
+        hasSpecificTransportRoute(candidate.payload) &&
+        Boolean(
+          (confirmation &&
+            normalizedComparable(confirmationFrom(candidate.payload) ?? "") ===
+              confirmation) ||
+            (provider &&
+              provider.length >= 3 &&
+              normalizedComparable(
+                stringValue(candidate.payload, "provider") ?? ""
+              ) === provider)
+        )
+    );
+
+    piece.outputEligible = false;
+    addCanonicalAction(piece, {
+      absorbedTitles: [],
+      observationIds: [...piece.observationIds],
+      reason: host
+        ? "route-less ticket fragment folded into its represented transport segment"
+        : "route-less, time-less transport fragment rejected: booking material without a movement is never a travel row",
+      type: "rejected",
+    });
+    if (host) {
+      host.observationIds = Array.from(
+        new Set([...host.observationIds, ...piece.observationIds])
+      );
+    }
+  }
+}
+
 function createPiece(
   observation: EvidenceObservation,
   outputEligible = true
@@ -1720,6 +1899,16 @@ function stampOwnTextClassification(
       )
       .map((observation) => ({
         ...activityInput(observation.payload),
+        // The verbatim source excerpt joins the judged text (run7: the
+        // parser rewrites list entries into invented prose — "Dinner at
+        // Mazel Tov restaurant." — and strips hedges like "(far away)";
+        // hedge/commitment judgment must see the source's own words).
+        description: [
+          stringValue(observation.payload, "description"),
+          stringValue(observation.payload, "evidence"),
+        ]
+          .filter(Boolean)
+          .join(" "),
         confirmation: stringValue(observation.payload, "confirmation"),
       }));
     const judged = own.length
@@ -9475,6 +9664,7 @@ export function clusterExtractedEvidence({
   mergeReclassifiedCanonicalPieces(pieces);
   attachCanonicalAccessoryDetails(pieces);
   suppressRedundantTransportParents(pieces);
+  suppressRouteLessTransportFragments(pieces);
   pruneNonOvernightPlaces(pieces);
   routeUnbookedDayTripTransport(pieces);
   mergeReclassifiedCanonicalPieces(pieces);
@@ -9612,6 +9802,7 @@ export function clusterExtractedEvidence({
     tripOverview
   );
   assignCanonicalEvidenceDispositions({ observations, pieces });
+  gateOffContractQuestions(finalMissingDetails);
   const draft = {
     activities,
     missingDetails: finalMissingDetails,
