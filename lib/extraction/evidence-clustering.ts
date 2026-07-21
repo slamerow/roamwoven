@@ -6778,6 +6778,18 @@ function createDeterministicGeoGroupingDecisions({
 
   const decisions: CanonicalGroupingDecision[] = [];
   const grouped = new Set<CanonicalEvidencePiece>();
+  // Live-run 7.21.0: when the geocode lane ran on this build, radius rules
+  // trust ONLY verified coordinates (the parser fabricates precise-looking
+  // ones). Without the lane (no key), the precise-parser fallback stands —
+  // the env-keyed contract promises no behavior change when disabled.
+  const geocodeLaneRan = pieces.some(
+    (piece) => piece.payload._geoVerified === true
+  );
+  const radiusCoordinates = (piece: CanonicalEvidencePiece) => {
+    const coords = precisePieceCoordinates(piece);
+    if (!coords) return null;
+    return geocodeLaneRan && !coords.verified ? null : coords;
+  };
 
   for (const [date, dayPieces] of byDate) {
     const located = dayPieces.filter((piece) => pieceCoordinates(piece));
@@ -6797,8 +6809,15 @@ function createDeterministicGeoGroupingDecisions({
       ) {
         continue;
       }
-      // Run5 PB-4: a passing mention is never a visit container.
-      if (PASSING_MENTION_TITLE_PATTERN.test(containerTitle)) {
+      // Run5 PB-4: a passing mention is never a visit container. Live-run
+      // 7.21.0 (Gresham, 3rd appearance): the passing mention lived in the
+      // card's own DESCRIPTION ("Take a peek inside the Four Seasons Hotel /
+      // Gresham Palace") while the title stayed clean — judge both.
+      const containerOwnProse = [
+        containerTitle,
+        stringValue(container.payload, "description") ?? "",
+      ].join(" ");
+      if (PASSING_MENTION_TITLE_PATTERN.test(containerOwnProse)) {
         continue;
       }
       const origin = precisePieceCoordinates(container);
@@ -6811,58 +6830,75 @@ function createDeterministicGeoGroupingDecisions({
       const children = dayPieces.filter((piece) => {
         if (piece === container || grouped.has(piece)) return false;
         if (confirmationFrom(piece.payload)) return false;
-        // Run5 PB-4: the geo-radius path needs precise coordinates on both
-        // ends. A TIMED stop joins by coordinates only when it shares the
-        // container's own category (RW-GRP-001 keeps the timed
-        // guard-changing inside the castle visit; the timed Chain Bridge
-        // crossing pulled into the Gresham "300 m" claim does not qualify).
-        // Source-hierarchy membership below still admits timed children.
-        const coords = precisePieceCoordinates(piece);
+        const childRawTitle = stringValue(piece.payload, "title");
+        const childTitle = normalizedComparable(childRawTitle);
+        if (!childTitle) return false;
+        // Source-hierarchy membership: a child the container's own
+        // description lists, or a child titled with the container's own
+        // name ("Palm House at Schönbrunn"). This path admits timed
+        // children (the guard change inside the castle) because the SOURCE
+        // places them inside the visit.
+        const sourceHierarchyMember = Boolean(
+          (childRawTitle &&
+            containerListsComponent(
+              stringValue(container.payload, "description"),
+              childRawTitle
+            )) ||
+            containerTokens.some(
+              (token) =>
+                token.length >= 5 && ` ${childTitle} `.includes(` ${token} `)
+            )
+        );
+        if (sourceHierarchyMember) return true;
+        // Live-run 7.21.0 (Gresham, 3rd appearance): a piece that is itself
+        // a named site container (Buda Castle) is grouping structure in its
+        // own right — it never joins ANOTHER site's visit by coordinates.
+        if (
+          childRawTitle &&
+          SAME_SITE_CONTAINER_PATTERN.test(childRawTitle)
+        ) {
+          return false;
+        }
+        // Geo-radius membership. Live-run 7.21.0: the parser fabricated
+        // 3-decimal coordinates for the whole Jan-22 day (Parliament, Buda
+        // Castle, Vörösmarty tér all "within 300 m" of Gresham Palace), so
+        // when the geocode lane ran, the radius rule accepts only VERIFIED
+        // coordinates on both ends (radiusCoordinates). A TIMED stop joins
+        // by coordinates only when it shares the container's own category
+        // (RW-GRP-001 locked reconciliation: the timed guard change stays
+        // inside the castle visit).
         const timedCategoryOk =
           !timeFrom(piece.payload) ||
           (Boolean(stringValue(piece.payload, "category")) &&
             stringValue(piece.payload, "category") ===
               stringValue(container.payload, "category"));
-        if (
-          origin &&
-          coords &&
-          timedCategoryOk &&
-          haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
-        ) {
-          return true;
-        }
-        const childRawTitle = stringValue(piece.payload, "title");
-        const childTitle = normalizedComparable(childRawTitle);
-        if (!childTitle) return false;
-        if (
-          childRawTitle &&
-          containerListsComponent(
-            stringValue(container.payload, "description"),
-            childRawTitle
-          )
-        ) {
-          return true;
-        }
-        return containerTokens.some(
-          (token) =>
-            token.length >= 5 && ` ${childTitle} `.includes(` ${token} `)
+        if (!timedCategoryOk) return false;
+        const originCoords = origin ? radiusCoordinates(container) : null;
+        const coords = radiusCoordinates(piece);
+        return Boolean(
+          originCoords &&
+            coords &&
+            haversineKm(originCoords, coords) <= SAME_SITE_RADIUS_KM
         );
       });
       if (children.length < 2) continue;
 
-      // Call claims state the actual rule that fired (doctrine v3).
-      const geoChildCount = origin
+      // Call claims state the actual rule that fired (doctrine v3). A geo
+      // child is one admitted by the radius path (verified-only when the
+      // lane ran).
+      const claimOrigin = radiusCoordinates(container);
+      const geoChildCount = claimOrigin
         ? children.filter((piece) => {
-            const coords = precisePieceCoordinates(piece);
             const timedOk =
               !timeFrom(piece.payload) ||
               (Boolean(stringValue(piece.payload, "category")) &&
                 stringValue(piece.payload, "category") ===
                   stringValue(container.payload, "category"));
+            if (!timedOk) return false;
+            const coords = radiusCoordinates(piece);
             return Boolean(
               coords &&
-                timedOk &&
-                haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
+                haversineKm(claimOrigin, coords) <= SAME_SITE_RADIUS_KM
             );
           }).length
         : 0;
@@ -6904,6 +6940,31 @@ function createDeterministicGeoGroupingDecisions({
         return false;
       }
       if (pieceHasHedgeMarker(piece)) return false;
+      // A tour or ticketed experience is its own plan, never a walk stop
+      // (live-run 7.21.0: "Catacombs tour" was absorbed into the Charles
+      // Bridge walk).
+      if (/tours?_tickets/i.test(stringValue(piece.payload, "category") ?? "")) {
+        return false;
+      }
+      if (/\btour\b/i.test(stringValue(piece.payload, "title") ?? "")) {
+        return false;
+      }
+      // A source-narrated route ("walk by the Dancing House", "stop by the
+      // Astronomical Clock on the hour") is already authored by the maker —
+      // the system never re-parents it into an invented walk (approved
+      // answer key: the Jan-14 Old Town evening route ships as standalone
+      // cards, no call; the Malá Strana walk's members are a bare list).
+      const ownProse = [
+        stringValue(piece.payload, "title") ?? "",
+        stringValue(piece.payload, "description") ?? "",
+      ].join(" ");
+      if (
+        /\b(?:walk (?:by|past|to|across|over|along)|stop by|on the (?:hour|way)|head (?:to|over|down)|then (?:walk|go|head))\b/i.test(
+          ownProse
+        )
+      ) {
+        return false;
+      }
       const title = normalizedComparable(stringValue(piece.payload, "title"));
       return Boolean(title) && !questionSubjects.has(title);
     });
@@ -6927,17 +6988,25 @@ function createDeterministicGeoGroupingDecisions({
       .filter((group) => group.length >= 3)
       .filter((group) => {
         // Run5 PB-4: the 15-minute-walk radius is only meaningful on
-        // precise coordinates; 2-decimal quantization (~1.1 km) makes far
-        // sights look adjacent, so imprecise members fail the walk check.
+        // precise coordinates. Live-run 7.21.0 hardening: the parser now
+        // fabricates precise-LOOKING coordinates, so when the geocode lane
+        // ran on this build (any verified member exists), the radius test
+        // accepts only VERIFIED coordinates; with the lane disabled the
+        // precise-parser fallback stands (no behavior change without a
+        // key), because the walk still demands per-member source-supported
+        // area labels as independent evidence.
         const coords = group
           .map(precisePieceCoordinates)
           .filter(
             (value): value is { lat: number; lng: number; verified: boolean } =>
               Boolean(value)
           );
+        const usable = geocodeLaneRan
+          ? coords.filter((value) => value.verified)
+          : coords;
         return (
-          coords.length === group.length &&
-          maxPairwiseKm(coords) <= WALK_RADIUS_KM
+          usable.length === group.length &&
+          maxPairwiseKm(usable) <= WALK_RADIUS_KM
         );
       })
       .sort((left, right) => right.length - left.length)[0];

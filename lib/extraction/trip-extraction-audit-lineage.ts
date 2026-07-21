@@ -397,6 +397,12 @@ function candidateFromArtifactPiece(
     address: recordValue(payload, "address"),
     approxLatitude: numberValue("approxLatitude"),
     approxLongitude: numberValue("approxLongitude"),
+    // Geocode-lane results ride into lineage so radius claims are
+    // verifiable from the QA bundle (live-run 7.21.0: the Gresham "within
+    // 300 m" call was unfalsifiable — zero verified fields in the bundle).
+    verifiedLatitude: numberValue("verifiedLatitude"),
+    verifiedLongitude: numberValue("verifiedLongitude"),
+    geoVerified: payload._geoVerified === true ? true : null,
     area: recordValue(payload, "area"),
     category: recordValue(payload, "category"),
     date: recordValue(payload, "date"),
@@ -495,6 +501,8 @@ function createArtifactLineageRows({
         return [{
           approxLatitude: observationNumber("approxLatitude"),
           approxLongitude: observationNumber("approxLongitude"),
+          verifiedLatitude: observationNumber("verifiedLatitude"),
+          verifiedLongitude: observationNumber("verifiedLongitude"),
           area: recordValue(observation.payload, "area"),
           date:
             recordValue(observation.payload, "date") ??

@@ -17,6 +17,11 @@ export type DraftRecordSummary = {
   // parser emitted coordinates at all).
   approxLatitude: number | null;
   approxLongitude: number | null;
+  // Geocode-lane verified coordinates (live-run 7.21.0: radius claims were
+  // unfalsifiable from the bundle — zero verified fields rode along).
+  verifiedLatitude: number | null;
+  verifiedLongitude: number | null;
+  geoVerified: true | null;
   area: string | null;
   category: string | null;
   date: string | null;
@@ -100,6 +105,8 @@ export type TripExtractionAuditLineageRow = {
     // are verifiable from the QA bundle (run5 PB-4 audit-visibility gap).
     approxLatitude: number | null;
     approxLongitude: number | null;
+    verifiedLatitude: number | null;
+    verifiedLongitude: number | null;
     area: string | null;
     date: string | null;
     id: string;

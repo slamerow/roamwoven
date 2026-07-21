@@ -114,7 +114,10 @@ export function getGeocodeVerificationConfig() {
       "https://maps.googleapis.com/maps/api/geocode/json",
     maxLookups: getOptionalPositiveInteger(
       "GEOCODE_VERIFICATION_MAX_LOOKUPS",
-      15
+      // Live-run 7.21.0: a 15-lookup budget starved the discovered-walk
+      // pool (29 of 44 candidates skipped) while radius rules ran on
+      // fabricated parser coordinates. Env-tunable; raise/lower in Vercel.
+      50
     ),
     timeoutMs: getOptionalPositiveInteger(
       "GEOCODE_VERIFICATION_TIMEOUT_MS",

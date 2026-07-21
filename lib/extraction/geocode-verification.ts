@@ -104,7 +104,6 @@ export function selectGeocodeCandidates(
   const candidates: GeocodeCandidate[] = [];
   for (const entry of records) {
     const record = entry.record;
-    if (hasPreciseParserCoordinates(record)) continue;
     const title = stringField(record, "title");
     if (!title) continue;
     const city = stringField(record, "city") ?? stringField(record, "area");
@@ -113,6 +112,15 @@ export function selectGeocodeCandidates(
       : entry.date && (dayCounts.get(entry.date) ?? 0) >= 6
         ? 1
         : 2;
+    // Live-run 7.21.0: the parser now fabricates 3-decimal coordinates (the
+    // whole Jan-22 guided day collapsed onto one point near Gresham Palace,
+    // passing the precision gate the run5 calibration assumed only real
+    // coordinates could pass). Precise-LOOKING parser coordinates are
+    // therefore nothing to trust for grouping: site containers and
+    // crowded-day members — the records radius rules actually consume —
+    // are verified regardless; only background records (rank 2) skip
+    // verification when the parser already supplied precise coordinates.
+    if (rank === 2 && hasPreciseParserCoordinates(record)) continue;
     candidates.push({
       query: city ? `${title}, ${city}` : title,
       rank,
