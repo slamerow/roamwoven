@@ -818,4 +818,39 @@ export default async function run() {
       "the St. Vitus angle folds into the castle decision (Δ2)"
     );
   });
+
+  await test("run8 junk-card families: street-nav, stay-details, and rental shards never ship as activities", () => {
+    const card = (title: string, description: string | null = null, extra: Record<string, unknown> = {}) =>
+      activity({ title, description, date: "2019-01-17", category: "admin_logistics", extra });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "jan-17-junk",
+          emptyStage({
+            activities: [
+              card("Exit the train station onto Via Marsala"),
+              card("Take tram 4 or 6 from Blaha Lujza ter"),
+              card("The Yellow stay details"),
+              card("Selected car", "Selected car: EDAR VW Polo, Skoda Fabia. Fuel type: Natural 95."),
+              card("Car reservation number", "Reservation number: 81486"),
+              card("Customer details", null),
+              // Real records survive.
+              card("Pick up car", "Pick up car at 9:00 AM. Reservation number 81486.", { startTime: "09:00", category: "arrival_departure" }),
+              activity({ title: "Sedlec Ossuary", date: "2019-01-17" }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const titles = (result.draft as { activities: Array<Record<string, unknown>> }).activities.map(
+      (item) => String(item.title)
+    );
+    for (const gone of [/via marsala/i, /take tram/i, /stay details/i, /selected car/i, /reservation number/i, /customer details/i]) {
+      assert.equal(titles.some((t) => gone.test(t)), false, `junk family ${gone} never ships`);
+    }
+    assert.ok(titles.some((t) => /pick up car/i.test(t)), "the rental pickup survives");
+    assert.ok(titles.some((t) => /sedlec/i.test(t)), "real sights survive");
+  });
 }

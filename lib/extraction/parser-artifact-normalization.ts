@@ -735,6 +735,54 @@ function repairTicketPageActivity(
   });
 }
 
+
+// --- Rule 6b: run8 junk-card families (live-run 7.21.1a) ------------------
+// Street-navigation narration ("Exit the train station onto Via Marsala",
+// "Take tram 4 or 6 from Blaha Lujza ter", "Walk along Via Marghera",
+// "Turn left onto…"), "<Stay> stay details" cards, rental-field shards
+// ("Selected car", "Car reservation number", "Return at the same
+// location"), and empty identity/admin cards ("Customer details") are
+// booking/directions evidence for their owning record, never dated plans.
+const STREET_NAV_TITLE_PATTERN =
+  /^(?:exit|leave|walk along|walk down|walk up|take (?:the )?(?:tram|bus|metro|train) \d|take tram|take bus|turn (?:left|right)|head (?:to|down|up|along)|from .{2,40} take)\b/i;
+const STAY_DETAILS_TITLE_PATTERN = /\bstay details$/i;
+const RENTAL_FIELD_TITLE_PATTERN =
+  /^(?:selected car|car reservation(?: number)?|reservation number|customer details?|fuel type|return at the same location|pick-?up location|drop-?off location)\b/i;
+
+function repairJunkCardFamilies(
+  activity: Record<string, unknown>,
+  stage: EvidenceStageInput,
+  repairs: ParserArtifactRepair[]
+) {
+  const title = stringValue(activity, "title");
+  if (!title) return;
+  if (stringValue(activity, "confirmation")) return;
+  const description = stringValue(activity, "description");
+  const bare = !description || description.trim() === title.trim();
+  const streetNav = STREET_NAV_TITLE_PATTERN.test(title.trim());
+  const stayDetails = STAY_DETAILS_TITLE_PATTERN.test(title.trim());
+  const rentalField =
+    RENTAL_FIELD_TITLE_PATTERN.test(title.trim()) &&
+    (bare ||
+      /^(?:reservation number|selected car|fuel type|shift)\s*:/i.test(
+        description ?? ""
+      ) ||
+      !description);
+  if (!streetNav && !stayDetails && !rentalField) return;
+  activity.evidenceRole = "accessory_detail";
+  activity._parserArtifactTicketCopy = true;
+  repairs.push({
+    detail: streetNav
+      ? "Street/transit navigation narration is directions evidence for its owning record, never a dated activity (live-run 7.21.1a: 'Exit the train station onto Via Marsala', 'Take tram 4 or 6 from Blaha Lujza ter')."
+      : stayDetails
+        ? "A '<Stay> stay details' card is stay evidence, never an activity (live-run 7.21.1a)."
+        : "Rental/booking field shards ('Selected car', 'Car reservation number', 'Customer details') are booking evidence for the rental record, never dated activities (live-run 7.21.1a).",
+    kind: "ticket_page_activity",
+    stageLabel: stage.label,
+    title,
+  });
+}
+
 // --- Entry point ------------------------------------------------------------
 
 export function normalizeParserStageArtifacts(
@@ -798,6 +846,7 @@ export function normalizeParserStageArtifacts(
       );
       repairCostLineCard(activity, stageInput.label, repairs);
       repairTicketPageActivity(activity, stageInput, repairs);
+      repairJunkCardFamilies(activity, stageInput, repairs);
     }
 
     repairSplitDisjunctions(activities, stageInput, repairs);
