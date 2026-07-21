@@ -224,7 +224,16 @@ export function classifyIdeaListSections(entries: IdeaListEntry[]) {
 
   for (const entry of entries) {
     if (!entry.date) continue;
-    const key = `${entry.date}|${normalizeText(entry.sectionLabel) || "(none)"}`;
+    // Day-plan labels unify per date (live-run 7.21.0, run7 PC-3): the
+    // parser emitted "Monday, January 21st" for some entries and "Monday,
+    // January 21st Train to Budapest // Budapest Bathing" for others,
+    // fragmenting one source list below the 3-entry floor. Non-day-plan
+    // labels (notes blobs) keep their identity — they are the evidence for
+    // signal (b).
+    const label = normalizeText(entry.sectionLabel) || "(none)";
+    const key = DAY_PLAN_LABEL_PATTERN.test(entry.sectionLabel ?? "")
+      ? `${entry.date}|(day-plan)`
+      : `${entry.date}|${label}`;
     const group = groups.get(key);
     if (group) group.push(entry);
     else groups.set(key, [entry]);

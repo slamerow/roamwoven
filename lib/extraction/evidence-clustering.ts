@@ -5897,6 +5897,50 @@ function reviewSubjectTitles(missingDetails: unknown[]) {
   return titles;
 }
 
+// A question subject protects its entity under ALIASING too (live-run
+// 7.21.0: the baths question's subject was "Gellert Bath House" while the
+// piece shipped as "Gellert Baths" — exact-equality matching would have let
+// a demotion pass eat the question's own anchor card).
+function titleMatchesQuestionSubject(
+  questionSubjects: Set<string>,
+  title: string
+) {
+  if (questionSubjects.has(title)) return true;
+  const tokens = title.split(" ").filter((token) => token.length >= 5);
+  if (tokens.length === 0) return false;
+  for (const subject of questionSubjects) {
+    const padded = ` ${subject} `;
+    if (tokens.some((token) => padded.includes(` ${token} `))) return true;
+  }
+  return false;
+}
+
+// Committed-day-content guard (live-run 7.21.0, run7 PC-1): an entity NAMED
+// IN ITS OWN DAY-SECTION HEADING ("Lesser Town & Prague Castle") is the
+// day's committed plan — never a researched idea, whatever research
+// markers its prose carries. Two shared distinctive tokens (or a full
+// single-token title hit) count as named.
+function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
+  const heading = normalizedComparable(
+    [
+      stringValue(piece.payload, "sourceSectionLabel") ?? "",
+      ...(pieceSourceHeadingPath(piece) ?? []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  if (!heading) return false;
+  const title = normalizedComparable(stringValue(piece.payload, "title"));
+  if (!title) return false;
+  const padded = ` ${heading} `;
+  const tokens = title
+    .split(" ")
+    .filter((token) => token.length >= 4)
+    .filter((token) => padded.includes(` ${token} `));
+  const titleTokenCount = title.split(" ").filter((token) => token.length >= 4).length;
+  return tokens.length >= 2 || (titleTokenCount === 1 && tokens.length === 1);
+}
+
 function demoteCanonicalPieceToCityNote(
   piece: CanonicalEvidencePiece,
   reason: string
@@ -6455,7 +6499,10 @@ function demoteIdeaListMentions(
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
     const title = normalizedComparable(stringValue(piece.payload, "title"));
-    if (!title || questionSubjects.has(title)) continue;
+    if (!title) continue;
+    if (titleMatchesQuestionSubject(questionSubjects, title)) continue;
+    // Run7 PC-1: day-heading-named entities are the day's committed plan.
+    if (pieceNamedInDayHeading(piece)) continue;
     // Researched entries (prices/hours) belong to the researched-list
     // question (RW-QUE-001 "planned for this day, or just ideas?"), never
     // to silent idea-list demotion — the maker decides those.
@@ -7078,7 +7125,11 @@ function createResearchedListQuestions(
     const date = stringValue(piece.payload, "date");
     const rawTitle = stringValue(piece.payload, "title") ?? "";
     const title = normalizedComparable(rawTitle);
-    if (!date || !title || questionSubjects.has(title)) continue;
+    if (!date || !title) continue;
+    if (titleMatchesQuestionSubject(questionSubjects, title)) continue;
+    // Run7 PC-1: the day's own heading commits the entity ("Lesser Town &
+    // Prague Castle" names the castle) — never a researched idea.
+    if (pieceNamedInDayHeading(piece)) continue;
     // "X at Site" component titles are same-site grouping structure, never
     // researched ideas (run5 PB-3: the orphaned "Orangeriegarten at
     // Schönbrunn" component leaked into a bogus planned-or-ideas question).

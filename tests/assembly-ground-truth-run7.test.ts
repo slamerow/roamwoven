@@ -4,6 +4,10 @@ import {
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
 import { selectGeocodeCandidates } from "@/lib/extraction/geocode-verification";
+import {
+  classifyIdeaListSections,
+  classifyOwnTextEvidence,
+} from "@/lib/extraction/activity-classifier";
 
 // Live-run 7.21.0 (planned "7.18.4", trip d45bb01b, run eb5cb832) regression
 // fixtures — Arc C. Shapes are drawn from the run's audit payload
@@ -376,6 +380,141 @@ export default async function run() {
       catacombs._canonicalParentPieceId ?? null,
       null,
       "a tour is never a walk stop"
+    );
+  });
+
+  await test("run7 PC-1: a day-heading-committed entity never demotes to a planned-or-ideas question", () => {
+    // Exact live shapes: the castle's own section is "Lesser Town & Prague
+    // Castle"; its prose carries a planned duration ("2 hours") and an
+    // explicit ticket decision. 7.21.0 held it "as a city idea pending the
+    // maker's planned-or-ideas answer" and shipped the day without a castle
+    // card.
+    const day = (title: string, description: string, extra: Record<string, unknown> = {}) => ({
+      address: null,
+      category: "art_culture",
+      city: null,
+      date: "2019-01-16",
+      description,
+      endTime: null,
+      itemType: "activity",
+      sourceFilename: "czech-out.pdf",
+      sourceHeadingPath: ["Wednesday, January 16th", "Lesser Town & Prague Castle"],
+      sourceSectionLabel: "Wednesday, January 16th Lesser Town & Prague Castle",
+      startTime: null,
+      title,
+      ...extra,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "jan-16",
+          emptyStage({
+            activities: [
+              day(
+                "Prague Castle Changing of the Guard",
+                "Prague castle visit for 2 hours. Changing of the Guard at 12:00 PM. Need to decide which ticket to get.",
+                { category: "tours_tickets" }
+              ),
+              day("KGB museum", "1 hour"),
+              day("St. Vitus Cathedral", "Stained glass inside; get tour?"),
+              day("Trdelnik for breakfast", "Breakfast: trdelnik", {
+                category: "food_dining",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const castle = draft.activities.find((item) =>
+      /prague castle/i.test(String(item.title))
+    );
+    const kgb = draft.activities.find((item) => /kgb/i.test(String(item.title)));
+    assert.ok(castle, "the castle survives as an activity card");
+    assert.ok(kgb, "the KGB museum survives as an activity card");
+    const plannedOrIdeas = draft.missingDetails.find((item) =>
+      /planned for the day, or just ideas/i.test(String(item.prompt ?? ""))
+    );
+    assert.equal(
+      plannedOrIdeas,
+      undefined,
+      "no planned-or-ideas question is minted for committed day content"
+    );
+  });
+
+  await test("run7 PC-3: parser-invented meal prose cannot stamp fixed commitment (Jan-21 idea list demotes as a unit)", () => {
+    // Exact live shapes, including the mixed section labels the parser
+    // emitted for one source list and the "Dinner at Mazel Tov restaurant."
+    // prose the parser invented for a bare list entry.
+    const LONG = "Monday, January 21st Train to Budapest // Budapest Bathing";
+    const SHORT = "Monday, January 21st";
+    const live = [
+      { id: "synagogue", title: "Great Synagogue / Jewish History", description: "Visit the Great Synagogue and explore Jewish history.", category: "art_culture", sec: LONG },
+      { id: "konyv", title: "Konyv Bar", description: "Drink Tokaji at Konyv Bar.", category: "food_dining", sec: LONG },
+      { id: "mazel", title: "Mazel Tov restaurant", description: "Dinner at Mazel Tov restaurant.", category: "food_dining", sec: LONG },
+      { id: "ruszwurm", title: "Oldest pastry shop", description: "Oldest pastry shop (Ruszwerm / roosworm) — serve lots of strudel.", category: "food_dining", sec: SHORT },
+      { id: "pinball", title: "Pinball Museum", description: "Visit the Pinball Museum.", category: "art_culture", sec: LONG },
+      { id: "wine", title: "Wine Cellar in the Hilton", description: "Wine Cellar in the Hilton.", category: "food_dining", sec: SHORT },
+    ];
+    const entries = live.map((item) => {
+      const own = classifyOwnTextEvidence([
+        { title: item.title, description: item.description, date: "2019-01-21" },
+      ]);
+      return {
+        id: item.id,
+        category: item.category,
+        date: "2019-01-21",
+        sectionLabel: item.sec,
+        headingPath: [item.sec],
+        title: item.title,
+        description: item.description,
+        hasFixedEvidence: own.hasFixedCommitment,
+        ownTextHedge: own.hasHedgeMarker,
+      };
+    });
+    assert.equal(
+      entries.filter((entry) => entry.hasFixedEvidence).length,
+      0,
+      "no entry is fixed by parser-invented meal prose"
+    );
+    const demoted = classifyIdeaListSections(entries);
+    assert.equal(demoted.size, 6, "the whole list demotes despite split labels");
+  });
+
+  await test("run7 PC-3: a real title-anchored meal keeps its day-plan benefit (Jan-20 deliberate list stays)", () => {
+    const own = classifyOwnTextEvidence([
+      {
+        title: "Breakfast at Cafe Central",
+        description: "Breakfast at Cafe Central.",
+        date: "2019-01-20",
+      },
+    ]);
+    assert.equal(own.hasFixedCommitment, true, "a source meal TITLE is fixed");
+    const entries = [
+      { id: "central", title: "Breakfast at Cafe Central", description: null, category: "food_dining" },
+      { id: "jewish", title: "Jewish Museum", description: null, category: "art_culture" },
+      { id: "library", title: "Library", description: null, category: "art_culture" },
+      { id: "kunstforum", title: "Bank Austria Kunstforum", description: null, category: "art_culture" },
+    ].map((item, index) => ({
+      id: item.id,
+      category: item.category,
+      date: "2019-01-20",
+      sectionLabel: "Sunday, January 20th",
+      headingPath: ["Sunday, January 20th"],
+      title: item.title,
+      description: item.description,
+      hasFixedEvidence: index === 0,
+      ownTextHedge: false,
+    }));
+    assert.equal(
+      classifyIdeaListSections(entries).size,
+      0,
+      "one fixed entry keeps the whole section a day plan"
     );
   });
 }

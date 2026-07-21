@@ -40,8 +40,12 @@ const PLANNED_ACTIVITY_PATTERN =
 const SIGHT_OR_LOOSE_PLACE_PATTERN =
   /\b(aquarium|basilica|cathedral|church|gallery|garden|hall|haus|house|landmark|market|monument|museum|park|palace|square|statue|synagogue|temple|tower|wheel)\b/;
 
+// Availability means OPENING information, not duration. Live-run 7.21.0
+// (run7 PC-1): bare `hours?` matched the planned-duration parenthetical in
+// "Prague castle (2 hours)", which made the castle look like a researched
+// idea and fed the planned-or-ideas demotion that killed it.
 const AVAILABILITY_MARKER_PATTERN =
-  /\b(open until|open til|hours?|free\s*\d|free admission)\b/;
+  /\b(open until|open til|opening hours|hours:|open \d|free\s*\d|free admission)\b/;
 
 // "if you want (to)" / "if you'd like" joined the hedge family in Arc B
 // (live-run 7.18.3 PB-4: "Buda hills loop — if you want to get out of the
@@ -193,9 +197,17 @@ export function hasStrongPlannedActivityLanguage(
 ) {
   const text = normalizeText(textForDraftActivity(input));
 
+  // The meal-slot anchor must come from the TITLE — source-derived naming
+  // ("Trdelnik for breakfast", "Breakfast at Cafe Central") — never from
+  // the description. Live-run 7.21.0 (run7 PC-3): the parser rewrites bare
+  // list entries into meal prose ("Dinner at Mazel Tov restaurant."), and
+  // that invented phrasing stamped fixed commitment onto an idea-list
+  // entry, which poisoned the whole Jan-21 section against demotion.
   if (
     input.date &&
-    /\b(breakfast|brunch|lunch|dinner|supper)\b/.test(text)
+    /\b(breakfast|brunch|lunch|dinner|supper)\b/.test(
+      normalizeText(input.title)
+    )
   ) {
     return true;
   }
