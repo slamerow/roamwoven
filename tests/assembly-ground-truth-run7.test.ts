@@ -517,4 +517,119 @@ export default async function run() {
       "one fixed entry keeps the whole section a day plan"
     );
   });
+
+  await test("run7 PC-4: receipt-field shards die at the parser-artifact layer; booked cards with menu details stay", () => {
+    const shard = (title: string, description: string | null = null, extra: Record<string, unknown> = {}) => ({
+      address: null,
+      category: "tours_tickets",
+      city: null,
+      date: "2019-01-15",
+      description: description ?? title,
+      endTime: null,
+      itemType: "activity",
+      sourceFilename: "czech-out.pdf",
+      startTime: null,
+      title,
+      ...extra,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "jan-15",
+          emptyStage({
+            activities: [
+              shard("Adult 16+ x 1 x 395CZK"),
+              shard("TOTAL 395CZK"),
+              shard("Status: paid (PayPal)", null, { category: "admin_logistics" }),
+              shard("LivingPragueTours"),
+              shard(
+                "Restaurant Peklo",
+                "Menu description: 3 festival meals + 2 glasses of wine or 2 glasses of beer + 1 bottle of natural water"
+              ),
+              // A real booked dinner whose description carries menu detail
+              // stays an activity (Bellevue shape).
+              shard(
+                "Bellevue dinner reservation",
+                "Menu description: five-course tasting.",
+                { category: "food_dining", startTime: "18:30" }
+              ),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const titles = draft.activities.map((item) => String(item.title));
+    for (const gone of [
+      /adult 16/i,
+      /total 395/i,
+      /paypal/i,
+      /livingpraguetours/i,
+      /peklo/i,
+    ]) {
+      assert.equal(
+        titles.some((title) => gone.test(title)),
+        false,
+        `receipt shard ${gone} never ships as an activity`
+      );
+    }
+    assert.ok(
+      titles.some((title) => /bellevue/i.test(title)),
+      "the booked dinner with menu detail survives"
+    );
+  });
+
+  await test("run7: admission evidence attaches by entity affinity, never date+time coincidence", () => {
+    const card = (title: string, description: string, extra: Record<string, unknown> = {}) => ({
+      address: null,
+      category: "art_culture",
+      city: null,
+      date: "2019-01-15",
+      description,
+      endTime: null,
+      itemType: "activity",
+      sourceFilename: "czech-out.pdf",
+      startTime: "14:30",
+      title,
+      ...extra,
+    });
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "jan-15-affinity",
+          emptyStage({
+            activities: [
+              card("Klementinum Tour", "Visit Klementinum at 2:30 PM. Guided Tour."),
+              // The Colosseum receipt page's own label carries the PURCHASE
+              // date/time (15.01 14:30), which collided with Klementinum's
+              // slot in 7.21.0.
+              card(
+                "Colosseum skip-the-line ticket",
+                "Skip-the-line admission ticket.",
+                { category: "tours_tickets" }
+              ),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const klementinum = draft.activities.find((item) =>
+      /klementinum/i.test(String(item.title))
+    );
+    assert.ok(klementinum, "Klementinum survives");
+    assert.equal(
+      /colosseum/i.test(String(klementinum.description ?? "")),
+      false,
+      "a Rome venue's ticket never lands inside a Prague tour's description"
+    );
+  });
 }

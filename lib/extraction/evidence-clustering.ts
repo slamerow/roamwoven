@@ -387,6 +387,7 @@ function evidenceRoleFromPayload(
     if (
       explicit === "accessory_detail" &&
       kind === "activity" &&
+      payload._parserArtifactTicketCopy !== true &&
       hasIndependentActivityAnchor(payload)
     ) {
       return "atomic_candidate";
@@ -2205,7 +2206,31 @@ function attachGenericActivityAccessories(pieces: CanonicalEvidencePiece[]) {
       }
 
       const candidateTime = timeFrom(candidate.payload);
-      return Boolean(time && candidateTime && time === candidateTime);
+      if (!time || !candidateTime || time !== candidateTime) return false;
+      // Entity affinity (live-run 7.21.0, run7: the "Colosseum
+      // skip-the-line ticket" — its own receipt page dated 15.01 14:30 —
+      // attached to the Klementinum Tour purely on the date+time
+      // coincidence). An accessory naming a venue attaches only to a
+      // candidate whose own text names that venue; a generic ticket line
+      // with no venue token may still attach by slot.
+      const accessoryVenueTokens = normalizedComparable(
+        stringValue(accessory.payload, "title")
+      )
+        .split(" ")
+        .filter(
+          (token) =>
+            token.length >= 5 &&
+            !/^(?:admission|entry|skip|the|line|ticket|tickets|voucher|pass)$/.test(
+              token
+            )
+        );
+      if (accessoryVenueTokens.length === 0) return true;
+      const candidateText = ` ${normalizedComparable(
+        activityText(candidate.payload)
+      )} `;
+      return accessoryVenueTokens.some((token) =>
+        candidateText.includes(` ${token} `)
+      );
     });
 
     if (candidates.length !== 1) {
@@ -4387,9 +4412,38 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
   );
   const groups = new Map<string, CanonicalEvidencePiece[]>();
 
+  // Notes must find a leg home (live-run 7.21.0, run7: recovered "Eat" and
+  // "Buy wine" Vienna notes shipped as leg-less standalone cards — their
+  // dates were cleared, so the place-range fallback never fired). The
+  // note's own day heading ("Saturday, January 19th") still carries the
+  // day; parse it with the shared date parser, defaulting the year from
+  // the trip's place ranges.
+  const placeYear = (() => {
+    for (const place of places) {
+      const match = /^(\d{4})-/.exec(place.arriveDate ?? "");
+      if (match) return Number(match[1]);
+    }
+    return null;
+  })();
+
   for (const note of notes) {
     const explicitCity = stringValue(note.payload, "city");
-    const date = stringValue(note.payload, "date");
+    const headingDate = (() => {
+      const headingPath = Array.isArray(note.payload.sourceHeadingPath)
+        ? note.payload.sourceHeadingPath.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : [];
+      for (const heading of [
+        stringValue(note.payload, "sourceSectionLabel") ?? "",
+        ...headingPath,
+      ]) {
+        const parsed = normalizeTripDate(heading, placeYear);
+        if (parsed) return parsed;
+      }
+      return null;
+    })();
+    const date = stringValue(note.payload, "date") ?? headingDate;
     const text = normalizeText(
       [note.payload.title, note.payload.description].filter(Boolean).join(" ")
     );

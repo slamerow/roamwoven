@@ -7,6 +7,7 @@ import {
   normalizeTripDate,
   tripDatesMatch,
 } from "@/lib/extraction/traveler-text";
+import { hasLooseTipVocabulary } from "@/lib/trip-card-taxonomy";
 
 type RoutingActions = {
   addAction: (
@@ -369,11 +370,22 @@ function routeDatedNoteEvidence({
       }
     }
 
-    return stayMention ||
-      uniqueLodgingContext ||
-      activityMention ||
-      transportMention ||
-      uniqueMovementContext
+    // Recommendation prose IS note content (live-run 7.21.0, run7 PC-7:
+    // "Some beers at Peklo… popular beer spots" and "maybe communism
+    // museum" were stripped from the Prague note as "activity evidence"
+    // because junk cards shared a name with them; the eat/drink recs
+    // vanished from the traveler note entirely). A segment carrying
+    // hedge/recommendation vocabulary stays in the note even when a
+    // record shares its name — the record match only removes RECORD
+    // evidence (bookings, times, addresses), never the recommendation.
+    const recommendationProse = hasLooseTipVocabulary(segment);
+
+    return !recommendationProse &&
+      (stayMention ||
+        uniqueLodgingContext ||
+        activityMention ||
+        transportMention ||
+        uniqueMovementContext)
       ? []
       : [segment];
   });

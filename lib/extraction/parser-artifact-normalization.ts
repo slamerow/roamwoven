@@ -628,7 +628,23 @@ const TICKET_TITLE_VOCABULARY = new Set([
   "entry", "eticket", "fast", "line", "one", "pass", "priority", "senior",
   "skip", "skip-the-line", "student", "the", "ticket", "tickets", "track",
   "x",
+  // Receipt-FIELD vocabulary (live-run 7.21.0, run7 PC-4: the walking-tour
+  // receipt shipped "Adult 16+ x 1 x 395CZK", "TOTAL 395CZK" and
+  // "Status: paid (PayPal)" as dated activity cards — field lines, not
+  // plans).
+  "total", "status", "paid", "paypal", "price", "qty", "quantity",
 ]);
+
+// A price-shaped token ("395czk", "24,00", "19.50") is receipt vocabulary.
+const PRICE_SHAPED_TOKEN_PATTERN = /^\d+(?:[.,]\d{2})?(?:czk|kc|eur|huf|ft|usd|gbp)?$/;
+
+// A single concatenated tour-operator token ("LivingPragueTours") with no
+// content beyond its own name is the receipt's vendor line.
+const VENDOR_TOKEN_TITLE_PATTERN = /^[A-Za-z]+[Tt]ours?$/;
+
+// Receipt/menu boilerplate text that is booking evidence, never a plan.
+const RECEIPT_BOILERPLATE_TEXT_PATTERN =
+  /\bmenu description\s*:|\bstatus\s*:\s*paid\b|\btotal\s+\d/i;
 const TICKET_QUANTITY_PATTERN =
   /\b\d+\s*x\s*\d+(?:[.,]\d{2})?|\btickets?\s*(?:number|no\.?|#)\s*:?\s*\d{4,}/i;
 
@@ -641,7 +657,10 @@ function isTicketVocabularyTitle(title: string) {
     return false;
   }
   return tokens.every(
-    (token) => TICKET_TITLE_VOCABULARY.has(token) || /^\d+$/.test(token)
+    (token) =>
+      TICKET_TITLE_VOCABULARY.has(token) ||
+      /^\d+$/.test(token) ||
+      PRICE_SHAPED_TOKEN_PATTERN.test(token)
   );
 }
 
@@ -670,21 +689,46 @@ function repairTicketPageActivity(
   // Activity-shaped branch: an all-ticket-vocabulary title plus explicit
   // quantity-x-price or ticket-number boilerplate is self-evident ticket
   // copy even without a booking_detail section tag.
+  // "No content beyond the title": the description is absent or repeats it.
+  const description = stringValue(activity, "description");
+  const bareCard =
+    !description || description.trim() === title.trim();
+
   const activityTicketCopy =
     isTicketVocabularyTitle(title) &&
     (TICKET_QUANTITY_PATTERN.test(text) ||
+      bareCard ||
       ((sectionType === "booking_detail" || ticketPageSource) &&
         TICKET_COPY_TEXT_PATTERN.test(text)));
 
-  if (!transportTicketCopy && !activityTicketCopy) {
+  // Receipt-field branch (live-run 7.21.0, run7 PC-4): a vendor-token title
+  // ("LivingPragueTours") with no content beyond itself, or an unbooked
+  // untimed card whose text is receipt/menu boilerplate ("Menu description:
+  // 3 festival meals…" on "Restaurant Peklo"), is a receipt shard. Booked
+  // or timed cards (Bellevue with its menu detail) are real plans and stay.
+  const unanchored =
+    !stringValue(activity, "startTime") &&
+    !stringValue(activity, "confirmation");
+  const receiptFieldCopy =
+    unanchored &&
+    ((VENDOR_TOKEN_TITLE_PATTERN.test(title.trim()) && bareCard) ||
+      RECEIPT_BOILERPLATE_TEXT_PATTERN.test(text));
+
+  if (!transportTicketCopy && !activityTicketCopy && !receiptFieldCopy) {
     return;
   }
 
   activity.evidenceRole = "accessory_detail";
+  // The independent-anchor override must never resurrect ticket/receipt
+  // copy: "Status: paid (PayPal)" carries the word "paid", which reads as a
+  // booking anchor (live-run 7.21.0, run7 PC-4).
+  activity._parserArtifactTicketCopy = true;
   repairs.push({
     detail: transportTicketCopy
       ? `Transport-titled card carrying booking/ticket codes from a ticket page is booking evidence for the transport record, never a new dated activity (live-run 7.18.0: RegioJet and ÖBB tickets re-emitted as Jan 24 cards).`
-      : `Ticket-vocabulary card carrying quantity/price/ticket-number boilerplate is a ticket-page re-emission, never a new dated activity (live-run 7.18.3 PB-1(c): "Skip the Line ticket, 1 x 380.00 Kč, ticket number 19183727" shipped as a Jan 15 activity).`,
+      : receiptFieldCopy && !activityTicketCopy
+        ? `Receipt-field card (vendor line or quantity/total/status/menu boilerplate) is booking evidence, never a new dated activity (live-run 7.21.0 run7 PC-4: "Adult 16+ x 1 x 395CZK", "TOTAL 395CZK", "Status: paid (PayPal)", "LivingPragueTours" and the festival-menu "Restaurant Peklo" shipped as Jan 15 cards).`
+        : `Ticket-vocabulary card carrying quantity/price/ticket-number boilerplate is a ticket-page re-emission, never a new dated activity (live-run 7.18.3 PB-1(c): "Skip the Line ticket, 1 x 380.00 Kč, ticket number 19183727" shipped as a Jan 15 activity).`,
     kind: "ticket_page_activity",
     stageLabel: stage.label,
     title,
