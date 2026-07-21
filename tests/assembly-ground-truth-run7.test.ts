@@ -699,6 +699,18 @@ export default async function run() {
         stage(
           "questions",
           emptyStage({
+            activities: [
+              // The Rome day is already firmly dated — the guessed-date
+              // question below is the settled/bogus case, not genuine
+              // uncertainty.
+              activity({
+                title: "Colosseum",
+                date: "2019-01-13",
+                startTime: "14:00",
+                lat: 41.89,
+                lng: 12.492,
+              }),
+            ],
             missingDetails: [
               {
                 answerType: "date",

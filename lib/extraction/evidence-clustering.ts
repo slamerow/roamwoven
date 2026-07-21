@@ -1666,7 +1666,19 @@ function suppressRedundantTransportParents(pieces: CanonicalEvidencePiece[]) {
 // day section and one targets the section's heading-named entity, the
 // sub-component questions fold into that container question (St. Vitus's
 // tour angle belongs inside the one castle ticket decision).
-function gateOffContractQuestions(details: unknown[]) {
+function guessYearFromPieces(pieces: CanonicalEvidencePiece[]) {
+  for (const piece of pieces) {
+    const date = stringValue(piece.payload, "date");
+    const match = date ? /^(\d{4})-/.exec(date) : null;
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+function gateOffContractQuestions(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[]
+) {
   const records = details
     .map((detail) => asRecord(detail))
     .filter(
@@ -1679,20 +1691,56 @@ function gateOffContractQuestions(details: unknown[]) {
     record._canonicalQuestionGate = reason;
   };
 
+  // Dead-target sweep (run7 hotfix, live trip e0f1db42): a question whose
+  // subject piece is no longer output-eligible (e.g. a transport fragment
+  // the fragment rule rejected) violates the finalization identity
+  // invariant ("missingDetails[n] targets missing canonical identity").
+  // Dismissal is the invariant's own exemption — the question dies with
+  // its subject, auditable in place.
+  const eligibleIds = new Set(
+    pieces.filter((piece) => piece.outputEligible).map((piece) => piece.id)
+  );
   for (const record of records) {
+    const related = stringValue(record, "relatedCanonicalPieceId");
+    if (related && !eligibleIds.has(related)) {
+      dismiss(
+        record,
+        "subject entity was suppressed by assembly; a question cannot outlive its subject"
+      );
+    }
+  }
+
+  for (const record of records) {
+    if (stringValue(record, "_canonicalReviewDisposition") !== "question") {
+      continue;
+    }
     const targetField = stringValue(record, "targetField") ?? "";
     const guessed = stringValue(record, "guessedValue");
     const evidence = stringValue(record, "evidence") ?? "";
-    if (
-      /date/i.test(targetField) &&
-      guessed &&
-      normalizeTripDate(guessed, 2000) !== null
-    ) {
-      dismiss(
-        record,
-        "auto-applied guessed date: the surrounding itinerary already dates this day (Phase 2 bogus-date family)"
-      );
-      continue;
+    if (/date/i.test(targetField) && guessed) {
+      // Dismiss ONLY when the pipeline already holds the guessed date as a
+      // settled fact (run7 hotfix: genuine date uncertainty — provisional
+      // dates — keeps its question per the locked Phase-2 doctrine; the
+      // 7.21.0 bogus case asked about a day whose records were already
+      // firmly dated).
+      const guessedIso = normalizeTripDate(guessed, guessYearFromPieces(pieces));
+      const settled =
+        guessedIso !== null &&
+        pieces.some((piece) => {
+          if (!piece.outputEligible || piece.kind !== "activity") return false;
+          if (stringValue(piece.payload, "date") !== guessedIso) return false;
+          const provisional = piece.payload._canonicalProvisionalFields;
+          return !(
+            Array.isArray(provisional) && provisional.includes("date")
+          );
+        });
+      if (settled) {
+        dismiss(
+          record,
+          "auto-applied guessed date: the surrounding itinerary already dates this day (Phase 2 bogus-date family)"
+        );
+        continue;
+      }
     }
     if (/^(?:type|itemtype)$/i.test(targetField) && guessed) {
       dismiss(
@@ -1813,19 +1861,20 @@ function suppressRouteLessTransportFragments(pieces: CanonicalEvidencePiece[]) {
     );
 
     piece.outputEligible = false;
+    // Identity-manifest hygiene (run7 hotfix): the fragment's observations
+    // stay on the fragment piece — moving observation ids between pieces
+    // desynchronizes the evidence identity manifest. The action record
+    // alone documents the fold.
     addCanonicalAction(piece, {
-      absorbedTitles: [],
+      absorbedTitles: host
+        ? [stringValue(host.payload, "title") ?? ""]
+        : [],
       observationIds: [...piece.observationIds],
       reason: host
         ? "route-less ticket fragment folded into its represented transport segment"
         : "route-less, time-less transport fragment rejected: booking material without a movement is never a travel row",
       type: "rejected",
     });
-    if (host) {
-      host.observationIds = Array.from(
-        new Set([...host.observationIds, ...piece.observationIds])
-      );
-    }
   }
 }
 
@@ -9291,6 +9340,11 @@ export function canonicalizeCanonicalReviewDetails(
     const disposition =
       internalTrace
         ? "dismissed"
+        : // An explicit dismissal (question gate v2, run7) survives
+          // canonicalization — the resolverDecisionId fallback below used
+          // to reclassify gated dismissals as calls.
+          stringValue(detail, "_canonicalReviewDisposition") === "dismissed"
+        ? "dismissed"
         : stringValue(detail, "_canonicalReviewDisposition") === "question"
         ? "question"
         : stringValue(detail, "_canonicalReviewDisposition") === "call" ||
@@ -9786,23 +9840,29 @@ export function clusterExtractedEvidence({
     transport,
     tripOverview,
   });
+  // Question gate v2 runs BEFORE canonicalization and disposition
+  // assignment (run7 hotfix: mutating dispositions after those passes
+  // desynchronizes the identity/disposition manifests the finalization
+  // invariants verify — live trip e0f1db42 failed assembly on exactly
+  // that).
+  const gatedDetails = [
+    ...canonicalGroupingCalls,
+    ...canonicalDuplicateFoldCalls,
+    ...canonicalSourceUpdateCalls,
+    ...canonicalConflictQuestions,
+    ...canonicalOwnedQuestions,
+    ...researchedListQuestions,
+    ...dayLabelSlotQuestions,
+    ...canonicalSpineQuestions,
+    ...missingDetails,
+  ];
+  gateOffContractQuestions(gatedDetails, pieces);
   const finalMissingDetails = canonicalizeCanonicalReviewDetails(
-    [
-      ...canonicalGroupingCalls,
-      ...canonicalDuplicateFoldCalls,
-      ...canonicalSourceUpdateCalls,
-      ...canonicalConflictQuestions,
-      ...canonicalOwnedQuestions,
-      ...researchedListQuestions,
-      ...dayLabelSlotQuestions,
-      ...canonicalSpineQuestions,
-      ...missingDetails,
-    ],
+    gatedDetails,
     pieces,
     tripOverview
   );
   assignCanonicalEvidenceDispositions({ observations, pieces });
-  gateOffContractQuestions(finalMissingDetails);
   const draft = {
     activities,
     missingDetails: finalMissingDetails,
