@@ -6,6 +6,58 @@
 
 ## Current State
 
+### 2026-07-21 — ARC C IMPLEMENTED: run7 audit + grouping/classifier/notes/transport/question fixes + parser evidence retention (Claude/Cowork cloud session)
+
+Read first: `docs/product-contracts.md` (ledger v17),
+`docs/assembly-defect-docket-2026-07-21-run7.md` (blind audit of live run
+"7.21.0" — the run planned as "7.18.4" — reconciled with ChatGPT's audit;
+§Arc C fix status).
+
+- 7.21.0 AUDIT HEADLINES: privacy CLEAN (first in 3 runs) and provider
+  fields fixed, but 4/6 ship-bar FAIL — castle demoted by the classifier's
+  planned-or-ideas hold (3rd mechanism in 3 runs), Gresham mega-container
+  returned on PARSER-FABRICATED 3-decimal coords (the lane skipped exactly
+  the precise-looking records), Jan-21 idea list promoted again (parser
+  invented meal prose + fragmented section labels poisoned fixture-green
+  logic), 9 questions (6 off-contract), phantom GOEURO transport row,
+  receipt-shard cards, Prague note content loss (recovery cap dropped 27
+  lines), koscom unflagged 7th run (covered only by note prose that
+  assembly then stripped).
+- ARC C LANDED, 5 commits, prefix-green (53 test files + typecheck):
+  f7fe907 grouping safety (verified-coords-only radius when lane ran,
+  container hygiene, walk rules per answer key, budget 15→50, bundle
+  visibility); bdca094 classifier input repair (day-heading commitment
+  guard, availability≠duration, meal-anchor-from-title, day-level group
+  keys, subject aliasing); 682e088 note integrity (receipt-field family,
+  entity-affinity attachment, recommendation prose never stripped, leg-less
+  note city resolution); 1e3e494 transport fragments + question gate v2 +
+  Δ2 St.-Vitus fold + coverage weak-credit tripwire/P2 + recovery cap
+  60→120 + publish warns-never-blocks; 41211f9 parser VERBATIM-evidence
+  retention (ISOLATED commit — the one model-behavior change).
+- CEO DECISIONS (Eli, this session): publish never hard-blocks (maker is
+  the quality gate; page states surviving defects instead of "ready"); Δ2
+  privacy scope stands (ChatGPT's "sensitive identifiers" finding
+  declassified); Jan-14 evening route follows the answer key (ungrouped —
+  may be amended later); budgets approved; evidence retention approved;
+  model A/B stays HELD (both ship-bar breakers were assembly-side); Eli's
+  blind diffs skipped this round (may still land as riders).
+- IMMEDIATE NEXT STEP: Eli pushes (clear .git/*.lock to _to_delete if
+  needed), optionally raises GEOCODE_VERIFICATION_MAX_LOOKUPS /
+  OPENAI_RECOVERY_MAX_LINES in Vercel (code defaults now 50/120), creates
+  a fresh QA100 trip with the Czech PDF, runs the validation extraction —
+  RECOMMENDED: TWO extractions on the same build ("7.21.1a/b") to measure
+  parser variance directly (decision pending). BLIND-FIRST audit against
+  the ship-bar floor PLUS the run7 confidence flags (docket §Arc C):
+  Prague note carries eat/drink recs; Pinball = ONE note zero cards;
+  evidence field VERBATIM not paraphrase (paraphrase → strongest model-A/B
+  case yet); castle groups vs merely survives; Lesser Town walk forms;
+  Vienna trio question returns. Audit-method upgrades from run7 gaps: read
+  every card's full prose (cross-city token check), schema-completeness
+  (every item binds a leg), tool exceptions are findings, maker-page walk
+  is a required leg.
+- THEN: extraction pinning after a validating run (own push, Supabase SQL
+  BEFORE deploy) → generalization round → Phases 3-4.
+
 ### 2026-07-18 — ARC B IMPLEMENTED: privacy wave + per-clause coverage + unified classifier + geocoding lane + riders (Claude/Cowork cloud session)
 
 Read first: `docs/product-contracts.md` (ledger v16),

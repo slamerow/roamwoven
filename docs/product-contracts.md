@@ -1,9 +1,12 @@
 # Roamwoven Product Contracts
 
-Ledger version: 16
+Ledger version: 17
 
-Ledger date: 2026-07-18 (Arc B: privacy wave + per-clause coverage + unified
-activity-vs-city-note classifier + geocoding verification lane + riders)
+Ledger date: 2026-07-21 (Arc C: run7 fixes — grouping trusts only verified
+coordinates once the lane runs, classifier commitment/demotion input repair,
+receipt-field family, transport fragment hardening, question gate v2 + Δ2
+fold, coverage weak-credit tripwire, parser verbatim-evidence retention,
+publish warns-never-blocks)
 
 Approval state: Approved and implementation-tracked
 
@@ -638,6 +641,28 @@ path is bypassed.
   `tests/parser-artifact-normalization.test.ts`,
   `tests/activity-classifier.test.ts`
 
+### 2026-07-21 Arc C evidence (RW-CLS-001, live-run 7.21.0, run7 PC-1/PC-3)
+
+The classifier's LOGIC held on live shapes; its INPUTS were broken and are
+repaired: (a) committed-day-content guard — an entity named in its own
+day-section heading ("Lesser Town & Prague Castle") never demotes via the
+planned-or-ideas hold or idea-list demotion (7.21.0 held the castle "as a
+city idea" and shipped the day without a castle card, 3rd distinct kill
+mechanism in 3 runs); (b) availability means OPENING info, never duration
+("castle (2 hours)" matched bare `hours` and read as research); (c) the
+meal-slot commitment anchor comes from the TITLE only — the parser invents
+meal prose for bare list entries ("Dinner at Mazel Tov restaurant."), which
+stamped fixed commitment and poisoned the whole Jan-21 section against
+demotion; (d) idea-list groups unify day-plan section labels per date
+(parser label fragmentation split one source list below the 3-entry floor);
+(e) question subjects protect their entity under aliasing ("Gellert Baths"
+vs "Gellert Bath House"); (f) own-text stamping judges hedges/commitment
+from the parser's VERBATIM `evidence` excerpt when present (new schema
+requirement — the parser strips "(far away)"/"maybe"/prices from prose,
+which blinded R2D2, Museum of Communism, and the Vienna trio's researched
+signal). Enforced by `tests/assembly-ground-truth-run7.test.ts` with the
+exact live payload shapes.
+
 ## RW-EVD-001 — Every meaningful source block receives an explicit disposition
 
 - Status: `LOCKED`
@@ -974,6 +999,12 @@ path is bypassed.
   update.
 - Evidence: Published snapshots are transactionally created and traveler reads
   use the active published snapshot.
+  2026-07-21 CEO decision (Eli, run7): publishing NEVER hard-blocks on audit
+  findings — the maker (a detail-oriented planner) is the quality gate, the
+  expensive stages are extraction/assembly, and republishing is cheap. The
+  publish page must state surviving confirmed output defects prominently
+  instead of claiming readiness ("Private app has open audit findings"),
+  but Create snapshot stays enabled.
 - Tests: `tests/published-snapshots.test.ts`,
   `tests/structured-trip-snapshot.test.ts`
 
