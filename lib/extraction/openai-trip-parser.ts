@@ -112,6 +112,7 @@ const tripDraftSchema = {
           date: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
           endTime: { type: ["string", "null"] },
+          evidence: { type: ["string", "null"] },
           evidenceRole: {
             enum: [
               "accessory_detail",
@@ -159,6 +160,7 @@ const tripDraftSchema = {
           "date",
           "description",
           "endTime",
+          "evidence",
           "evidenceRole",
           "itemType",
           "sourceFilename",
@@ -394,6 +396,7 @@ const systemPrompt = [
   "For sightseeing activity cards, set area to a SUB-CITY walkable neighborhood label only when the source text itself names one (a day title or heading such as 'Lesser Town' or 'Old Town'). Never use the city name, a day-trip town name, or a district you inferred from your own knowledge as the area. Set area to null when unsure. It must never change a card's city, date, or intent.",
   "Line-coverage rule: every meaningful line inside a dated day section must be represented in your output as an activity, note, stay, transport record, sensitive detail, or question. Never skip a line because it is short, odd, hedged, or unfamiliar: an unknown proper noun ('go to koscom'), a hedged mention ('maybe communism museum' — emit as city_note_candidate per the doubt-marker rule), a bath-house or venue option under a day title ('Szechenyi' or 'Gellert'), and a sparse committed item ('Tour Rome' — emit as placeholder or flexible card) must all still be emitted. Dropping a source line is an extraction defect.",
   "Day-title rule: a day heading or its title fragment ('We Explore Budapest', 'Walking tour / Jewish History / Old Town free time') is never an activity card title. Extract the concrete traveler items underneath instead; keep the heading itself in sourceSectionLabel only.",
+  "Evidence rule (REQUIRED for classification integrity): for every UNTIMED, UNBOOKED activity card, set evidence to the source's OWN line(s) for that item, VERBATIM — copy the exact source words including hedges ('maybe', 'if you want', '(far away)'), prices, and opening hours. Never paraphrase, summarize, or normalize the evidence field; the description may be normalized prose, but evidence is a quote. Timed or booked cards may set evidence to null. Downstream classification judges commitment from the evidence quote — a card whose evidence is missing or paraphrased will be misclassified.",
   "Reference-list rule: when a trailing summary or notes blob re-lists venues that already appear inside dated day sections, those trailing entries are reference copies — emit them as city_note_candidate or context sightings, never as new dated activities, and never move a card onto a different city's day because a reference list sits near that day's text.",
   "Ticket-page rule: an e-ticket, boarding pass, booking confirmation, or ticket PDF page that re-describes a transport segment (route, times, booking/ticket/travel codes) is booking_detail evidence for that transport record, never a new activity card. Use only the date printed on the ticket itself; never date ticket content by page position or by the surrounding day sections.",
   "Disjunction rule: when one itinerary slot offers alternatives ('Lunch at X or Y', 'Mumok or Natural History Museum'), emit exactly ONE activity card whose title or description carries the 'X or Y' choice. Never also emit the individual alternatives as separate activity cards — that duplicates one decision into several plans.",
@@ -743,6 +746,7 @@ function formatActivityChunkInput({
       "If this chunk contains multiple named dated venues, preserve them as separate cards unless the source clearly makes them one tour, route, complex, or pick-one cluster.",
       "Preserve the chunk's heading/list hierarchy in sourceHeadingPath, sourceSectionLabel, sourceSectionType, and evidenceRole. Do not promote recommendations from a city-reference section merely because a dated section appeared above them.",
       "Cover every meaningful source line in this chunk with at least one output record, and fill approxLatitude/approxLongitude (at least 3 decimal places; 2-decimal coordinates are too coarse and are ignored) for every named landmark or venue card you emit.",
+      "For every untimed, unbooked activity card in this chunk, set evidence to the source's own line VERBATIM (keep hedges, prices, hours exactly as written — never paraphrase).",
       rescueInstructions,
     ].join("\n"),
     formatMaterials(chunk.materials),
