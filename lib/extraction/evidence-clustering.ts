@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isBoilerplateSourceLine } from "@/lib/extraction/source-coverage";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
@@ -1749,10 +1750,24 @@ function gateOffContractQuestions(
       );
       continue;
     }
-    if (/sensitive/i.test(targetField)) {
+    if (/sensitive|access.?code/i.test(targetField)) {
       dismiss(
         record,
-        "identity protection is automatic and final (RW-PRI-001), never a maker question"
+        "identity/access protection is automatic and final (RW-PRI-001), never a maker question"
+      );
+      continue;
+    }
+    // Run8: a question whose own reason admits the excerpt is cut off is
+    // asking the maker to complete an OCR fragment — never a material
+    // decision ("what comes after 'Turn left onto…'", receipt-title asks).
+    if (
+      /\bcut off\b|\bcut-off\b|excerpt (?:is|appears)\b[^.]{0,40}(?:cut|truncat|incomplete)/i.test(
+        stringValue(record, "reason") ?? ""
+      )
+    ) {
+      dismiss(
+        record,
+        "the excerpt is an OCR fragment; completing it is not a maker decision (RW-QUE-001)"
       );
       continue;
     }
@@ -1826,7 +1841,40 @@ function suppressRouteLessTransportFragments(pieces: CanonicalEvidencePiece[]) {
     (piece) => piece.kind === "transport" && piece.outputEligible
   );
 
+  // Run8 (7.21.1a): the ÖBB ticket's VIA stations minted a second row with
+  // the SAME provider and SAME departure/arrival times as the real segment
+  // ("Train ticket" Gramatneusiedl→Gyor, 10:42→13:19). Times+provider are a
+  // stronger identity signal than route names: the unconfirmed twin folds.
   for (const piece of transportPieces) {
+    if (piece.outputEligible === false) continue;
+    if (confirmationFrom(piece.payload)) continue;
+    const dep = stringValue(piece.payload, "departureTime");
+    const arr = stringValue(piece.payload, "arrivalTime");
+    const prov = normalizedComparable(stringValue(piece.payload, "provider") ?? "");
+    if (!dep || !arr || !prov) continue;
+    const twin = transportPieces.find(
+      (candidate) =>
+        candidate !== piece &&
+        candidate.outputEligible &&
+        Boolean(confirmationFrom(candidate.payload)) &&
+        stringValue(candidate.payload, "departureTime") === dep &&
+        stringValue(candidate.payload, "arrivalTime") === arr &&
+        normalizedComparable(stringValue(candidate.payload, "provider") ?? "") === prov
+    );
+    if (twin) {
+      piece.outputEligible = false;
+      addCanonicalAction(piece, {
+        absorbedTitles: [stringValue(twin.payload, "title") ?? ""],
+        observationIds: [...piece.observationIds],
+        reason:
+          "unconfirmed twin row shares provider and exact times with a confirmed segment: ticket routing detail, not a second journey",
+        type: "rejected",
+      });
+    }
+  }
+
+  for (const piece of transportPieces) {
+    if (piece.outputEligible === false) continue;
     if (
       hasSpecificTransportRoute(piece.payload) ||
       transportNumber(piece.payload) ||
@@ -3778,7 +3826,7 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
 // sentences (Wi-Fi password / door code / lockbox / buzzer), which are stay
 // material by definition.
 const CREDENTIAL_SENTENCE_PATTERN =
-  /\b(?:wi-?fi(?:\s+(?:password|network|name))?\s*:|wi-?fi\s+password|password\s*:|door\s+code|access\s+code|entry\s+code|lock\s*box(?:\s+code)?|buzzer(?:\s+number)?|(?:^|\s)code\s+[A-Z0-9]{6,})/i;
+  /\b(?:wi-?fi(?:\s+(?:password|network|name))?\s*:|wi-?fi\s+password|password\s*:|door\s+code|access\s+code|entry\s+code|lock\s*box(?:\s+code)?|buzzer(?:\s+number)?|(?:^|\s)code\s+[A-Z0-9]{6,}|(?:use|enter|open[^.]{0,30}with)\s+the\s+code\s+\d{3,}|safe\s+box\s+with\s+your\s+key)/i;
 
 // Inter-city travel booking identifiers are protected class (RW-PRI-001
 // Δ2 scope) even when they ride on an ACTIVITY-shaped card: a transport
@@ -4807,6 +4855,28 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
           continue;
         }
         if (COSTS_CONTENT_PATTERN.test(candidate)) continue;
+        // Run8 P0 (7.21.1b): the restore pass shipped the Prague lockbox
+        // code + key-pickup steps + German ticket boilerplate inside "Rome
+        // Notes & Tips". Restored content passes the SAME filters the
+        // initial render enforces: never credentials, never boilerplate,
+        // never stay-access narration, and never material whose own source
+        // city disagrees with this collection's city.
+        if (CREDENTIAL_SENTENCE_PATTERN.test(candidate)) continue;
+        if (isBoilerplateSourceLine(candidate)) continue;
+        if (
+          /\b(?:how to get in|where to find the key|key.?pickup|lock\s*box|safe box|step \d|hinfahrt|fahrschein|verkehrsmittel|zugbindung|erwachsener|steward on board)\b/i.test(
+            candidate
+          )
+        ) {
+          continue;
+        }
+        const noteCity = normalizedComparable(
+          stringValue(note.payload, "city") ?? ""
+        );
+        const targetCity = normalizedComparable(
+          stringValue(target.payload, "city") ?? ""
+        );
+        if (noteCity && targetCity && noteCity !== targetCity) continue;
         const section = classifyCityNoteSection({
           category,
           label,

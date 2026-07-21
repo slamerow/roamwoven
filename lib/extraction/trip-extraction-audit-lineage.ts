@@ -408,7 +408,9 @@ function candidateFromArtifactPiece(
     date: recordValue(payload, "date"),
     description: truncate(recordValue(payload, "description")),
     endTime: recordValue(payload, "endTime"),
-    evidence: null,
+    // Run8: verbatim-evidence compliance must be auditable from the bundle
+    // (it was hard-nulled, so the retention change could not be verified).
+    evidence: truncate(recordValue(payload, "evidence")),
     itemType: recordValue(payload, "itemType"),
     locationName: recordValue(payload, "locationName"),
     sourceFilename: recordValue(payload, "sourceFilename"),

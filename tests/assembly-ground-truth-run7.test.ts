@@ -263,9 +263,10 @@ export default async function run() {
 
   await test("run7 geocode lane: site containers and crowded-day members are verified even with precise-looking parser coordinates", () => {
     const day = "2019-01-22";
-    const member = (title: string) => ({
+    const member = (title: string, area: string | null = "Pest") => ({
       approxLatitude: 47.497,
       approxLongitude: 19.04,
+      area,
       date: day,
       itemType: "activity",
       title,
@@ -280,7 +281,7 @@ export default async function run() {
             member("Gresham Palace"),
             member("Szechenyi Chain Bridge"),
             member("St. Istvan's Basilica"),
-            member("Shoes on the Danube"),
+            member("Shoes on the Danube", null),
             member("Parliament"),
             member("Buda Castle"),
             // Rank-2 background record with precise coords: still skipped.
@@ -308,7 +309,11 @@ export default async function run() {
     );
     assert.ok(
       titles.some((query) => /parliament/i.test(query)),
-      "crowded-day members are lookup candidates despite precise parser coords"
+      "area-labeled crowded-day members (the walk pool) are lookup candidates despite precise parser coords"
+    );
+    assert.ok(
+      !titles.some((query) => /shoes on the danube/i.test(query)),
+      "a crowded-day member WITHOUT an area label and with precise coords stays rank-2 and skips (run8 budget fix)"
     );
     assert.ok(
       !titles.some((query) => /colosseum/i.test(query)),

@@ -107,9 +107,15 @@ export function selectGeocodeCandidates(
     const title = stringField(record, "title");
     if (!title) continue;
     const city = stringField(record, "city") ?? stringField(record, "area");
+    // Run8: the candidate pool ballooned past the budget (145/191 vs 50)
+    // and the walk pool starved. Rank 1 is now the DISCOVERED-WALK pool
+    // specifically — crowded-day members carrying a source area label —
+    // so the lookups that arbitrate grouping always fit inside budget.
     const rank = SITE_CONTAINER_NOUN_PATTERN.test(title)
       ? 0
-      : entry.date && (dayCounts.get(entry.date) ?? 0) >= 6
+      : entry.date &&
+          (dayCounts.get(entry.date) ?? 0) >= 6 &&
+          stringField(record, "area")
         ? 1
         : 2;
     // Live-run 7.21.0: the parser now fabricates 3-decimal coordinates (the
