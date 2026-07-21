@@ -49,7 +49,12 @@ import { getMakerTrip } from "@/lib/trips";
 import { listTripUploads } from "@/lib/uploads";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// Run9: gpt-5.6-luna's extraction cannot finish ~30 chunk calls inside
+// 300 s (mini took ~180 s; two luna runs were platform-killed mid
+// model_extraction and surfaced as browser 405s, runs stuck 'processing').
+// 800 s requires Vercel Fluid/Pro; if the build rejects it, the plan is the
+// constraint and extraction must move to a background job before luna ships.
+export const maxDuration = 800;
 
 function hasSeriousQualityFindings(
   assessment: ReturnType<typeof assessTripDraftQuality>
