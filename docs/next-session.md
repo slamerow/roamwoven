@@ -6,6 +6,72 @@
 
 ## Current State
 
+### 2026-07-23 — ARC E LIVE DAY: run 7.23.0 FAILED at assembly, root-caused, two fix commits ready; AUDIT SESSION STARTS HERE
+
+Read first: AGENTS.md §Operating discipline, the Arc E entry below (build
+contents), ledger v18 (RW-CAN-001 fold-guard refinement + RW-OPS-001 Arc E
+hotfix/containment evidence).
+
+- RUN LEDGER: Arc E budget was 3 runs. Run 1 = trip 892b2e3e ("7.23.0",
+  named 7.22.5 in the plan): model_extraction COMPLETED on gpt-5.4-mini in
+  ~2m42s (5-wide chunks fine, 28 calls, 0 failed) but ASSEMBLY died —
+  `assembly-recovery-required`. Root cause from live events (informative
+  failure, counted): `mergeCanonicalPieceInto` → `refreshCanonicalPieceId`
+  changes the surviving piece's canonical id; a question already bound to
+  the old id then hits the finalization invariant ("missingDetails[8]
+  targets missing canonical identity piece_a7a0bcd4…"); the rebuild path
+  did not heal review subjects, so the bounded retry died too. The Arc E
+  fold guard changed which pieces flow into those merges, which is what
+  tripped the latent mine on this parse.
+- FIX COMMITS (verify `git log`; Eli may or may not have pushed them):
+  aa9e16b — id refreshes record a prior-id trail; review subjects forward
+  through it at subject resolution, the question gate, and every rebuild;
+  a subject matching no live piece dismisses its item INSIDE
+  canonicalizeCanonicalReviewDetails (unbound to trip level so draft and
+  projection agree). The exact 7.23.0 violation string now assembles as a
+  repaired draft + dismissed item (tests/canonical-review-identity-
+  recovery.test.ts, proven both directions).
+  f6a0ec5 — containment: NO raw exception escapes the assembly repair
+  corridor; artifact-inspection catch attempts the rebuild instead of
+  dying; finalize/compile raw-rethrow hatches removed; poisoned-draft test
+  proven both directions. Suite 57 files green, typecheck clean.
+- A RETRY of trip 892b2e3e was about to run on the fixed build ("7.23.0r").
+  Eli reported "really bad start" and moved the audit to a fresh session —
+  the retry's outcome was NOT audited in the prior session. FIRST STEPS
+  for this session: (1) confirm aa9e16b+f6a0ec5 are pushed and deploy is
+  green; (2) read the retry's processing events (qa-bundle
+  `audit.processingEvents` via the maker session — an in-page fetch of
+  /maker/trips/<id>/data/audit/qa-bundle?includePrivate=1 works, large
+  outputs via rendering into the DOM + get_page_text); (3) blind-first
+  audit if a draft exists.
+- AUDIT BAR for the next completed run (locked with Eli): floor = castle +
+  Schoenbrunn survive AND group, zero wrong groups, Jan-19/Jan-21 idea
+  lists stay notes, privacy clean, evidence provenance counts in lineage
+  (expect line_match_injected >> model_verbatim), no wrong-line injections
+  (check every line_match_injected row's evidence against its title), no
+  which-day questions from undated repeat copies. HONEST expectation for
+  the Schoenbrunn group ON THIS BUILD: 3-4 of 6 stops (palace +
+  at-Schönbrunn components via hierarchy; Gloriette is ~800 m out — the
+  locked ~300 m same-site radius refuses it BY DESIGN). Eli's bar is ALL
+  SIX as one tour: the agreed rider (his direction: "geo coordinate +
+  logic") is to capture the geocoder's formatted address (it literally
+  names the complex — "…Schönbrunn Palace Gardens") and match container
+  tokens, radius as fallback; also consider hierarchy-confirmed members
+  extending the site's footprint. Needs the run's verified coords +
+  addresses to calibrate; amends RW-GRP-001 detail → CEO sign-off.
+- STILL PENDING: Supabase SQL (db/production-sql-2026-07-22-extraction-
+  pinning.sql) — Eli's dashboard session was logged out; must run before
+  EXTRACTION_PIN_WRITE/REUSE flip. Recommendation standing: flip WRITE=1
+  as soon as SQL is in (crash-resume + every pinned parse becomes an
+  offline replay-corpus case). Dismissed-question quality check after any
+  run with the new code: if a question was dismissed that should have
+  survived, that is a forwarding gap, not a new class.
+- Session ops notes: device git leaves stale .git/*.lock files after every
+  bridge git command (VM cannot delete) — mv them to _to_delete/ before
+  git ops. Bundles fetch fine through Eli's logged-in Chrome; the
+  extension blocks base64 output but raw JSON via DOM render +
+  get_page_text works.
+
 ### 2026-07-22 (later) — ARC E IMPLEMENTED: fold guard + evidence injection + parallelization + pinning (Claude/Cowork cloud session; COMMITTED, NOT PUSHED, NOT RUN)
 
 Read first: docs/arc-e-paper-plan-2026-07-22.md (the approved plan; CEO
