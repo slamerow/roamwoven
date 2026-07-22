@@ -6,6 +6,68 @@
 
 ## Current State
 
+### 2026-07-22 (later) — ARC E IMPLEMENTED: fold guard + evidence injection + parallelization + pinning (Claude/Cowork cloud session; COMMITTED, NOT PUSHED, NOT RUN)
+
+Read first: docs/arc-e-paper-plan-2026-07-22.md (the approved plan; CEO
+locked ledger-v18 wording, pinning-in-push, 3-run budget),
+docs/assembly-defect-docket-2026-07-22-run-7.22.4.md (live-bundle root
+cause — it CORRECTS the entry below: Schoenbrunn died in the card-vs-note
+reconciliation, not the group fold; the castle was a 4th distinct kill —
+doubt-demoted on R2D2's absorbed "(far away)" because mini nulls evidence,
+0/140 rows), ledger v18.
+
+- REPO at b1d4102, four commits, each prefix-green (full suite + typecheck
+  in a clean npm-ci env; negative controls proven for commits 1-2):
+  b2fe586 fold guard — grouping structure (at-site components, their
+  container, description-listed stops) and heading-committed entities never
+  fold into a reference copy; hedged copies still demote; Ferris-wheel idea
+  set stays notes (tests/assembly-ground-truth-run9.test.ts, live shapes);
+  a97b36f deterministic verbatim-evidence injection at intake — own-section
+  line match, all-token rule, ambiguity injects NOTHING, evidenceProvenance
+  (model_verbatim | line_match_injected | model_unverified | absent) rides
+  lineage + snapshot; 0544670 chunk concurrency 3→5 + geocode lookups
+  8-wide (lane fail-soft semantics unchanged, widths in telemetry);
+  b1d4102 extraction pinning ISOLATED — model calls memoized at the OpenAI
+  client boundary (covers spine/chunks/rescues/resolver/recovery; prompt
+  drift = live miss), trip_extraction_parses SQL, EXTRACTION_PIN_WRITE/
+  REUSE + OPENAI_EXTRACTION_TEMPERATURE/SEED all default OFF/UNSET —
+  zero live-behavior change until envs flip. Suite 56 files green.
+- OPS ORDER FOR THE PUSH (verify + undo each):
+  1. Supabase SQL editor: run db/production-sql-2026-07-22-extraction-
+     pinning.sql. Verify: `select count(*) from trip_extraction_parses;`
+     returns 0. Undo: `drop table trip_extraction_parses;` (additive,
+     nothing references it).
+  2. Eli runs local `npm test` + `npx tsc --noEmit` (final gate; cloud
+     already green), then pushes b1d4102. Verify: Vercel deploy green.
+     Undo: revert commits individually — each is isolated.
+  3. NO env changes at push time. Before R1: confirm from 7.22.4 telemetry
+     (not the console) that extraction model is gpt-5.4-mini and
+     OPENAI_OCR_MODEL is unset-or-luna.
+  4. Fresh browser tab before the run (deploys invalidate open tabs).
+- RUN PLAN (budget 3, hard stop after 2 uninformative failures):
+  R1 "7.22.5" arc validation, pins/params OFF. Floor: castle + Schoenbrunn
+  survive AND group; zero wrong groups; Jan-19/Jan-21 idea lists stay
+  notes; privacy clean; evidence populated with provenance counts in
+  lineage (expect line_match_injected >> model_verbatim); no which-day
+  questions from undated repeat copies; Jan-21 day not empty of its train;
+  duration headroom holds at 5-wide (28 chunks = 6 waves).
+  R2 flip EXTRACTION_PIN_WRITE=1 + EXTRACTION_PIN_REUSE=1 (one env change,
+  telemetry-verified via the model_extraction event's pinning block), then
+  extract + re-extract same trip: second run must show hits≈calls,
+  near-zero token spend, byte-similar draft. Optionally then TEMPERATURE=0
+  (its own change; may be stripped fail-soft — watch
+  trip_extraction_sampling_params_stripped).
+  R3 reserved for one repair-and-confirm.
+- WATCH ITEMS (deferred by CEO decision, fixtures wanted from 2 runs):
+  GOEURO item with literal date "21.01"; Jan-21 phrasebook junk shards
+  ("Asking for paprika"); geocode budget still exhausting (104 candidates
+  vs 50 — env raise decided AFTER R1 telemetry); Apple Strudel/Panorama
+  grouping depends on the parse carrying container hierarchy (answer-key
+  stops, not floor).
+- Full 7.22.4 bundle (263,590 B, sha256 5357cf3a…5bd8) is in Eli's
+  Downloads as run-7.22.4-qa-bundle.json — drag to repo root (gitignored)
+  when convenient; the fixture-relevant extract is quoted in the docket.
+
 ### 2026-07-22 — ARC D + A/B DAY (read the WHOLE entry before touching anything; costly day, discipline rules born from it)
 
 Read first: AGENTS.md §Operating discipline (BINDING), docs/assembly-defect-docket-2026-07-21-run8.md, ledger v17.
