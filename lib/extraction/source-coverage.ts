@@ -74,6 +74,48 @@ export function isBoilerplateSourceLine(line: string) {
   return BOILERPLATE_LINE_PATTERNS.some((pattern) => pattern.test(line.trim()));
 }
 
+// Run 7.23.0r (approved ground truth: the Costs section is EXCLUDED trip
+// content — planning artifacts, never activities, notes, legs, or maker
+// fields). These lines are structurally uncovered BY DESIGN, so source
+// recovery kept re-ingesting them: per-night price lines minted two
+// phantom overnight legs, a "$15-$20" ledger line became a never-taken
+// train card, and cost text reached two maker questions. Shapes are
+// matched on the LINE (and cost-heading section labels), never on prose
+// venues: "45.75 euro due upon arrival" (stay cost, due on arrival) and
+// "funicular (HUF 1,200 one way)" deliberately do not match.
+const PLANNING_COST_LINE_PATTERNS = [
+  // The Costs heading itself.
+  /^costs?$/i,
+  // Per-night cost ledger lines / section headings:
+  // "January 15th Prague - $56 (airbnb)".
+  /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–]\s*\$\d/i,
+  // Budget lines: "(Budget: $470)", "Budget notes: $1200 total".
+  /\bbudget:?\s*\$?\d/i,
+  // Ledger label lines: "Flight to Rome: $300 (in points)", "Travel: $470".
+  /^[a-zà-ÿ' /&-]{2,40}:\s*\$\d[\d,.]*(?:\s*\(|\s*\+|\s*$)/i,
+  // Amount-first continuation lines: "$110 flight upgrade".
+  /^\+?\s*\$\d[\d,.]*\b/,
+  // Price-range-only tails: "Train to/from Cesky Krumlov ($15-$20)".
+  /\(\s*\$\d[\d,.]*\s*[-–]\s*\$\d[\d,.]*\s*\)\s*$/,
+];
+
+export function isPlanningCostSectionLabel(label: string | null | undefined) {
+  if (!label) return false;
+  const trimmed = label.trim();
+  return (
+    /^costs?$/i.test(trimmed) ||
+    /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–]\s*\$\d/i.test(
+      trimmed
+    )
+  );
+}
+
+export function isExcludedPlanningCostLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return PLANNING_COST_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
 const LINE_STOPWORDS = new Set([
   "about",
   "after",

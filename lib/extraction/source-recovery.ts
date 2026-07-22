@@ -3,6 +3,8 @@ import { classifyRecoveredLineRole } from "@/lib/extraction/activity-classifier"
 import { comparableTokens, normalizeTripDate } from "@/lib/extraction/traveler-text";
 import {
   distinctiveLineTokens,
+  isExcludedPlanningCostLine,
+  isPlanningCostSectionLabel,
   stageOutputTokenSet,
   type SourceCoverageSummary,
 } from "@/lib/extraction/source-coverage";
@@ -44,6 +46,11 @@ export type SourceRecoveryPlan = {
   // No silent caps (RW-OPS-001 telemetry honesty): lines beyond the batch
   // caps are counted, never silently dropped from the record.
   droppedLineCount: number;
+  // Run 7.23.0r: Costs-section planning lines are EXCLUDED trip content
+  // (approved ground truth) — recovery re-ingesting them minted two
+  // phantom legs, a never-taken train card, and cost text inside maker
+  // questions. Excluded lines are counted here, never silently skipped.
+  excludedPlanningCostLineCount: number;
   input: string;
   sections: SourceRecoveryPlanSection[];
 };
@@ -51,6 +58,7 @@ export type SourceRecoveryPlan = {
 export type SourceRecoveryUsage = {
   batchedLineCount: number;
   droppedLineCount: number;
+  excludedPlanningCostLineCount?: number;
   error: { message: string; name: string } | null;
   inputCharCount: number;
   model: string | null;
@@ -99,15 +107,25 @@ export function planSourceRecoveryBatch({
   const parts: string[] = [];
   let batchedLineCount = 0;
   let droppedLineCount = 0;
+  let excludedPlanningCostLineCount = 0;
   let charBudget = maxInputChars;
 
   for (const stageReport of coverage.stages) {
+    // Run 7.23.0r: a whole section whose label is a cost heading
+    // ("Costs", "January 15th Prague - $56 (airbnb)") is planning-artifact
+    // material — excluded from trip content by the approved ground truth,
+    // so recovery never re-ingests it.
+    const costSection = isPlanningCostSectionLabel(stageReport.label);
     const header = `Source section: ${stageReport.label}\nDay heading: ${
       stageReport.dayHeading ?? "(none)"
     }`;
     const sectionExcerpts: string[] = [];
 
     for (const line of stageReport.uncoveredLines) {
+      if (costSection || isExcludedPlanningCostLine(line.excerpt)) {
+        excludedPlanningCostLineCount += 1;
+        continue;
+      }
       const lineText = `- ${line.excerpt}`;
 
       if (
@@ -145,6 +163,7 @@ export function planSourceRecoveryBatch({
   return {
     batchedLineCount,
     droppedLineCount,
+    excludedPlanningCostLineCount,
     input: [
       "These source lines were not captured by the first structuring pass. Recover them.",
       ...parts,
@@ -484,6 +503,7 @@ export async function runBoundedSourceRecovery({
         ...baseUsage,
         batchedLineCount: plan.batchedLineCount,
         droppedLineCount: plan.droppedLineCount,
+        excludedPlanningCostLineCount: plan.excludedPlanningCostLineCount,
         inputCharCount: plan.input.length,
         model: response.model,
         outcome: "recovered",
@@ -502,6 +522,7 @@ export async function runBoundedSourceRecovery({
         ...baseUsage,
         batchedLineCount: plan.batchedLineCount,
         droppedLineCount: plan.droppedLineCount,
+        excludedPlanningCostLineCount: plan.excludedPlanningCostLineCount,
         error: {
           message: error instanceof Error ? error.message : "Unknown error.",
           name: error instanceof Error ? error.name : "UnknownError",

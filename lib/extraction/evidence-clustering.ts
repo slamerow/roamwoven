@@ -3374,7 +3374,30 @@ function isBooleanLikeStayName(value: unknown) {
   );
 }
 
-function pruneNonOvernightPlaces(pieces: CanonicalEvidencePiece[]) {
+// Mirrors SOURCE_RECOVERY_STAGE_LABEL in source-recovery.ts (kept local:
+// source-recovery already imports this module's types, and a value import
+// back would create a cycle). The "(failed)" variant shares the prefix.
+const SOURCE_RECOVERY_LABEL_PREFIX = "source recovery";
+
+function observationHasLegCorroboration(observation: EvidenceObservation) {
+  if (observation.source === "model_spine") return true;
+  const label = observation.sourceLabel ?? "";
+  if (label.toLowerCase().startsWith(SOURCE_RECOVERY_LABEL_PREFIX)) {
+    return false;
+  }
+  // Any real source section (a day heading or the document's own notes
+  // blob) counts — the guard only refuses places whose ENTIRE existence is
+  // recovery output.
+  return label.trim().length > 0;
+}
+
+function pruneNonOvernightPlaces(
+  pieces: CanonicalEvidencePiece[],
+  observations: EvidenceObservation[] = []
+) {
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
   const places = pieces
     .filter((piece) => piece.kind === "place" && piece.outputEligible)
     .sort((left, right) =>
@@ -3400,6 +3423,31 @@ function pruneNonOvernightPlaces(pieces: CanonicalEvidencePiece[]) {
 
   places.forEach((place, index) => {
     const city = stringValue(place.payload, "city");
+    // Run 7.23.0r P1 (RW-TRV-001): source recovery re-extracted the Costs
+    // section's per-night price lines and minted two phantom overnight
+    // legs (Prague Jan 15-17 piece_4443af…, Budapest Jan 21-23
+    // piece_4f1f87…) nested INSIDE the real spine legs. A leg asserts
+    // where the traveler SLEEPS — that claim needs the trip spine or a
+    // real source section behind it. A place piece whose every
+    // observation is recovery output never mints a leg; its city text is
+    // recovery evidence, not itinerary structure.
+    const observed = place.observationIds
+      .map((id) => observationById.get(id))
+      .filter((observation): observation is EvidenceObservation =>
+        Boolean(observation)
+      );
+    const recoveryOnly =
+      observed.length > 0 &&
+      observed.every(
+        (observation) => !observationHasLegCorroboration(observation)
+      );
+    if (recoveryOnly) {
+      suppressCanonicalPiece(
+        place,
+        "recovery-only place evidence never mints a trip leg: spine or day-heading corroboration required"
+      );
+      return;
+    }
     const arriveDate = stringValue(place.payload, "arriveDate") ??
       stringValue(place.payload, "arrivalDate");
     const leaveDate = stringValue(place.payload, "leaveDate") ??
@@ -10144,7 +10192,7 @@ export function clusterExtractedEvidence({
   attachCanonicalAccessoryDetails(pieces);
   suppressRedundantTransportParents(pieces);
   suppressRouteLessTransportFragments(pieces);
-  pruneNonOvernightPlaces(pieces);
+  pruneNonOvernightPlaces(pieces, observations);
   routeUnbookedDayTripTransport(pieces);
   mergeReclassifiedCanonicalPieces(pieces);
   finalizeCanonicalPlaceFields(pieces);
