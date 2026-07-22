@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isBoilerplateSourceLine } from "@/lib/extraction/source-coverage";
+import { injectVerbatimActivityEvidence } from "@/lib/extraction/evidence-injection";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
@@ -9732,6 +9733,18 @@ export function clusterExtractedEvidence({
         const payload = normalizePayloadDates(asRecord(item), tripYear);
         if (Object.keys(payload).length === 0) continue;
         stampSourceSupport(payload, collection, stageInput.sourceText ?? null);
+        // Arc E: deterministic verbatim-evidence injection runs at intake,
+        // BEFORE observations exist, so own-text hedge/commitment stamping
+        // judges the source's own words even when the model nulls the
+        // schema-required evidence field (run 7.22.4: 0/140 rows carried
+        // evidence and Prague Castle doubt-demoted on an absorbed R2D2
+        // fragment).
+        if (collection === "activities") {
+          injectVerbatimActivityEvidence(
+            payload,
+            stageInput.sourceText ?? null
+          );
+        }
         ordinal += 1;
         const kind =
           collection === "activities" ? activityKind(payload) : defaultKind;

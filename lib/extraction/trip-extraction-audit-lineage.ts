@@ -411,6 +411,10 @@ function candidateFromArtifactPiece(
     // Run8: verbatim-evidence compliance must be auditable from the bundle
     // (it was hard-nulled, so the retention change could not be verified).
     evidence: truncate(recordValue(payload, "evidence")),
+    // Arc E: model-provided vs deterministically injected vs absent — the
+    // per-row provenance makes the compliance split countable from the
+    // bundle (RW-AUD-001 rider for the injection lane).
+    evidenceProvenance: recordValue(payload, "_evidenceProvenance"),
     itemType: recordValue(payload, "itemType"),
     locationName: recordValue(payload, "locationName"),
     sourceFilename: recordValue(payload, "sourceFilename"),

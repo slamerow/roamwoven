@@ -28,6 +28,9 @@ export type DraftRecordSummary = {
   description: string | null;
   endTime: string | null;
   evidence: string | null;
+  // Arc E: "model_verbatim" | "line_match_injected" | "model_unverified" |
+  // "absent" — verbatim-compliance split, countable from the QA bundle.
+  evidenceProvenance: string | null;
   itemType: string | null;
   locationName: string | null;
   sourceFilename: string | null;

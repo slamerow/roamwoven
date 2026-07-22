@@ -35,6 +35,7 @@ function summarizeActivity(value: unknown, index: number): DraftRecordSummary {
     description: truncate(getString(record, "description")),
     endTime: getString(record, "endTime"),
     evidence: truncate(getString(record, "evidence")),
+    evidenceProvenance: getString(record, "_evidenceProvenance"),
     itemType: getString(record, "itemType"),
     locationName: getString(record, "locationName"),
     sourceFilename: getString(record, "sourceFilename"),
