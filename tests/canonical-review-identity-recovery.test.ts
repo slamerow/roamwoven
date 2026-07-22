@@ -127,6 +127,48 @@ export default async function run() {
     );
   });
 
+  await test("containment: a raw non-canonical exception in the assembly corridor is repaired by rebuild, not a dead run", () => {
+    const evidence = baseCluster();
+    const draft = evidence.draft as Draft;
+    // A malformed draft record whose property access THROWS — the
+    // unknown-bug class (TypeError et al.) that used to bypass the repair
+    // corridor entirely and die as an untyped extraction failure. The
+    // rebuild reads only canonical pieces, so it is immune to the poison.
+    const activities = (draft as Record<string, unknown>).activities as unknown[];
+    const poisoned: Record<string, unknown> = { itemType: "activity" };
+    // The identity field itself throws, so the exception fires INSIDE the
+    // artifact inspection — the exact place pre-containment code died with
+    // recoveryFailure(stage: "repair") without attempting any rebuild.
+    Object.defineProperty(poisoned, "_canonicalId", {
+      enumerable: true,
+      get() {
+        throw new TypeError("boom: malformed draft record");
+      },
+    });
+    (draft as Record<string, unknown>).activities = [...activities, poisoned];
+
+    const result = assembleCanonicalTripDraft({
+      draft,
+      evidencePieces: evidence.pieces,
+      fallbackTripName: "containment repro",
+      tripId: "892b2e3e-177e-429b-89ee-b8c8259f535f",
+    });
+
+    assert.equal(result.recovery.attempted, true, "repair engaged");
+    assert.ok(
+      result.recovery.actions.includes("rebuilt_canonical_outputs_from_evidence"),
+      "the draft was rebuilt from canonical pieces"
+    );
+    const resultDraft = result.draft as Draft;
+    const castle = (resultDraft as Record<string, unknown>).activities as Array<
+      Record<string, unknown>
+    >;
+    assert.ok(
+      castle.some((item) => /prague castle/i.test(String(item.title ?? ""))),
+      "real content survives the containment rebuild"
+    );
+  });
+
   await test("id forwarding: a subject whose piece id was refreshed follows the prior-id trail and the question SURVIVES", () => {
     const evidence = baseCluster();
     const castle = evidence.pieces.find(

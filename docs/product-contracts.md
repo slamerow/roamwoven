@@ -1186,6 +1186,14 @@ exact live payload shapes.
   `tests/canonical-review-identity-recovery.test.ts` (live 7.23.0
   violation shape survives as a repaired draft + dismissed item;
   id-refresh forwarding keeps the question alive on the same entity).
+  Same change, containment: the assembly corridor no longer lets ANY raw
+  non-canonical exception escape untyped — every failure (invariant or
+  TypeError-class unknown) flows through the same bounded
+  rebuild-from-pieces + retry and terminates, at worst, in a named
+  recovery state with the real error summarized in events. The former
+  isCanonicalAssemblyError gate is deleted, not bypassed. Proven both
+  directions by the poisoned-draft check in
+  `tests/canonical-review-identity-recovery.test.ts`.
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,

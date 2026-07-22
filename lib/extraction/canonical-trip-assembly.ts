@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  FinalizedCanonicalMutationError,
   finalizeCanonicalTripDraft,
-  NonCanonicalDraftError,
   type CanonicalFinalizationDebug,
 } from "@/lib/extraction/canonical-trip-finalization";
 import { CanonicalIdentityInvariantError } from "@/lib/extraction/canonical-identity";
@@ -14,10 +12,7 @@ import {
   type EvidenceObservation,
   type EvidenceObservationDisposition,
 } from "@/lib/extraction/evidence-clustering";
-import {
-  CanonicalProjectionInvariantError,
-  createStructuredTripRecordsFromDraft,
-} from "@/lib/extraction/draft-to-structured-trip";
+import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import {
   getArray,
   getObject,
@@ -275,14 +270,10 @@ function errorSummary(error: unknown) {
   };
 }
 
-function isCanonicalAssemblyError(error: unknown) {
-  return (
-    error instanceof CanonicalIdentityInvariantError ||
-    error instanceof CanonicalProjectionInvariantError ||
-    error instanceof FinalizedCanonicalMutationError ||
-    error instanceof NonCanonicalDraftError
-  );
-}
+// Arc E containment note: the former isCanonicalAssemblyError gate is gone
+// on purpose — EVERY assembly-corridor failure (canonical invariant or raw
+// exception) flows through the same bounded rebuild+retry and terminates,
+// at worst, in a named recovery state. Raw errors never escape untyped.
 
 function recoveredPieceId({
   originalId,
@@ -746,18 +737,39 @@ export function assembleCanonicalTripDraft({
       );
     }
   } catch (error) {
-    throw recoveryFailure({
-      actions: recoveryActions,
-      initialError: error,
-      retryError: error,
-      stage: "repair",
-    });
+    // Arc E containment (dark-factory totality): an unexpected raw
+    // exception while inspecting the draft's artifact projection gets the
+    // SAME bounded repair a detected violation gets — the rebuild reads
+    // only the canonical pieces, so it is immune to whatever malformed
+    // draft shape threw. Terminal only when the rebuild itself cannot run.
+    initialError = error;
+    try {
+      const repaired = rebuildDraftFromCanonicalPieces({
+        draft: candidate,
+        pieces: evidencePieces,
+      });
+      candidate = repaired.draft;
+      recoveryActions = Array.from(
+        new Set([...priorRecoveryActions, ...repaired.actions])
+      );
+    } catch (repairError) {
+      throw recoveryFailure({
+        actions: recoveryActions,
+        initialError: error,
+        retryError: repairError,
+        stage: "repair",
+      });
+    }
   }
 
   try {
     finalization = finalizeCanonicalTripDraft(candidate);
   } catch (error) {
-    if (!isCanonicalAssemblyError(error)) throw error;
+    // Arc E containment: raw non-canonical exceptions no longer escape the
+    // repair corridor (they used to rethrow here and die as an untyped
+    // extraction failure with no repair attempt). Every error class flows
+    // through the same bounded rebuild+retry; errorSummary preserves the
+    // real name/message/violations in the recovery event either way.
     if (initialError !== null) {
       throw recoveryFailure({
         actions: recoveryActions,
@@ -807,7 +819,8 @@ export function assembleCanonicalTripDraft({
       recovery: recoverySummary(),
     };
   } catch (error) {
-    if (!isCanonicalAssemblyError(error)) throw error;
+    // Arc E containment: compilation failures — canonical OR raw — follow
+    // the same bounded rebuild+retry as finalization failures.
     if (initialError !== null) {
       throw recoveryFailure({
         actions: recoveryActions,
