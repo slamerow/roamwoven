@@ -6433,6 +6433,111 @@ function isDeliberateDayPlanMention(
   return !classification.hasAvailabilityMarker;
 }
 
+// --- Arc E fold guard (live-run 7.22.4; RW-CAN-001 v18) ---------------------
+//
+// The never-committed repeat fold may not remove grouping structure or
+// heading-committed entities in favor of a reference copy. In run 7.22.4 the
+// PDF listed the Schönbrunn sights twice (day plan + trailing notes blob),
+// the parse gave the copies no times, and reconcileCardsAgainstCityNotes
+// folded the entire family — palace and "X at Schönbrunn" components — into
+// the suppressed "Schönbrunn visit" note ("the city-note copy is the single
+// home"), leaving zero cards and zero groups. isDeliberateDayPlanMention
+// could not save them because the merged reference-copy text carries
+// price/hours tokens ("(free-…)", "Open til …"), and those disqualify the
+// whole piece.
+//
+// Two parse-independent protection bases (no venue knowledge, per A-6):
+//   (1) the piece's own day heading names the entity — the run7 castle rule
+//       ("Lesser Town & Prague Castle"), reused verbatim;
+//   (2) same-site grouping structure (RW-GRP-001 doctrine: grouping
+//       structure is exempt from covered-container demotion — extended to
+//       the repeat-fold family): an "X at <Site>" component whose tail
+//       names a present peer, the container that a component's tail names,
+//       or an entity listed in such a container's own description
+//       (source-hierarchy membership).
+// A hedged copy still demotes — doubt markers stay authoritative
+// (RW-CLS-001) — and price/hours text is deliberately NOT a disqualifier
+// here: research markers on a merged reference copy are not intent evidence
+// against the plan copy (they instead feed the researched-list question,
+// which is gated upstream by question subjects).
+
+const AT_SITE_TAIL_PATTERN = /\s+(?:at|inside|within)\s+(.+)$/i;
+const MEAL_PREFIX_TITLE_PATTERN =
+  /^(?:breakfast|brunch|lunch|dinner|coffee|drinks?|eat|meal)\b/i;
+
+function atSiteTailComparable(rawTitle: string) {
+  // A meal-prefix title ("Breakfast at Cafe Central") is venue aliasing,
+  // not site structure (7.17.2 meal-prefix fold must keep working).
+  if (MEAL_PREFIX_TITLE_PATTERN.test(rawTitle)) return null;
+  const tail = AT_SITE_TAIL_PATTERN.exec(rawTitle)?.[1];
+  if (!tail) return null;
+  const comparable = normalizedComparable(tail);
+  return comparable.length >= 4 ? comparable : null;
+}
+
+function pieceIsSameSiteGroupingStructure(
+  piece: CanonicalEvidencePiece,
+  pieces: CanonicalEvidencePiece[]
+) {
+  const selfRawTitle = stringValue(piece.payload, "title") ?? "";
+  const selfTitle = normalizedComparable(selfRawTitle);
+  if (!selfTitle) return false;
+  const selfDate = stringValue(piece.payload, "date");
+
+  const peers = pieces
+    .filter((peer) => peer !== piece && peer.kind === "activity")
+    .map((peer) => ({
+      date: stringValue(peer.payload, "date"),
+      description: normalizedComparable(
+        stringValue(peer.payload, "description") ?? ""
+      ),
+      rawTitle: stringValue(peer.payload, "title") ?? "",
+      title: normalizedComparable(stringValue(peer.payload, "title")),
+    }))
+    .filter((peer) => Boolean(peer.title))
+    // Same-site structure is a same-day visit; undated copies of the same
+    // family still count (7.22.4 gave some copies no dates at all).
+    .filter((peer) => !selfDate || !peer.date || peer.date === selfDate);
+
+  // (2a) Component: own "at <site>" tail names a present peer (the site).
+  const selfTail = atSiteTailComparable(selfRawTitle);
+  if (
+    selfTail &&
+    peers.some((peer) => ` ${peer.title} `.includes(` ${selfTail} `))
+  ) {
+    return true;
+  }
+
+  // (2b) Container: a peer component's at-tail names this piece.
+  const namesSite = (title: string) =>
+    peers.some((peer) => {
+      const tail = atSiteTailComparable(peer.rawTitle);
+      return tail !== null && ` ${title} `.includes(` ${tail} `);
+    });
+  if (namesSite(selfTitle)) return true;
+
+  // (2c) Listed in a container peer's own description — RW-GRP-001
+  // source-hierarchy membership ("a stop listed in the container's own
+  // description joins the visit"). Only genuine containers count (peers
+  // that some component's at-tail names), never note collections — a
+  // reference blob naming everything must not protect everything.
+  return peers.some(
+    (peer) =>
+      namesSite(peer.title) &&
+      peer.description.length > 0 &&
+      ` ${peer.description} `.includes(` ${selfTitle} `)
+  );
+}
+
+function pieceIsProtectedPlanCopy(
+  piece: CanonicalEvidencePiece,
+  pieces: CanonicalEvidencePiece[]
+) {
+  if (pieceHasHedgeMarker(piece)) return false;
+  if (pieceNamedInDayHeading(piece)) return true;
+  return pieceIsSameSiteGroupingStructure(piece, pieces);
+}
+
 function notesShareSourceSection(
   piece: CanonicalEvidencePiece,
   notePieces: CanonicalEvidencePiece[],
@@ -6559,12 +6664,21 @@ function resolveUncommittedRepeatMentions(
     // day-plan section, that membership is the "stronger planned sighting"
     // (RW-CLS-001; ground truth v2: the Jan 20 St. Stephen's plan beats
     // the Jan 19 idea copy) — it keeps the card and the other copies fold
-    // into it. Otherwise: repeated but never committed → one City Note.
+    // into it. A protected plan copy (Arc E fold guard: heading-committed
+    // or same-site grouping structure) counts as deliberate regardless of
+    // merged price/hours text. Otherwise: repeated but never committed →
+    // one City Note.
     if (questionSubjects.has(title)) continue;
-    const deliberate = group.filter((piece) =>
-      isDeliberateDayPlanMention(piece, observationById)
+    const deliberate = group.filter(
+      (piece) =>
+        isDeliberateDayPlanMention(piece, observationById) ||
+        pieceIsProtectedPlanCopy(piece, pieces)
     );
-    if (deliberate.length === 1) {
+    if (deliberate.length >= 1) {
+      // Exactly one deliberate copy is the ground-truth v2 shape. Multiple
+      // deliberate/protected copies (Arc E: e.g. two structure copies of
+      // one visit) still resolve to ONE home — first in source order —
+      // instead of demoting the whole family to a City Note.
       const winnerPiece = deliberate[0];
       for (const extra of group) {
         if (extra === winnerPiece) continue;
@@ -6601,6 +6715,9 @@ function resolveUncommittedRepeatMentions(
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title || questionSubjects.has(title)) continue;
     if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    // Arc E fold guard: heading-committed entities and same-site grouping
+    // structure never demote as "repeated but never committed".
+    if (pieceIsProtectedPlanCopy(piece, pieces)) continue;
     const mentions = observationMentionDatesAndCommitment(piece, observationById);
     if (mentions.dates.size < 2 || mentions.anyCommitted) continue;
 
@@ -6654,14 +6771,17 @@ function resolveUncommittedRepeatMentions(
       // Deliberate day-plan membership beats an idea-list note copy from a
       // DIFFERENT source section (ground truth v2 dedup: the planned copy
       // wins). A note copy from the SAME section means the source listed the
-      // venue once as a reference and the note stays the single home.
+      // venue once as a reference and the note stays the single home. A
+      // protected plan copy (Arc E fold guard) wins regardless — grouping
+      // structure outranks a reference listing.
       if (
-        isDeliberateDayPlanMention(piece, observationById) &&
-        !notesShareSourceSection(
-          piece,
-          matches.map((match) => match.piece),
-          observationById
-        )
+        pieceIsProtectedPlanCopy(piece, pieces) ||
+        (isDeliberateDayPlanMention(piece, observationById) &&
+          !notesShareSourceSection(
+            piece,
+            matches.map((match) => match.piece),
+            observationById
+          ))
       ) {
         for (const match of matches) {
           if (!match.piece.outputEligible) continue;
@@ -6775,8 +6895,14 @@ function reconcileCardsAgainstCityNotes(
       observations.length > 0 &&
       isDeliberateDayPlanMention(piece, observationById) &&
       !notesShareSourceSection(piece, [matchingNote], observationById);
+    // Arc E fold guard (live-run 7.22.4 Schönbrunn killer): a
+    // heading-committed entity or same-site grouping structure never folds
+    // into its reference copy, independent of observation availability and
+    // of the shared-section veto — structure outranks a reference listing.
+    const protectedPlanCopy =
+      commitment === "none" && pieceIsProtectedPlanCopy(piece, pieces);
 
-    if (commitment === "none" && !deliberateDayPlanWins) {
+    if (commitment === "none" && !deliberateDayPlanWins && !protectedPlanCopy) {
       if (matchingNote.outputEligible) {
         mergeCanonicalPieceInto({
           reason:

@@ -1,12 +1,11 @@
 # Roamwoven Product Contracts
 
-Ledger version: 17
+Ledger version: 18
 
-Ledger date: 2026-07-21 (Arc C: run7 fixes — grouping trusts only verified
-coordinates once the lane runs, classifier commitment/demotion input repair,
-receipt-field family, transport fragment hardening, question gate v2 + Δ2
-fold, coverage weak-credit tripwire, parser verbatim-evidence retention,
-publish warns-never-blocks)
+Ledger date: 2026-07-22 (Arc E: run-7.22.4 fixes — repeat-fold plan-copy
+guard: grouping structure and heading-committed entities never fold into a
+reference copy; deterministic evidence injection at intake; chunk/geocode
+parallelization; extraction pinning foundations)
 
 Approval state: Approved and implementation-tracked
 
@@ -150,6 +149,25 @@ path is bypassed.
   copies are a genuine planned double visit) and silently absorb loose
   copies; repeats where NO copy is committed become ONE City Note with no
   cards and no Question.
+
+  2026-07-22 refinement (Arc E, CEO-approved; live-run 7.22.4): the
+  never-committed fold may not remove grouping structure or
+  heading-committed entities in favor of a reference copy. A copy whose own
+  day heading names the entity (the run7 castle rule), or that is same-site
+  grouping structure per RW-GRP-001 — an "X at <Site>" component whose tail
+  names a present peer, the container a component's tail names, or an
+  entity listed in such a container's own description — is a PLAN copy: it
+  keeps the card (and its reference copy is removed), even when merged
+  reference-copy text carries prices or opening hours. A hedged copy still
+  demotes — doubt markers stay authoritative (RW-CLS-001) — and a loose
+  day-plan copy with no heading or structure evidence still folds into its
+  note copy, so an idea set repeated across day plan and notes blob stays
+  City Notes (the Jan-19 Ferris-wheel set). Context: 7.22.4's parse listed
+  the Schönbrunn family twice with no times, and the card-vs-note
+  reconciliation folded palace and components into the suppressed
+  "Schönbrunn visit" note — zero cards, zero groups. Enforced by
+  `tests/assembly-ground-truth-run9.test.ts` (fold-guard positive, idea-set
+  negative control, heading-committed castle shape, hedged-copy control).
 - Enforcement: `PARTIAL`
 - Contract: Evidence observations become canonical candidate entities. After
   canonical validation and resolution, finalized canonical entities are
@@ -230,6 +248,7 @@ path is bypassed.
   of maker-created entities and saved decisions across the future rebuild and
   merge/split lifecycle.
 - Tests: `tests/assembly-purity.test.ts`,
+  `tests/assembly-ground-truth-run9.test.ts`,
   `tests/parser-artifact-normalization.test.ts`,
   `tests/canonical-identity.test.ts`,
   `tests/canonical-factory-boundary.test.ts`,

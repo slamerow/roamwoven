@@ -16,3 +16,4 @@ run-*.json
 
 # Claude scratch area (never commit)
 _to_delete/
+repo-snapshot-arc-e.tgz
