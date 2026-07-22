@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { isBoilerplateSourceLine } from "@/lib/extraction/source-coverage";
 import { injectVerbatimActivityEvidence } from "@/lib/extraction/evidence-injection";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
-import { SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY } from "@/lib/extraction/source-transport-anchors";
+import {
+  SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
+  sourceTransportAnchorMatchesRecord,
+} from "@/lib/extraction/source-transport-anchors";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
 import {
   normalizeParserStageArtifacts,
@@ -1900,6 +1903,102 @@ function gateOffContractQuestions(
 // segment shares its confirmation or provider, the fragment folds there as
 // evidence; otherwise it is rejected with a recorded disposition. Deleting
 // beats asking (CEO direction, run7).
+// Run 7.23.0r P1: a 9th transport row shipped — "Home flight FCO to JFK",
+// JFK 02:45 -> FCO 10:15 on Jan 25, description "Delta Flight 1043", conf
+// #GHFHPG — a garbled duplicate of the anchored Delta 1043 (FCO 14:45 ->
+// JFK 18:45). Every existing twin basis failed: no number field, route
+// REVERSED, times corrupted, dated titles differ. But the phantom shares
+// its confirmation with an anchored same-date row over the SAME endpoint
+// set — and it matches no source anchor of its own (the run's own
+// transport_row_without_source_anchor advisory flagged it; nothing acted).
+// Shared confirmation alone is NOT sufficient: one booking legitimately
+// covers several segments (all four Delta rows carry #GHFHPG), so the fold
+// additionally requires same date AND the same unordered endpoint pair.
+function transportAnchorRecordFromPayload(payload: Record<string, unknown>) {
+  return {
+    arrivalLocation:
+      stringValue(payload, "arrival") ?? stringValue(payload, "arrivalLocation"),
+    arrivalTime: stringValue(payload, "arrivalTime"),
+    confirmationLabel:
+      stringValue(payload, "confirmation") ??
+      stringValue(payload, "confirmationLabel") ??
+      stringValue(payload, "bookingReference"),
+    date: stringValue(payload, "date"),
+    departureLocation:
+      stringValue(payload, "departure") ??
+      stringValue(payload, "departureLocation"),
+    departureTime: stringValue(payload, "departureTime"),
+    provider: stringValue(payload, "provider"),
+    routeLabel: stringValue(payload, "title") ?? "",
+    transportType: stringValue(payload, "type"),
+  };
+}
+
+function transportEndpoints(payload: Record<string, unknown>) {
+  return {
+    arrival: payload.arrival ?? payload.arrivalLocation,
+    departure: payload.departure ?? payload.departureLocation,
+  };
+}
+
+function sameUnorderedEndpointPair(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  const a = transportEndpoints(left);
+  const b = transportEndpoints(right);
+  return (
+    (locationsMatch(a.departure, b.departure) &&
+      locationsMatch(a.arrival, b.arrival)) ||
+    (locationsMatch(a.departure, b.arrival) &&
+      locationsMatch(a.arrival, b.departure))
+  );
+}
+
+function foldUnanchoredConfirmationTwinTransport(
+  pieces: CanonicalEvidencePiece[],
+  anchors: SourceTransportAnchor[]
+) {
+  if (anchors.length === 0) return;
+  const transports = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+  if (transports.length < 2) return;
+  const anchoredPieces = new Set(
+    transports.filter((piece) =>
+      anchors.some((anchor) =>
+        sourceTransportAnchorMatchesRecord(
+          anchor,
+          transportAnchorRecordFromPayload(piece.payload)
+        )
+      )
+    )
+  );
+
+  for (const piece of transports) {
+    if (!piece.outputEligible) continue;
+    if (anchoredPieces.has(piece)) continue;
+    const confirmation = confirmationFrom(piece.payload);
+    if (!confirmation) continue;
+    const twin = transports.find(
+      (candidate) =>
+        candidate !== piece &&
+        candidate.outputEligible &&
+        anchoredPieces.has(candidate) &&
+        confirmationFrom(candidate.payload) === confirmation &&
+        sameCanonicalDate(piece.payload, candidate.payload) &&
+        sameUnorderedEndpointPair(piece.payload, candidate.payload)
+    );
+    if (!twin) continue;
+    mergeCanonicalPieceInto({
+      reason:
+        "unanchored travel row sharing its confirmation, date, and endpoint pair with an anchored segment folds into it (7.23.0r phantom twin)",
+      source: piece,
+      target: twin,
+    });
+  }
+}
+
 function suppressRouteLessTransportFragments(pieces: CanonicalEvidencePiece[]) {
   const transportPieces = pieces.filter(
     (piece) => piece.kind === "transport" && piece.outputEligible
@@ -10192,6 +10291,7 @@ export function clusterExtractedEvidence({
   attachCanonicalAccessoryDetails(pieces);
   suppressRedundantTransportParents(pieces);
   suppressRouteLessTransportFragments(pieces);
+  foldUnanchoredConfirmationTwinTransport(pieces, sourceTransportAnchors);
   pruneNonOvernightPlaces(pieces, observations);
   routeUnbookedDayTripTransport(pieces);
   mergeReclassifiedCanonicalPieces(pieces);
