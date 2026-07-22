@@ -430,6 +430,8 @@ export function canonicalPiecePublicPayload(
 ) {
   const {
     _canonicalGroupingDecisionIds,
+    _canonicalPriorPieceIds,
+    _evidenceProvenance,
     _canonicalNoteCollectionLabel,
     _canonicalNoteEntries,
     _canonicalNoteEntry,
@@ -3899,7 +3901,67 @@ const CREDENTIAL_SENTENCE_PATTERN =
 const TRAVEL_CONFIRMATION_SENTENCE_PATTERN =
   /\b(?:confirmation(?:\s+(?:code|number))?|booking\s+(?:code|number|reference)|reservation\s+(?:code|number)|ticket\s*code|travel\s+code|pnr)\b\s*[:#]?\s*[A-Za-z0-9]/i;
 
-function collectProtectedValueDenyList(pieces: CanonicalEvidencePiece[]) {
+// Run 7.23.0r P0 (RW-PRI-001): the ÖBB ticket code "2 159 1990 1842 0436"
+// shipped verbatim inside a PUBLIC activity card description while the
+// privacy layer gated the SAME value behind traveler_password — the deny
+// list only knew stay/transport payload FIELDS, so a code that rides in
+// via ticket-page prose (captured as a draft-level sensitive detail, never
+// as a payload field) sailed through. Code-shaped tokens are extracted
+// from the sensitive-detail titles themselves; extraction NEVER pattern
+// -matches public prose directly, so venue names, flight numbers, and
+// times cannot false-positive — only tokens that provably belong to a
+// protected value are swept.
+const PROTECTED_TOKEN_FLIGHT_CODE_PATTERN = /^[A-Z]{1,2}\d{3,4}$/;
+const PROTECTED_TOKEN_DATE_PATTERNS = [
+  /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/,
+  /^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}$/,
+];
+const PROTECTED_TOKEN_STOP_WORDS = new Set([
+  "CONFIRMATION", "RESERVATION", "BOOKING", "NUMBER", "TICKET", "PASSWORD",
+  "ADDRESS", "FLIGHT", "TRAIN", "HOSTEL", "AIRBNB", "STREET",
+]);
+
+function protectedCodeTokensFromSensitiveValue(value: string) {
+  const tokens: string[] = [];
+  const isDateShaped = (token: string) =>
+    PROTECTED_TOKEN_DATE_PATTERNS.some((pattern) => pattern.test(token));
+
+  for (const match of value.matchAll(
+    /[A-Za-z0-9][A-Za-z0-9'._-]*@[A-Za-z0-9.-]+/g
+  )) {
+    tokens.push(match[0]);
+  }
+  // Spaced/dashed digit groups (ticket codes, booking numbers, phones):
+  // require ≥7 digits total and exclude date shapes.
+  for (const match of value.matchAll(/\+?\d[\d ()./-]{5,}\d/g)) {
+    const token = match[0].trim();
+    const digitCount = (token.match(/\d/g) ?? []).length;
+    if (digitCount >= 7 && !isDateShaped(token)) tokens.push(token);
+  }
+  for (const match of value.matchAll(/#?\b[A-Za-z0-9-]{5,}\b/g)) {
+    const token = match[0].replace(/^#/, "");
+    const hasLetter = /[A-Za-z]/.test(token);
+    const hasDigit = /\d/.test(token);
+    const allCapsCode =
+      /^[A-Z0-9-]{6,}$/.test(token) &&
+      hasLetter &&
+      !PROTECTED_TOKEN_STOP_WORDS.has(token);
+    const mixedCode = hasLetter && hasDigit;
+    if (
+      (mixedCode || allCapsCode) &&
+      !PROTECTED_TOKEN_FLIGHT_CODE_PATTERN.test(token) &&
+      !isDateShaped(token)
+    ) {
+      tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+function collectProtectedValueDenyList(
+  pieces: CanonicalEvidencePiece[],
+  sensitiveDetails: unknown[] = []
+) {
   const values: string[] = [];
   const push = (value: unknown) => {
     if (typeof value === "string" && value.trim().length >= 5) {
@@ -3918,8 +3980,37 @@ function collectProtectedValueDenyList(pieces: CanonicalEvidencePiece[]) {
       push(piece.payload.bookingReference);
     }
   }
+  for (const detail of sensitiveDetails) {
+    const record = asRecord(detail);
+    for (const field of ["title", "value", "detail", "code"]) {
+      const value = stringValue(record, field);
+      if (!value) continue;
+      for (const token of protectedCodeTokensFromSensitiveValue(value)) {
+        if (token.length >= 5) values.push(token);
+      }
+    }
+  }
   // Longest first so full addresses are removed before their fragments.
   return Array.from(new Set(values)).sort((a, b) => b.length - a.length);
+}
+
+// Booking-field personal names in public prose ("Client: Eli J Kamerow",
+// "Passenger and Ticket Details Eli Kamerow", "Reserved by: Kamerow, Eli")
+// are content hygiene (ground truth Δ2): identity is never trip content.
+// Marker-anchored so ordinary prose ("client meetings") cannot match: the
+// name run must be 2-4 capitalized tokens (initials allowed) immediately
+// after a booking field marker.
+// Case classes are explicit (no /i flag): the marker tolerates either
+// case, but the NAME run must stay strictly capitalized so ordinary prose
+// ("client meetings happen here") can never match.
+const BOOKING_NAME_FIELD_PATTERN =
+  /\b([Cc]lient|[Cc]ustomer|[Gg]uest|[Tt]raveler|[Pp]assenger(?:\s+[Aa]nd\s+[Tt]icket\s+[Dd]etails)?|[Rr]eserved\s+[Bb]y)(\s*:?\s+)((?:[A-ZÀ-Þ][a-zà-ÿA-ZÀ-Þ'.-]+|[A-Z]\.?)(?:,?\s+(?:[A-ZÀ-Þ][a-zà-ÿA-ZÀ-Þ'.-]*|[A-Z]\.?)){1,3})/g;
+
+function scrubBookingFieldNames(value: string) {
+  return value.replace(
+    BOOKING_NAME_FIELD_PATTERN,
+    (_full: string, marker: string, sep: string) => `${marker}${sep}[private]`
+  );
 }
 
 function scrubProtectedValuesFromText(
@@ -3956,13 +4047,38 @@ function scrubProtectedValuesFromText(
   return rebuilt;
 }
 
-function scrubProtectedValuesFromPublicProse(pieces: CanonicalEvidencePiece[]) {
-  const denyList = collectProtectedValueDenyList(pieces);
+function scrubProtectedValuesFromPublicProse(
+  pieces: CanonicalEvidencePiece[],
+  sensitiveDetails: unknown[] = []
+) {
+  const denyList = collectProtectedValueDenyList(pieces, sensitiveDetails);
   const staysExist = pieces.some(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
   for (const piece of pieces) {
     if (!piece.outputEligible) continue;
+    // Run 7.23.0r: transport piece DESCRIPTIONS also carry ticket-page
+    // prose (route via-stations are fine; codes are not) — token-sweep
+    // them too. Titles/routeLabels stay untouched for transport.
+    if (piece.kind === "transport") {
+      const description = stringValue(piece.payload, "description");
+      if (description) {
+        const cleaned = scrubBookingFieldNames(
+          scrubProtectedValuesFromText(description, denyList, false)
+        );
+        if (cleaned !== description) {
+          piece.payload.description = cleaned || null;
+          addCanonicalAction(piece, {
+            absorbedTitles: [],
+            observationIds: [...piece.observationIds],
+            reason:
+              "protected stay/travel values scrubbed from public card prose (RW-PRI-001 output boundary)",
+            type: "recovered",
+          });
+        }
+      }
+      continue;
+    }
     if (piece.kind !== "activity" && piece.kind !== "note") continue;
     let scrubbed = false;
     const transportShaped =
@@ -4003,7 +4119,9 @@ function scrubProtectedValuesFromPublicProse(pieces: CanonicalEvidencePiece[]) {
                   : current,
               value
             )
-          : scrubProtectedValuesFromText(value, denyList, staysExist);
+          : scrubBookingFieldNames(
+              scrubProtectedValuesFromText(value, denyList, staysExist)
+            );
       if (cleaned !== value) {
         piece.payload[field] = cleaned || null;
         scrubbed = true;
@@ -10117,8 +10235,11 @@ export function clusterExtractedEvidence({
   rerouteCrossCityNoteContent(pieces);
   mergeCanonicalCityNotes(pieces);
   finalizeCanonicalOutputFields(pieces);
-  scrubProtectedValuesFromPublicProse(pieces);
   reconcileCanonicalConflicts(pieces, observations);
+  // Run 7.23.0r ordering fix: the sweep is the LAST text mutation before
+  // outputFor — conflict reconciliation selects field values and could
+  // otherwise resurrect unscrubbed prose after an earlier sweep.
+  scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails);
   const canonicalGroupingCalls = createCanonicalGroupingCalls(
     combinedGroupingDecisions,
     pieces
