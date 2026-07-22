@@ -1,4 +1,8 @@
 import { getOpenAIConfig } from "@/lib/env";
+import {
+  activeExtractionParseCache,
+  hashExtractionModelCall,
+} from "@/lib/extraction/extraction-pinning";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const MIN_STRUCTURED_OUTPUT_TOKENS = 12000;
@@ -161,12 +165,33 @@ function isLikelyIncompleteJsonParseError(error: unknown) {
   );
 }
 
+// Arc E extraction pinning: env-keyed sampling params (default UNSET — no
+// behavior change until flipped; flipping is a migration per AGENTS.md).
+// The Responses API may reject temperature/seed for reasoning models —
+// requestStructuredResponse strips them fail-soft on a 400 and retries
+// once, so a rejected param costs one call, never the run.
+export function resolveExtractionSamplingParams(): Record<string, number> {
+  const params: Record<string, number> = {};
+  const temperature = process.env.OPENAI_EXTRACTION_TEMPERATURE;
+  if (temperature !== undefined && temperature.trim() !== "") {
+    const value = Number(temperature);
+    if (Number.isFinite(value)) params.temperature = value;
+  }
+  const seed = process.env.OPENAI_EXTRACTION_SEED;
+  if (seed !== undefined && seed.trim() !== "") {
+    const value = Number.parseInt(seed, 10);
+    if (Number.isFinite(value)) params.seed = value;
+  }
+  return params;
+}
+
 async function requestStructuredResponse({
   apiKey,
   input,
   maxInputChars,
   maxOutputTokens,
   model,
+  samplingParams = {},
   schema,
   schemaName,
   system,
@@ -177,6 +202,7 @@ async function requestStructuredResponse({
   maxInputChars: number;
   maxOutputTokens: number;
   model: string;
+  samplingParams?: Record<string, number>;
   schema: Record<string, unknown>;
   schemaName: string;
   system: string;
@@ -214,6 +240,7 @@ async function requestStructuredResponse({
       model,
       service_tier: "default",
       store: false,
+      ...samplingParams,
       text: {
         format: {
           name: schemaName,
@@ -231,6 +258,34 @@ async function requestStructuredResponse({
     | null;
 
   if (!response.ok) {
+    // Fail-soft sampling-param strip (Arc E): a 400 that names the param is
+    // retried once WITHOUT temperature/seed and the strip is logged — a
+    // rejected param must cost one call, never the run.
+    if (
+      response.status === 400 &&
+      Object.keys(samplingParams).length > 0 &&
+      /temperature|seed|unsupported|unknown parameter/i.test(
+        body?.error?.message ?? ""
+      )
+    ) {
+      console.warn("trip_extraction_sampling_params_stripped", {
+        message: body?.error?.message ?? null,
+        model,
+        samplingParams,
+      });
+      return requestStructuredResponse({
+        apiKey,
+        input,
+        maxInputChars,
+        maxOutputTokens,
+        model,
+        samplingParams: {},
+        schema,
+        schemaName,
+        system,
+        webSearch,
+      });
+    }
     throw new OpenAIExtractionRequestError(
       body?.error?.message ?? `OpenAI request failed with ${response.status}.`,
       response.status
@@ -353,6 +408,31 @@ export async function createOpenAIStructuredResponse({
         config.maxInputChars,
         Math.min(maxInputChars ?? config.maxInputChars, 120000)
       );
+
+  // Arc E extraction pinning: when a parse cache is active for this run,
+  // structured calls are memoized by request content. Web-search calls are
+  // never pinned (external content is not replay-safe). Clones on both
+  // sides keep downstream payload mutation out of the stored pin.
+  const samplingParams = resolveExtractionSamplingParams();
+  const parseCache = webSearch ? null : activeExtractionParseCache();
+  const callHash = parseCache
+    ? hashExtractionModelCall({
+        input: input.slice(0, effectiveMaxInputChars),
+        model: requestModel,
+        samplingParams,
+        schema,
+        schemaName,
+        system,
+        version: 1,
+      })
+    : null;
+  if (parseCache && callHash && parseCache.entries.has(callHash)) {
+    parseCache.hits += 1;
+    return structuredClone(
+      parseCache.entries.get(callHash)
+    ) as OpenAIStructuredResponseResult;
+  }
+
   const firstBody = await requestStructuredResponse({
     apiKey: config.apiKey,
     input,
@@ -397,13 +477,20 @@ export async function createOpenAIStructuredResponse({
     }
   }
 
-  return {
+  const result: OpenAIStructuredResponseResult = {
     json: parsed.json,
     model: requestModel,
     rawText: parsed.rawText,
     sources: getWebSearchSources(body),
     usage: body.usage ?? null,
   };
+  if (parseCache && callHash) {
+    parseCache.misses += 1;
+    const stored = structuredClone(result);
+    parseCache.entries.set(callHash, stored);
+    parseCache.recorded.push({ h: callHash, v: stored });
+  }
+  return result;
 }
 
 function isSupportedOcrMimeType(mimeType: string) {

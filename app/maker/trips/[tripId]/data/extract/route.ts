@@ -6,6 +6,19 @@ import {
 } from "@/lib/env";
 import { extractTripDraftWithOpenAI } from "@/lib/extraction/openai-trip-parser";
 import {
+  computeExtractionParseKey,
+  createExtractionParseCache,
+  fingerprintExtractionMaterials,
+  resolveExtractionPinningEnv,
+  runWithExtractionParseCache,
+  type ExtractionParseCache,
+} from "@/lib/extraction/extraction-pinning";
+import {
+  loadPinnedExtractionParse,
+  savePinnedExtractionParse,
+} from "@/lib/extraction/extraction-pinning-store";
+import { resolveExtractionSamplingParams } from "@/lib/ai/openai";
+import {
   assembleCanonicalTripDraft,
   CanonicalAssemblyRecoveryError,
   materializeCanonicalEvidenceObservations,
@@ -376,14 +389,75 @@ export async function POST(
       status: "started",
       tripId,
     });
-    const result = await extractTripDraftWithOpenAI({
-      materials,
-      tripName: trip.name,
-    });
+    // Arc E extraction pinning (env-gated OFF by default; RW-OPS-001:
+    // fail-soft — pinning machinery never blocks or alters the run).
+    const pinning = resolveExtractionPinningEnv();
+    let parseCache: ExtractionParseCache | null = null;
+    let parseKey: string | null = null;
+    let materialFingerprints: string[] = [];
+    const samplingParams = resolveExtractionSamplingParams();
+    if (pinning.reuse || pinning.write) {
+      materialFingerprints = fingerprintExtractionMaterials(materials);
+      parseKey = computeExtractionParseKey({
+        materialFingerprints,
+        model: getOpenAIConfig().extractionModel,
+        samplingParams,
+      });
+      const pinned = pinning.reuse
+        ? await loadPinnedExtractionParse({ parseKey, tripId })
+        : null;
+      parseCache = createExtractionParseCache(pinned?.calls ?? []);
+    }
+    const result = parseCache
+      ? await runWithExtractionParseCache(parseCache, () =>
+          extractTripDraftWithOpenAI({
+            materials,
+            tripName: trip.name,
+          })
+        )
+      : await extractTripDraftWithOpenAI({
+          materials,
+          tripName: trip.name,
+        });
     extractionUsage = result.usage;
+    let pinningOutcome: Record<string, unknown> | null = null;
+    if (parseCache && parseKey) {
+      pinningOutcome = {
+        hits: parseCache.hits,
+        misses: parseCache.misses,
+        parseKey,
+        reuse: pinning.reuse,
+        samplingParams,
+        seededEntryCount: parseCache.seededEntryCount,
+        write: pinning.write,
+      };
+      if (pinning.write) {
+        const saved = await savePinnedExtractionParse({
+          calls: [...parseCache.entries.entries()].map(([h, v]) => ({ h, v })),
+          materialFingerprints,
+          model: getOpenAIConfig().extractionModel,
+          parseKey,
+          samplingParams,
+          stats: pinningOutcome,
+          tripId,
+        });
+        pinningOutcome.saved = saved;
+      }
+      if (
+        extractionUsage &&
+        typeof extractionUsage === "object" &&
+        !Array.isArray(extractionUsage)
+      ) {
+        (extractionUsage as Record<string, unknown>).extractionPinning =
+          pinningOutcome;
+      }
+    }
     await recordTripProcessingEvent({
       details: {
         model: result.model,
+        // Env-surgery protocol: the values the run ACTUALLY used are run
+        // telemetry — sampling params and pin hit/miss ride the event.
+        pinning: pinningOutcome,
       },
       processingRunId: run.id,
       stage: "model_extraction",
