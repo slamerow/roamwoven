@@ -25,12 +25,20 @@ export type GeocodeVerificationConfig = {
   timeoutMs: number;
 };
 
+// Arc E: bounded lookup batching. 8 concurrent requests against a
+// commercial geocoding endpoint is well inside normal QPS allowances; the
+// rollback is this one constant.
+const GEOCODE_LOOKUP_CONCURRENCY = 8;
+
 export type GeocodeVerificationUsage = {
   budget: number;
   candidateCount: number;
   endpointHost: string | null;
   error: string | null;
   failedCount: number;
+  // Arc E: batch width actually used — env-verification is run telemetry,
+  // never the console (AGENTS.md env-surgery protocol).
+  lookupConcurrency: number;
   lookupCount: number;
   outcome: "disabled" | "completed" | "failed" | "no_candidates";
   resolvedCount: number;
@@ -186,6 +194,7 @@ export async function runGeocodeVerification({
     })(),
     error: null,
     failedCount: 0,
+    lookupConcurrency: 0,
     lookupCount: 0,
     outcome: "disabled",
     resolvedCount: 0,
@@ -208,30 +217,57 @@ export async function runGeocodeVerification({
   const withinBudget = candidates.slice(0, Math.max(0, config.maxLookups));
   usage.skippedOverBudgetCount = candidates.length - withinBudget.length;
 
-  for (const candidate of withinBudget) {
-    usage.lookupCount += 1;
+  // Arc E parallelization: lookups run in bounded batches instead of one
+  // strictly serial chain (run 7.22.4 spent 50 serial round-trips; Arc C/D
+  // made runs 50-100% slower and the lane is the second-largest wall-time
+  // item after chunk calls). Semantics are unchanged: one hard transport
+  // failure still ends the lane and the draft survives on parser
+  // coordinates — in-flight results from the failing batch are kept, and
+  // no per-candidate retry policy is introduced. Width is telemetry-visible.
+  const lookupOne = async (candidate: (typeof withinBudget)[number]) => {
+    const url = new URL(config.endpoint);
+    url.searchParams.set("address", candidate.query);
+    url.searchParams.set("key", config.apiKey as string);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    let response: Response;
     try {
-      const url = new URL(config.endpoint);
-      url.searchParams.set("address", candidate.query);
-      url.searchParams.set("key", config.apiKey);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-      let response: Response;
-      try {
-        response = await fetchImpl(url.toString(), {
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
+      response = await fetchImpl(url.toString(), {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      throw new Error(`geocode endpoint returned ${response.status}`);
+    }
+    return parseGeocodeResponse(await response.json());
+  };
+
+  usage.lookupConcurrency = GEOCODE_LOOKUP_CONCURRENCY;
+  for (
+    let start = 0;
+    start < withinBudget.length;
+    start += GEOCODE_LOOKUP_CONCURRENCY
+  ) {
+    const batch = withinBudget.slice(start, start + GEOCODE_LOOKUP_CONCURRENCY);
+    usage.lookupCount += batch.length;
+    const settled = await Promise.allSettled(
+      batch.map((candidate) => lookupOne(candidate))
+    );
+    let transportError: unknown = null;
+    settled.forEach((outcome, index) => {
+      if (outcome.status === "rejected") {
+        usage.failedCount += 1;
+        transportError = transportError ?? outcome.reason;
+        return;
       }
-      if (!response.ok) {
-        throw new Error(`geocode endpoint returned ${response.status}`);
-      }
-      const coords = parseGeocodeResponse(await response.json());
+      const coords = outcome.value;
       if (!coords) {
         usage.failedCount += 1;
-        continue;
+        return;
       }
+      const candidate = batch[index];
       // Proximity-only attachment: verified coordinates + provenance. No
       // other field is ever written.
       candidate.record.verifiedLatitude = coords.lat;
@@ -242,10 +278,12 @@ export async function runGeocodeVerification({
         query: candidate.query,
       };
       usage.resolvedCount += 1;
-    } catch (error) {
-      usage.failedCount += 1;
+    });
+    if (transportError !== null) {
       usage.error =
-        error instanceof Error ? error.message : "Unknown geocode error.";
+        transportError instanceof Error
+          ? transportError.message
+          : "Unknown geocode error.";
       // Fail-soft: one hard transport failure ends the lane — the draft
       // survives on parser coordinates.
       usage.outcome = "failed";

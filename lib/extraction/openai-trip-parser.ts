@@ -50,7 +50,10 @@ export type ActivityExtractionChunk = {
 
 const ACTIVITY_CHUNK_TARGET_CHARS = 18000;
 const ACTIVITY_CHUNK_RETRY_CHARS = 9000;
-const ACTIVITY_EXTRACTION_CONCURRENCY = 3;
+// Arc E: 3 → 5. Duration arithmetic (AGENTS.md discipline #1a): 28 chunks
+// at 5-wide is 6 waves; with maxDuration 800 the whole extraction keeps
+// >40% headroom on run-7.22.4 shaped inputs. Rollback is this constant.
+const ACTIVITY_EXTRACTION_CONCURRENCY = 5;
 const LONG_SECTION_CHUNK_OVERLAP_CHARS = 800;
 
 type OpenAIStructuredResult = Awaited<
