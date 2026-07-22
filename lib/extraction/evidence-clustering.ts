@@ -1559,10 +1559,63 @@ function mergeObservationIntoPiece(
 }
 
 function refreshCanonicalPieceId(piece: CanonicalEvidencePiece) {
+  const priorId = piece.id;
   piece.id = `piece_${stableHash({
     kind: piece.kind,
     observations: [...piece.observationIds].sort(),
   })}`;
+  // Run 7.23.0 (Arc E): a merge refreshes the WINNER's id, so anything that
+  // bound to the prior id — question subjects resolved before the fold —
+  // dangles and kills finalization ("missingDetails[n] targets missing
+  // canonical identity"). The prior ids ride on the payload so review
+  // subjects can be re-keyed to the same entity's current id (identity
+  // forwarding is the represented-by chain's sibling, never title
+  // similarity — RW-QUE-001).
+  if (priorId && priorId !== piece.id) {
+    const priors = Array.isArray(piece.payload._canonicalPriorPieceIds)
+      ? (piece.payload._canonicalPriorPieceIds as unknown[]).filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    if (!priors.includes(priorId)) {
+      piece.payload._canonicalPriorPieceIds = [...priors, priorId];
+    }
+  }
+}
+
+// Re-key review subjects through canonical id forwarding (Arc E, live-run
+// 7.23.0 assembly-recovery failure): a detail whose relatedCanonicalPieceId
+// is no longer a live piece id follows the prior-id index to the same
+// entity's current id. Truly dead subjects are left for the dead-target
+// sweep to dismiss — a question cannot outlive its subject, but it must
+// never be orphaned by a mere id refresh.
+function rekeyReviewSubjectsThroughPriorIds(
+  details: unknown[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  const currentIds = new Set(pieces.map((piece) => piece.id));
+  const currentByPriorId = new Map<string, string>();
+  for (const piece of pieces) {
+    const priors = piece.payload._canonicalPriorPieceIds;
+    if (!Array.isArray(priors)) continue;
+    for (const prior of priors) {
+      if (typeof prior === "string" && !currentIds.has(prior)) {
+        currentByPriorId.set(prior, piece.id);
+      }
+    }
+  }
+  if (currentByPriorId.size === 0) return;
+
+  for (const detail of details) {
+    const record = asRecord(detail);
+    const related = stringValue(record, "relatedCanonicalPieceId");
+    if (!related || currentIds.has(related)) continue;
+    const forwarded = currentByPriorId.get(related);
+    if (forwarded) {
+      record.relatedCanonicalPieceId = forwarded;
+      record._canonicalSubjectRekeyedFrom = related;
+    }
+  }
 }
 
 function reconcileCanonicalConflicts(
@@ -1693,12 +1746,20 @@ function gateOffContractQuestions(
     record._canonicalQuestionGate = reason;
   };
 
+  // Arc E (live-run 7.23.0): before any dismissal, forward subjects whose
+  // piece id was refreshed by a merge — the entity survived, only its id
+  // changed; the question follows it.
+  rekeyReviewSubjectsThroughPriorIds(details, pieces);
+
   // Dead-target sweep (run7 hotfix, live trip e0f1db42): a question whose
   // subject piece is no longer output-eligible (e.g. a transport fragment
   // the fragment rule rejected) violates the finalization identity
   // invariant ("missingDetails[n] targets missing canonical identity").
   // Dismissal is the invariant's own exemption — the question dies with
-  // its subject, auditable in place.
+  // its subject, auditable in place. Arc E: the sweep now also catches a
+  // subject id that matches NO live piece at all (the 7.23.0 shape) — the
+  // rekey pass above has already rescued every forwardable subject, so
+  // whatever remains is genuinely dead.
   const eligibleIds = new Set(
     pieces.filter((piece) => piece.outputEligible).map((piece) => piece.id)
   );
@@ -8222,6 +8283,19 @@ function pieceForMissingDetail(
       (piece) => piece.outputEligible && piece.id === relatedCanonicalPieceId
     );
     if (canonicalMatch) return canonicalMatch;
+    // Arc E (live-run 7.23.0): a merge refreshed the subject's id after the
+    // question bound to it. The prior-id trail forwards the subject to the
+    // same entity's current piece — identity forwarding, never title
+    // similarity (RW-QUE-001).
+    const forwarded = pieces.find(
+      (piece) =>
+        piece.outputEligible &&
+        Array.isArray(piece.payload._canonicalPriorPieceIds) &&
+        (piece.payload._canonicalPriorPieceIds as unknown[]).includes(
+          relatedCanonicalPieceId
+        )
+    );
+    if (forwarded) return forwarded;
   }
 
   const detailText = reviewDetailText(detail);
@@ -9549,13 +9623,37 @@ export function canonicalizeCanonicalReviewDetails(
         ? "call"
         : "question";
 
+    // Arc E (live-run 7.23.0, dark-factory totality): a subject id that
+    // matches NO live piece — after prior-id forwarding — is a dead
+    // target. It is dismissed here, at the same boundary that resolves
+    // subjects, so the finalization invariant ("targets missing canonical
+    // identity") is unreachable by construction: every rebuild passes
+    // through this function. A question cannot outlive its subject; it
+    // also cannot kill a usable draft (AGENTS.md binding rule).
+    const relatedId = piece?.id ?? stringValue(detail, "relatedCanonicalPieceId");
+    const deadTarget =
+      !piece &&
+      typeof relatedId === "string" &&
+      relatedId.length > 0 &&
+      !pieces.some((candidate) => candidate.id === relatedId);
+
     return {
       ...detail,
-      _canonicalReviewDisposition: disposition,
+      _canonicalReviewDisposition: deadTarget ? "dismissed" : disposition,
+      ...(deadTarget
+        ? {
+            _canonicalQuestionGate:
+              "subject entity no longer exists after assembly; a review item cannot outlive its subject",
+            // The dead id is unbound (draft and projection must agree the
+            // subject is now the trip) but stays auditable in place.
+            _canonicalDeadSubjectId: relatedId,
+          }
+        : {}),
       evidence: scrubReviewEvidence(detail.evidence),
-      relatedCanonicalPieceId:
-        piece?.id ?? stringValue(detail, "relatedCanonicalPieceId"),
-      subjectType: piece
+      relatedCanonicalPieceId: deadTarget ? null : relatedId,
+      subjectType: deadTarget
+        ? "trip"
+        : piece
         ? canonicalReviewSubjectType(piece)
         : detail.subjectType ?? "trip",
     };

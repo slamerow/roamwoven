@@ -1171,6 +1171,21 @@ exact live payload shapes.
   outcomes: recovered / failed-with-one-question / no-trigger, each with
   separate usage telemetry. Enforced by `tests/cleanup-cron-route.test.ts`
   and `tests/source-recovery.test.ts`.
+  2026-07-22 Arc E hotfix (live-run 7.23.0: a usable draft terminated in a
+  technical recovery state because a repeat-fold merge refreshed a
+  question subject's canonical id — forbidden by this contract): canonical
+  id refreshes now record a prior-id trail on the piece; review subjects
+  forward through that trail at subject resolution, the question gate, and
+  the rebuild boundary (identity forwarding, never title similarity); a
+  subject that matches no live piece dismisses its review item inside
+  `canonicalizeCanonicalReviewDetails`, so the finalization
+  missing-identity invariant is unreachable by construction and every
+  rebuild heals the class. ONE mechanism at the existing boundaries — this
+  retires the run7 dead-target band-aid's blind spot rather than adding a
+  parallel sweep. Enforced by
+  `tests/canonical-review-identity-recovery.test.ts` (live 7.23.0
+  violation shape survives as a repaired draft + dismissed item;
+  id-refresh forwarding keeps the question alive on the same entity).
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,
