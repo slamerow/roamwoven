@@ -6,6 +6,140 @@
 
 ## Current State
 
+### 2026-07-24 — RUN 7.23.2 AUDITED (root-cause, 8 chains), ARC F/G/H PLAN AGREED WITH ELI, CEO DECISIONS RECORDED, PRE-CODE TRIPWIRE REVIEW DONE; NEXT SESSION CODES ARC F
+
+Read first: docs/assembly-defect-docket-2026-07-24-run-7.23.2.md (8 traced
+chains incl. two corrections of the draft + chain 3b), AGENTS.md §Operating
+discipline, this entry. NO code was written this session — audit, root-cause,
+planning, and interaction review only.
+
+- RUN 7.23.2 (trip dea9d239, first completed run on 14098e3, bundle sha256
+  cb4b1351…): spine/transport/completion PASS (5 legs, 8 rows, GT-exact, both
+  7.23.1 signatures dead). Privacy FAIL — 4 leak shapes: email-as-TITLE card
+  (scrub/detector field asymmetry, chain 1), phantom stay "Eli J Kamerow"
+  (no stay candidacy gate + stays invisible to sweep AND detector, chain 2),
+  ticket codes in real transport descriptions (deny list is capture-
+  dependent; the public qa-bundle only LOOKED clean via serve-time cosmetic
+  masking — the documented 7.18.3 audit trap, chain 3), stay arrival-
+  directions in public prose at 2 sites incl. the Rome city note (chain 3b).
+  Content: Kutna Hora day gutted (numeric section label "17.1.2019 20:00"
+  defeats DAY_PLAN_LABEL_PATTERN → notes-blob demotion, chain 5); St
+  Stephen's Vienna killed by fold-then-rejudge (fold elects "deliberate
+  day-plan copy", never-committed rule re-judges the merged now-DATELESS
+  piece and demotes — castle family, chain 6); Jan-19 idea flood (researched-
+  entry exemption falls through to ship-as-card when no question mints +
+  signal-less museum lists, chain 7); GT baths question minted then
+  DISMISSED by the dead-subject sweep after its subject note-folded
+  (dismissedQuestions:1, chain 7). identityRecoveryStatus "repaired" AGAIN,
+  trigger unknowable: initialViolations computed in the corridor but DROPPED
+  by summarizeFinalizationUsage in the extract route (chain 8, one-field
+  fix). Pins PROVEN live: 62 calls saved, parseKey 790f80db… — replay corpus
+  now has 7.23.1 (67de9b43…) + 7.23.2.
+- ATTRIBUTION (Eli asked "what broke this week"): the model did NOT change
+  (gpt-5.4-mini + luna OCR in every bundle 7.17.1→7.23.2). Stays were
+  genuinely locked since f1e66ee (5 in every run after 7.18.0); the phantom
+  is a NEW uncovered shape. Three structural changes explain the feel:
+  Arc E containment ships parses that used to die (visibility flip),
+  coverage v3 + recovery call feeds receipt shards in, Arc B unified
+  classifier centralizes card-vs-note with enumerated holes. Constant
+  underneath: unpinned variance (same-build pair 7.21.1a/b: 88 vs 86
+  actives, 7 vs 8 transport, 8 vs 3 questions). Junk is misrouted SOURCE
+  text, not model invention.
+- PLAN (Eli aligned): Arc F armor → run 1 (privacy-class bar ONLY, semantics
+  expected unchanged) → Arc G classifier + H riders → run 2 (classifier bar,
+  privacy must hold) → FREEZE → run 3 = new-itinerary generalization probe
+  on the frozen build. NOT Asia — Eli: "we have others we will test first";
+  probe doc + its prep level TBD by Eli (recommended: blind-first, class-
+  level must-passes only). Replay-validate every fix against pinned parses
+  BEFORE each live run; per-arc audits stay mandatory.
+  - ARC F (no model behavior changes, fixture-provable): (1) telemetry —
+    persist initialViolations in the assembly event (extract route
+    summarizeFinalizationUsage), serialize excludedPlanningCostLineCount
+    (trip-extraction-audit-snapshot whitelist), dismissed-question content
+    into the bundle; (2) ONE identity output gate walking every public field
+    of every record kind (titles, stay names, notes, locationNames,
+    transport descriptions; routeLabels stay untouched per 7.23.0r) with
+    identity predicates + prose-side code-shape pass (reuse
+    protectedCodeTokensFromSensitiveValue exemptions: flight codes, dates,
+    clock times); (3) stay candidacy gate (night evidence required);
+    (4) Costs exclusion moved to canonical candidacy via ONE shared
+    predicate (currently private to source-recovery.ts) imported by
+    recovery, candidacy, and audit detectors — preserve ddb1699's negative
+    controls (stay costs due on arrival, HUF prose, priced venue/idea
+    lines).
+  - ARC G order: sourceText plumbing (wake the dead evidence injection,
+    loud telemetry) → fold-winner deliberateMention stamp honored by the
+    never-committed rule + fold preserves winner's date (castle/St
+    Stephen's family, kills chain 6) → numeric date labels count as
+    day-plan labels (chain 5) → researched-list exemption terminates in
+    question-or-demotion, never silent card promotion (chain 7) →
+    dismissed-question rebind (see tripwire T3 below). H rides run 2:
+    geocode budget raise, Malá Strana/site-membership work.
+- CEO DECISIONS (this session, Eli explicit): (1) publish stays warns-never-
+  blocks; readiness copy becomes warning-state ("ready with N privacy
+  warnings") while a P0 finding is open — v17 MESSAGING amendment only,
+  ledger update lands with the Arc F change. (2) Identity gate action =
+  SUPPRESS + audit disposition (no maker review item, no scrubbed husks).
+  (3) Castle Hill: timed stops MAY group inside one named complex — GT
+  answer key + fixture updated to match rule 5 (code already composable;
+  the shipped call was correct). Schönbrunn rider builds ONE shared
+  site-membership definition (geocoder formatted-address containment +
+  hierarchy members + radius fallback) consumed by grouping AND merge
+  refusal — no per-venue patches. (4) Koscom-style: enrichment-successful
+  unknown tokens ship as activity, no question (GT rule 10, no new
+  decision needed). (5) Old test-trip drafts with leaks (892b2e3e, dea9d239
+  etc.): Eli — pre-alpha, all test, ignore; no purge step; focus entirely
+  on the next run being right. (6) RUN 1 AUDIT BAR APPROVED VERBATIM by
+  Eli (the MUST PASS / EXPECTED STILL BROKEN split in the plan above —
+  zero identity signals + zero code-shape tokens in any public field of
+  any record kind judged against REAL payloads; stays=5 phantom suppressed
+  with disposition; no cost cards any path; 5/8 spine; run completes;
+  repair trigger NAMED). (7) Warning-copy trigger: identity P0s + hard
+  warnings; quiet warnings never change readiness copy. Eli's standing
+  directive with it: warnings are a TRIPWIRE, not a feature — recurring
+  hard-warning shapes are backlog defects the logic must learn to resolve
+  (the Albertina stay-collision card is a resolvable fold-ownership shape,
+  queue it in Arc G); target state is N=0 on a healthy run.
+- PRE-CODE TRIPWIRE REVIEW (Eli-ordered; pipeline pass order traced in
+  evidence-clustering main function ~10320-10470):
+  T1. The identity gate slots into the EXISTING sweep position
+      (scrubProtectedValuesFromPublicProse — "LAST text mutation before
+      outputFor", after reconcileCanonicalConflicts per the 7.23.0r
+      ordering fix). Extend that pass; do NOT add a later one. Suppressions
+      made there are SAFE for question subjects because
+      canonicalizeCanonicalReviewDetails (dead-subject sweep, 14098e3) and
+      assignCanonicalEvidenceDispositions both run AFTER it — the draft's
+      activities list and manifests are built post-suppression, so they
+      agree by construction. NOTHING may suppress or mutate dispositions
+      after canonicalizeCanonicalReviewDetails (the e0f1db42 mine).
+  T2. The stay CANDIDACY gate runs EARLY (at reconcileCanonicalStayIdentity
+      time), not at the output boundary — downstream passes (deny-list
+      build, accessory attachment, stay-collision warnings) then see a
+      consistent world. Note collectProtectedValueDenyList reads stays
+      regardless of outputEligible, so a suppressed phantom still feeds the
+      deny list — keep that property.
+  T3. G's dismissed-question rebind must key off the suppression REASON:
+      subject killed by note-fold → rebind to trip (baths shape); subject
+      killed by the identity/junk gate → die silently. Otherwise G resur-
+      rects questions about records F just suppressed.
+  T4. Costs-predicate move: reconcileCardsAgainstCityNotes must see
+      ORIGINAL note lists (existing ordering comment) — the candidacy-time
+      Costs gate runs at piece creation, before all reconciliation, so it
+      cannot disturb that.
+  T5. Publish-copy change touches trip-publish-policy.ts + publish surface —
+      read both before coding; the change keys off open P0 findings only.
+  T6. Chain-8 telemetry lands FIRST within Arc F so run 1 finally names
+      whatever still trips the repair corridor (canonical_validation said
+      not_needed; the trigger is artifact-inspection-time).
+- SECOND-OPINION AUDIT (Eli pasted an external NO-SHIP audit): adopted its
+  Rome-note directions catch (chain 3b) + hotel-access routing lane;
+  rejected its errors (Koscom card DID ship; "~57 plans" accounting differs
+  from the approved GT). Its ticket-code blindness is the qa-bundle trap —
+  future audits must fetch includePrivate=1 AND diff the real payloads.
+- OPS: device bridge dropped repeatedly this session — docket committed to
+  docs/ after retries. Audit procedure unchanged (in-page fetch via Eli's
+  Chrome; extension may reject the first navigate — ask Eli to approve).
+
 ### 2026-07-23 (later) — FIX DAY: run 7.23.0r audited, 4 fix commits shipped, run 7.23.1 failed and was root-caused SAME DAY, commit 5 closes it; NEXT SESSION AUDITS THE FIRST RUN ON 14098e3
 
 Read first: docs/assembly-defect-docket-2026-07-23-run-7.23.0r.md (full
