@@ -40,6 +40,7 @@ function diagnosticClassification(
     case "day_section_line_covered_only_by_note_output":
     case "day_section_source_line_unextracted":
     case "ocr_backfill_failed":
+    case "transport_confirmation_value_not_captured":
     case "transport_row_without_source_anchor":
     case "weak_transport_source_anchor_unmatched":
       return "confirmed_source_processing_failure";
@@ -51,6 +52,8 @@ function diagnosticClassification(
     case "identity_value_in_public_prose":
     case "loose_tip_promoted_to_activity":
     case "planned_activity_buried_in_city_notes":
+    case "planning_cost_line_shipped_as_card":
+    case "protected_code_shape_in_public_prose":
     case "transport_description_contaminated":
     case "transport_provider_field_corrupted":
     case "transport_times_disagree_with_source_anchor":

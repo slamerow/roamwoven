@@ -3,8 +3,7 @@ import { classifyRecoveredLineRole } from "@/lib/extraction/activity-classifier"
 import { comparableTokens, normalizeTripDate } from "@/lib/extraction/traveler-text";
 import {
   distinctiveLineTokens,
-  isExcludedPlanningCostLine,
-  isPlanningCostSectionLabel,
+  isPlanningCostMaterial,
   stageOutputTokenSet,
   type SourceCoverageSummary,
 } from "@/lib/extraction/source-coverage";
@@ -114,15 +113,21 @@ export function planSourceRecoveryBatch({
     // Run 7.23.0r: a whole section whose label is a cost heading
     // ("Costs", "January 15th Prague - $56 (airbnb)") is planning-artifact
     // material — excluded from trip content by the approved ground truth,
-    // so recovery never re-ingests it.
-    const costSection = isPlanningCostSectionLabel(stageReport.label);
+    // so recovery never re-ingests it. Arc F: judged by the SHARED
+    // predicate (isPlanningCostMaterial) that canonical candidacy and the
+    // audit detector also consume (chain 4 — one test, every path).
     const header = `Source section: ${stageReport.label}\nDay heading: ${
       stageReport.dayHeading ?? "(none)"
     }`;
     const sectionExcerpts: string[] = [];
 
     for (const line of stageReport.uncoveredLines) {
-      if (costSection || isExcludedPlanningCostLine(line.excerpt)) {
+      if (
+        isPlanningCostMaterial({
+          label: stageReport.label,
+          lines: [line.excerpt],
+        })
+      ) {
         excludedPlanningCostLineCount += 1;
         continue;
       }

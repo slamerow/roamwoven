@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { isBoilerplateSourceLine } from "@/lib/extraction/source-coverage";
+import {
+  isBoilerplateSourceLine,
+  isPlanningCostMaterial,
+} from "@/lib/extraction/source-coverage";
 import { injectVerbatimActivityEvidence } from "@/lib/extraction/evidence-injection";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 import {
@@ -30,7 +33,11 @@ import {
   classifyMergeEligibility,
   type MergeWinnerCard,
 } from "@/lib/extraction/entity-winner";
-import { segmentCarriesIdentityValues } from "@/lib/extraction/identity-prose";
+import {
+  findIdentityProseSignal,
+  scrubProtectedCodeShapedTokens,
+  segmentCarriesIdentityValues,
+} from "@/lib/extraction/identity-prose";
 import {
   classifyIdeaListSections,
   classifyOwnTextEvidence,
@@ -3214,7 +3221,15 @@ function suppressRepresentedTravelAndStayActivities(
     if (matchingStays.length >= 1 || sameDateStays.length >= 1) {
       const owner = matchingStays[0] ?? sameDateStays[0];
       const instructions = stringValue(activity.payload, "description");
-      if (instructions && STAY_ACCESS_INSTRUCTION_PATTERN.test(instructions)) {
+      // Chain 3b: arrival-directions prose is stay material too — before
+      // Arc F this attach step only kept credential/"directions" shapes,
+      // so a directions block routed through the routine check-in fold
+      // was dropped instead of retained on the stay.
+      if (
+        instructions &&
+        (STAY_ACCESS_INSTRUCTION_PATTERN.test(instructions) ||
+          isArrivalDirectionsProse(instructions))
+      ) {
         const existing = stringValue(owner.payload, "accessInstructions");
         if (!existing) {
           owner.payload.accessInstructions = instructions;
@@ -3235,6 +3250,44 @@ function suppressRepresentedTravelAndStayActivities(
 const STAY_ACCESS_INSTRUCTION_PATTERN =
   /\b(?:key (?:will be|to be|is) (?:prepared|ready|left)|key pickup|lockbox|lock box|buzzer(?:\s+number)?|door code|access code|entry code|wifi password|wi-fi password|apartment is on the|door on the (?:left|right)|directions? (?:from|to) .{0,60}\b(?:station|airport|hostel|hotel|apartment|airbnb|stay)\b)/i;
 
+// Run 7.23.2 chain 3b (Eli 2026-07-24: full fix in Arc F). GT protects
+// stay "getting there" material, but the rules above only matched text
+// that NAMED a known stay, carried an address, or used a credential/
+// "directions" word — so arrival-directions prose that names neither
+// shipped publicly at two live sites: the admin card "The RomeHello
+// Hostel access details" (the full walk from Termini) and the Rome city
+// note carrying The Yellow's block verbatim ("Exit the train station onto
+// Via Marsala by track 1. Find Via Marghera…"). The arrival-directions
+// SHAPE — a station-exit/from-station opener, or turn-by-turn prose —
+// now routes to the leg's stay regardless of whether the stay is named,
+// and city notes are swept by the same rule.
+const ARRIVAL_DIRECTIONS_STRONG_PATTERN =
+  /\b(?:directions?\s+(?:from|to)\b[^.!?]{0,60}\b(?:station|airport|terminal)|exit\s+the\s+(?:train\s+|bus\s+|metro\s+)?station|from\s+the\s+(?:train\s+|bus\s+)?(?:station|airport)\b[^.!?]{0,40}\b(?:exit|walk|turn|head|cross))/i;
+const ARRIVAL_DIRECTIONS_CUE_PATTERNS = [
+  /\bturn\s+(?:left|right)\b/i,
+  /\bon\s+your\s+(?:left|right)\b/i,
+  /\b(?:walk|continue|head|go)\s+(?:straight|along|down|up)\b/i,
+  /\bcross\s+the\s+(?:street|road|square)\b/i,
+  // Street-grammar cues ("Find Via Marghera", "onto Via Marsala") — the
+  // preposition+street-word pair, not a bare street mention, so a
+  // sightseeing note that names an avenue is not a cue by itself.
+  /\b(?:find|onto|into|take)\s+(?:via|viale|rua|calle|ulice|utca|strasse|straße)\b/i,
+  /\bafter\s+(?:about\s+)?\d+\s*(?:m|meters|metres|blocks)\b/i,
+  /\bby\s+track\s+\d+\b/i,
+];
+
+function arrivalDirectionsCueCount(text: string) {
+  return ARRIVAL_DIRECTIONS_CUE_PATTERNS.filter((pattern) =>
+    pattern.test(text)
+  ).length;
+}
+
+function isArrivalDirectionsProse(text: string) {
+  if (!text) return false;
+  if (ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(text)) return true;
+  return arrivalDirectionsCueCount(text) >= 2;
+}
+
 function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
   const stays = pieces.filter(
     (piece) => piece.kind === "stay" && piece.outputEligible
@@ -3249,10 +3302,19 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
   )) {
     const text = activityText(activity.payload);
     const title = stringValue(activity.payload, "title") ?? "";
+    // Direction-shape detection runs on the RAW prose (activityText
+    // normalizes case/punctuation away from the street-grammar cues).
+    const rawProse = [title, stringValue(activity.payload, "description")]
+      .filter(Boolean)
+      .join(" ");
+    const directionShaped = isArrivalDirectionsProse(rawProse);
 
     if (
       !STAY_ACCESS_INSTRUCTION_PATTERN.test(text) &&
-      !/\barrival directions\b|\bgetting there\b/i.test(title)
+      !/\barrival directions\b|\bgetting there\b|\baccess details?\b/i.test(
+        title
+      ) &&
+      !directionShaped
     ) {
       continue;
     }
@@ -3298,15 +3360,132 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
       );
     if (
       stays.length > 0 &&
-      STAY_ACCESS_INSTRUCTION_PATTERN.test(text) &&
-      (carriesCredential || !timeFrom(activity.payload))
+      (STAY_ACCESS_INSTRUCTION_PATTERN.test(text) || directionShaped) &&
+      // Directions are stay material regardless of a card time, exactly
+      // like credentials (chain 3b: the arrival walk is the protected
+      // "getting there" block whether or not the parser stamped a time).
+      (carriesCredential || directionShaped || !timeFrom(activity.payload))
     ) {
+      // Chain 3b: route the material to the leg's stay even though no
+      // stay is NAMED — the activity's own city picks the owner; a
+      // single-stay trip falls back to that stay.
+      const activityCity = normalizedComparable(
+        stringValue(activity.payload, "city")
+      );
+      const places = pieces.filter(
+        (piece) => piece.kind === "place" && piece.outputEligible
+      );
+      const cityStay =
+        stays.find(
+          (stay) =>
+            activityCity &&
+            normalizedComparable(stayCity(stay, places)) === activityCity
+        ) ?? (stays.length === 1 ? stays[0] : null);
+      const instructions = stringValue(activity.payload, "description");
+      if (cityStay && instructions) {
+        const existing = stringValue(cityStay.payload, "accessInstructions");
+        if (!existing) {
+          cityStay.payload.accessInstructions = instructions;
+        }
+        addCanonicalAction(cityStay, {
+          absorbedTitles: [title].filter(Boolean),
+          observationIds: [...activity.observationIds],
+          reason:
+            "arrival-directions material routed to the leg's stay (RW-PRI-001 chain 3b: stay 'getting there' prose is protected even when the stay is unnamed)",
+          type: "recovered",
+        });
+      }
       suppressCanonicalPiece(
         activity,
         "access instructions are stay material, not a traveler activity"
       );
       continue;
     }
+  }
+
+  // Chain 3b, note lane: the same arrival-directions shape is swept from
+  // city-note prose (live 7.23.2: the Rome Notes & Tips carried The
+  // Yellow's walking-directions block verbatim). A qualifying block — a
+  // contiguous run of direction segments containing a strong opener, or
+  // two-plus cue segments — moves to the same-city stay's access
+  // instructions; single incidental cue sentences ("walk down the
+  // avenue" sightseeing advice) stay note content. The sweep only acts
+  // when a stay exists to own the material (RW-ING-001 preservation).
+  for (const note of pieces.filter(
+    (piece) => piece.kind === "note" && piece.outputEligible
+  )) {
+    const description = stringValue(note.payload, "description");
+    if (!description || stays.length === 0) continue;
+    const segments = description.split(PROSE_SEGMENT_SPLIT);
+    if (segments.length === 0) continue;
+    const marks = segments.map(
+      (segment) =>
+        ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(segment) ||
+        arrivalDirectionsCueCount(segment) >= 1
+    );
+    const strong = segments.map((segment) =>
+      ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(segment)
+    );
+    // Maximal runs of marked segments; a run qualifies with a strong
+    // opener or length >= 2.
+    const removed: boolean[] = segments.map(() => false);
+    let start = -1;
+    for (let index = 0; index <= segments.length; index += 1) {
+      if (index < segments.length && marks[index]) {
+        if (start === -1) start = index;
+        continue;
+      }
+      if (start !== -1) {
+        const runLength = index - start;
+        const runHasStrong = strong.slice(start, index).some(Boolean);
+        if (runHasStrong || runLength >= 2) {
+          for (let cursor = start; cursor < index; cursor += 1) {
+            removed[cursor] = true;
+          }
+        }
+        start = -1;
+      }
+    }
+    if (!removed.some(Boolean)) continue;
+    const removedText = segments
+      .filter((_, index) => removed[index])
+      .join(" ")
+      .trim();
+    const keptText = segments
+      .filter((_, index) => !removed[index])
+      .join(" ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    const noteCity = normalizedComparable(stringValue(note.payload, "city"));
+    const places = pieces.filter(
+      (piece) => piece.kind === "place" && piece.outputEligible
+    );
+    const cityStay =
+      stays.find(
+        (stay) =>
+          noteCity &&
+          normalizedComparable(stayCity(stay, places)) === noteCity
+      ) ?? (stays.length === 1 ? stays[0] : null);
+    if (!cityStay) continue;
+    note.payload.description = keptText || null;
+    const existing = stringValue(cityStay.payload, "accessInstructions");
+    if (!existing) {
+      cityStay.payload.accessInstructions = removedText;
+    }
+    addCanonicalAction(note, {
+      absorbedTitles: [],
+      observationIds: [...note.observationIds],
+      reason:
+        "arrival-directions block swept from public note to the leg's stay (RW-PRI-001 chain 3b)",
+      type: "recovered",
+    });
+    addCanonicalAction(cityStay, {
+      absorbedTitles: [],
+      observationIds: [...note.observationIds],
+      reason:
+        "arrival-directions material routed to the leg's stay (RW-PRI-001 chain 3b: stay 'getting there' prose is protected even when the stay is unnamed)",
+      type: "recovered",
+    });
   }
 
   for (const activity of pieces.filter(
@@ -4194,6 +4373,23 @@ function scrubProtectedValuesFromText(
   return rebuilt;
 }
 
+// Arc F identity output gate (run 7.23.2 chains 1-3; CEO decision 2).
+// This is the SAME pass as the protected-value sweep (tripwire T1: extend
+// the existing "LAST text mutation before outputFor" position, never add a
+// later one). Guarantees, per output-eligible record:
+// - identity predicates (identity-prose.ts) run over every public field
+//   the audit detector scans — chain 1 shipped an email as a card TITLE
+//   because the scrub covered descriptions while the detector covered
+//   [title, description, summary, address, locationName];
+// - a card/note whose TITLE carries an identity value is SUPPRESSED whole
+//   with an auditable disposition — no maker review item, no scrubbed
+//   husks (CEO decision 2). Structural records (transport, stays) are
+//   never suppressed here: the leaked value is removed and the row kept
+//   (Eli, 2026-07-24 — the 5/8 spine bar outranks a husk-free ideal);
+// - protected-code-shaped tokens are swept from transport and stay prose
+//   DIRECTLY (chain 3): the deny list is capture-dependent and run 7.23.2
+//   captured neither leaked ticket code anywhere protected, so an empty
+//   deny list swept nothing while both codes shipped.
 function scrubProtectedValuesFromPublicProse(
   pieces: CanonicalEvidencePiece[],
   sensitiveDetails: unknown[] = []
@@ -4202,6 +4398,13 @@ function scrubProtectedValuesFromPublicProse(
   const staysExist = pieces.some(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
+  const dropIdentitySegments = (value: string) =>
+    value
+      .split(PROSE_SEGMENT_SPLIT)
+      .filter((segment) => !segmentCarriesIdentityValues(segment.trim()))
+      .join(" ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
   for (const piece of pieces) {
     if (!piece.outputEligible) continue;
     // Run 7.23.0r: transport piece DESCRIPTIONS also carry ticket-page
@@ -4210,8 +4413,15 @@ function scrubProtectedValuesFromPublicProse(
     if (piece.kind === "transport") {
       const description = stringValue(piece.payload, "description");
       if (description) {
-        const cleaned = scrubBookingFieldNames(
-          scrubProtectedValuesFromText(description, denyList, false)
+        // Deny-list + booking-name scrub (7.23.0r), then the chain-3
+        // prose-side code pass, then identity segment removal — transport
+        // rows keep the row and lose the leak, never the reverse.
+        const cleaned = dropIdentitySegments(
+          scrubProtectedCodeShapedTokens(
+            scrubBookingFieldNames(
+              scrubProtectedValuesFromText(description, denyList, false)
+            )
+          )
         );
         if (cleaned !== description) {
           piece.payload.description = cleaned || null;
@@ -4223,6 +4433,43 @@ function scrubProtectedValuesFromPublicProse(
             type: "recovered",
           });
         }
+      }
+      continue;
+    }
+    // Chain 2 half (b): stay fields were never swept at all — stays only
+    // CONTRIBUTED to the deny list. Stay name and prose now get the
+    // identity + code-shape pass; the row itself is structural and stays.
+    if (piece.kind === "stay") {
+      let stayScrubbed = false;
+      const name = stringValue(piece.payload, "name");
+      if (name) {
+        const cleanedName = scrubProtectedCodeShapedTokens(
+          scrubBookingFieldNames(name)
+        );
+        if (cleanedName !== name) {
+          piece.payload.name = cleanedName || null;
+          stayScrubbed = true;
+        }
+      }
+      for (const field of ["description", "notes"]) {
+        const value = stringValue(piece.payload, field);
+        if (!value) continue;
+        const cleaned = dropIdentitySegments(
+          scrubProtectedCodeShapedTokens(scrubBookingFieldNames(value))
+        );
+        if (cleaned !== value) {
+          piece.payload[field] = cleaned || null;
+          stayScrubbed = true;
+        }
+      }
+      if (stayScrubbed) {
+        addCanonicalAction(piece, {
+          absorbedTitles: [],
+          observationIds: [...piece.observationIds],
+          reason:
+            "identity/protected-code values scrubbed from public stay fields (RW-PRI-001 output boundary)",
+          type: "recovered",
+        });
       }
       continue;
     }
@@ -4274,6 +4521,26 @@ function scrubProtectedValuesFromPublicProse(
         scrubbed = true;
       }
     }
+    // Chain 1: identity predicates over the SAME field list the audit
+    // detector scans — after the scrubs above, so anything a scrub can fix
+    // (a marker-anchored name, a deny-list value, a credential sentence)
+    // survives as before and only a REMAINING identity value acts here.
+    for (const field of ["description", "summary"]) {
+      const value = stringValue(piece.payload, field);
+      if (!value) continue;
+      const kept = dropIdentitySegments(value);
+      if (kept !== value) {
+        piece.payload[field] = kept || null;
+        scrubbed = true;
+      }
+    }
+    for (const field of ["address", "locationName", "location"]) {
+      const value = stringValue(piece.payload, field);
+      if (value && findIdentityProseSignal(value)) {
+        piece.payload[field] = null;
+        scrubbed = true;
+      }
+    }
     if (scrubbed) {
       addCanonicalAction(piece, {
         absorbedTitles: [],
@@ -4282,6 +4549,21 @@ function scrubProtectedValuesFromPublicProse(
           "protected stay/travel values scrubbed from public card prose (RW-PRI-001 output boundary)",
         type: "recovered",
       });
+    }
+    // The title IS the record's public identity: an identity value there
+    // cannot be scrubbed without leaving a husk, so the whole card is
+    // suppressed with an auditable disposition and no maker review item
+    // (CEO decision 2; chain 1's "Eli.kamerow@..." card title). The
+    // dead-subject sweep and disposition assignment both run AFTER this
+    // pass (T1), so questions about the record die with it and manifests
+    // agree by construction.
+    const finalTitle = stringValue(piece.payload, "title");
+    const titleSignal = finalTitle ? findIdentityProseSignal(finalTitle) : null;
+    if (titleSignal) {
+      suppressCanonicalPiece(
+        piece,
+        `identity-shaped value (${titleSignal}) in public title: record suppressed at the output boundary (RW-PRI-001 — identity is never trip content; no scrubbed husks)`
+      );
     }
   }
 }
@@ -4323,6 +4605,55 @@ function stayPayloadRichness(payload: Record<string, unknown>) {
     (stringValue(payload, "checkOut") ? 1 : 0) +
     (stringValue(payload, "checkInTime") ? 1 : 0)
   );
+}
+
+// Arc F stay candidacy gate (run 7.23.2 chain 2, tripwire T2). Live shape:
+// records.stays[5] = "Eli J Kamerow" — a stay-kind piece named from a
+// booking passenger/Client field, with no dates, no leg, no address —
+// shipped publicly because stays had NO candidacy rule: activities have
+// committed-mention candidacy, transports have anchor/fragment rules, and
+// the stay reconciler only merges same-venue OVERLAPPING ranges, so a
+// dateless stay merges with nothing and nothing else ever judges it.
+// The rule (GT night-coverage): a stay record represents at least one
+// night — check-in, check-out, or first-night evidence. It runs HERE, at
+// reconcileCanonicalStayIdentity time, AFTER guessed stay dates are
+// applied (a legit stay whose date arrives from a maker guess must not be
+// killed) and BEFORE the deny-list build, accessory attachment, and
+// stay-collision warnings, so every downstream pass sees a consistent
+// world. A suppressed phantom still CONTRIBUTES to the protected-value
+// deny list — collectProtectedValueDenyList deliberately reads stays
+// regardless of outputEligible (T2's keep-property).
+const PERSON_NAME_STAY_LODGING_TOKENS =
+  /\b(?:airbnb|apartment|apartments|b&b|bnb|camp|casa|flat|guesthouse|guest house|hostal|hostel|hotel|house|inn|lodge|lodging|palace|pension|rental|residence|room|rooms|stay|suites?|villa)\b/i;
+
+function isPersonNameShapedStayName(value: unknown) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw || /\d/.test(raw)) return false;
+  if (PERSON_NAME_STAY_LODGING_TOKENS.test(raw)) return false;
+  const tokens = raw.split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  // Every token is a capitalized name token or a bare initial.
+  return tokens.every((token) =>
+    /^(?:[A-ZÀ-Þ][\wà-ÿ'’.-]*|[A-Z]\.?)$/.test(token)
+  );
+}
+
+function applyStayCandidacyGate(pieces: CanonicalEvidencePiece[]) {
+  for (const stay of pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  )) {
+    const nightEvidence =
+      stringValue(stay.payload, "checkIn") ??
+      stringValue(stay.payload, "checkOut") ??
+      stringValue(stay.payload, "firstNightDate");
+    if (nightEvidence) continue;
+    suppressCanonicalPiece(
+      stay,
+      isPersonNameShapedStayName(stay.payload.name)
+        ? "stay candidacy: person-name-shaped, dateless stay is booking material, never a stay record (RW-TRV-001 night rule; run 7.23.2 phantom shape)"
+        : "stay candidacy: no night evidence (no check-in, check-out, or first-night date); suppressed with disposition (RW-TRV-001 night rule)"
+    );
+  }
 }
 
 function reconcileCanonicalStayIdentity(
@@ -10314,6 +10645,36 @@ export function clusterExtractedEvidence({
     pieces.push(createPiece(observation));
   }
 
+  // Arc F (run 7.23.2 chain 4, tripwire T4): the Costs exclusion is a
+  // CANDIDACY rule, not a producer patch. ddb1699 excluded Costs lines
+  // from recovery batching and that path held — but the same Costs line
+  // re-emitted as a model_chunk admin activity shipped as the "Vienna
+  // lodging cost" card. Any activity/note candidate whose source section
+  // is a Costs heading, or whose own line matches the shared
+  // planning-cost shapes, fails candidacy at piece creation — BEFORE all
+  // reconciliation, so reconcileCardsAgainstCityNotes still sees original
+  // note lists. Negative controls stay with the shared predicate: stay
+  // costs due on arrival, HUF prose, and priced venue/idea lines are
+  // deliberately not planning-cost shapes.
+  for (const piece of pieces) {
+    if (!piece.outputEligible) continue;
+    if (piece.kind !== "activity" && piece.kind !== "note") continue;
+    if (
+      isPlanningCostMaterial({
+        label: stringValue(piece.payload, "sourceSectionLabel"),
+        lines: [
+          stringValue(piece.payload, "evidence"),
+          stringValue(piece.payload, "title"),
+          stringValue(piece.payload, "description"),
+        ],
+      })
+    ) {
+      suppressCanonicalPiece(
+        piece,
+        "Costs-section planning line fails canonical candidacy (approved ground truth: Costs is excluded trip content; run 7.23.2 chain 4 — exclusion is path-independent)"
+      );
+    }
+  }
   stampOwnTextClassification(pieces, observations);
   attachCanonicalSourceDecisions(pieces);
   suppressUnsupportedModelInventions(pieces, observations);
@@ -10332,6 +10693,7 @@ export function clusterExtractedEvidence({
   applyCanonicalGuessedStayNames(missingDetails, pieces);
   applyCanonicalGuessedStayDates(missingDetails, pieces, tripYear);
   finalizeCanonicalStayFields(pieces);
+  applyStayCandidacyGate(pieces);
   reconcileCanonicalStayIdentity(pieces, observations);
   finalizeCanonicalStayFields(pieces);
   attachGenericActivityAccessories(pieces);

@@ -116,6 +116,26 @@ export function isExcludedPlanningCostLine(line: string) {
   return PLANNING_COST_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
+// Arc F (run 7.23.2 chain 4): THE shared Costs test. ddb1699 excluded
+// Costs lines from source-recovery batching only, so whether a cost card
+// shipped depended on which PATH re-emitted the line — the suppressed
+// lineage twin and the shipped "Vienna lodging cost" card were the same
+// Costs line arriving through two lanes. Recovery batching, canonical
+// candidacy (evidence-clustering), and the audit detector all consume
+// this ONE function now; a producer-local copy is a regression.
+export function isPlanningCostMaterial({
+  label,
+  lines,
+}: {
+  label?: string | null;
+  lines: Array<string | null | undefined>;
+}) {
+  if (isPlanningCostSectionLabel(label)) return true;
+  return lines.some(
+    (line) => typeof line === "string" && isExcludedPlanningCostLine(line)
+  );
+}
+
 const LINE_STOPWORDS = new Set([
   "about",
   "after",

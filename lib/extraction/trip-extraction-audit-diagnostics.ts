@@ -37,7 +37,11 @@ import {
   type DraftActivityCardInput,
 } from "@/lib/trip-card-taxonomy";
 import { SAME_SITE_CONTAINER_PATTERN } from "@/lib/extraction/evidence-clustering";
-import { findIdentityProseSignals } from "@/lib/extraction/identity-prose";
+import {
+  findIdentityProseSignals,
+  findProtectedCodeShapedTokens,
+} from "@/lib/extraction/identity-prose";
+import { isPlanningCostMaterial } from "@/lib/extraction/source-coverage";
 import { providerFieldLooksCorrupted } from "@/lib/extraction/parser-artifact-normalization";
 import {
   isHeadingFragmentTitle,
@@ -808,6 +812,80 @@ export function createAuditDiagnostics({
     });
   }
 
+  // Capture-miss telemetry (run 7.23.2 chain 3): the protected-value deny
+  // list is built from CAPTURED confirmation values, so a parse that never
+  // captures a code anywhere protected silently disarms the sweep for that
+  // code. A transport row with no confirmation-shaped value at all —
+  // including a garbled label like the literal string "Operator" — is the
+  // detectable symptom. Quiet P2 advisory: a candidate finding for the
+  // audit, never a mutation (RW-AUD-001).
+  const looksConfirmationShaped = (value: string | null) => {
+    if (!value) return false;
+    const trimmed = value.trim().replace(/^#/, "");
+    if (trimmed.length < 4) return false;
+    const digitCount = (trimmed.match(/\d/g) ?? []).length;
+    if (digitCount >= 4) return true;
+    // Locator shapes: mixed letters+digits, or an all-caps letter run of
+    // 6+ ("VXFHXKCQEPHPUSNT") — a capitalized ordinary word is neither.
+    if (/\d/.test(trimmed) && /[A-Za-z]/.test(trimmed) && trimmed.length >= 5) {
+      return true;
+    }
+    return /^[A-Z0-9-]{6,}$/.test(trimmed) && /[A-Z]/.test(trimmed);
+  };
+  const confirmationCaptureMissRows = records.transport.filter(
+    (row) =>
+      row.status !== "ignored" &&
+      !looksConfirmationShaped(row.confirmationLabel)
+  );
+
+  if (confirmationCaptureMissRows.length > 0) {
+    diagnostics.push({
+      code: "transport_confirmation_value_not_captured",
+      detail:
+        "Transport rows carry no confirmation-shaped value (empty or garbled label). The protected-value deny list is capture-dependent, so an uncaptured code cannot be swept from prose by the deny-list pass — the prose-side code-shape pass is the backstop for these rows.",
+      evidence: confirmationCaptureMissRows
+        .slice(0, 10)
+        .map(
+          (row) =>
+            `${row.date ?? "undated"} - ${row.routeLabel} [confirmationLabel: ${row.confirmationLabel ?? "(none)"}]`
+        ),
+      severity: "p2",
+      title: "Transport rows without a captured confirmation value",
+    });
+  }
+
+  // Run 7.23.2 chain 4 tripwire: a shipped card whose own text is a
+  // planning-cost line — judged by the SAME shared predicate the recovery
+  // batcher and canonical candidacy use (source-coverage.ts), so detector
+  // and gate can never drift. Post-gate this should never fire; it exists
+  // so a new producing path is caught from the bundle, not a live audit.
+  const planningCostCards = records.items
+    .filter((item) => item.status !== "ignored")
+    .filter((item) =>
+      isPlanningCostMaterial({
+        label: null,
+        lines: [item.title, item.description],
+      })
+    );
+
+  if (planningCostCards.length > 0) {
+    const costCardIds = new Set(planningCostCards.map((item) => item.id));
+    diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) => costCardIds.has(record.id))
+      ),
+      code: "planning_cost_line_shipped_as_card",
+      detail:
+        "A traveler-visible card carries a Costs-section planning-line shape (cost ledger, budget, or per-night price line). Costs content is excluded trip content (approved ground truth): the canonical candidacy gate should have suppressed it on any producing path.",
+      evidence: planningCostCards
+        .slice(0, 10)
+        .map((item) => `${item.date ?? "undated"} - ${item.title}`),
+      severity: "p1",
+      title: "Planning-cost line shipped as a traveler card",
+    });
+  }
+
   // Identity-leak P0 (RW-PRI-001 / RW-AUD-001, live-run 7.18.3 PB-1): no
   // detector previously scanned PUBLIC card prose for identity-shaped
   // values, and the QA bundle's redaction markers made the run LOOK clean
@@ -816,18 +894,57 @@ export function createAuditDiagnostics({
   // predicates the pipeline scrub uses (identity-prose.ts), so scrub and
   // detector can never drift (B4). Evidence names the signal shape, never
   // the value itself, so the diagnostic is safe in redacted bundles.
-  const identityLeakItems = records.items
-    .filter((item) => item.status !== "ignored")
-    .map((item) => {
-      const prose = [item.title, item.description, item.summary, item.address, item.locationName]
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .join(" ");
-      return { item, signals: findIdentityProseSignals(prose) };
-    })
+  // Run 7.23.2 chain 2: the phantom stay "Eli J Kamerow" was structurally
+  // INVISIBLE to this detector because it scanned records.items only. The
+  // walk now covers every record kind's public fields — items, stays
+  // (name, publicLocationLabel), and transport (description) — matching
+  // the output gate's field coverage exactly, so scrub and detector judge
+  // the same surface (the chain-1 asymmetry was field coverage, not
+  // shapes).
+  const identityLeakEntries = [
+    ...records.items
+      .filter((item) => item.status !== "ignored")
+      .map((item) => ({
+        id: item.id,
+        label: `${item.date ?? "undated"} - ${item.title}`,
+        prose: [item.title, item.description, item.summary, item.address, item.locationName]
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0
+          )
+          .join(" "),
+      })),
+    ...records.stays
+      .filter((stay) => stay.status !== "ignored")
+      .map((stay) => ({
+        id: stay.id,
+        label: `${stay.checkInDate ?? "undated"} - stay ${stay.name}`,
+        prose: [stay.name, stay.publicLocationLabel]
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0
+          )
+          .join(" "),
+      })),
+    ...records.transport
+      .filter((row) => row.status !== "ignored")
+      .map((row) => ({
+        id: row.id,
+        label: `${row.date ?? "undated"} - ${row.routeLabel}`,
+        prose: [row.description]
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0
+          )
+          .join(" "),
+      })),
+  ];
+  const identityLeakItems = identityLeakEntries
+    .map((entry) => ({ ...entry, signals: findIdentityProseSignals(entry.prose) }))
     .filter((entry) => entry.signals.length > 0);
 
   if (identityLeakItems.length > 0) {
-    const leakedRecordIds = new Set(identityLeakItems.map((entry) => entry.item.id));
+    const leakedRecordIds = new Set(identityLeakItems.map((entry) => entry.id));
     diagnostics.push({
       canonicalPieceIds: canonicalPieceIdsForFinalRecords(
         lineage,
@@ -835,15 +952,65 @@ export function createAuditDiagnostics({
       ),
       code: "identity_value_in_public_prose",
       detail:
-        "Public activity or note prose carries identity-shaped values (a role-labelled traveler name, a postal home address, a phone number, or an email). Personal identity data is not trip content at all (RW-PRI-001): the output-boundary scrub should have removed it before projection.",
+        "Public record prose carries identity-shaped values (a role-labelled traveler name, a postal home address, a phone number, or an email) in an item, stay, or transport public field. Personal identity data is not trip content at all (RW-PRI-001): the output-boundary gate should have scrubbed the value or suppressed the record before projection.",
       evidence: identityLeakItems
+        .slice(0, 10)
+        .map((entry) => `${entry.label} [${entry.signals.join(", ")}]`),
+      severity: "p0",
+      title: "Identity-shaped values shipped in public record fields",
+    });
+  }
+
+  // Run 7.23.2 chain 3: protected-code-shaped tokens in PROTECTED-CLASS
+  // prose (transport descriptions, stay name/label) — judged by the same
+  // predicates the output gate's prose-side code pass uses, so the bar
+  // "zero code-shape tokens in any public field" is verifiable from the
+  // bundle. Activity booking references stay public (Delta-2 ruling), so
+  // ordinary item prose is deliberately NOT scanned here.
+  const codeShapeLeakEntries = [
+    ...records.transport
+      .filter((row) => row.status !== "ignored")
+      .map((row) => ({
+        id: row.id,
+        label: `${row.date ?? "undated"} - ${row.routeLabel}`,
+        tokens: findProtectedCodeShapedTokens(row.description ?? ""),
+      })),
+    ...records.stays
+      .filter((stay) => stay.status !== "ignored")
+      .map((stay) => ({
+        id: stay.id,
+        label: `${stay.checkInDate ?? "undated"} - stay ${stay.name}`,
+        tokens: findProtectedCodeShapedTokens(
+          [stay.name, stay.publicLocationLabel]
+            .filter(
+              (value): value is string =>
+                typeof value === "string" && value.length > 0
+            )
+            .join(" ")
+        ),
+      })),
+  ].filter((entry) => entry.tokens.length > 0);
+
+  if (codeShapeLeakEntries.length > 0) {
+    const leakedRecordIds = new Set(codeShapeLeakEntries.map((entry) => entry.id));
+    diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) => leakedRecordIds.has(record.id))
+      ),
+      code: "protected_code_shape_in_public_prose",
+      detail:
+        "Transport or stay public prose carries protected-code-shaped tokens (long digit runs or mixed letter+digit locators). Stay and inter-city travel booking identifiers are protected class (RW-PRI-001): the prose-side code pass should have swept them even when no protected slot captured the value.",
+      // Token COUNT only, never the token value — the diagnostic must be
+      // safe in redacted bundles.
+      evidence: codeShapeLeakEntries
         .slice(0, 10)
         .map(
           (entry) =>
-            `${entry.item.date ?? "undated"} - ${entry.item.title} [${entry.signals.join(", ")}]`
+            `${entry.label} [${entry.tokens.length} code-shaped token${entry.tokens.length === 1 ? "" : "s"}]`
         ),
       severity: "p0",
-      title: "Identity-shaped values shipped in public card prose",
+      title: "Protected-code-shaped tokens shipped in transport/stay prose",
     });
   }
 

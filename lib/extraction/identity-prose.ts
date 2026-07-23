@@ -96,3 +96,103 @@ export function findIdentityProseSignals(prose: string): IdentityProseSignal[] {
   }
   return signals;
 }
+
+// ---------------------------------------------------------------------------
+// Prose-side protected-code shapes (Arc F, run 7.23.2 chain 3).
+//
+// The output-boundary sweep's deny list is built from CAPTURED protected
+// values (stay/transport fields + sensitive-detail code tokens). Run 7.23.2
+// proved that protection fails silently under parse variance: the parser
+// captured NEITHER "travel code 0468406277" (RegioJet) nor "ticket code
+// 2159 1990 1842 0436" (OBB) in any protected slot, the deny list came up
+// empty for them, and both GT-protected codes shipped in real transport
+// descriptions. These predicates judge the PROSE ITSELF, so protection no
+// longer depends on the parse having also captured the value elsewhere.
+//
+// Scope (RW-PRI-001, Delta-2 privacy ruling): this pass exists for the
+// protected classes — stay and inter-city travel prose. Activity booking
+// references are deliberately PUBLIC; callers must not apply these shapes
+// to ordinary activity/note prose.
+//
+// Exemptions (7.23.1 handoff, CEO item 2): flight-code shapes ("FR8331",
+// "RJ1033"), date shapes, and clock times are itinerary content, never
+// protected codes. Pure-letter all-caps runs ("UNESCO", "FCO", shouted
+// words) are also exempt HERE — unlike captured sensitive values, prose
+// acronyms are overwhelmingly not booking locators, and the capture-side
+// deny list still sweeps letter-only locators it has actually seen.
+
+const CODE_TOKEN_FLIGHT_PATTERN = /^[A-Z]{1,2}\d{3,4}$/;
+const CODE_TOKEN_DATE_PATTERNS = [
+  /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/,
+  /^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}$/,
+];
+const CODE_TOKEN_CLOCK_PATTERN =
+  /^\d{1,2}[:.]\d{2}(?:\s*[-–]\s*\d{1,2}[:.]\d{2})?$/;
+
+function isExemptCodeToken(token: string) {
+  return (
+    CODE_TOKEN_FLIGHT_PATTERN.test(token) ||
+    CODE_TOKEN_DATE_PATTERNS.some((pattern) => pattern.test(token)) ||
+    CODE_TOKEN_CLOCK_PATTERN.test(token)
+  );
+}
+
+// Every protected-code-shaped token in a prose string, in order:
+// - spaced/dashed digit runs with >= 7 digits ("0468406277",
+//   "2159 1990 1842 0436") that are not date or clock shapes;
+// - mixed letter+digit tokens of >= 5 chars ("2159A990X") that are not
+//   flight-code or date shapes.
+export function findProtectedCodeShapedTokens(prose: string): string[] {
+  if (!prose) return [];
+  const tokens: string[] = [];
+  for (const match of prose.matchAll(/\+?\d[\d ()./-]{5,}\d/g)) {
+    const token = match[0].trim();
+    const digitCount = (token.match(/\d/g) ?? []).length;
+    if (digitCount >= 7 && !isExemptCodeToken(token)) {
+      tokens.push(token);
+    }
+  }
+  for (const match of prose.matchAll(/#?\b[A-Za-z0-9-]{5,}\b/g)) {
+    const token = match[0].replace(/^#/, "");
+    if (
+      /[A-Za-z]/.test(token) &&
+      /\d/.test(token) &&
+      !isExemptCodeToken(token) &&
+      !tokens.some((existing) => existing.includes(token))
+    ) {
+      tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+// Dangling code-label phrases left behind once their token is removed
+// ("travel code", "Ticketcode:") — swept so scrubbed prose reads clean.
+const DANGLING_CODE_LABEL_PATTERN =
+  /\b(?:travel|ticket|booking|confirmation)\s*[- ]?code\s*[:#]?\s*(?=[.,;:)\]]|$)/gi;
+
+// Removes every protected-code-shaped token from prose and tidies the
+// leftovers. Returns the input unchanged when nothing matches. Callers:
+// the output-boundary sweep (transport/stay prose) and nothing else — the
+// audit detector reports tokens via findProtectedCodeShapedTokens instead
+// of mutating.
+export function scrubProtectedCodeShapedTokens(prose: string): string {
+  const tokens = findProtectedCodeShapedTokens(prose);
+  if (tokens.length === 0) return prose;
+  let result = prose;
+  for (const token of tokens.sort((a, b) => b.length - a.length)) {
+    let index = result.indexOf(token);
+    while (index !== -1) {
+      const hadHash = result[index - 1] === "#";
+      const start = hadHash ? index - 1 : index;
+      result = `${result.slice(0, start)}${result.slice(index + token.length)}`;
+      index = result.indexOf(token);
+    }
+  }
+  return result
+    .replace(DANGLING_CODE_LABEL_PATTERN, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/\(\s*\)/g, "")
+    .trim();
+}
