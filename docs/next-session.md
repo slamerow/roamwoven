@@ -6,6 +6,89 @@
 
 ## Current State
 
+### 2026-07-23 (later) — FIX DAY: run 7.23.0r audited, 4 fix commits shipped, run 7.23.1 failed and was root-caused SAME DAY, commit 5 closes it; NEXT SESSION AUDITS THE FIRST RUN ON 14098e3
+
+Read first: docs/assembly-defect-docket-2026-07-23-run-7.23.0r.md (full
+7.23.0r audit incl. verified corrections round), AGENTS.md §Operating
+discipline, this entry.
+
+- COMMITS (in order; all proven both-directions with fixtures from live
+  bundles; suite 61 files / 472 ok / typecheck clean at 14098e3):
+  f58a61b P0 privacy output boundary — deny-list tokens from sensitive
+    details (the ÖBB-Ticketcode-in-public-prose shape), booking-field name
+    redaction (Client/Passenger/Reserved by), transport descriptions swept,
+    sweep moved AFTER conflict reconciliation, _canonicalPriorPieceIds/
+    _evidenceProvenance no longer leak into public payloads.
+  ddb1699 P1 phantom legs — leg candidacy requires spine/day-heading
+    corroboration (recovery-only places never mint legs; killed the nested
+    Prague Jan-15-17 / Budapest Jan-21-23 phantoms, 7 legs -> 5); Costs
+    lines excluded from recovery batching (excludedPlanningCostLineCount in
+    telemetry; killed the Cesky Krumlov card + cost text in questions).
+  8b5afa1 P1 phantom transport twin — unanchored row sharing confirmation
+    + date + unordered endpoint pair with an anchored row folds into it
+    (the reversed-route 02:45 Delta-1043 phantom); one-booking-many-
+    segments and unique-conf-unanchored (Ryanair) proven safe.
+  14098e3 P0 run completion (7.23.1 trip cc2cd30f died assembly-recovery-
+    required): (1) the "activities identity order" violation fired on ALL
+    THREE consecutive parses — draft emits activities GROUPED
+    (activity-kind then note-kind), inspection expected kinds interleaved
+    in raw piece order; accidental agreement broke when the fold guard
+    changed which pieces demote to notes. ONE grouped-ordering rule now in
+    cluster emitter + rebuild + inspection. (2) rebuild compile death
+    ("missingDetails[3] changed canonical subject piece_2a10274a… to
+    tripId"): subject exists but output-ineligible after minting →
+    reconciled AT SUBJECT RESOLUTION: questions dismiss+unbind, source-
+    update calls stay calls but unbind to trip, presentation calls keep
+    their id for the run7 stale-call filter. Draft and projection agree by
+    construction; invariants stay armed as tripwires. Enforces the locked
+    dark-factory clause (identity defects after a usable parse never
+    terminate in a technical recovery state).
+- PUSH STATE at handoff: f58a61b/ddb1699/8b5afa1 pushed by Eli; 14098e3
+  committed LOCAL — verify `git log origin/main..main` empty before the
+  run; Eli runs the local gate + pushes, deploy green, FRESH TAB.
+- PINS: Supabase table verified in (DDL success), EXTRACTION_PIN_WRITE=1
+  live and PROVEN (7.23.1 telemetry: write true, saved true, 62 calls,
+  parseKey 67de9b43…). REUSE stays OFF. Every run is now recorded.
+- AUDIT BAR for the next completed run (calibrate BEFORE reacting):
+  MUST PASS (fixed): run completes (no assembly-recovery-required — either
+  7.23.1 signature reappearing falsifies commit 5); 5 legs; 8 transport
+  rows; zero protected values or personal names in public prose;
+  no Cesky-Krumlov/cost-line cards; excludedPlanningCostLineCount > 0;
+  identityRecoveryStatus ideally "not_needed" (repair no longer
+  load-bearing).
+  STILL EXPECTED BROKEN (deferred, do not burn budget reacting): Prague
+  Castle card dead (5 distinct kills, unfixed), Jan-18/Jan-20 committed
+  lists demoted by the note-copy inversion, booking-shard junk cards
+  (Client/Seller/Event date/Menu items/Wi-Fi — prose now redacted, cards
+  still present), question bloat (~7 incl. junk fragment shapes; GT
+  Vienna-trio question missing), Apple Strudel/Panorama + Malá Strana
+  ungrouped (geocode budget exhaustion suspected for Malá Strana),
+  evidence injection still a NO-OP live (0 provenance rows in 7.23.1
+  bundle too — sourceText not plumbed at intake; fix queued), Rome notes
+  carry Vienna content.
+- NEXT WORK QUEUE (order agreed with Eli): (a) plumb sourceText so
+  injection runs live + loud telemetry (enabler for castle + dedup
+  inversions), (b) booking-material shard gate (receipt-field shapes to
+  accessory routing; removes the junk cards whose prose we now redact),
+  (c) card-vs-note committed-single inversion + castle same-day-collapse
+  survivor rule, (d) grouping: geocode budget raise (127 candidates vs 50,
+  telemetry in hand) + Malá Strana geo rule, (e) question-shape gates.
+  Replay corpus: 7.23.1's 62 pinned calls (parseKey 67de9b43…) are the
+  fixture source for (a)-(c).
+- AUDIT PROCEDURE (unchanged): in-page fetch of /maker/trips/<id>/data/
+  audit/qa-bundle?includePrivate=1 via Eli's logged-in Chrome; DOM-render
+  + get_page_text in <=45KB slices; verify sha256 in-browser; blind-first;
+  docket in docs/. Chrome extension may reject the first navigate — ask
+  Eli to approve rather than retrying.
+- OPS NOTES: device git leaves undeletable lock/tmp files (VM cannot
+  unlink) — mv to _to_delete/ before git ops; .git/index.lock may need
+  Eli's manual delete. Supabase dashboard session in Eli's Chrome was
+  logged out. Vercel env inventory: EXTRACTION_PIN_WRITE=1 (new),
+  EXTRACTION_PIN_REUSE unset, OPENAI_EXTRACTION_TEMPERATURE/SEED unset,
+  model gpt-5.4-mini, OCR luna. Confidence ledger given to Eli: 9/10 the
+  two 7.23.1 signatures are dead, 7-8/10 next run completes, 99%+
+  sustained completion only claimable after ~3 clean runs.
+
 ### 2026-07-23 — ARC E LIVE DAY: run 7.23.0 FAILED at assembly, root-caused, two fix commits ready; AUDIT SESSION STARTS HERE
 
 Read first: AGENTS.md §Operating discipline, the Arc E entry below (build
