@@ -224,10 +224,21 @@ function artifactProjectionViolations({
   violations.push(...dispositionManifestViolations({ evidence, pieces }));
 
   for (const { collection, kinds } of PIECE_COLLECTIONS) {
-    const expected = pieces.filter(
-      (piece) =>
-        piece.outputEligible &&
-        (kinds as readonly CanonicalEvidencePiece["kind"][]).includes(piece.kind)
+    // Runs 7.23.0/7.23.0r/7.23.1 (three consecutive live parses): the
+    // "activities identity order" violation fired every run because the
+    // draft emits GROUPED collections (all activity-kind pieces, then all
+    // note-kind pieces — outputFor composition at cluster time) while this
+    // check expected the two kinds INTERLEAVED in raw piece order. The two
+    // orders agreed only while every note piece happened to sit after
+    // every activity piece; the Arc E fold guard legitimately changed
+    // which pieces demote to notes and the accident stopped holding. One
+    // ordering rule everywhere: collections are grouped by the
+    // collection's kind list, in piece order within each kind — here, in
+    // the cluster emitter, and in the rebuild path.
+    const expected = (
+      kinds as readonly CanonicalEvidencePiece["kind"][]
+    ).flatMap((kind) =>
+      pieces.filter((piece) => piece.outputEligible && piece.kind === kind)
     );
     const actual = getArray(record, collection).map(asRecord);
     const actualIds = actual.map((item) => getString(item, "_canonicalId") ?? "");
@@ -619,7 +630,9 @@ function rebuildDraftFromCanonicalPieces({
     actions: Array.from(new Set(actions)),
     draft: {
       ...record,
-      activities: outputFor("activity", "note"),
+      // Same grouped ordering rule as the cluster emitter and the artifact
+      // inspection: activity-kind pieces first, then note-kind (7.23.1).
+      activities: [...outputFor("activity"), ...outputFor("note")],
       missingDetails: canonicalizeCanonicalReviewDetails(
         getArray(record, "missingDetails"),
         uniquePieces

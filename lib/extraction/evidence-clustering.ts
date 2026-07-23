@@ -9896,11 +9896,39 @@ export function canonicalizeCanonicalReviewDetails(
     // through this function. A question cannot outlive its subject; it
     // also cannot kill a usable draft (AGENTS.md binding rule).
     const relatedId = piece?.id ?? stringValue(detail, "relatedCanonicalPieceId");
-    const deadTarget =
-      !piece &&
-      typeof relatedId === "string" &&
-      relatedId.length > 0 &&
-      !pieces.some((candidate) => candidate.id === relatedId);
+    // Run 7.23.1 (assembly-recovery-required, trip cc2cd30f): the original
+    // dead-target test required the subject id to match NO piece at all —
+    // a subject piece that still EXISTS but lost output eligibility (a
+    // fold suppressed its card after the question was minted) kept its id
+    // in the draft while the projection, which only knows output records,
+    // resolved the same question to the trip ("missingDetails[3] changed
+    // canonical subject piece_2a10274a… to <tripId>") — a draft/projection
+    // disagreement the compile invariant rightly refuses. The rebuild path
+    // runs only this function (not the question gate's eligibility sweep),
+    // so the rule lives here: if the subject cannot be resolved to an
+    // OUTPUT-ELIGIBLE piece — directly or through the prior-id trail — the
+    // item is dismissed and unbound, in the draft, so draft and projection
+    // agree by construction. A question cannot outlive its subject
+    // (RW-QUE-001); it also cannot kill a usable draft (dark-factory
+    // clause: identity defects after a usable parse are internal recovery
+    // work, never a technical recovery state).
+    const unresolvedRelated =
+      !piece && typeof relatedId === "string" && relatedId.length > 0;
+    // Three coherent outcomes for an unresolvable subject, none of which
+    // may stop the run (dark-factory clause):
+    //  - QUESTIONS die with their subject: dismissed + unbound.
+    //  - SOURCE-UPDATE calls (cancellation/replacement) legitimately
+    //    narrate a removal ("We left out X — cancelled"): kept as calls,
+    //    unbound to trip level so draft and projection agree (7.23.1).
+    //  - other calls (presentation/grouping) keep their original id so the
+    //    run7 stale-call filter downstream can see the dead subject and
+    //    drop them before projection, exactly as before.
+    const sourceUpdateCall =
+      disposition === "call" &&
+      stringValue(detail, "targetField") === "source_update";
+    const unresolvedSubject =
+      unresolvedRelated && (disposition !== "call" || sourceUpdateCall);
+    const deadTarget = unresolvedSubject && disposition !== "call";
 
     return {
       ...detail,
@@ -9909,14 +9937,18 @@ export function canonicalizeCanonicalReviewDetails(
         ? {
             _canonicalQuestionGate:
               "subject entity no longer exists after assembly; a review item cannot outlive its subject",
+          }
+        : {}),
+      ...(unresolvedSubject
+        ? {
             // The dead id is unbound (draft and projection must agree the
             // subject is now the trip) but stays auditable in place.
             _canonicalDeadSubjectId: relatedId,
           }
         : {}),
       evidence: scrubReviewEvidence(detail.evidence),
-      relatedCanonicalPieceId: deadTarget ? null : relatedId,
-      subjectType: deadTarget
+      relatedCanonicalPieceId: unresolvedSubject ? null : relatedId,
+      subjectType: unresolvedSubject
         ? "trip"
         : piece
         ? canonicalReviewSubjectType(piece)
