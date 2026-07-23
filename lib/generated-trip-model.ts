@@ -253,6 +253,14 @@ export type TripReviewQuestionRecord = {
   answerValue: string | null;
   canonicalId: string;
   createdAt: string | null;
+  /**
+   * Why a dismissed question was dismissed (the assembly gate/sweep trace,
+   * e.g. "subject entity no longer exists after assembly"). Run 7.23.2
+   * chain 8.3: dismissed questions kept only a count in the QA bundle, so
+   * the baths-question loss (chain 7) had to be inferred instead of read.
+   * Arc G's rebind rule (tripwire T3) keys off this reason.
+   */
+  dismissalReason?: string | null;
   evidence: string | null;
   guessedValue: string | null;
   id: string;

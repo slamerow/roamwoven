@@ -50,6 +50,7 @@ function report(
       contextObservationCount: 0,
       dispositionCount: 0,
       identityRepairCount: 0,
+      identityRecoveryInitialViolations: [],
       identityRecoveryStatus: "not_needed",
       observationCount: 0,
       parserArtifactRepairCount: 0,

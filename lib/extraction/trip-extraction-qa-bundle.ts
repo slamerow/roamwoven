@@ -500,6 +500,16 @@ function createRecordSummaries({
     })),
     review: {
       calls: calls.map((question) => summarizeReviewQuestion(question, includePrivate)),
+      // Run 7.23.2 chain 8.3: the bundle stored only a dismissed-question
+      // COUNT, so a wrongly-dismissed question (the baths shape, chain 7)
+      // could not be quoted from the bundle. Full content + dismissal
+      // reason now ship.
+      dismissedQuestions: records.reviewQuestions
+        .filter((question) => question.status === "dismissed")
+        .map((question) => ({
+          ...summarizeReviewQuestion(question, includePrivate),
+          dismissalReason: question.dismissalReason ?? null,
+        })),
       internalSignals: {
         privateDetailsNeedingReview: records.privateDetails.filter(
           (detail) => detail.reviewRequired

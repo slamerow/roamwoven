@@ -140,6 +140,16 @@ export function createCanonicalizationSummary(usage: unknown) {
     identityRepairCount: Array.isArray(identityRecovery.actions)
       ? identityRecovery.actions.length
       : 0,
+    // Run 7.23.2 chain 8.1: "repaired" with no violation text made the
+    // repair trigger unknowable from the QA bundle (must-pass item 7). The
+    // corridor's initial violation strings now ship in the audit summary.
+    identityRecoveryInitialViolations: Array.isArray(
+      identityRecovery.initialViolations
+    )
+      ? identityRecovery.initialViolations.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [],
     identityRecoveryStatus,
     observationCount,
     parserArtifactRepairCount: Number(evidence.parserArtifactRepairCount) || 0,
@@ -215,6 +225,12 @@ export function createExtractionSummary(usage: unknown) {
         ? {
             batchedLineCount: Number(sourceRecovery.batchedLineCount) || 0,
             droppedLineCount: Number(sourceRecovery.droppedLineCount) || 0,
+            // Run 7.23.2 chain 8.2: computed by source-recovery since
+            // ddb1699 but dropped by this whitelist — must-pass item 6
+            // (excludedPlanningCostLineCount > 0) was unverifiable by
+            // construction.
+            excludedPlanningCostLineCount:
+              Number(sourceRecovery.excludedPlanningCostLineCount) || 0,
             model:
               typeof sourceRecovery.model === "string"
                 ? sourceRecovery.model

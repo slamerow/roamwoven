@@ -187,6 +187,7 @@ export type TripExtractionAuditReport = {
     contextObservationCount: number;
     dispositionCount: number;
     identityRepairCount: number;
+    identityRecoveryInitialViolations: string[];
     identityRecoveryStatus: "not_needed" | "repaired";
     observationCount: number;
     parserArtifactRepairCount: number;
@@ -215,6 +216,7 @@ export type TripExtractionAuditReport = {
     sourceRecovery: {
       batchedLineCount: number;
       droppedLineCount: number;
+      excludedPlanningCostLineCount: number;
       model: string | null;
       outcome: string;
       recoveredLineCount: number;

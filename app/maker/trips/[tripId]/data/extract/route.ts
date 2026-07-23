@@ -174,6 +174,17 @@ function summarizeFinalizationUsage(usage: unknown) {
       ? identityRecovery.actions
       : [],
     identityRecoveryAttempted: identityRecovery?.attempted === true,
+    // Run 7.23.2 chain 8.1: the assembly corridor computes the actual
+    // violation strings (recoverySummary().initialViolations) but this
+    // summary used to persist only actions/attempted/status — a run could
+    // report identityRecoveryStatus "repaired" with no way to name WHICH
+    // invariant tripped the repair corridor. The trigger now rides in the
+    // assembly completed event.
+    identityRecoveryInitialViolations: Array.isArray(
+      identityRecovery?.initialViolations
+    )
+      ? identityRecovery.initialViolations
+      : [],
     identityRecoveryStatus: identityRecovery?.status ?? "not_needed",
     status: finalization.status ?? null,
   };

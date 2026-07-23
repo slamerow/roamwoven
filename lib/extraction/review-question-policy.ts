@@ -159,6 +159,15 @@ export function createReviewQuestions({
         answerValue: null,
         canonicalId: canonicalReviewId,
         createdAt: null,
+        // Run 7.23.2 chain 8.3: a dismissed question used to reach the
+        // records as a bare status — the gate/sweep trace stayed behind on
+        // the draft detail. The reason now rides the record so audits can
+        // QUOTE the dismissal and Arc G's rebind (T3) can key off it.
+        dismissalReason:
+          disposition === "dismissed"
+            ? getString(detail, "_canonicalQuestionGate") ??
+              "dismissed during canonical assembly"
+            : null,
         evidence: getString(detail, "evidence"),
         guessedValue: getString(detail, "guessedValue"),
         id: `${tripId}-${canonicalReviewId}`,

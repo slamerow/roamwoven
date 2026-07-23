@@ -211,6 +211,31 @@ const records: StructuredTripRecords = {
       targetField: null,
       tripId: "trip-qa",
     },
+    // Run 7.23.2 chain 8.3: dismissed questions used to reach the bundle
+    // as a bare count — the content and the dismissal reason now ship so
+    // a wrong dismissal (the chain-7 baths shape) can be quoted, not
+    // inferred.
+    {
+      answerType: "single_choice",
+      answerValue: null,
+      canonicalId: "canonical-question-dismissed",
+      createdAt: null,
+      dismissalReason:
+        "subject entity no longer exists after assembly; a review item cannot outlive its subject",
+      evidence: "Day title: Budapest Bathing",
+      guessedValue: null,
+      id: "question-dismissed",
+      prompt: "Which bath house is planned?",
+      reason: "The day title commits a bathing slot.",
+      resolvedAt: null,
+      sourceConfidence: "high",
+      status: "dismissed",
+      subjectCanonicalId: "canonical-item-baths",
+      subjectId: "item-baths",
+      subjectType: "item",
+      targetField: "subject",
+      tripId: "trip-qa",
+    },
   ],
   stays: [
     {
@@ -350,6 +375,16 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(reviewPageSections["private-details"], 0);
   assert.equal(bundle.records?.review.openQuestions.length, 1);
   assert.equal(bundle.records?.review.calls.length, 1);
+  assert.equal(bundle.records?.counts.dismissedQuestions, 1);
+  assert.equal(bundle.records?.review.dismissedQuestions.length, 1);
+  assert.equal(
+    bundle.records?.review.dismissedQuestions[0]?.prompt,
+    "Which bath house is planned?"
+  );
+  assert.match(
+    bundle.records?.review.dismissedQuestions[0]?.dismissalReason ?? "",
+    /cannot outlive its subject/
+  );
   assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "[redacted value]");
   assert.equal(
     (bundle.audit.processingEvents[0]?.details.nested as Record<string, unknown>)
