@@ -1,11 +1,14 @@
 # Roamwoven Product Contracts
 
-Ledger version: 18
+Ledger version: 19
 
-Ledger date: 2026-07-22 (Arc E: run-7.22.4 fixes — repeat-fold plan-copy
-guard: grouping structure and heading-committed entities never fold into a
-reference copy; deterministic evidence injection at intake; chunk/geocode
-parallelization; extraction pinning foundations)
+Ledger date: 2026-07-24 (Arc F: run-7.23.2 privacy armor — one identity
+output gate over every public field of every record kind with suppress-or-
+scrub semantics; prose-side protected-code sweep independent of capture;
+stay candidacy gate (night evidence); shared Costs predicate at canonical
+candidacy; arrival-directions routed to stays; chain-8 telemetry closed;
+publish readiness copy becomes warning-state on open identity P0s / hard
+warnings — RW-PUB-001 messaging amendment, CEO decisions 1 and 7)
 
 Approval state: Approved and implementation-tracked
 
@@ -525,8 +528,20 @@ path is bypassed.
   night is covered by a surviving same-city stay is absorbed as cost/context
   residue; internal date-suffix disambiguators never survive in stay names.
   Enforced by ground-truth run3 checks.
+  2026-07-24 Arc F stay candidacy gate (live-run 7.23.2 chain 2: phantom
+  public stay "Eli J Kamerow" — dateless, leg-less, minted from a booking
+  passenger field; stays had NO candidacy rule): a stay record requires
+  night evidence (check-in, check-out, or first-night date). The gate runs
+  at `reconcileCanonicalStayIdentity` time, after guessed stay dates apply
+  and before the deny-list build, accessory attachment, and stay-collision
+  warnings (tripwire T2); person-name-shaped dateless stays are suppressed
+  as booking material with an auditable disposition, and a suppressed
+  phantom still contributes to the protected-value deny list. Enforced by
+  `tests/stay-candidacy-gate.test.ts` (live phantom shape, single-boundary
+  negative controls, proven both directions).
 - Tests: `tests/assembly-ground-truth.test.ts`,
-  `tests/source-transport-anchors.test.ts`
+  `tests/source-transport-anchors.test.ts`,
+  `tests/stay-candidacy-gate.test.ts`
 
 ## RW-CLS-001 — Source intent determines Activity versus City Note
 
@@ -653,12 +668,25 @@ path is bypassed.
   (PB-9: loose-tip recovery output becomes city-note candidates). Enforced
   by `tests/activity-classifier.test.ts` and
   `tests/assembly-ground-truth-run6.test.ts`.
+  2026-07-24 Arc F (live-run 7.23.2 chain 4, tripwire T4): the Costs
+  exclusion is enforced at CANONICAL CANDIDACY, not per producer. ONE
+  shared predicate (`isPlanningCostMaterial`, source-coverage.ts) is
+  consumed by recovery batching (ddb1699's lane), piece-creation candidacy
+  (before all reconciliation, so card/note reconciliation still sees
+  original note lists), and a new `planning_cost_line_shipped_as_card`
+  audit tripwire — the shipped "Vienna lodging cost" card was the same
+  Costs line the recovery exclusion had already suppressed, arriving
+  through a second path. ddb1699's negative controls (stay costs due on
+  arrival, HUF prose, priced venue/idea lines) hold at candidacy. Enforced
+  by `tests/planning-cost-candidacy.test.ts` (suppressed-twin/shipped-card
+  pair, proven both directions).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
   `tests/parser-artifact-normalization.test.ts`,
-  `tests/activity-classifier.test.ts`
+  `tests/activity-classifier.test.ts`,
+  `tests/planning-cost-candidacy.test.ts`
 
 ### 2026-07-21 Arc C evidence (RW-CLS-001, live-run 7.21.0, run7 PC-1/PC-3)
 
@@ -1002,15 +1030,48 @@ exact live payload shapes.
   `tests/assembly-ground-truth-run6.test.ts` (rental-car scrub, FR8331
   shadow + confirmation, clean-prose agreement with the shared
   predicates).
+  2026-07-24 Arc F identity output gate (live-run 7.23.2 chains 1-3b; CEO
+  decision 2): ONE gate at the existing sweep position covers every public
+  field of every record kind — the chain-1 defect was FIELD-COVERAGE
+  asymmetry (detector scanned titles, scrub never did). A card/note whose
+  TITLE carries an identity value is suppressed whole with an auditable
+  disposition (no maker review item, no scrubbed husks); structural
+  records (transport, stays) keep the row and lose only the leaked value
+  (Eli, 2026-07-24). Protected-code-shaped tokens are swept from
+  transport/stay prose DIRECTLY (`identity-prose.ts` shapes shared with
+  the detector), so protection no longer depends on the parse having
+  captured the code in a protected slot (chain 3's empty-deny-list
+  failure); flight codes, dates, and clock times are exempt, and ordinary
+  activity booking references stay public. Stay fields are now swept and
+  the detector walks items, stays, and transport alike; a new
+  `protected_code_shape_in_public_prose` P0 makes the code-token bar
+  verifiable from the bundle. Arrival-directions prose (chain 3b, Eli:
+  full fix in Arc F) routes to the leg's stay even when no stay is named,
+  and city notes are swept by the same rule. Enforced by
+  `tests/identity-output-gate.test.ts` and
+  `tests/stay-arrival-directions.test.ts` (live shapes verbatim, proven
+  both directions).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
-  `tests/assembly-ground-truth-run6.test.ts`
+  `tests/assembly-ground-truth-run6.test.ts`,
+  `tests/identity-output-gate.test.ts`,
+  `tests/stay-arrival-directions.test.ts`
 
 ## RW-PUB-001 — Published trip versions are immutable
 
 - Status: `LOCKED`
-- Decision date: `2026-07-15`
+- Decision date: `2026-07-24`
+- Supersession: the 2026-07-21 messaging is amended by the 2026-07-24 CEO
+  decisions 1 and 7 (Arc F). Publishing still warns-never-blocks; the
+  amendment changes only the readiness COPY: while an identity-class P0
+  finding or a hard structural warning is open, the readiness headline is a
+  warning-state — "Ready with N privacy warnings" (N = open identity P0s +
+  open hard warnings) — instead of "Private app is ready". Quiet warnings
+  never change readiness copy. Standing directive recorded with the
+  decision: these warnings are a TRIPWIRE, not a feature — recurring
+  hard-warning shapes are backlog defects the assembly logic must learn to
+  resolve; the target state is N = 0 on a healthy run.
 - Enforcement: `PARTIAL`
 - Contract: Extraction, assembly, review, and future fixes never mutate an
   already published traveler snapshot. Maker changes create a new draft and an
@@ -1024,8 +1085,15 @@ exact live payload shapes.
   publish page must state surviving confirmed output defects prominently
   instead of claiming readiness ("Private app has open audit findings"),
   but Create snapshot stays enabled.
+  2026-07-24 Arc F: `assessTripPublishReadinessCopy`
+  (`lib/trip-publish-policy.ts`) derives the warning-state headline from
+  the run's remediation outcomes (open conservative-fallback findings
+  only; repaired/verified findings, detector incidents, and the quiet
+  activity_bloat warning never count); the publish page renders it above
+  the run7 audit-findings copy.
 - Tests: `tests/published-snapshots.test.ts`,
-  `tests/structured-trip-snapshot.test.ts`
+  `tests/structured-trip-snapshot.test.ts`,
+  `tests/trip-publish-policy.test.ts`
 
 ## RW-AUD-001 — Audit findings require independent proof before action
 
@@ -1194,10 +1262,23 @@ exact live payload shapes.
   isCanonicalAssemblyError gate is deleted, not bypassed. Proven both
   directions by the poisoned-draft check in
   `tests/canonical-review-identity-recovery.test.ts`.
+  2026-07-24 Arc F telemetry honesty (run 7.23.2 chain 8 — three gaps that
+  made must-pass items unverifiable from the bundle): the repair
+  corridor's `initialViolations` now persist in the assembly completed
+  event AND the audit canonicalization summary (a "repaired" status names
+  which invariant tripped); `excludedPlanningCostLineCount` survives the
+  audit-snapshot whitelist; dismissed questions ship their full content
+  plus a `dismissalReason` (the gate/sweep trace — Arc G's rebind, T3,
+  keys off it); and a quiet `transport_confirmation_value_not_captured`
+  advisory flags rows with no confirmation-shaped value (the chain-3
+  capture-miss symptom, e.g. the literal label "Operator"). Enforced by
+  `tests/arc-f-telemetry.test.ts` and the qa-bundle dismissed-question
+  checks in `tests/trip-extraction-qa-bundle.test.ts`.
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,
-  `tests/trip-audit-reconciliation.test.ts`
+  `tests/trip-audit-reconciliation.test.ts`,
+  `tests/arc-f-telemetry.test.ts`
 
 ## RW-OPEN-001 — Question response controls in the assembly pass
 

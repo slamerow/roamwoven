@@ -4,6 +4,7 @@ import { MakerProgress } from "@/components/maker-progress";
 import { CopyLinkButton, RefreshAppButton } from "@/components/publish-actions";
 import { getAppUrl } from "@/lib/env";
 import { getMakerTrip } from "@/lib/trips";
+import { assessTripPublishReadinessCopy } from "@/lib/trip-publish-policy";
 import { getLatestTripProcessingRun } from "@/lib/extraction/processing-runs";
 
 // Surviving confirmed output defects from the latest run's remediation
@@ -46,6 +47,9 @@ export default async function PublishPage({
   const shareUrl = token ? `${getAppUrl()}/t/${token}` : null;
   const latestRun = await getLatestTripProcessingRun(tripId).catch(() => null);
   const survivingDefects = countSurvivingOutputDefects(
+    latestRun?.openaiUsage ?? null
+  );
+  const readinessCopy = assessTripPublishReadinessCopy(
     latestRun?.openaiUsage ?? null
   );
 
@@ -100,14 +104,24 @@ export default async function PublishPage({
           <div className="rounded-md border border-ink/10 bg-white p-5">
             <div className="flex items-center gap-3">
               <ShieldCheck
-                className={survivingDefects > 0 ? "text-clay" : "text-moss"}
+                className={
+                  readinessCopy.state === "ready_with_warnings" ||
+                  survivingDefects > 0
+                    ? "text-clay"
+                    : "text-moss"
+                }
                 size={24}
               />
               <div>
                 <h2 className="text-xl font-semibold text-ink">
-                  {survivingDefects > 0
-                    ? "Private app has open audit findings"
-                    : "Private app is ready"}
+                  {/* Arc F (CEO decisions 1+7): identity P0s and hard
+                      warnings flip the headline to a warning state; quiet
+                      warnings never do; publishing never blocks. */}
+                  {readinessCopy.state === "ready_with_warnings"
+                    ? readinessCopy.headline
+                    : survivingDefects > 0
+                      ? "Private app has open audit findings"
+                      : "Private app is ready"}
                 </h2>
                 <p className="mt-1 text-sm text-ink/60">
                   {shareUrl
