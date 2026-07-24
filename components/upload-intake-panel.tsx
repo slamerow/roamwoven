@@ -1,14 +1,15 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ClipboardList, FileImage, FileSpreadsheet, FileText, UploadCloud } from "lucide-react";
+import {
+  ClipboardList,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { ACCEPTED_MATERIAL_INPUT_ACCEPT } from "@/lib/extraction/material-capabilities";
-
-type QueuedFile = {
-  name: string;
-  size: number;
-  type: string;
-};
 
 function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) {
@@ -18,7 +19,7 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function iconForFile(file: QueuedFile) {
+function iconForFile(file: File) {
   const name = file.name.toLowerCase();
 
   if (name.endsWith(".xlsx") || name.endsWith(".csv")) {
@@ -33,7 +34,9 @@ function iconForFile(file: QueuedFile) {
 }
 
 export function UploadIntakePanel({ tripId }: { tripId: string }) {
-  const [files, setFiles] = useState<QueuedFile[]>([]);
+  // Real File objects: what the form submits is the hidden input's
+  // FileList, so removing a queued file must rebuild it (DataTransfer).
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [notes, setNotes] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -44,14 +47,38 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
     [files]
   );
 
-  function queueFiles(fileList: FileList | null) {
-    const selected = Array.from(fileList ?? []).map((file) => ({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-    }));
+  function syncQueuedFiles(next: File[]) {
+    setFiles(next);
 
-    setFiles(selected);
+    if (fileInputRef.current) {
+      const transfer = new DataTransfer();
+      next.forEach((file) => transfer.items.add(file));
+      fileInputRef.current.files = transfer.files;
+    }
+  }
+
+  // Appends with name+size dedupe — "Add more files" used to replace the
+  // whole queue.
+  function queueFiles(fileList: FileList | null) {
+    const incoming = Array.from(fileList ?? []);
+    const merged = [...files];
+
+    for (const file of incoming) {
+      if (
+        !merged.some(
+          (existing) =>
+            existing.name === file.name && existing.size === file.size
+        )
+      ) {
+        merged.push(file);
+      }
+    }
+
+    syncQueuedFiles(merged);
+  }
+
+  function removeFile(index: number) {
+    syncQueuedFiles(files.filter((_, position) => position !== index));
   }
 
   return (
@@ -96,10 +123,6 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
           event.preventDefault();
           setIsDragging(false);
           queueFiles(event.dataTransfer.files);
-
-          if (fileInputRef.current) {
-            fileInputRef.current.files = event.dataTransfer.files;
-          }
         }}
       >
         <UploadCloud className="text-tide" size={34} />
@@ -139,12 +162,12 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
             <p className="text-sm text-ink/55">{formatSize(totalSize)}</p>
           </div>
           <div className="space-y-2">
-            {files.map((file) => {
+            {files.map((file, index) => {
               const Icon = iconForFile(file);
               return (
                 <div
                   key={`${file.name}-${file.size}`}
-                  className="flex items-center justify-between rounded-md bg-white px-3 py-2"
+                  className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <Icon className="shrink-0 text-tide" size={18} />
@@ -152,9 +175,19 @@ export function UploadIntakePanel({ tripId }: { tripId: string }) {
                       {file.name}
                     </span>
                   </div>
-                  <span className="shrink-0 text-xs text-ink/50">
-                    {formatSize(file.size)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-ink/50">
+                      {formatSize(file.size)}
+                    </span>
+                    <button
+                      aria-label={`Remove ${file.name}`}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-ink/10 text-ink/50 transition hover:border-clay/30 hover:text-clay"
+                      onClick={() => removeFile(index)}
+                      type="button"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
               );
             })}

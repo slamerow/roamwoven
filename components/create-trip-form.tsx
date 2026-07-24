@@ -7,13 +7,8 @@ import {
   FileSpreadsheet,
   FileText,
   UploadCloud,
+  X,
 } from "lucide-react";
-
-type QueuedFile = {
-  name: string;
-  size: number;
-  type: string;
-};
 
 function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) {
@@ -23,7 +18,7 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function iconForFile(file: QueuedFile) {
+function iconForFile(file: File) {
   const name = file.name.toLowerCase();
 
   if (name.endsWith(".xlsx") || name.endsWith(".csv")) {
@@ -38,7 +33,10 @@ function iconForFile(file: QueuedFile) {
 }
 
 export function CreateTripForm({ error }: { error?: string }) {
-  const [files, setFiles] = useState<QueuedFile[]>([]);
+  // Real File objects, not name/size snapshots: removing one file must
+  // rebuild the hidden input's FileList (via DataTransfer), because what
+  // the form SUBMITS is the input's FileList, not the rendered list.
+  const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const totalSize = useMemo(
@@ -46,14 +44,38 @@ export function CreateTripForm({ error }: { error?: string }) {
     [files]
   );
 
-  function queueFiles(fileList: FileList | null) {
-    const selected = Array.from(fileList ?? []).map((file) => ({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-    }));
+  function syncQueuedFiles(next: File[]) {
+    setFiles(next);
 
-    setFiles(selected);
+    if (fileInputRef.current) {
+      const transfer = new DataTransfer();
+      next.forEach((file) => transfer.items.add(file));
+      fileInputRef.current.files = transfer.files;
+    }
+  }
+
+  // "Add more files" APPENDS (dedupe by name+size); it used to silently
+  // replace the whole queue.
+  function queueFiles(fileList: FileList | null) {
+    const incoming = Array.from(fileList ?? []);
+    const merged = [...files];
+
+    for (const file of incoming) {
+      if (
+        !merged.some(
+          (existing) =>
+            existing.name === file.name && existing.size === file.size
+        )
+      ) {
+        merged.push(file);
+      }
+    }
+
+    syncQueuedFiles(merged);
+  }
+
+  function removeFile(index: number) {
+    syncQueuedFiles(files.filter((_, position) => position !== index));
   }
 
   return (
@@ -101,10 +123,6 @@ export function CreateTripForm({ error }: { error?: string }) {
           event.preventDefault();
           setIsDragging(false);
           queueFiles(event.dataTransfer.files);
-
-          if (fileInputRef.current) {
-            fileInputRef.current.files = event.dataTransfer.files;
-          }
         }}
       >
         <UploadCloud className="text-tide" size={34} />
@@ -134,17 +152,17 @@ export function CreateTripForm({ error }: { error?: string }) {
         <div className="rounded-md border border-ink/10 bg-paper p-4">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm font-semibold text-ink">
-              {files.length} files ready
+              {files.length === 1 ? "1 file ready" : `${files.length} files ready`}
             </p>
             <p className="text-sm text-ink/55">{formatSize(totalSize)}</p>
           </div>
           <div className="space-y-2">
-            {files.map((file) => {
+            {files.map((file, index) => {
               const Icon = iconForFile(file);
 
               return (
                 <div
-                  className="flex items-center justify-between rounded-md bg-white px-3 py-2"
+                  className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2"
                   key={`${file.name}-${file.size}`}
                 >
                   <div className="flex min-w-0 items-center gap-2">
@@ -153,9 +171,19 @@ export function CreateTripForm({ error }: { error?: string }) {
                       {file.name}
                     </span>
                   </div>
-                  <span className="shrink-0 text-xs text-ink/50">
-                    {formatSize(file.size)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-ink/50">
+                      {formatSize(file.size)}
+                    </span>
+                    <button
+                      aria-label={`Remove ${file.name}`}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-ink/10 text-ink/50 transition hover:border-clay/30 hover:text-clay"
+                      onClick={() => removeFile(index)}
+                      type="button"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
