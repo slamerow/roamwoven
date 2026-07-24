@@ -6,6 +6,100 @@
 
 ## Current State
 
+### 2026-07-24 (F.2 session, cloud) — ARC F.2 CODED AND COMMITTED: step-0 chain-D trace CORRECTED the docket, C1 DROPPED (Eli: Δ2 stands, chain C tokens are public), C2/C3/C4 landed fixture-proven; NEXT: transfer verified on Eli's machine → local gate → replay all three pinned parses → push → run 2
+
+Read first: docket 7.24.1 CORRECTION block (bar item 6 re-scored),
+this entry, ledger v20 (F.2 evidence on RW-PRI/TRV/CLS/OPS-001).
+Commits (each suite-green + typecheck clean in the cloud clone, on top of
+02db27c): af8f8d7 docket correction → 469c388 C2 → 67f55fa C3 →
+0457f0c C4 → (this docs commit). ZERO live runs spent.
+
+- STEP 0 (chain D trace, read-only, at e3f7e3e): the docket's
+  rebuild-bypass hypothesis is PARTLY WRONG. The corridor rebuild cannot
+  un-sweep by itself — piece payloads are swept IN PLACE before outputFor,
+  so assembly call #1 sees draft≡pieces by construction. The real
+  mutation vector is the route's QUALITY RETRY:
+  hasSeriousQualityFindings triggers on activity_bloat (78 cards
+  guaranteed it on 7.24.1), reapplyCanonicalOutputInvariants re-runs the
+  accessory router + finalize on a clone AFTER the sweep with no
+  re-sweep, assembly #2 then detects semantic payload mismatch on exactly
+  the router-walked pieces (the three persisted initialViolations = the
+  three Notes & Tips items) and rebuilds ALL outputs from the
+  retry-mutated payloads. The e0f1db42 mine class, route level. ALSO:
+  chain D's dirty CONTENT was already in draft #1 — the merged city note
+  is created AFTER the routing/3b/costs passes, and the run8
+  access/OCR/credential filters gated only the RESTORE pass, never the
+  initial render. De-mining note for Arc G: the rebuild re-runs
+  canonicalizeCanonicalReviewDetails, so retry-suppressed subjects get
+  dismissed with persisted reasons — T3 rebind-by-reason is safe against
+  this ordering. Verify from the 7.24.1 bundle if desired:
+  qualityRemediation.retryAttempted/retryChanged should both be true.
+- C1 DROPPED (Eli rulings this session — TWO clarifications):
+  (1) Asked which wins between the Δ2 carve-out and the bar wording:
+  Eli — "public". The GT answer key agrees: Δ2 amendment 1 explicitly
+  de-🔒s L272-181125-2, reservation 81486, and activity ticket barcodes.
+  The 7.24.1 docket's "GT-protected" attribution for chain C was an
+  audit MIS-READ (correction block added to the docket; run7 had scored
+  81486 public-correct). Bar item 6 = zero PROTECTED-class (stay +
+  inter-city travel) code tokens in any public field — future audits
+  must apply the carve-out before scoring. A full C1 implementation was
+  built, caught by the run6 negative control, and reverted un-committed.
+  (2) C4 fix point approved: "re-sweep the retry" (not corridor-internal).
+- C2 (469c388): transport candidacy floor in
+  suppressRouteLessTransportFragments — no departure AND no arrival
+  location AND no matching source anchor → booking-material suppression
+  with auditable reason; anchor matcher shared with the audit. Transport
+  pieces now feed the deny list regardless of outputEligible (T2
+  mirrored) so the chain A fragment's captured 0648… code stays swept.
+  Negative controls proven: Delta 2934, missing-arrival-time-only,
+  anchored endpoint-less row. tests/transport-candidacy-floor.test.ts.
+- C3 (67f55fa): stay venue-shape candidacy — document-artifact names
+  (itinerary / "by day N" / filename shapes) fail regardless of night
+  evidence ("Visitacity itinerary by day 3" verbatim fixture); Wombats
+  "The Lounge" + Prague Airbnb controls pass. NEW quiet P2
+  same_leg_stay_night_overlap (strict overlap only; checkout==check-in
+  sequences exempt; per decision 3 NOT a hard warning).
+  tests/stay-venue-shape.test.ts.
+- C4 (0457f0c): (a) reapplyCanonicalOutputInvariants now ENDS with
+  scrubProtectedValuesFromPublicProse (sensitiveDetails threaded from the
+  route) — T1 restored for the retry lane; corridor rebuilds regenerate
+  from RE-SWEPT payloads, proven end-to-end (inject → retry → 'repaired'
+  → clean rebuilt output) and idempotent (changed=false on untouched
+  clone). (b) ONE segment safety classifier gates BOTH the initial
+  city-note render and the restore pass: costs (shared planning-cost
+  lines + new lodging-cost shape — decision 2 final; em-dash added to the
+  shared ledger-line pattern that the live "January 24th Rome—$118" line
+  evaded), access/credential shapes ("HOW TO GET IN", "use the key",
+  key-pickup, Step N:, credential sentences), ticket-OCR boilerplate
+  (FAHRSCHEIN/Zugbindung class). Access material routes to the same-city
+  stay's protected accessInstructions; every exclusion carries a
+  disposition. Pre-merge 3b note sweep gains the access vocabulary
+  (access sentence = strong alone). ddb1699 negative controls held.
+  tests/note-lane-protections.test.ts.
+- EXIT GATE STATUS: cloud suite 69 files green + tsc clean per commit.
+  COMMITTED CHECKPOINT ONLY — NOT yet push-safe: (1) Eli runs the local
+  gate on his machine (npm test && npx tsc --noEmit) after the transfer,
+  (2) replay ALL THREE pinned parses on Eli's Mac (cloud cannot reach
+  Supabase): node scripts/replay-pinned-parse.mjs <tripId> <parseKey> for
+  67de9b43…, 790f80db… (expect: unchanged Arc F bar — 5 legs / 8
+  transport / 5 stays / zero identity / recovery NOT_NEEDED), and
+  1d5668af… (trip aa218430; expect: 8 transport — chain A fragment
+  suppressed with floor disposition; 5 stays — Visitacity artifact
+  suppressed; Rome/Prague notes carry NO access block, NO FAHRSCHEIN OCR,
+  NO $-lodging lines; zero identity signals; zero PROTECTED-class code
+  tokens — note L272-181125-2 in Prague notes is Δ2-PUBLIC and may
+  legitimately appear post-correction; retry may report changed=true with
+  'repaired' + payload-mismatch violations — that is the designed
+  mechanism, judge the OUTPUT). Then push → pre-flight (deploy green,
+  fresh tab, env from telemetry) → RUN 2 (Arc G classifier bar with
+  privacy and spine holding) per the approved sequencing: F.2
+  replay-validates BEFORE any Arc G coding.
+- Session ops: work done in an isolated cloud clone from a device
+  snapshot at 02db27c (tar excl. node_modules, npm ci fresh); commits
+  transferred back to the device repo via git bundle + ff-merge (see
+  transfer note at the end of this entry / chat). The device _to_delete/
+  scratch rule stands.
+
 ### 2026-07-24 (evening) — RUN 7.24.1 AUDITED: BAR FAIL (9 transport / 6 stays / 3 code-shape leaks, all NEW shapes one lane over from Arc F's); ARC F.2 PLANNED AND ELI-APPROVED; F.2 BEFORE ARC G
 
 Read first: docs/assembly-defect-docket-2026-07-24-run-7.24.1.md (chains A-E),

@@ -1,6 +1,6 @@
 # Roamwoven Product Contracts
 
-Ledger version: 19
+Ledger version: 20
 
 Ledger date: 2026-07-24 (Arc F: run-7.23.2 privacy armor — one identity
 output gate over every public field of every record kind with suppress-or-
@@ -539,9 +539,26 @@ path is bypassed.
   phantom still contributes to the protected-value deny list. Enforced by
   `tests/stay-candidacy-gate.test.ts` (live phantom shape, single-boundary
   negative controls, proven both directions).
+  2026-07-24 Arc F.2 (run 7.24.1 chains A+B): transport candidacy floor —
+  a row with neither endpoint location and no matching source anchor is
+  booking material, never a travel row (the live 9th row "Train ticket",
+  Jan 24, null→null, a second ÖBB OCR reading whose departure time kept it
+  alive); suppressed fragments keep feeding the protected-value deny list
+  (transport now mirrors T2's stay property). Stay candidacy gained a
+  venue-shape test: document-artifact-shaped names (itinerary / "by day N"
+  / filename shapes — the live "Visitacity itinerary by day 3" carried a
+  full night range and passed the night rule) fail candidacy regardless of
+  dates; same-leg strictly-overlapping stay ranges raise the quiet
+  `same_leg_stay_night_overlap` P2 (never a hard warning — CEO decision,
+  F.2 session). Enforced by `tests/transport-candidacy-floor.test.ts` and
+  `tests/stay-venue-shape.test.ts` (live shapes verbatim, negative
+  controls: Delta 2934, missing-arrival-time, anchored endpoint-less row,
+  Wombats "The Lounge", Prague Airbnb).
 - Tests: `tests/assembly-ground-truth.test.ts`,
   `tests/source-transport-anchors.test.ts`,
-  `tests/stay-candidacy-gate.test.ts`
+  `tests/stay-candidacy-gate.test.ts`,
+  `tests/transport-candidacy-floor.test.ts`,
+  `tests/stay-venue-shape.test.ts`
 
 ## RW-CLS-001 — Source intent determines Activity versus City Note
 
@@ -680,13 +697,29 @@ path is bypassed.
   arrival, HUF prose, priced venue/idea lines) hold at candidacy. Enforced
   by `tests/planning-cost-candidacy.test.ts` (suppressed-twin/shipped-card
   pair, proven both directions).
+  2026-07-24 Arc F.2 (run 7.24.1 chain D; CEO decisions, F.2 session):
+  notes are the recommendation taxonomy on EVERY lane — the run8 filters
+  gated only the restore pass while the initial city-note render excluded
+  nothing but the old costs pattern, so the live Rome Notes & Tips shipped
+  an access block, raw ticket OCR, and a lodging-cost line through the
+  front door. One segment safety classifier now gates both the initial
+  render and the restore pass: costs (including shared planning-cost lines
+  and a lodging-cost shape — no lodging cost ships anywhere public, the
+  amount-due-at-check-in exception lives as a protected stay detail),
+  access/credential material (routed to the same-city stay), and
+  booking/receipt boilerplate (FAHRSCHEIN/Zugbindung-class OCR), each
+  exclusion recorded as a disposition. The shared ledger-line pattern now
+  accepts the em dash the live line used ("January 24th Rome—$118").
+  ddb1699 negative controls held (HUF prose, priced venue/idea lines).
+  Enforced by `tests/note-lane-protections.test.ts`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
   `tests/parser-artifact-normalization.test.ts`,
   `tests/activity-classifier.test.ts`,
-  `tests/planning-cost-candidacy.test.ts`
+  `tests/planning-cost-candidacy.test.ts`,
+  `tests/note-lane-protections.test.ts`
 
 ### 2026-07-21 Arc C evidence (RW-CLS-001, live-run 7.21.0, run7 PC-1/PC-3)
 
@@ -989,6 +1022,11 @@ exact live payload shapes.
   the Vienna Card. Personal identity data (traveler name, home address,
   email, phone) is not trip content at all — it is scrubbed from card prose
   as content hygiene, not gated behind privacy.
+  REAFFIRMED 2026-07-24 (Arc F.2 session): confronted with the run-7.24.1
+  bar wording ("zero code-shape tokens in any public field"), Eli ruled the
+  Δ2 carve-out stands — activity/tour/rental booking references stay
+  public; bar item 6 means zero PROTECTED-class code tokens, and the
+  7.24.1 chain C finding was re-scored not-a-defect (docket correction).
 - Enforcement: `PARTIAL`
 - Contract: Clearly sensitive details default protected without a user Question.
   Exact lodging and private-residence addresses, access codes, private contacts,
@@ -1051,12 +1089,28 @@ exact live payload shapes.
   `tests/identity-output-gate.test.ts` and
   `tests/stay-arrival-directions.test.ts` (live shapes verbatim, proven
   both directions).
+  2026-07-24 Arc F.2 (run 7.24.1 chain D + step-0 trace): the route's
+  quality retry was the one post-sweep payload mutation point — it re-ran
+  the accessory router after the output-boundary sweep, and the assembly
+  corridor's rebuild then regenerated public outputs from those un-re-swept
+  payloads (`rebuilt_canonical_outputs_from_evidence`, the run's "repaired"
+  trigger). `reapplyCanonicalOutputInvariants` now ends by re-running
+  `scrubProtectedValuesFromPublicProse` (T1: the sweep stays the last text
+  mutation before outputs are composed, retry lane included), proven
+  end-to-end (drift → repaired → re-swept output). The note-lane access
+  vocabulary now includes access-instruction shapes ("HOW TO GET IN",
+  "use the key", key-pickup, step sequences, credential sentences) in both
+  the pre-merge 3b sweep and the merged-note composition; access material
+  routes to the same-city stay's protected accessInstructions with a
+  recorded disposition. Enforced by `tests/note-lane-protections.test.ts`
+  (live 7.24.1 shapes verbatim, both directions).
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
   `tests/assembly-ground-truth-run6.test.ts`,
   `tests/identity-output-gate.test.ts`,
-  `tests/stay-arrival-directions.test.ts`
+  `tests/stay-arrival-directions.test.ts`,
+  `tests/note-lane-protections.test.ts`
 
 ## RW-PUB-001 — Published trip versions are immutable
 
@@ -1274,11 +1328,23 @@ exact live payload shapes.
   capture-miss symptom, e.g. the literal label "Operator"). Enforced by
   `tests/arc-f-telemetry.test.ts` and the qa-bundle dismissed-question
   checks in `tests/trip-extraction-qa-bundle.test.ts`.
+  2026-07-24 Arc F.2 (step-0 trace of the 7.24.1 "repaired" trigger): the
+  quality retry (`reapplyCanonicalOutputInvariants`) was the one live
+  mutation point after the output-boundary sweep — its router changes made
+  the corridor's artifact inspection report semantic payload mismatches
+  (the three persisted initialViolations named exactly the router-walked
+  note pieces) and rebuild outputs from un-re-swept payloads. The retry
+  now re-sweeps its clone before returning, so every corridor rebuild
+  regenerates from swept payloads; `changed` stays false on an untouched
+  clone (idempotency fixture-proven). Chain D's rebuild-bypass hypothesis
+  is CORRECTED in the docket: the corridor itself never un-swept — the
+  retry lane did. Enforced by `tests/note-lane-protections.test.ts`.
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,
   `tests/trip-audit-reconciliation.test.ts`,
-  `tests/arc-f-telemetry.test.ts`
+  `tests/arc-f-telemetry.test.ts`,
+  `tests/note-lane-protections.test.ts`
 
 ## RW-OPEN-001 — Question response controls in the assembly pass
 
