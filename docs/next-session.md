@@ -6,6 +6,127 @@
 
 ## Current State
 
+### 2026-07-24 (later) — ARC F IMPLEMENTED AND REPLAY-VALIDATED: pinned 7.23.2 parse replayed offline through the new build, RUN-1 BAR PASSED ON EVERY ITEM; NEXT: push, pre-flight, RUN 1 (privacy bar)
+
+Read first: the 2026-07-24 entry below (Arc F scope, CEO decisions 1-7,
+tripwires T1-T6), docs/assembly-defect-docket-2026-07-24-run-7.23.2.md,
+AGENTS.md §Operating discipline, ledger v19 (RW-PUB-001 messaging
+amendment + Arc F evidence updates).
+
+- COMMITS (in order; each prefix suite-green + typecheck clean in a clean
+  cloud env; commit 3 = docs/policy):
+  0118b0f Arc F telemetry (chain 8) — initialViolations persisted in the
+    assembly completed event AND the audit canonicalization summary (a
+    "repaired" status finally names its trigger, must-pass item 7);
+    excludedPlanningCostLineCount serialized through the audit-snapshot
+    whitelist (item 6); dismissed questions ship full content + a
+    dismissalReason in records and the QA bundle (chain 7's baths shape
+    becomes quotable; Arc G's rebind keys off the reason, T3). Suite 62.
+  edde7cd Arc F privacy armor (chains 1-4 + 3b) — ONE identity output
+    gate at the existing sweep position (T1): identity predicates over
+    every public field of every record kind; card/note TITLE leaks
+    suppress the whole record with an auditable disposition (CEO decision
+    2 — no maker item, no scrubbed husks; Eli 2026-07-24: structural
+    transport/stay rows keep the row, lose only the value). Prose-side
+    code-shape sweep for transport/stay prose (identity-prose.ts, shared
+    with detectors; flight-code/date/clock exemptions) — protection no
+    longer capture-dependent (chain 3). Detector parity: identity P0
+    walks items+stays+transport; NEW protected_code_shape_in_public_prose
+    P0 + transport_confirmation_value_not_captured quiet advisory
+    ("Operator" capture-miss). Stay candidacy gate at
+    reconcileCanonicalStayIdentity time (T2; night evidence required;
+    person-named dateless stays = booking material; suppressed phantoms
+    still feed the deny list). Chain 3b FULL fix (Eli): the
+    arrival-directions shape routes to the leg's stay even unnamed, card
+    lane + city-note lane; incidental walk advice stays content. Costs
+    exclusion at canonical candidacy via isPlanningCostMaterial
+    (source-coverage.ts) consumed by recovery + candidacy + audit
+    tripwire (T4; ddb1699 negative controls proven held). All mechanisms
+    fixture-proven BOTH directions from live 7.23.2 bundle shapes
+    (tests/identity-output-gate, stay-arrival-directions,
+    stay-candidacy-gate, planning-cost-candidacy, arc-f-telemetry).
+    Suite 66.
+  a7796ce publish warning copy (CEO decisions 1+7, T5) —
+    assessTripPublishReadinessCopy in lib/trip-publish-policy.ts derives
+    "Ready with N privacy warnings" (N = OPEN identity-class P0s + open
+    hard warnings, from remediation outcomes; quiet warnings and
+    repaired/verified findings never count; publish never blocks); the
+    publish page renders it above the run7 audit-findings copy. Ledger
+    bumped v18→v19 (RW-PUB-001 decision date 2026-07-24 + supersession
+    note; Arc F evidence on RW-PRI-001/RW-TRV-001/RW-CLS-001/RW-OPS-001).
+    Replay harness scripts/replay-pinned-parse.mjs (offline: pins answer
+    every model call, sentinel API key dies loudly on a miss, geocode
+    lane stays off; verifies parse-key byte-identity, replays, assembles,
+    audits, prints the run-1 bar).
+- PUSH STATE at handoff: 0118b0f/edde7cd/a7796ce pushed by Eli; 78d041f
+  (harness path fix) + the final handoff/harness commit are LOCAL — Eli
+  runs the local gate (npm test + npx tsc --noEmit) and pushes before the
+  run; deploy green; FRESH TAB. npm ci was re-run on Eli's machine
+  2026-07-24 evening (node_modules had a broken typescript package).
+- REPLAY VALIDATED (2026-07-24 evening, on Eli's machine —
+  scripts/replay-pinned-parse.mjs, trip dea9d239, parseKey 790f80db):
+  62/62 pin hits, 0 misses; material reconstruction byte-identical
+  (parse-key match). RUN-1 BAR: ALL PASS on the real 7.23.2 parse —
+  run completes; 5 legs; 8 transport; 5 stays with the phantom
+  "Eli J Kamerow" piece SUPPRESSED with the booking-material disposition;
+  ZERO identity signals in any public field (email card dead); ZERO
+  code-shape tokens in protected prose (both ticket codes swept); no
+  cost-line cards; repair corridor NOT_NEEDED (live 7.23.2 said
+  "repaired" — the new assembly trips no invariant on this parse, and if
+  it had, initialViolations would now name it). Chain-8 telemetry
+  confirmed live: the dismissed baths question ships with full text +
+  dismissalReason ("subject entity no longer exists after assembly…"),
+  and transport_confirmation_value_not_captured fires as a quiet P2 (the
+  "Operator" capture-miss). Remaining diagnostics are the EXPECTED
+  content-lane P2s (day-section coverage, anchor gaps) — semantics
+  outside the privacy/stay/cost lanes unchanged, as intended. Caveat:
+  geocode lane off in replay (not pinned), so grouping parity vs live was
+  not judged — not a bar item.
+- RUN 1 (next session, privacy-class bar ONLY — approved verbatim, CEO
+  decision 6): zero identity signals + zero code-shape tokens in any
+  public field of any record kind judged against REAL payloads (fetch
+  includePrivate=1 AND diff the actual records — the qa-bundle serve-time
+  mask is the documented audit trap); stays=5 with the phantom suppressed
+  + disposition; no cost cards on any path; 5 legs / 8 transport; run
+  completes; repair trigger NAMED in the assembly completed event /
+  canonicalization summary. EXPECTED STILL BROKEN (do not burn budget):
+  all Arc G content items — Kutna Hora numeric-label gutting (chain 5),
+  fold-then-rejudge kills (chain 6, castle + both St. Stephen's), Jan-19
+  idea flood + researched-list exemption fallthrough (chain 7),
+  dismissed-question rebind (T3 — reason is now persisted), sourceText
+  injection still NO-OP, geocode budget exhaustion, Malá Strana
+  grouping. Semantics are expected UNCHANGED by Arc F outside the
+  privacy/stay/cost lanes.
+- ARC G next (order from the entry below): sourceText plumbing → fold-
+  winner deliberateMention stamp + date preservation → numeric date
+  labels are day-plan labels → researched-list exemption terminates in
+  question-or-demotion → dismissed-question rebind keyed off
+  dismissalReason (T3: note-fold subject → rebind to trip; identity/junk
+  gate subject → die silently — the reason string now distinguishes
+  these). H rides run 2.
+- OPS NOTES this session: computer-use tools dropped and reconnected
+  mid-session (bridge flaky again). Device-repo writes: tar extraction
+  over existing files FAILS on the mount (cannot unlink) — extract to a
+  scratch dir and cp -f over (O_TRUNC allowed); git leaves undeletable
+  .lock/tmp_obj files — mv *.lock to _to_delete/ BEFORE every git
+  command; _incoming*/repo-snapshot*.tgz scratch files live under
+  _to_delete/, safe for Eli to delete. Cloud repo work verified
+  per-prefix by overlaying commit file-sets on the arc-e baseline and
+  running the full suite each time.
+  REPLAY OPS (for the next replay): the cloud container CANNOT reach the
+  Supabase host (egress allowlist) — replays run on Eli's Mac via one
+  Terminal command. .env.local exists now (repo root, gitignored): URL +
+  SUPABASE_SERVICE_ROLE_KEY. Pitfalls burned tonight, all fixed in the
+  harness: macOS default shell is zsh (bash-isms like read -p fail);
+  Supabase dashboard shows the REST endpoint URL — the bare project URL
+  is required (harness now survives it being wrong loudly);
+  hasSupabaseServerConfig gates loaders on an ANON key existing (harness
+  sets a stand-in); the paid-extraction flag sits BEFORE the pin cache
+  (harness opens it with a sentinel API key so misses die unpayable);
+  Node URL.pathname percent-encodes the space in the repo path (use
+  fileURLToPath). Command: node scripts/replay-pinned-parse.mjs <tripId>
+  <parseKeyPrefix>.
+
 ### 2026-07-24 — RUN 7.23.2 AUDITED (root-cause, 8 chains), ARC F/G/H PLAN AGREED WITH ELI, CEO DECISIONS RECORDED, PRE-CODE TRIPWIRE REVIEW DONE; NEXT SESSION CODES ARC F
 
 Read first: docs/assembly-defect-docket-2026-07-24-run-7.23.2.md (8 traced

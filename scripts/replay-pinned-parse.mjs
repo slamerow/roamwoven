@@ -41,9 +41,21 @@ if (fs.existsSync(envPath)) {
   }
 }
 process.env.OPENAI_API_KEY = "replay-must-not-call-the-network";
+// The paid-extraction gate sits BEFORE the pin-cache lookup, so it must be
+// open for a replay; the sentinel API key above keeps a cache miss loud
+// and unpayable instead of a live call.
+process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = "true";
 delete process.env.GEOCODE_VERIFICATION_API_KEY;
 process.env.OPENAI_EXTRACTION_MODEL =
   process.env.OPENAI_EXTRACTION_MODEL ?? "gpt-5.4-mini";
+// hasSupabaseServerConfig() gates several loaders on an anon key being
+// PRESENT, but every actual query here goes through the patched
+// service-role client — a stand-in satisfies the truthiness gate without
+// being used for any connection.
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  process.env.SUPABASE_SERVICE_ROLE_KEY ??
+  "";
 
 // --- TS require hook (same mechanics as scripts/run-tests.mjs) -------------
 const originalResolveFilename = Module._resolveFilename;
@@ -136,6 +148,12 @@ const prepared = await materialsModule.getTripExtractionMaterialsWithSummary(
 );
 const materials = prepared.materials;
 console.log(`materials rebuilt: ${materials.length}`);
+if (materials.length === 0) {
+  console.error(
+    "REPLAY FAIL: zero materials rebuilt — uploads or extraction checkpoints are not visible (check .env.local URL/keys and that the trip id is right)."
+  );
+  process.exit(1);
+}
 
 const pinning = require2(
   path.join(rootDir, "lib/extraction/extraction-pinning.ts")
