@@ -42,6 +42,28 @@ Bar verdict: **FAIL (items 3, 4, 6).** Not shippable as run 1's exit. But see
 shapes one rule-boundary over, plus a scope gap between the approved bar's
 wording and the implemented sweep.
 
+> **CORRECTION (2026-07-24, F.2 session, Eli ruling): item 6 re-scored
+> FAIL → PASS; chain C is NOT a defect; F.2 commit C1 is dropped.**
+> This docket called the three chain-C tokens "GT-protected identifiers."
+> That mis-read the answer key: GT Δ2 amendment 1 (2026-07-17,
+> Eli-approved) explicitly removes the 🔒 markers from exactly these
+> values — "the walking tour's L272-181125-2 … the rental car reservation
+> 81486 … all lose their 🔒 markers"; activity/tour/restaurant booking
+> references (including the DREYER skip-line ticket barcode) are PUBLIC,
+> protection covers trip-sabotage surface only (stays + inter-city
+> travel). The inline 🔒 marks earlier in the GT doc predate the
+> amendment; run7's audit had already scored "reservation 81486 public
+> per CEO ruling — correct." Confronted with the conflict in the F.2
+> session, Eli reaffirmed: public. Bar item 6 therefore reads: zero
+> code-shape tokens of the PROTECTED classes (stay + inter-city travel)
+> in any public field — the Δ2 carve-out is part of the bar, and future
+> audits must apply it before scoring. An F.2 implementation of the
+> docket's chain-C fix point was built, caught by the run6 negative
+> control (`reservation number stays public`), and reverted un-committed.
+> Corrected bar verdict: **FAIL (items 3, 4)** plus the item-7 cost-TEXT
+> caveat (chain D, CEO lodging-cost decision) — all addressed by F.2
+> C2/C3/C4.
+
 ## Chain A — 9th transport row: "Train ticket", Jan 24, null→null
 
 `records.transport[8]`: type train, routeLabel "Train ticket", date
