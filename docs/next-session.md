@@ -6,6 +6,92 @@
 
 ## Current State
 
+### 2026-07-24 (evening) — RUN 7.24.1 AUDITED: BAR FAIL (9 transport / 6 stays / 3 code-shape leaks, all NEW shapes one lane over from Arc F's); ARC F.2 PLANNED AND ELI-APPROVED; F.2 BEFORE ARC G
+
+Read first: docs/assembly-defect-docket-2026-07-24-run-7.24.1.md (chains A-E),
+this entry, AGENTS.md §Operating discipline. NO code written this session —
+two audits (7.24.0 discarded, 7.24.1 real), root-cause to bundle level,
+F.2 plan approved.
+
+- RUN 7.24.0 (trip 6ad4ee72) is VOID: the create form had the ANSWER KEY PDF
+  staged ("Roamwoven answer key 1 (Czech).pdf") — 5 model calls, bar
+  unjudgeable. Eli re-ran. (e3f7e3e, the queued-file remove button, is the
+  UX fix for exactly this.) Cheap lesson: 5 calls.
+- RUN 7.24.1 (trip aa218430, "USE FOR TESTING CZECH.pdf", bundle sha256
+  a477adad…, 62 calls pinned, parseKey 1d5668af…): **BAR FAIL on items 3/4/6**
+  — 9 transport (8 correct + "Train ticket" fragment, no endpoints, ÖBB OCR
+  re-read, wrong date), 6 stays (5 correct + "Visitacity itinerary by day 3",
+  document-artifact title WITH dates so the night-evidence gate passes it,
+  minted via "note evidence routed to canonical stay" routing), 3 code-shape
+  tokens in ACTIVITY/NOTE prose (barcode 19813727, reservation 81486,
+  L272-181125-2) — the code sweep + P0 detector are scoped to transport/stay
+  prose, NARROWER THAN THE APPROVED BAR WORDING. Worst record: Rome Notes &
+  Tips publicly carries the "HOW TO GET IN … use the key" access block, raw
+  FAHRSCHEIN OCR, and a lodging-cost line. PASSED: run completes, 5 legs,
+  zero identity signals (every 7.23.2 leak shape dead on a real parse), no
+  cost CARDS (candidacy suppressions fired with the path-independent reason,
+  excludedPlanningCostLineCount=1), repair trigger NAMED — "repaired" with
+  initialViolations persisted verbatim, naming activities[79]/[80]/[81] (the
+  Notes & Tips items, payload-mismatch) — which is also the chain D lead.
+  Baths question minted-then-dismissed again with the persisted reason
+  (rebind stays Arc G/T3). 0 hard warnings; 5 P2s fired, zero gating —
+  the diagnostics lane is proven inert.
+- CEO DECISIONS (this session, Eli explicit):
+  (1) City Notes & Tips contract REAFFIRMED, framing corrected: there is NO
+      scenario in which protected/booking/receipt/access/cost material
+      belongs in Notes & Tips — notes are the RW-CLS-001 recommendation
+      taxonomy (source-authored recs, category lists, background). The
+      note-lane fix is INGESTION candidacy (recommendation-shaped segments
+      only; booking/receipt/access/cost segments route to their protected
+      owners or booking material), with the output-boundary value-scrub kept
+      only as defense-in-depth. Value-scrub (not whole-record suppression)
+      is the action for a protected value embedded in a surviving
+      description; decision-2 whole-record suppression still governs titles.
+  (2) LODGING COSTS, FINAL (stated for at least the third time — do not
+      re-ask): no lodging cost ships ANYWHERE, any path, any lane. Sole
+      exception: amount due at check-in, which lives as a PROTECTED stay
+      detail (the ddb1699 negative control), never public prose.
+  (3) NO NEW HARD WARNINGS in F.2 — Eli is explicitly wary (7.23.1 died to
+      a defensive invariant; the team has not yet proven a warning can be
+      added without gating a run). F.2 uses only candidacy dispositions and
+      P2 diagnostics. The spine-deviation signal ships as a P2, not a hard
+      warning. Publish machinery untouched.
+  (4) SEQUENCING: F.2 lands and replay-validates BEFORE any Arc G coding.
+- ARC F.2 (one coding session, ZERO live runs, every commit fixture-proven
+  both directions from the 7.24.1 bundle shapes):
+  Step 0 (read-only): trace chain D at e3f7e3e — does
+    rebuilt_canonical_outputs_from_evidence regenerate note payloads AFTER
+    the sweep position? (T1 / e0f1db42 mine class; the three violation
+    strings name the exact pieces.) Decides commit 4; also de-mines G's
+    rebind work in the same ordering territory.
+  C1: code-shape sweep + protected_code_shape_in_public_prose detector go to
+    the FULL public field walk of every record kind (same walk the identity
+    predicates got in edde7cd; existing flight-code/date/clock exemptions).
+  C2: transport candidacy floor — no departure AND no arrival location AND
+    no matching source anchor → booking-material disposition (confirmation
+    still captured + deny-listed). Negative controls: Delta 2934 (null conf,
+    real endpoints) survives; missing-arrival-time-only survives.
+  C3: stay candidacy venue-shape test — document-artifact-shaped names
+    ("itinerary", "by day N", filename shapes) fail candidacy regardless of
+    dates → booking material with disposition, deny-list feed kept (T2).
+    Same-leg full-date-overlap second stay → P2 diagnostic only.
+    Negative controls: Wombats "The Lounge", Prague Airbnb pass.
+  C4: note-lane ingestion candidacy per decision (1) + chain D fix per step
+    0 (likely: corridor re-applies the sweep to any payload it rebuilds);
+    lodging-cost text in note prose excluded per decision (2); if the
+    "HOW TO GET IN" block survives the rebuild fix, extend the 3b
+    access-shape vocabulary (this bundle's block is the fixture).
+  EXIT GATE before run 2: suite + typecheck green; replay ALL THREE pinned
+  parses (67de9b43, 790f80db, 1d5668af) → 5 legs / 8 transport / 5 stays,
+  zero identity signals, zero code-shape tokens in any public field, Rome/
+  Prague notes clean. Run 2 then tests the Arc G classifier bar with privacy
+  and spine holding (unchanged single live spend).
+- Replay corpus now three parses. Trend line for honesty: 7.23.2 measured 4
+  leak shapes on known lanes; 7.24.1 measures 0 on those lanes, 3-4 on
+  adjacent lanes. Eli's standing challenge stands: if the run AFTER the
+  full-field-walk principle lands produces another lane-over recurrence,
+  the architecture (not coverage) is the defect — re-plan on paper.
+
 ### 2026-07-24 (later) — ARC F IMPLEMENTED AND REPLAY-VALIDATED: pinned 7.23.2 parse replayed offline through the new build, RUN-1 BAR PASSED ON EVERY ITEM; NEXT: push, pre-flight, RUN 1 (privacy bar)
 
 Read first: the 2026-07-24 entry below (Arc F scope, CEO decisions 1-7,
