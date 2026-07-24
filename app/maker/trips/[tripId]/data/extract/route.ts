@@ -571,7 +571,20 @@ export async function POST(
     let retryChanged = false;
 
     if (retryAttempted) {
-      const retry = reapplyCanonicalOutputInvariants({ pieces: currentPieces });
+      // Arc F.2 C4: the retry re-sweeps whatever it mutates (T1 — the
+      // sweep is the last text mutation before outputs are composed), so
+      // the corridor's rebuild-from-pieces regenerates from RE-SWEPT
+      // payloads. sensitiveDetails ride from the assembled draft so the
+      // deny list matches cluster time.
+      const draftSensitiveDetails = (() => {
+        const record = asRecord(assembly.draft);
+        const value = record ? record.sensitiveDetails : null;
+        return Array.isArray(value) ? value : [];
+      })();
+      const retry = reapplyCanonicalOutputInvariants({
+        pieces: currentPieces,
+        sensitiveDetails: draftSensitiveDetails,
+      });
       retryChanged = retry.changed;
 
       if (retryChanged) {

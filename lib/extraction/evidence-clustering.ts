@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   isBoilerplateSourceLine,
+  isExcludedPlanningCostLine,
   isPlanningCostMaterial,
 } from "@/lib/extraction/source-coverage";
 import { injectVerbatimActivityEvidence } from "@/lib/extraction/evidence-injection";
@@ -3458,13 +3459,25 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
     if (!description || stays.length === 0) continue;
     const segments = description.split(PROSE_SEGMENT_SPLIT);
     if (segments.length === 0) continue;
+    // Arc F.2 C4 (run 7.24.1 chain D): access-instruction shapes join the
+    // note-lane sweep vocabulary — the live "HOW TO GET IN … use the key"
+    // block carried no arrival-directions cue and sailed through. An
+    // access/credential sentence is STRONG on its own (credential-class
+    // material, never incidental sightseeing advice).
+    const accessShaped = (segment: string) =>
+      STAY_ACCESS_INSTRUCTION_PATTERN.test(segment) ||
+      NOTE_ACCESS_SHAPE_PATTERN.test(segment) ||
+      CREDENTIAL_SENTENCE_PATTERN.test(segment);
     const marks = segments.map(
       (segment) =>
         ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(segment) ||
-        arrivalDirectionsCueCount(segment) >= 1
+        arrivalDirectionsCueCount(segment) >= 1 ||
+        accessShaped(segment)
     );
-    const strong = segments.map((segment) =>
-      ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(segment)
+    const strong = segments.map(
+      (segment) =>
+        ARRIVAL_DIRECTIONS_STRONG_PATTERN.test(segment) ||
+        accessShaped(segment)
     );
     // Maximal runs of marked segments; a run qualifies with a strong
     // opener or length >= 2.
@@ -5180,6 +5193,57 @@ export type CityNoteSection = (typeof CITY_NOTE_SECTIONS)[number];
 const COSTS_CONTENT_PATTERN =
   /\bbudget\b|[$€£]\s?\d[\d,.]*\s*(?:total|\/\s*day|per\s+(?:day|night|person))|\btotal\b[^.]{0,20}[$€£]\s?\d|\bcosts?\s*:/i;
 
+// Arc F.2 C4 (run 7.24.1 chain D; CEO decisions 1+2, F.2 session). The
+// run8 fix gave the RESTORE pass credential/access/OCR filters, but the
+// INITIAL section render excluded nothing except COSTS_CONTENT_PATTERN —
+// so the live Rome Notes & Tips shipped the "HOW TO GET IN … use the key"
+// apartment access block, raw ÖBB FAHRSCHEIN OCR, and a lodging-cost line
+// through the front door. Notes are the RW-CLS-001 recommendation
+// taxonomy: there is NO scenario in which booking/receipt/access/cost
+// material belongs in Notes & Tips (CEO decision 1). One segment
+// classifier now gates BOTH the initial render and the restore pass;
+// access material routes to the same-city stay's protected
+// accessInstructions, and every exclusion is recorded as a disposition
+// (RW-ING-001 — nothing is silently dropped).
+const NOTE_ACCESS_SHAPE_PATTERN =
+  /\bhow to get in\b|\buse the key\b|\bwhere to find the key\b|\bkey.?pickup\b|\bfor entering the (?:building|apartment|flat|house)\b|\bstep \d+\s*:/i;
+const NOTE_TICKET_OCR_PATTERN =
+  /\b(?:fahrschein|zugbindung|hinfahrt|r(?:ü|ue)ckfahrt|erwachsener|sparschiene|kein umtausch|keine erstattung|verkehrsmittel|steward on board)\b/i;
+// CEO decision 2 (final, stated for at least the third time): no lodging
+// cost ships anywhere public — the sole exception (amount due at
+// check-in) lives as a PROTECTED stay detail, never note prose. A
+// currency amount beside lodging vocabulary is a lodging-cost line.
+// Negative controls: HUF-only prose and priced venue/idea lines carry no
+// lodging word and stay note content.
+const NOTE_LODGING_COST_PATTERN =
+  /[$€£]\s?\d[\d,.]*[^\n]{0,60}\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|per night|a night|stay)\b|\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|stay)\b[^\n]{0,60}[$€£]\s?\d/i;
+
+type CityNoteSegmentSafety = "access" | "booking" | "content" | "cost";
+
+function classifyCityNoteSegmentSafety(segment: string): CityNoteSegmentSafety {
+  if (
+    COSTS_CONTENT_PATTERN.test(segment) ||
+    isExcludedPlanningCostLine(segment) ||
+    NOTE_LODGING_COST_PATTERN.test(segment)
+  ) {
+    return "cost";
+  }
+  if (
+    CREDENTIAL_SENTENCE_PATTERN.test(segment) ||
+    STAY_ACCESS_INSTRUCTION_PATTERN.test(segment) ||
+    NOTE_ACCESS_SHAPE_PATTERN.test(segment)
+  ) {
+    return "access";
+  }
+  if (
+    NOTE_TICKET_OCR_PATTERN.test(segment) ||
+    isBoilerplateSourceLine(segment)
+  ) {
+    return "booking";
+  }
+  return "content";
+}
+
 const SECTION_LABEL_HINTS: Array<[RegExp, CityNoteSection]> = [
   [/\b(?:eat|food|restaurants?|cafes?|bakery|bakeries|pastry|brunch|breakfast|lunch|dinner)\b/i, "Food"],
   [/\b(?:drinks?|bars?|beer|beer halls?|wine|cocktails?|nightlife|pubs?|breweries|brewery)\b/i, "Drinks & Nightlife"],
@@ -5236,6 +5300,8 @@ function classifyCityNoteSection({
 
 function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
   const sections = new Map<CityNoteSection, string[]>();
+  const excludedAccess: string[] = [];
+  const excludedBooking: string[] = [];
   const excludedCosts: string[] = [];
 
   const addEntry = (
@@ -5249,6 +5315,28 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     );
   };
 
+  // Arc F.2 C4: the SAME safety classifier the restore pass uses gates the
+  // initial render — run 7.24.1 chain D shipped access/OCR/cost material
+  // through this front door while the restore-lane filters sat idle.
+  const routeEntry = (
+    entry: string,
+    classify: () => CityNoteSection
+  ) => {
+    switch (classifyCityNoteSegmentSafety(entry)) {
+      case "cost":
+        excludedCosts.push(entry);
+        return;
+      case "access":
+        excludedAccess.push(entry);
+        return;
+      case "booking":
+        excludedBooking.push(entry);
+        return;
+      default:
+        addEntry(classify(), entry);
+    }
+  };
+
   for (const note of notes) {
     const label =
       stringValue(note.payload, "_canonicalNoteCollectionLabel") ?? null;
@@ -5258,11 +5346,7 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     if (note.payload._canonicalNoteEntry === true && title) {
       const text = sanitizeCityNoteText(title);
       if (typeof text !== "string" || !text) continue;
-      if (COSTS_CONTENT_PATTERN.test(text)) {
-        excludedCosts.push(text);
-        continue;
-      }
-      addEntry(classifyCityNoteSection({ category, label, text }), text);
+      routeEntry(text, () => classifyCityNoteSection({ category, label, text }));
       continue;
     }
 
@@ -5277,13 +5361,8 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
       .map((segment) => segment.trim())
       .filter(Boolean);
     for (const segment of segments) {
-      if (COSTS_CONTENT_PATTERN.test(segment)) {
-        excludedCosts.push(segment);
-        continue;
-      }
-      addEntry(
-        classifyCityNoteSection({ category, label, text: segment }),
-        segment
+      routeEntry(segment, () =>
+        classifyCityNoteSection({ category, label, text: segment })
       );
     }
   }
@@ -5295,7 +5374,7 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     section,
   }));
 
-  return { excludedCosts, sections: orderedSections };
+  return { excludedAccess, excludedBooking, excludedCosts, sections: orderedSections };
 }
 
 function renderCityNoteSectionEntries(entries: string[]) {
@@ -5499,7 +5578,8 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       )?.city ??
       "City";
     const insertionIndex = Math.min(...group.map((note) => pieces.indexOf(note)));
-    const { excludedCosts, sections } = cityNoteCollectionSections(group);
+    const { excludedAccess, excludedBooking, excludedCosts, sections } =
+      cityNoteCollectionSections(group);
     const target: CanonicalEvidencePiece = {
       actions: [],
       confidence: "high",
@@ -5536,6 +5616,54 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
         type: "rejected",
       });
     }
+    // Arc F.2 C4 (run 7.24.1 chain D): access/credential segments are STAY
+    // material (RW-PRI-001) — routed to the same-city stay's protected
+    // accessInstructions when a stay exists to own them, and always
+    // excluded from the public note with a recorded disposition.
+    if (excludedAccess.length > 0) {
+      const stays = pieces.filter(
+        (piece) => piece.kind === "stay" && piece.outputEligible
+      );
+      const stayPlaces = pieces.filter(
+        (piece) => piece.kind === "place" && piece.outputEligible
+      );
+      const targetCityNorm = normalizedComparable(city);
+      const cityStay =
+        stays.find(
+          (stay) =>
+            targetCityNorm &&
+            normalizedComparable(stayCity(stay, stayPlaces)) === targetCityNorm
+        ) ?? (stays.length === 1 ? stays[0] : null);
+      if (cityStay) {
+        const existing = stringValue(cityStay.payload, "accessInstructions");
+        if (!existing) {
+          cityStay.payload.accessInstructions = excludedAccess.join(" ");
+        }
+        addCanonicalAction(cityStay, {
+          absorbedTitles: [],
+          observationIds: [],
+          reason:
+            "stay access material routed from the city note to the stay's protected access instructions (RW-PRI-001 chain 3b note lane; run 7.24.1 chain D)",
+          type: "recovered",
+        });
+      }
+      addCanonicalAction(target, {
+        absorbedTitles: excludedAccess,
+        observationIds: [],
+        reason:
+          "stay access/credential material excluded from traveler notes (RW-PRI-001: access instructions are stay material, never note content; run 7.24.1 chain D)",
+        type: "rejected",
+      });
+    }
+    if (excludedBooking.length > 0) {
+      addCanonicalAction(target, {
+        absorbedTitles: excludedBooking,
+        observationIds: [],
+        reason:
+          "booking/receipt boilerplate excluded from traveler notes (RW-CLS-001: notes are the recommendation taxonomy; run 7.24.1 chain D raw ticket OCR)",
+        type: "rejected",
+      });
+    }
 
     for (const note of group) {
       mergeCanonicalPieceInto({
@@ -5554,9 +5682,11 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
     // restore it into its classified section and record the recovery.
     const renderedNow = () =>
       normalizedComparable(stringValue(target.payload, "description") ?? "");
-    const excludedNormalized = excludedCosts.map((entry) =>
-      normalizedComparable(entry)
-    );
+    const excludedNormalized = [
+      ...excludedAccess,
+      ...excludedBooking,
+      ...excludedCosts,
+    ].map((entry) => normalizedComparable(entry));
     const restored: string[] = [];
     for (const note of group) {
       const label =
@@ -5585,22 +5715,14 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
         ) {
           continue;
         }
-        if (COSTS_CONTENT_PATTERN.test(candidate)) continue;
-        // Run8 P0 (7.21.1b): the restore pass shipped the Prague lockbox
-        // code + key-pickup steps + German ticket boilerplate inside "Rome
-        // Notes & Tips". Restored content passes the SAME filters the
-        // initial render enforces: never credentials, never boilerplate,
-        // never stay-access narration, and never material whose own source
-        // city disagrees with this collection's city.
-        if (CREDENTIAL_SENTENCE_PATTERN.test(candidate)) continue;
-        if (isBoilerplateSourceLine(candidate)) continue;
-        if (
-          /\b(?:how to get in|where to find the key|key.?pickup|lock\s*box|safe box|step \d|hinfahrt|fahrschein|verkehrsmittel|zugbindung|erwachsener|steward on board)\b/i.test(
-            candidate
-          )
-        ) {
-          continue;
-        }
+        // Run8 P0 (7.21.1b) + Arc F.2 C4: restored content passes the SAME
+        // safety classifier the initial render enforces — never costs,
+        // never credentials/access narration, never booking/receipt
+        // boilerplate — plus the legacy lockbox/safe-box shapes, and never
+        // material whose own source city disagrees with this collection's
+        // city.
+        if (classifyCityNoteSegmentSafety(candidate) !== "content") continue;
+        if (/\block\s*box|\bsafe box\b|\bstep \d\b/i.test(candidate)) continue;
         const noteCity = normalizedComparable(
           stringValue(note.payload, "city") ?? ""
         );
@@ -8894,9 +9016,11 @@ function dedupeObjects(items: unknown[]) {
 
 export function reapplyCanonicalOutputInvariants({
   pieces: inputPieces,
+  sensitiveDetails = [],
   tripYear = null,
 }: {
   pieces: CanonicalEvidencePiece[];
+  sensitiveDetails?: unknown[];
   tripYear?: number | null;
 }) {
   const pieces = structuredClone(inputPieces);
@@ -8914,6 +9038,22 @@ export function reapplyCanonicalOutputInvariants({
     tripYear,
   });
   finalizeCanonicalOutputFields(pieces);
+  // Arc F.2 C4 (run 7.24.1 chains D/E, step-0 trace): this retry is the
+  // ONE post-sweep payload mutation point in the live route — the
+  // accessory router re-runs here (attaching/removing prose) AFTER
+  // scrubProtectedValuesFromPublicProse already ran at cluster time, and
+  // any change makes the assembly corridor detect a draft/pieces payload
+  // mismatch and REBUILD every public output from these payloads
+  // (`rebuilt_canonical_outputs_from_evidence` — the 7.24.1 "repaired"
+  // trigger, initialViolations naming exactly the router-touched note
+  // pieces). Re-running the sweep here restores T1's invariant — the
+  // sweep is the last text mutation before outputs are composed — for
+  // the retry lane too: the rebuild then regenerates from RE-SWEPT
+  // payloads and swept lanes can never un-sweep themselves at
+  // finalization (the e0f1db42 mine class, route level). Idempotent on
+  // an unchanged clone: `changed` stays false when the router did
+  // nothing.
+  scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails);
 
   return {
     changed: JSON.stringify(pieces) !== before,

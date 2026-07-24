@@ -87,8 +87,10 @@ const PLANNING_COST_LINE_PATTERNS = [
   // The Costs heading itself.
   /^costs?$/i,
   // Per-night cost ledger lines / section headings:
-  // "January 15th Prague - $56 (airbnb)".
-  /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–]\s*\$\d/i,
+  // "January 15th Prague - $56 (airbnb)". Run 7.24.1 chain D: the live
+  // Rome line used an EM dash ("January 24th Rome—$118") and escaped the
+  // hyphen/en-dash class — all three dashes now match.
+  /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–—]\s*\$\d/i,
   // Budget lines: "(Budget: $470)", "Budget notes: $1200 total".
   /\bbudget:?\s*\$?\d/i,
   // Ledger label lines: "Flight to Rome: $300 (in points)", "Travel: $470".
@@ -104,7 +106,7 @@ export function isPlanningCostSectionLabel(label: string | null | undefined) {
   const trimmed = label.trim();
   return (
     /^costs?$/i.test(trimmed) ||
-    /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–]\s*\$\d/i.test(
+    /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\s+[a-zà-ÿ .'-]+[-–—]\s*\$\d/i.test(
       trimmed
     )
   );
