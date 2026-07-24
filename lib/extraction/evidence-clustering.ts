@@ -2006,10 +2006,50 @@ function foldUnanchoredConfirmationTwinTransport(
   }
 }
 
-function suppressRouteLessTransportFragments(pieces: CanonicalEvidencePiece[]) {
+function suppressRouteLessTransportFragments(
+  pieces: CanonicalEvidencePiece[],
+  sourceTransportAnchors: SourceTransportAnchor[] = []
+) {
   const transportPieces = pieces.filter(
     (piece) => piece.kind === "transport" && piece.outputEligible
   );
+
+  // Transport candidacy floor (Arc F.2 C2, run 7.24.1 chain A): a row with
+  // NEITHER endpoint location AND no matching source anchor is booking
+  // material, never a traveler travel row — the 9th row ("Train ticket",
+  // Jan 24, null→null) was a second reading of the ÖBB FAHRSCHEIN OCR
+  // block whose 10:42 departure time kept it alive through the
+  // route-less-fragment pass below (a time is not a route). The two P2s
+  // that saw it live (transport_row_without_source_anchor,
+  // critical_transport_missing_soft_details) are the detection; this is
+  // their disposition. Negative controls (fixture-proven): real endpoints
+  // with a null confirmation survive (Delta 2934); a missing arrival time
+  // alone survives; an endpoint-less row whose identity matches a source
+  // anchor survives (the anchor is the endpoints' source of truth).
+  // The suppressed piece keeps its evidence and observations
+  // (RW-ING-001/RW-EVD-001), and its captured confirmation still feeds
+  // the protected-value deny list (T2's stay property, mirrored).
+  for (const piece of transportPieces) {
+    if (!piece.outputEligible) continue;
+    if (hasSpecificTransportRoute(piece.payload)) continue;
+    if (
+      routeEndpoint(piece.payload, "departure") ||
+      routeEndpoint(piece.payload, "arrival")
+    ) {
+      continue;
+    }
+    const anchored = sourceTransportAnchors.some((anchor) =>
+      sourceTransportAnchorMatchesRecord(
+        anchor,
+        transportAnchorRecordFromPayload(piece.payload)
+      )
+    );
+    if (anchored) continue;
+    suppressCanonicalPiece(
+      piece,
+      "transport candidacy floor: no departure or arrival location and no matching source anchor — booking material, not a travel row (run 7.24.1 chain A)"
+    );
+  }
 
   // Run8 (7.21.1a): the ÖBB ticket's VIA stations minted a second row with
   // the SAME provider and SAME departure/arrival times as the real segment
@@ -4300,7 +4340,13 @@ function collectProtectedValueDenyList(
       push(piece.payload.confirmation);
       push(piece.payload.confirmationLabel);
     }
-    if (piece.kind === "transport" && piece.outputEligible) {
+    // Arc F.2 C2: like stays (T2), transport pieces feed the deny list
+    // REGARDLESS of output eligibility — a fragment the candidacy floor
+    // suppressed as booking material still carries a real captured
+    // confirmation (run 7.24.1 chain A: 0648… on the "Train ticket"
+    // fragment), and that code must stay swept wherever the same source
+    // text resurfaces in public prose.
+    if (piece.kind === "transport") {
       push(piece.payload.confirmation);
       push(piece.payload.confirmationLabel);
       push(piece.payload.bookingReference);
@@ -10683,7 +10729,7 @@ export function clusterExtractedEvidence({
   mergeReclassifiedCanonicalPieces(pieces);
   attachCanonicalAccessoryDetails(pieces);
   suppressRedundantTransportParents(pieces);
-  suppressRouteLessTransportFragments(pieces);
+  suppressRouteLessTransportFragments(pieces, sourceTransportAnchors);
   foldUnanchoredConfirmationTwinTransport(pieces, sourceTransportAnchors);
   pruneNonOvernightPlaces(pieces, observations);
   routeUnbookedDayTripTransport(pieces);
