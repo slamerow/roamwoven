@@ -153,6 +153,7 @@ export type TripExtractionAuditDiagnostic = {
     | "planned_activity_buried_in_city_notes"
     | "planning_cost_line_shipped_as_card"
     | "protected_code_shape_in_public_prose"
+    | "same_leg_stay_night_overlap"
     | "transport_description_contaminated"
     | "transport_provider_field_corrupted"
     | "transport_row_without_source_anchor"

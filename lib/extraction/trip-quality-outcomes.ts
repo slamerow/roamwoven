@@ -54,6 +54,7 @@ function diagnosticClassification(
     case "planned_activity_buried_in_city_notes":
     case "planning_cost_line_shipped_as_card":
     case "protected_code_shape_in_public_prose":
+    case "same_leg_stay_night_overlap":
     case "transport_description_contaminated":
     case "transport_provider_field_corrupted":
     case "transport_times_disagree_with_source_anchor":

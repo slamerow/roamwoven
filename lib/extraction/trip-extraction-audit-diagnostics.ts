@@ -1014,6 +1014,50 @@ export function createAuditDiagnostics({
     });
   }
 
+  // Arc F.2 C3 (run 7.24.1 chain B): two public stays whose night ranges
+  // STRICTLY overlap on the same leg — the live "Visitacity itinerary by
+  // day 3" duplicated the Wombats window Jan 18-21 and no signal fired
+  // (hardWarnings 0). Per CEO decision 3 (F.2 session) this ships as a
+  // QUIET P2 diagnostic, never a hard warning: detection without gating.
+  // Back-to-back stays (checkout == next check-in) are normal lodging
+  // sequence and do not overlap strictly.
+  const activeStays = records.stays.filter((stay) => stay.status !== "ignored");
+  const overlappingStayPairs: string[] = [];
+  const overlappingStayIds = new Set<string>();
+  for (let left = 0; left < activeStays.length; left += 1) {
+    for (let right = left + 1; right < activeStays.length; right += 1) {
+      const a = activeStays[left];
+      const b = activeStays[right];
+      if ((a.legId ?? null) !== (b.legId ?? null)) continue;
+      const aIn = a.checkInDate;
+      const bIn = b.checkInDate;
+      if (!aIn || !bIn) continue;
+      const aOut = a.checkOutDate ?? aIn;
+      const bOut = b.checkOutDate ?? bIn;
+      if (aIn < bOut && bIn < aOut) {
+        overlappingStayPairs.push(
+          `${a.name} (${aIn}..${aOut}) overlaps ${b.name} (${bIn}..${bOut})`
+        );
+        overlappingStayIds.add(a.id);
+        overlappingStayIds.add(b.id);
+      }
+    }
+  }
+  if (overlappingStayPairs.length > 0) {
+    diagnostics.push({
+      canonicalPieceIds: canonicalPieceIdsForFinalRecords(
+        lineage,
+        finalRecords.filter((record) => overlappingStayIds.has(record.id))
+      ),
+      code: "same_leg_stay_night_overlap",
+      detail:
+        "Two public stay records cover the same nights on the same leg. A traveler sleeps in one place per night (RW-TRV-001): one of these rows is likely a duplicate, a document artifact, or a mis-dated fragment. Quiet advisory only (CEO decision, F.2): candidacy gates own the disposition; this diagnostic never gates a run.",
+      evidence: overlappingStayPairs.slice(0, 10),
+      severity: "p2",
+      title: "Same-leg stays with overlapping night ranges",
+    });
+  }
+
   const activeActivities = records.items.filter(
     (item) =>
       item.status !== "ignored" &&

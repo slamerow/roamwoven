@@ -4684,10 +4684,37 @@ function isPersonNameShapedStayName(value: unknown) {
   );
 }
 
+// Arc F.2 C3 (run 7.24.1 chain B): a stay whose NAME is document-artifact
+// shaped is source-document material, never lodging — REGARDLESS of night
+// evidence. The live 6th stay "Visitacity itinerary by day 3" (an
+// itinerary-app export title) carried a full Jan 18-21 range inherited
+// from the document's coverage window, so the night-evidence rule PASSED
+// it; venue names do not look like document titles. Shapes per the
+// approved F.2 plan: "itinerary", "by day N" pagination, and filename
+// extensions. Negative controls (fixture-proven): Wombats "The Lounge"
+// and the Prague Airbnb pass untouched.
+const DOCUMENT_ARTIFACT_STAY_NAME_PATTERN =
+  /\bitinerar(?:y|ies)\b|\bby day \d+\b|\.(?:pdf|docx?|xlsx?|txt|html?|md|png|jpe?g)\b/i;
+
+function isDocumentArtifactShapedStayName(value: unknown) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return Boolean(raw) && DOCUMENT_ARTIFACT_STAY_NAME_PATTERN.test(raw);
+}
+
 function applyStayCandidacyGate(pieces: CanonicalEvidencePiece[]) {
   for (const stay of pieces.filter(
     (piece) => piece.kind === "stay" && piece.outputEligible
   )) {
+    if (isDocumentArtifactShapedStayName(stay.payload.name)) {
+      // Suppressed artifacts keep feeding the protected-value deny list
+      // (T2's keep-property — collectProtectedValueDenyList reads stays
+      // regardless of outputEligible).
+      suppressCanonicalPiece(
+        stay,
+        "stay candidacy: document-artifact-shaped name (itinerary/by-day/filename shape) is source-document booking material, never a lodging record (run 7.24.1 chain B)"
+      );
+      continue;
+    }
     const nightEvidence =
       stringValue(stay.payload, "checkIn") ??
       stringValue(stay.payload, "checkOut") ??
