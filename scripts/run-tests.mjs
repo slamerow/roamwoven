@@ -1,9 +1,18 @@
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
+// fileURLToPath, not URL.pathname: on a repo path containing spaces
+// ("Claude - Roamwoven") .pathname stays percent-encoded, the tests
+// directory is never found, and the runner reported SUCCESS with zero
+// tests — a silently vacuous local gate (caught 2026-07-24 on Eli's
+// machine; same bug class as the replay harness fix in 78d041f).
+const rootDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  ".."
+);
 const originalResolveFilename = Module._resolveFilename;
 
 Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
@@ -80,8 +89,9 @@ const require = Module.createRequire(import.meta.url);
 const testFiles = listTestFiles(path.join(rootDir, "tests"));
 
 if (testFiles.length === 0) {
-  console.log("No tests found.");
-  process.exit(0);
+  // Zero tests is a broken gate, never a pass (dark-factory honesty).
+  console.error("No tests found — refusing to report success.");
+  process.exit(1);
 }
 
 for (const file of testFiles) {
