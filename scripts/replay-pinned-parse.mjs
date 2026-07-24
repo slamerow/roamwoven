@@ -20,9 +20,15 @@
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const rootDir = path.resolve(new URL("..", import.meta.url).pathname);
+// fileURLToPath, not URL.pathname: the repo lives at a path with spaces
+// ("Claude - Roamwoven") and .pathname leaves them percent-encoded.
+const rootDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  ".."
+);
 
 // --- .env.local ------------------------------------------------------------
 const envPath = path.join(rootDir, ".env.local");
