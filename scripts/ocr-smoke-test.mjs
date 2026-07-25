@@ -71,12 +71,38 @@ Module._extensions[".ts"] = function compileTypeScript(module, filename) {
   module._compile(output.outputText, filename);
 };
 
-const [fileArg, modelArg] = process.argv.slice(2);
+// usage: <file> [--model X] [--batch-pages N] [--all]
+const argv = process.argv.slice(2);
+let fileArg = null;
+let modelArg = null;
+let batchPagesArg = null;
+let ocrAllPages = false;
+for (let index = 0; index < argv.length; index += 1) {
+  const arg = argv[index];
+  if (arg === "--model") modelArg = argv[++index];
+  else if (arg === "--batch-pages") batchPagesArg = Number(argv[++index]);
+  else if (arg === "--all") ocrAllPages = true;
+  else if (!fileArg) fileArg = arg;
+  else if (!modelArg) modelArg = arg; // positional model, back-compat
+}
 if (!fileArg) {
-  console.error("usage: node scripts/ocr-smoke-test.mjs <file> [model]");
+  console.error(
+    "usage: node scripts/ocr-smoke-test.mjs <file> [--model X] " +
+      "[--batch-pages N] [--all]\n\n" +
+      "  --batch-pages N  pages per model call (production default 4, via\n" +
+      "                   OPENAI_OCR_PDF_BATCH_PAGES). Asking one call to\n" +
+      "                   transcribe several dense pages is a known cause of\n" +
+      "                   OMITTED lines, so compare N=4 against N=1.\n" +
+      "  --all            OCR every batch and report TOTAL characters, so the\n" +
+      "                   number is directly comparable to a live run's\n" +
+      "                   ocrSummary. Without it, only the FIRST batch runs.\n"
+  );
   process.exit(2);
 }
 if (modelArg) process.env.OPENAI_OCR_MODEL = modelArg;
+if (Number.isFinite(batchPagesArg) && batchPagesArg > 0) {
+  process.env.OPENAI_OCR_PDF_BATCH_PAGES = String(Math.floor(batchPagesArg));
+}
 
 const filePath = path.isAbsolute(fileArg)
   ? fileArg
@@ -112,33 +138,87 @@ console.log(
   }`
 );
 
-const base64 = fs.readFileSync(filePath).toString("base64");
-const started = process.hrtime.bigint();
-let result;
-try {
-  result = await openaiModule.createOpenAIOcrText({
-    base64,
-    filename: path.basename(filePath),
-    mimeType,
-  });
-} catch (error) {
-  console.error(`\nOCR SMOKE TEST FAILED: ${error?.message ?? error}`);
-  console.error(
-    "A model that cannot read this file type fails HERE, for a fraction of a " +
-      "cent, instead of costing a live run."
+const bytes = fs.readFileSync(filePath);
+
+// Build the same page batches production builds, so a character count here is
+// comparable to a live run's ocrSummary rather than a different measurement.
+let batches;
+if (mimeType === "application/pdf") {
+  const batchModule = require2(
+    path.join(rootDir, "lib/extraction/pdf-page-batches.ts")
   );
-  process.exit(1);
+  const batcher = await batchModule.createPdfPageBatcher(
+    new Uint8Array(bytes)
+  );
+  const pageGroups = batchModule.createPageNumberBatches({
+    batchSize: config.ocrPdfBatchPages,
+    pageCount: batcher.pageCount,
+  });
+  console.log(
+    `pages     : ${batcher.pageCount} in ${pageGroups.length} batch(es) of ` +
+      `${config.ocrPdfBatchPages} (OPENAI_OCR_PDF_BATCH_PAGES)`
+  );
+  const selected = ocrAllPages ? pageGroups : pageGroups.slice(0, 1);
+  if (!ocrAllPages && pageGroups.length > 1) {
+    console.log(
+      `mode      : FIRST BATCH ONLY (pass --all for every batch and a total ` +
+        `comparable to a live run)`
+    );
+  }
+  batches = [];
+  for (const pageNumbers of selected) {
+    const batch = await batcher.createBatch(pageNumbers);
+    batches.push({ base64: batch.base64, pageNumbers });
+  }
+} else {
+  batches = [{ base64: bytes.toString("base64"), pageNumbers: [1] }];
+}
+
+let totalChars = 0;
+let firstText = "";
+let reportedModel = null;
+const started = process.hrtime.bigint();
+for (const batch of batches) {
+  let result;
+  try {
+    result = await openaiModule.createOpenAIOcrText({
+      base64: batch.base64,
+      filename: path.basename(filePath),
+      mimeType,
+    });
+  } catch (error) {
+    console.error(
+      `\nOCR SMOKE TEST FAILED on pages ${batch.pageNumbers.join(",")}: ` +
+        `${error?.message ?? error}`
+    );
+    console.error(
+      "A model that cannot read this file type fails HERE, for a fraction of " +
+        "a cent, instead of costing a live run."
+    );
+    process.exit(1);
+  }
+  const text = result?.text ?? "";
+  totalChars += text.length;
+  if (!firstText) firstText = text;
+  reportedModel = result?.model ?? reportedModel;
+  console.log(
+    `  pages ${String(batch.pageNumbers.join(",")).padEnd(12)} -> ` +
+      `${String(text.length).padStart(6)} chars`
+  );
 }
 const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
 
-const text = result?.text ?? "";
-console.log(`\nmodel reported: ${result?.model ?? "(none)"}`);
-console.log(`pages         : ${(result?.pageNumbers ?? []).join(", ") || "(n/a)"}`);
-console.log(`characters    : ${text.length}`);
-console.log(`elapsed       : ${Math.round(elapsedMs)} ms`);
-console.log(`\n--- first 400 characters ---\n${text.slice(0, 400)}`);
+const pagesRead = batches.reduce((sum, b) => sum + b.pageNumbers.length, 0);
+console.log(`\nmodel reported : ${reportedModel ?? "(none)"}`);
+console.log(`characters     : ${totalChars}`);
+console.log(
+  `chars per page : ${pagesRead ? Math.round(totalChars / pagesRead) : 0}` +
+    `   <-- the number to COMPARE across models and batch sizes`
+);
+console.log(`elapsed        : ${Math.round(elapsedMs)} ms`);
+console.log(`\n--- first 400 characters ---\n${firstText.slice(0, 400)}`);
 
-if (text.trim().length === 0) {
+if (totalChars === 0) {
   console.error(
     "\nSMOKE TEST FAILED: zero characters extracted. This model cannot read " +
       "this file. Do NOT make it the OCR default."
@@ -146,3 +226,9 @@ if (text.trim().length === 0) {
   process.exit(1);
 }
 console.log("\nSMOKE TEST PASSED: the model returned readable text.");
+console.log(
+  "For a quality comparison, run the SAME file at --batch-pages 4 and " +
+    "--batch-pages 1 and compare 'chars per page'. Run 7.25.0 averaged ~1,640 " +
+    "chars/page at 4 pages per call (31,173 chars / 19 pages) and lost 41 of " +
+    "399 source lines."
+);
