@@ -433,6 +433,33 @@ export async function createOpenAIStructuredResponse({
     ) as OpenAIStructuredResponseResult;
   }
 
+  // A pin MISS is counted HERE, at the moment the lookup fails — not after
+  // the network call succeeds (2026-07-25).
+  //
+  // The miss counter used to increment only in the success block below, so a
+  // call that missed the pin and then THREW was never counted. In offline
+  // replay that is every miss by construction: the harness sets a sentinel
+  // OPENAI_API_KEY precisely so a miss cannot spend tokens, the call throws
+  // "Incorrect API key provided", the fail-soft handlers in the recovery lane
+  // and the resolver swallow it, and the replay reported `misses=0` and
+  // "BAR PASSED" while silently running with those stages MISSING.
+  //
+  // So `if (cache.misses > 0) fail(...)` — the single check protecting replay
+  // integrity — was structurally unreachable in exactly the situation it
+  // exists for. Observed on the 1d5668af replay: two calls died on the
+  // sentinel key (sourceRecovery and the canonical evidence resolver), the
+  // run still printed misses=0, and the bar still passed. Same defect class
+  // as the dead question gate (F.3 F3): a guard that cannot fire reads as
+  // green.
+  //
+  // Live runs are unaffected in practice — a successful call counted as a
+  // miss then and counts as a miss now — and a FAILED live call now counts
+  // too, which is the more honest number.
+  if (parseCache && callHash) {
+    parseCache.misses += 1;
+    parseCache.missedCalls.push({ hash: callHash, schemaName });
+  }
+
   const firstBody = await requestStructuredResponse({
     apiKey: config.apiKey,
     input,
@@ -485,7 +512,8 @@ export async function createOpenAIStructuredResponse({
     usage: body.usage ?? null,
   };
   if (parseCache && callHash) {
-    parseCache.misses += 1;
+    // The miss was already counted at lookup time (above); this block only
+    // RECORDS the response so a live run can persist the pin.
     const stored = structuredClone(result);
     parseCache.entries.set(callHash, stored);
     parseCache.recorded.push({ h: callHash, v: stored });

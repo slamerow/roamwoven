@@ -116,4 +116,50 @@ export default async function run() {
       process.env = savedEnv;
     }
   });
+
+  await test("pinning: a MISS that then throws is still counted (replay integrity)", async () => {
+    // The regression this guards (2026-07-25): the miss counter used to
+    // increment only AFTER a successful network call, so a call that missed
+    // the pin and then threw was never counted. In offline replay that is
+    // every miss by construction (the harness sets a sentinel API key so a
+    // miss cannot spend tokens), which made the replay harness's only
+    // integrity check — `if (cache.misses > 0) fail(...)` — unreachable in
+    // exactly the situation it exists for. A degraded replay printed
+    // "misses=0" and "BAR PASSED" while running with stages MISSING.
+    const { createOpenAIStructuredResponse } = await import("@/lib/ai/openai");
+    const savedEnv = process.env;
+    process.env = {
+      ...savedEnv,
+      OPENAI_API_KEY: "sentinel-must-not-work",
+      ROAMWOVEN_ENABLE_AI_EXTRACTION: "true",
+    };
+    try {
+      const cache = createExtractionParseCache([]);
+      await runWithExtractionParseCache(cache, async () => {
+        await assert.rejects(
+          () =>
+            createOpenAIStructuredResponse({
+              input: "unpinned input",
+              schema: { type: "object", properties: {} },
+              schemaName: "test_schema",
+              system: "system",
+            }),
+          "a sentinel key must make the call fail loudly, never silently"
+        );
+      });
+      assert.equal(
+        cache.misses,
+        1,
+        "the miss is counted at lookup time, so a throwing call still reports"
+      );
+      assert.equal(cache.hits, 0);
+      assert.deepEqual(
+        cache.missedCalls.map((call) => call.schemaName),
+        ["test_schema"],
+        "and it names the stage, so a miss is actionable"
+      );
+    } finally {
+      process.env = savedEnv;
+    }
+  });
 }

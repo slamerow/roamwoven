@@ -231,7 +231,30 @@ const result = await pinning.runWithExtractionParseCache(cache, () =>
 console.log(
   `replayed: hits=${cache.hits} misses=${cache.misses} (seeded ${cache.seededEntryCount})`
 );
-if (cache.misses > 0) fail(`${cache.misses} model calls missed the pin`);
+if (cache.hits < cache.seededEntryCount) {
+  // Unused pins are as diagnostic as missed ones: a stage that ran with a
+  // DIFFERENT input leaves its recorded twin untouched.
+  console.log(
+    `NOTE: ${cache.seededEntryCount - cache.hits} pinned call(s) went unused — ` +
+      `a stage's input diverged from the recorded run`
+  );
+}
+if (cache.misses > 0) {
+  // Name the stages, so a miss is actionable rather than a mystery. Before
+  // 2026-07-25 this could not fire at all in replay: the counter incremented
+  // only after a successful network call, and in replay every miss throws on
+  // the sentinel API key first — so a degraded replay printed misses=0 and
+  // "BAR PASSED" while running with stages missing.
+  for (const missed of cache.missedCalls ?? []) {
+    console.error(
+      `  MISSED PIN: schema=${missed.schemaName} hash=${missed.hash.slice(0, 12)}…`
+    );
+  }
+  fail(
+    `${cache.misses} model call(s) missed the pin — this replay is NOT a ` +
+      `faithful reproduction and its bar result must not be trusted`
+  );
+}
 
 // --- assemble + audit exactly as the route does ---------------------------
 const assemblyModule = require2(
