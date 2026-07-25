@@ -2,6 +2,21 @@ export function getOptionalEnv(name: string) {
   return process.env[name]?.trim() || null;
 }
 
+// Models known to read images and PDFs. The OCR lane sends `input_image` /
+// `input_file` content, so ONLY a model on this list can serve it; a text-only
+// model returns nothing usable and the source file is receipted as "not
+// included" (the 2026-07-25 incident — see getOpenAIConfig's ocrModel note).
+//
+// This list is a REMINDER, not a capability probe: the only way to truly know
+// is to send one page and look at the output, which is what
+// `scripts/ocr-smoke-test.mjs` exists for. Adding a model here without running
+// that smoke test repeats the incident.
+export const OCR_VISION_CAPABLE_MODELS = ["gpt-5.6-luna"] as const;
+
+// Text-only models that have been mistakenly used for OCR. Named explicitly so
+// the mistake is caught by a test rather than by a lost live run.
+export const OCR_TEXT_ONLY_MODELS = ["gpt-5.4-mini"] as const;
+
 export function getSupabaseConfig() {
   return {
     url: getOptionalEnv("NEXT_PUBLIC_SUPABASE_URL"),
@@ -62,30 +77,44 @@ export function getOpenAIConfig() {
     extractionAllowedTripIds: parseOptionalEnvList(
       getOptionalEnv("ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS")
     ),
-    // OCR model default. This is `gpt-5.4-mini` deliberately, and it must
-    // stay the same family as `extractionModel` above unless a migration
-    // says otherwise (AGENTS.md §Operating discipline 1: the pipeline is
-    // SHAPE-CALIBRATED to the extraction model).
+    // OCR model default. MUST be a VISION-CAPABLE model — this lane sends
+    // `input_image` / `input_file` content (lib/ai/openai.ts getOcrContent),
+    // so a text-only model returns nothing usable and the source file is
+    // receipted as "not included" (RW-ING-001 fail-soft). It is EXPECTED and
+    // CORRECT that this differs from `extractionModel` above: extraction
+    // reads text, OCR reads pixels. See OCR_VISION_CAPABLE_MODELS below.
     //
-    // History, and why this line has a test (2026-07-25): commit 1d862ec
-    // (2026-07-10) changed this default from "gpt-5.4-mini" to
-    // "gpt-5.6-luna", and `git log --all -S'gpt-5.6-luna'` shows it was
-    // NEVER reverted. Run 7.25.0's telemetry then read exactly as that
-    // asymmetry predicts — all 5 OCR batches / 19 pages / 31,173 chars on
-    // gpt-5.6-luna while extraction and sourceRecovery ran gpt-5.4-mini,
-    // because extractionModel defaulted to mini and ocrModel defaulted to
-    // luna. Eli's verdict on luna was that it "really sucked" and the
-    // decision was to roll back; the run's output corroborates it (41 of
-    // 399 uncovered lines, four missing ground-truth stops, and "Josefov"
-    // misread as "Joselov", which the run then raised a spelling question
-    // about). That rollback existed only as a hosted env var, if at all —
-    // so DELETING the env var, the most natural way to undo a model
-    // change, silently restored luna. A code default is the durable place
-    // for an approved rollback; the env var stays available for a
-    // deliberate, telemetry-verified experiment.
+    // INCIDENT, 2026-07-25 — one live run lost, recorded so it is not
+    // repeated. This default was changed to "gpt-5.4-mini" on the reasoning
+    // that commit 1d862ec (2026-07-10) had swapped it mini -> luna and
+    // `git log --all -S'gpt-5.6-luna'` proved it was never reverted, so the
+    // luna value looked like an unreverted accident blocking an approved
+    // rollback. The git facts were right; the INTERPRETATION was backwards.
+    // 1d862ec is the commit that BUILT real image/PDF OCR — it created
+    // ocr-batches.ts, pdf-page-batches.ts, openai-ocr.test.ts and added 439
+    // lines to ocr-processor.ts — and it set luna because luna is the model
+    // that can read a document. The earlier "gpt-5.4-mini" value was a
+    // placeholder from 639247e (2026-06-19), three weeks before OCR sent an
+    // image to anything. Consequence of the swap: OCR extracted NOTHING,
+    // "USE FOR TESTING CZECH.pdf" was receipted as not included, only the
+    // pdf.js text layer reached the parser, and the run produced 6 transport
+    // / 4 activities instead of 8 / ~40.
+    //
+    // Two lessons, both already written in AGENTS.md and both skipped:
+    //  1. A model change is a MIGRATION and requires a single-chunk SHAPE
+    //     smoke test of the new model BEFORE the live run (discipline 1c).
+    //     `scripts/ocr-smoke-test.mjs` now makes that cheap — run it.
+    //  2. A git diff shows WHAT changed, never WHY. Read the commit the
+    //     change belongs to before calling an old value a mistake.
+    //
+    // Still open and NOT addressed by this line: luna's OCR quality is poor
+    // (run 7.25.0: 41 of 399 uncovered lines, four missing ground-truth
+    // stops, "Josefov" misread as "Joselov"). The fix for that is a BETTER
+    // VISION model, never a text model — and it goes through the smoke test
+    // first.
     ocrModel:
       getOptionalEnv("OPENAI_OCR_MODEL") ??
-      "gpt-5.4-mini",
+      "gpt-5.6-luna",
     ocrMaxFilesPerRun: getOptionalPositiveInteger(
       "OPENAI_OCR_MAX_FILES_PER_RUN",
       20
