@@ -43,6 +43,49 @@ const TRAILING_PHONE_PATTERN = /(?:\+?\d[\d\s().-]{8,}\d)\s*$/;
 
 const EMAIL_PATTERN = /\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/i;
 
+// A digit run that is a DATE, not a phone number. The unlabelled phone
+// shapes above are positional (a long digit run with separators), and an ISO
+// or dotted date matches them: "2038-04-05" is a digit, eight [\d.-] chars,
+// and a digit at the end of a segment, so TRAILING_PHONE_PATTERN reads
+// "January 12-25 2019" and "2038-04-02 to 2038-04-05" as private contacts.
+//
+// Found in Arc F.3 when the shared predicate was first applied to the review
+// surface: the Paris stay question's evidence IS a date range, so the whole
+// segment was dropped as an identity leak
+// (tests/canonical-factory-boundary.test.ts "an overnight destination
+// without lodging remains a leg and asks once"). The same false positive was
+// live in the CARD lane, where it silently deleted any description sentence
+// ending in a date, and in the audit's identity_value_in_public_prose P0,
+// where it could raise a privacy finding on an itinerary date (a
+// report-correct-output-as-defect violation of RW-AUD-001).
+//
+// The exemption is narrow by construction: it is applied ONLY to the two
+// unlabelled positional shapes, never to an email, a role-labelled name, a
+// postal address, an explicitly labelled phone, or an international
+// +-prefixed number — so no real contact shape is narrowed. The
+// code-token side of this module already carries the equivalent exemptions
+// (isExemptCodeToken).
+const DATE_LIKE_RUN_PATTERNS = [
+  /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/, // 2038-04-05
+  /^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}$/, // 05.04.2038
+  /^\d{1,2}\s*[-–]\s*\d{1,2}[,.]?\s*\d{4}$/, // 12-25, 2019
+  /^\d{4}\s*[-–]\s*\d{4}$/, // 2019 - 2020
+];
+
+function isDateLikeDigitRun(candidate: string) {
+  const trimmed = candidate.trim().replace(/[.,;:]$/, "");
+  return DATE_LIKE_RUN_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+// Matches only when the positional shape finds a run that is NOT a date.
+function hasUnlabelledPhoneRun(segment: string) {
+  for (const pattern of [US_PHONE_PATTERN, TRAILING_PHONE_PATTERN]) {
+    const match = pattern.exec(segment);
+    if (match && !isDateLikeDigitRun(match[0])) return true;
+  }
+  return false;
+}
+
 export type IdentityProseSignal =
   | "email"
   | "phone"
@@ -62,8 +105,7 @@ export function findIdentityProseSignal(
   if (
     LABELLED_PHONE_PATTERN.test(segment) ||
     INTERNATIONAL_PHONE_PATTERN.test(segment) ||
-    US_PHONE_PATTERN.test(segment) ||
-    TRAILING_PHONE_PATTERN.test(segment)
+    hasUnlabelledPhoneRun(segment)
   ) {
     return "phone";
   }
@@ -95,6 +137,27 @@ export function findIdentityProseSignals(prose: string): IdentityProseSignal[] {
     }
   }
   return signals;
+}
+
+// Removes every prose segment that carries an identity value, keeping the
+// rest. This is the ACTION that pairs with the predicates above: identity is
+// not trip content, so the sentence carrying it goes rather than being
+// partially masked.
+//
+// Promoted here in Arc F.3 from a local closure in evidence-clustering's
+// output-boundary sweep (`dropIdentitySegments`, three call sites) so the
+// card lane and the review surface run ONE implementation. The closure split
+// on a private `PROSE_SEGMENT_SPLIT` constant that was byte-identical to
+// IDENTITY_PROSE_SEGMENT_SPLIT — a fifth duplicate of the same regex — so
+// this is behavior-preserving for the card lane.
+export function dropIdentityProseSegments(prose: string): string {
+  if (!prose) return prose;
+  return prose
+    .split(IDENTITY_PROSE_SEGMENT_SPLIT)
+    .filter((segment) => !segmentCarriesIdentityValues(segment.trim()))
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 // ---------------------------------------------------------------------------

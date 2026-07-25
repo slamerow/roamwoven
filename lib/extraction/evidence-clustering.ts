@@ -35,10 +35,12 @@ import {
   type MergeWinnerCard,
 } from "@/lib/extraction/entity-winner";
 import {
+  dropIdentityProseSegments,
   findIdentityProseSignal,
   scrubProtectedCodeShapedTokens,
   segmentCarriesIdentityValues,
 } from "@/lib/extraction/identity-prose";
+import { applyReviewIdentityGate } from "@/lib/extraction/review-identity-gate";
 import {
   classifyIdeaListSections,
   classifyOwnTextEvidence,
@@ -4457,13 +4459,11 @@ function scrubProtectedValuesFromPublicProse(
   const staysExist = pieces.some(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
-  const dropIdentitySegments = (value: string) =>
-    value
-      .split(PROSE_SEGMENT_SPLIT)
-      .filter((segment) => !segmentCarriesIdentityValues(segment.trim()))
-      .join(" ")
-      .replace(/\s{2,}/g, " ")
-      .trim();
+  // Arc F.3: this was a local closure over a private duplicate of the
+  // segment-split regex; it now calls the shared implementation in
+  // identity-prose.ts (same split, same filter, same join) so the card lane
+  // and the review surface cannot drift apart.
+  const dropIdentitySegments = dropIdentityProseSegments;
   for (const piece of pieces) {
     if (!piece.outputEligible) continue;
     // Run 7.23.0r: transport piece DESCRIPTIONS also carry ticket-page
@@ -10474,13 +10474,64 @@ export function canonicalizeCanonicalReviewDetails(
       unresolvedRelated && (disposition !== "call" || sourceUpdateCall);
     const deadTarget = unresolvedSubject && disposition !== "call";
 
+    // Arc F.3 (run 7.25.0 chain C): the review-surface identity gate. It runs
+    // HERE, inside subject resolution, for three reasons:
+    //  - this function is the boundary EVERY build and every rebuild passes
+    //    through (the Arc E dead-target rule lives here for the same reason),
+    //    so the gate cannot be bypassed by the retry/rebuild lane;
+    //  - it runs AFTER `pieceForMissingDetail` above, so scrubbing
+    //    `relatedTitle` can never disturb subject binding;
+    //  - it is deliberately NOT added to `gateOffContractQuestions` (:1746),
+    //    whose filter reads a field this function assigns one line later —
+    //    that gate is dead for parser-minted details and F.3 only makes the
+    //    gap honest in tests rather than rewiring it (an Arc G change).
+    // Dismissal is in place: the record and its reason stay auditable and the
+    // projection still emits a matching review record, so the compile
+    // invariant at draft-to-structured-trip.ts:846 holds. Nothing here can
+    // fail a run (Eli's standing do-not-block directive).
+    // The legacy evidence scrub runs FIRST and keeps its behavior: it turns
+    // an email or a long digit run into an informative
+    // "[private contact removed]" marker. The shared identity pass then runs
+    // over what remains, so this change is strictly ADDITIVE — it catches the
+    // shapes the private copy misses (the colon-less "Customer Eli kamerow"
+    // block that identity-prose.ts documents as the 7.18.3 leak, and postal
+    // home addresses) without deleting sentences the marker already made safe.
+    const markerScrubbedEvidence = scrubReviewEvidence(detail.evidence);
+    const identityGate = applyReviewIdentityGate({
+      evidence:
+        typeof markerScrubbedEvidence === "string" ? markerScrubbedEvidence : null,
+      guessedValue: stringValue(detail, "guessedValue"),
+      prompt: stringValue(detail, "prompt"),
+      reason: stringValue(detail, "reason"),
+      relatedTitle: stringValue(detail, "relatedTitle"),
+      targetField: stringValue(detail, "targetField"),
+    });
+    // Only a QUESTION is dismissed for soliciting identity data. A Call is a
+    // statement, not an ask (RW-REV-001), so it keeps its disposition and
+    // only loses the identity value from its wording.
+    const identityDismissed =
+      !deadTarget &&
+      disposition === "question" &&
+      identityGate.dismissalReason !== null;
+
     return {
       ...detail,
-      _canonicalReviewDisposition: deadTarget ? "dismissed" : disposition,
+      ...identityGate.scrubbed,
+      _canonicalReviewDisposition:
+        deadTarget || identityDismissed ? "dismissed" : disposition,
       ...(deadTarget
         ? {
             _canonicalQuestionGate:
               "subject entity no longer exists after assembly; a review item cannot outlive its subject",
+          }
+        : identityDismissed
+        ? { _canonicalQuestionGate: identityGate.dismissalReason }
+        : {}),
+      ...(identityGate.removedSignals.length > 0
+        ? {
+            // Signal SHAPES only, never values — safe in redacted QA bundles
+            // (RW-AUD-001 posture, matching the card-lane suppression reason).
+            _canonicalReviewIdentitySignals: identityGate.removedSignals,
           }
         : {}),
       ...(unresolvedSubject
@@ -10490,7 +10541,10 @@ export function canonicalizeCanonicalReviewDetails(
             _canonicalDeadSubjectId: relatedId,
           }
         : {}),
-      evidence: scrubReviewEvidence(detail.evidence),
+      evidence:
+        identityGate.scrubbed.evidence !== undefined
+          ? identityGate.scrubbed.evidence
+          : markerScrubbedEvidence,
       relatedCanonicalPieceId: unresolvedSubject ? null : relatedId,
       subjectType: unresolvedSubject
         ? "trip"

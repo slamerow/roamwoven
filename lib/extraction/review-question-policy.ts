@@ -12,6 +12,7 @@ import {
   getString,
 } from "@/lib/extraction/draft-value";
 import { getCanonicalReviewId } from "@/lib/extraction/canonical-identity";
+import { applyReviewIdentityGate } from "@/lib/extraction/review-identity-gate";
 
 function getConfidence(value: string | null): TripSourceConfidence {
   return value === "low" || value === "high" ? value : "medium";
@@ -133,6 +134,37 @@ export function createReviewQuestions({
           ? "date"
           : coercedAnswerType;
 
+      // Arc F.3 (run 7.25.0 chain C): the review-surface identity gate runs
+      // again HERE, at the last boundary before the maker sees the question.
+      // The draft boundary (`canonicalizeCanonicalReviewDetails`) is the
+      // primary gate; this is the same shared predicate set applied as
+      // defense-in-depth, so a draft persisted by an older build — or any
+      // path that reaches projection without re-canonicalizing — still cannot
+      // ship an identity ask or an identity value in question prose.
+      //
+      // It DISMISSES, never drops: `validateStructuredTripRecords` requires a
+      // projected record for every draft missingDetail
+      // (draft-to-structured-trip.ts:846-851), so filtering here would fail a
+      // compile invariant and could kill a usable run. Both boundaries run
+      // the same pure function, so they agree by construction and no
+      // draft/projection disposition disagreement can arise.
+      const identityGate = applyReviewIdentityGate({
+        evidence: getString(detail, "evidence"),
+        guessedValue: getString(detail, "guessedValue"),
+        prompt: getString(detail, "prompt"),
+        reason: getString(detail, "reason"),
+        targetField: targetFieldValue,
+      });
+      const identityDismissed =
+        disposition === "question" && identityGate.dismissalReason !== null;
+      const gatedDisposition = identityDismissed ? "dismissed" : disposition;
+      const gatedText = <K extends "evidence" | "guessedValue" | "prompt" | "reason">(
+        field: K
+      ) =>
+        identityGate.scrubbed[field] !== undefined
+          ? identityGate.scrubbed[field] ?? null
+          : getString(detail, field);
+
       const memberSnapshots = getArray(detail, "_canonicalMemberSnapshots")
         .flatMap((snapshot) => {
           const record =
@@ -164,23 +196,24 @@ export function createReviewQuestions({
         // the draft detail. The reason now rides the record so audits can
         // QUOTE the dismissal and Arc G's rebind (T3) can key off it.
         dismissalReason:
-          disposition === "dismissed"
-            ? getString(detail, "_canonicalQuestionGate") ??
+          gatedDisposition === "dismissed"
+            ? (identityDismissed ? identityGate.dismissalReason : null) ??
+              getString(detail, "_canonicalQuestionGate") ??
               "dismissed during canonical assembly"
             : null,
-        evidence: getString(detail, "evidence"),
-        guessedValue: getString(detail, "guessedValue"),
+        evidence: gatedText("evidence"),
+        guessedValue: gatedText("guessedValue"),
         id: `${tripId}-${canonicalReviewId}`,
-        prompt: getString(detail, "prompt") ?? "Confirm a missing detail",
+        prompt: gatedText("prompt") ?? "Confirm a missing detail",
         reason:
-          getString(detail, "reason") ??
+          gatedText("reason") ??
           "This source-backed detail materially affects the traveler app.",
         resolvedAt: null,
         sourceConfidence: getConfidence(getString(detail, "confidence")),
         status:
-          disposition === "call"
+          gatedDisposition === "call"
             ? "noted"
-            : disposition === "dismissed"
+            : gatedDisposition === "dismissed"
               ? "dismissed"
               : "open",
         subjectCanonicalId:
