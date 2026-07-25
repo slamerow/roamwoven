@@ -8,6 +8,25 @@
 
 ### 2026-07-25 (OCR incident + verification session, cloud) — **NO CODE CHANGES. The OCR break was already reverted before this session began; the remaining work was proving it and DEMOLISHING FIVE WRONG PREMISES sitting in these docs.** One live run spent: the Arc F.3 live validation (re-purposed from the impossible "mini baseline" — see below). NEXT: audit that run.
 
+**HOW TO READ THIS ENTRY — it is a correction record, NOT a verdict on the
+run it precedes.** Written the same day by the session that verified the
+config, so treat it accordingly:
+  - **Score the run on its own telemetry FIRST, before reading further.** This
+    entry corrects OLD claims; it has no standing over NEW evidence. If the
+    run's own numbers contradict anything below, THE RUN WINS and the
+    contradiction is the finding.
+  - Items marked VERIFIED were checked in source, in the Vercel console, or by
+    direct measurement, and the check is named so you can repeat it. Items
+    marked HYPOTHESIS are inference and are flagged as such — do not promote
+    one to a fact by citing this entry.
+  - Nothing here is closed to re-examination. The retired premises are retired
+    because they are FACTUALLY wrong (a text-only model cannot read an image),
+    not because the topics are settled. OCR quality in particular remains OPEN.
+  - The author's bias runs toward "the alarms were measurement artifacts,"
+    because on this day four of them were. That is a real risk to your
+    independence: a genuine OCR defect in THIS run would look, at first
+    glance, like the artifacts described below. Weigh accordingly.
+
 **READ THIS BEFORE ANY OTHER ENTRY. Five claims in these docs are WRONG and
 acting on any of them costs a run. Today's incident was caused by exactly
 that: a session read a stale premise, reasoned impeccably from it, and
@@ -63,9 +82,16 @@ variable:
   - 19 batches x 1 page -> 18,252 chars, 961 chars/page
 A 4x change in pages-per-call moved yield **1.5%** — below the 2.6%
 run-to-run nondeterminism measured on the same pages minutes apart (3,563 vs
-3,656 chars, with visibly different field labels). **Batch size does not
-cause omission on this document. Do not re-open this; do not change
-`OPENAI_OCR_PDF_BATCH_PAGES`.** Recorded as a PROVEN NEGATIVE.
+3,656 chars, with visibly different field labels).
+**SCOPE OF THIS RESULT, stated precisely so it is not over-read:** batch size
+does not measurably affect OCR YIELD *for this document, this model, on this
+date*. It is one file and one model, not a general law, and yield in
+characters is not the same thing as FIDELITY — it cannot rule out that
+batching affects WHICH lines are dropped rather than how many characters come
+back. It is strong enough that changing `OPENAI_OCR_PDF_BATCH_PAGES` should
+not be anyone's first move, and NOT strong enough to stop you looking if this
+run's telemetry points at batching directly. Re-open it on evidence; do not
+re-open it on a hunch.
 
 **RETIRED PREMISE 5 — "~1,640 chars/page (31,173 / 19)" as a smoke-test
 target.** `scripts/ocr-smoke-test.mjs` prints this baseline in its closing
@@ -87,12 +113,20 @@ run's ocrSummary". BOTH ARE WRONG, for two independent reasons:
       bundle and check WHICH FIELD the 31,173 was summed from. If it is a
       combined material total, there was never a shortfall and this closes.
 
-**THE PATTERN BEHIND ALL OF THESE, worth naming because it is the actual
-systemic defect:** every one is *two numbers measured differently, compared
-as if they were not*. Four separate alarms today all pointed at "the OCR is
-degraded" and not one was evidence of it. The same root cause produced the
-model swap that cost a run. Before citing any telemetry number against a
-baseline, verify BOTH were measured the same way.
+**THE PATTERN BEHIND ALL OF THESE:** every one is *two numbers measured
+differently, compared as if they were not*. The same root cause produced the
+model swap that cost a run. **The operational rule is narrow: before citing
+any telemetry number against a baseline, verify BOTH were measured the same
+way — then act on what you find.**
+**THE RULE IS NOT "OCR ALARMS ARE PROBABLY ARTIFACTS."** On this date four
+happened to be, but that is a fact about four specific comparisons, not a
+prior about OCR. Reading it as a prior would be the same mistake in the
+opposite direction — dismissing a real signal because a superficially similar
+one was spurious — and it is exactly how a session talks itself out of
+checking. luna's transcription quality is a REAL and OPEN defect ("Josefov"
+-> "Joselov" is a character-level misread no measurement artifact explains).
+If this run shows OCR loss, the correct response is to investigate it, and to
+record that this entry's framing was a headwind.
 
 **THE OPENAI OUTAGE (2026-07-25, ~09:00-11:00 UTC) — explains every 500/503
 in today's logs; NOT a code defect.** `scripts/ocr-triage.mjs` (NEW, written
