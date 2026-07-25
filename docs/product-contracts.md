@@ -1,14 +1,23 @@
 # Roamwoven Product Contracts
 
-Ledger version: 20
+Ledger version: 21
 
-Ledger date: 2026-07-24 (Arc F: run-7.23.2 privacy armor — one identity
-output gate over every public field of every record kind with suppress-or-
-scrub semantics; prose-side protected-code sweep independent of capture;
-stay candidacy gate (night evidence); shared Costs predicate at canonical
-candidacy; arrival-directions routed to stays; chain-8 telemetry closed;
-publish readiness copy becomes warning-state on open identity P0s / hard
-warnings — RW-PUB-001 messaging amendment, CEO decisions 1 and 7)
+Ledger date: 2026-07-25 (Arc F.3 — privacy only, zero live runs: the identity
+gate reaches the QUESTION surface, so identity data is scrubbed from review
+prose and is never asked as a question; publish readiness copy words privacy
+findings and structural findings separately; the Delta-3 travel-card
+amendment, the travel-card display rule and the do-not-block standing
+directive are recorded; the question gate's dead wiring becomes an explicit
+`KNOWN_GAP` covered on the production shape instead of seeded-fixture green;
+four positional privacy-predicate false positives fixed)
+
+Prior: ledger version 20 (2026-07-24) — Arc F: run-7.23.2 privacy armor —
+one identity output gate over every public field of every record kind with
+suppress-or-scrub semantics; prose-side protected-code sweep independent of
+capture; stay candidacy gate (night evidence); shared Costs predicate at
+canonical candidacy; arrival-directions routed to stays; chain-8 telemetry
+closed; publish readiness copy becomes warning-state on open identity P0s /
+hard warnings — RW-PUB-001 messaging amendment, CEO decisions 1 and 7.
 
 Approval state: Approved and implementation-tracked
 
@@ -940,6 +949,18 @@ exact live payload shapes.
   question #3); stays never get item date questions; undated activities
   resolve their day from source structure before any leg-guess date
   question is allowed (see RW-EVD-001).
+
+  2026-07-25 addition (Eli, Arc F.3) — the material-decision test restated,
+  plus one absolute. Verbatim: "questions should be asked if there is
+  something material that would impact the shape of a day (or the trip).
+  asking the maker's name is never useful and should never be a question."
+  Personal identity data — a name, email, phone, home address, a
+  reserved-by / booked-by field, or any equivalent — is NEVER a Question, on
+  any lane, at any confidence. It is scrubbed from output (RW-PRI-001) and it
+  is not solicited: the pipeline may not ask the maker to re-supply the exact
+  data it removes. A question that solicits identity data is dismissed in
+  place with an auditable reason; a question that is otherwise material keeps
+  its ask and loses only the personal detail from its wording.
 - Enforcement: `PARTIAL`
 - Contract: Every emitted Question declares one canonical subject, one target
   field or explicit atomic mutation, source-backed answer options, and an
@@ -1005,8 +1026,39 @@ exact live payload shapes.
   run. Remaining gaps are true multi-select mutation, direct-edit co-resolution,
   affected-card highlighting, Change/Undo, and immutable answer history. Saved
   decisions still preserve only the current value.
+  2026-07-25 Arc F.3 F1 — the identity absolute above is `ENFORCED` at two
+  boundaries by `lib/extraction/review-identity-gate.ts`; see RW-PRI-001 for
+  the mechanism and `tests/review-identity-gate.test.ts` for coverage.
+  2026-07-25 Arc F.3 F3 — `gateOffContractQuestions` IS A `KNOWN_GAP`.
+  Verified in source: the gate (`evidence-clustering.ts:1746`) filters to
+  records whose `_canonicalReviewDisposition === "question"` (`:1750-1755`),
+  but that field is first assigned inside
+  `canonicalizeCanonicalReviewDetails` (`:10420-10433`), called at `:11043` —
+  ONE LINE AFTER the gate at `:11042`. Parser `missingDetails` carry no
+  disposition (the parser schema is `additionalProperties:false` and declares
+  no such property), so the filter yields an empty list and NONE of the
+  gate's seven rules run in production. It was green only because
+  `tests/assembly-ground-truth-run7.test.ts:729+` hand-seeds the field onto a
+  shape production cannot emit — an idealized fixture describing a live
+  contract as enforced, which AGENTS.md §Coverage honesty forbids. That
+  fixture now carries an in-line note saying so and may not be cited as live
+  coverage for the gate. The docket's framing is CORRECTED by the trace: the
+  settled-date family IS handled in production, by the Phase-2 reconciliation
+  gate rather than the question gate, but through a DIFFERENT terminal state
+  — the seeded path retains a `dismissed` record with a quotable reason while
+  the production path filters the detail out of the draft entirely, leaving
+  no record and nothing for an audit to quote. Arc G must converge these on
+  the retained-and-reasoned terminal state (RW-OPS-001: every path terminates
+  in a named outcome), not merely rewire the filter; rewiring alone is a
+  behavior change that would start dismissing real questions and was
+  deliberately excluded from F.3. Pinned by
+  `tests/question-gate-production-shape.test.ts`, which asserts current
+  production truth so the suite stays green AND honest, and fails loudly when
+  the wiring is fixed.
 - Tests: `tests/generated-trip-model.test.ts`,
-  `tests/published-snapshots.test.ts`, `tests/structured-trip-snapshot.test.ts`
+  `tests/published-snapshots.test.ts`, `tests/structured-trip-snapshot.test.ts`,
+  `tests/review-identity-gate.test.ts`,
+  `tests/question-gate-production-shape.test.ts`
 
 ## RW-PRI-001 — Privacy defaults are automatic and final-projection safe
 
@@ -1027,6 +1079,42 @@ exact live payload shapes.
   Δ2 carve-out stands — activity/tour/rental booking references stay
   public; bar item 6 means zero PROTECTED-class code tokens, and the
   7.24.1 chain C finding was re-scored not-a-defect (docket correction).
+
+  Δ3 AMENDMENT (Eli, 2026-07-24, run-7.25.0 audit; verbatim: "it's fine if
+  they see seats too. we just need to hide confirmation codes so a bad
+  actor can't get the info and cancel a transit"): on travel cards,
+  protection covers CONFIRMATION / BOOKING / TICKET CODES ONLY. Seat
+  number, seat class, route and times are PUBLIC. This is Δ2's
+  sabotage-surface principle applied consistently — a seat number cannot
+  cancel a transit. Consequences recorded with the decision: run-7.25.0 bar
+  item 6 was re-scored FAIL → PASS on it, the planned F.3 seat fix was
+  DROPPED, and future audits must apply Δ3 BEFORE scoring item 6.
+
+  TRAVEL-CARD DISPLAY RULE (Eli, 2026-07-24, approved with Δ3): a travel
+  card shows title + route + times publicly; its protected details (the
+  codes) sit behind ONE password entry. The traveler-side screen that
+  enforces this is NOT BUILT — `lib/traveler-view-model.ts` is the demo
+  seed builder (it imports asia-trip-seed.json with transport hard-coded to
+  `[]`), and no generated-trip transport → traveler rendering path exists
+  yet. Recorded as a build item, not as enforced behavior.
+
+  DO-NOT-BLOCK STANDING DIRECTIVE (Eli, 2026-07-24, binding on every
+  session; verbatim: "we are close, so as you work on privacy and stuff in
+  99% of times we should not block the run (unless there is corrupted
+  source data)"): every privacy mechanism terminates in suppression or
+  scrub plus an auditable disposition. No new throws, no quarantines, no
+  hard warnings, and no invariants that can fail a run. Corrupted source
+  data is the ONLY exception. (Run 7.23.1 died to a defensive invariant;
+  this directive is that lesson made standing. It is the privacy-lane
+  specialisation of RW-QA-001's fail-soft posture and RW-OPS-001's
+  dark-factory clause.)
+
+  Δ3 SCOPE NOTE, question surface (Eli, 2026-07-25): personal identity data
+  is not merely scrubbed from output — it is never SOLICITED. Verbatim:
+  "that should absolutely be scrubbed, and should never be asked as a
+  question. questions should be asked if there is something material that
+  would impact the shape of a day (or the trip). asking the maker's name is
+  never useful and should never be a question." See RW-QUE-001.
 - Enforcement: `PARTIAL`
 - Contract: Clearly sensitive details default protected without a user Question.
   Exact lodging and private-residence addresses, access codes, private contacts,
@@ -1104,28 +1192,104 @@ exact live payload shapes.
   routes to the same-city stay's protected accessInstructions with a
   recorded disposition. Enforced by `tests/note-lane-protections.test.ts`
   (live 7.24.1 shapes verbatim, both directions).
+  2026-07-25 Arc F.3 (run 7.25.0 chain C — the QUESTION surface had no
+  privacy contract at all): the identity gate now covers the review surface
+  as well as records. `lib/extraction/review-identity-gate.ts` is one pure
+  idempotent predicate set consumed at TWO boundaries — the draft boundary
+  (`canonicalizeCanonicalReviewDetails`, which every build and every
+  rebuild passes through) and the projection boundary
+  (`createReviewQuestions`, the last stop before the maker). A question
+  whose `targetField` solicits identity data, whose prose asks for it, or
+  whose prompt is nothing but an identity value is DISMISSED IN PLACE with
+  an auditable reason naming the signal SHAPE, never the value; a still
+  material question keeps its ask and loses only the personal detail from
+  its wording; a Call is never dismissed (RW-REV-001 — a statement is not
+  an ask). Dismissal is never a filter: `validateStructuredTripRecords`
+  requires one projected review record per draft `missingDetail`
+  (`draft-to-structured-trip.ts:846-851`), so dropping one would fail a
+  compile invariant — the do-not-block directive in mechanical form. The
+  review path's un-migrated private copy (`scrubReviewEvidence`, which
+  required "Customer:" WITH a colon — the exact 7.18.3 leak
+  `identity-prose.ts` documents in its own header) is now layered UNDER the
+  shared predicates, so the change is strictly additive.
+  `dropIdentitySegments` was promoted out of the output sweep into
+  `identity-prose.ts` (a local closure over a fifth byte-identical copy of
+  the segment-split regex). FOUR positional false positives in the shared
+  predicates were found by applying them to a new lane, each fixed and
+  proven both directions: a DATE RANGE read as a phone number
+  (`TRAILING_PHONE_PATTERN` on "2038-04-02 to 2038-04-05" — live in the
+  CARD lane, where it silently deleted any description sentence ending in a
+  date, and capable of raising a false identity P0 on an itinerary date, an
+  RW-AUD-001 report-correct-output-as-defect violation); a ROLE WORD
+  followed by an itinerary noun read as a person ("Passenger Terminal 3",
+  "Driver Instructions", "Customer Service desk" — and because a
+  title-borne identity signal suppresses the WHOLE card, this DELETED
+  legitimate cards rather than cleaning them); and a DATE FOLLOWED BY A
+  CLOCK TIME read as a protected code ("2019-01-18 06:20", scrubbed down to
+  ":20"). Enforced by `tests/review-identity-gate.test.ts` (live 7.25.0
+  question shapes verbatim, purity + idempotency for the retry/rebuild
+  lane, and every material question this pipeline must keep asking as a
+  negative control) and `tests/delta3-travel-card-publicity.test.ts` (Δ3
+  both directions on the eight live travel rows).
+  KNOWN residual, recorded and NOT fixed (see `docs/next-session.md`): the
+  street-address shape still flags VENUE addresses ("Borkonyha, 3 Sas
+  street, 1051 Budapest") because shape alone cannot separate a venue
+  address from the traveler's home address, and the live leak sits in its
+  own segment so context-coupling would miss it — content loss, not a leak,
+  and genuine design work; and the protected-code shape still flags fused
+  continental train numbers ("REX2513", "NJ40295"), which is in TENSION
+  WITH Δ3 and needs a CEO call, because any widening of the flight-code
+  exemption also exempts short booking locators — trading a content bug for
+  a privacy loosening. Mitigation verified in source
+  (`evidence-clustering.ts:4472`): transport titles and routeLabels are not
+  swept, only descriptions, so the row's public identity survives. Both
+  residuals are pinned as explicit KNOWN_GAP characterisation assertions in
+  `tests/delta3-travel-card-publicity.test.ts` so a change to either fails
+  loudly.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
   `tests/assembly-ground-truth-run6.test.ts`,
   `tests/identity-output-gate.test.ts`,
   `tests/stay-arrival-directions.test.ts`,
-  `tests/note-lane-protections.test.ts`
+  `tests/note-lane-protections.test.ts`,
+  `tests/review-identity-gate.test.ts`,
+  `tests/delta3-travel-card-publicity.test.ts`
 
 ## RW-PUB-001 — Published trip versions are immutable
 
 - Status: `LOCKED`
-- Decision date: `2026-07-24`
+- Decision date: `2026-07-25`
 - Supersession: the 2026-07-21 messaging is amended by the 2026-07-24 CEO
   decisions 1 and 7 (Arc F). Publishing still warns-never-blocks; the
   amendment changes only the readiness COPY: while an identity-class P0
   finding or a hard structural warning is open, the readiness headline is a
-  warning-state — "Ready with N privacy warnings" (N = open identity P0s +
-  open hard warnings) — instead of "Private app is ready". Quiet warnings
-  never change readiness copy. Standing directive recorded with the
-  decision: these warnings are a TRIPWIRE, not a feature — recurring
-  hard-warning shapes are backlog defects the assembly logic must learn to
-  resolve; the target state is N = 0 on a healthy run.
+  warning-state instead of "Private app is ready". Quiet warnings never
+  change readiness copy. Standing directive recorded with the decision:
+  these warnings are a TRIPWIRE, not a feature — recurring hard-warning
+  shapes are backlog defects the assembly logic must learn to resolve; the
+  target state is zero open findings on a healthy run.
+
+  2026-07-25 Δ-COPY AMENDMENT (Eli, Arc F.3 F2) — SUPERSEDES the
+  2026-07-24 formula. The 2026-07-24 text specified ONE count, "Ready with
+  N privacy warnings" where N = open identity P0s + open hard warnings.
+  Run 7.25.0 proved that wording wrong on a real run: its only open finding
+  was a structural `warning:activity_duplicate_title` (the duplicate Prague
+  Castle card) with ZERO privacy content, and the page rendered "Ready with
+  1 privacy warning" — making a real identity leak and a duplicate title
+  indistinguishable in the headline, which is the opposite of the signal the
+  amendment exists to raise. The two classes are now counted AND WORDED
+  separately:
+    - no open findings          → "Private app is ready"
+    - privacy P0s only          → "Ready with N privacy warning(s)"
+    - structural warnings only  → "Ready — N item(s) to review"
+    - both                      → "Ready with N privacy warning(s) and
+                                   M item(s) to review"
+  Privacy language is reserved for privacy findings. Publishing still never
+  blocks: `canPublish` and `assessTripPublishability` are untouched and
+  Create snapshot stays enabled. This is recorded rather than averaged per
+  RW-GOV-001 — the newest explicit CEO decision wins, and the older formula
+  is preserved above as history.
 - Enforcement: `PARTIAL`
 - Contract: Extraction, assembly, review, and future fixes never mutate an
   already published traveler snapshot. Maker changes create a new draft and an
@@ -1145,6 +1309,17 @@ exact live payload shapes.
   only; repaired/verified findings, detector incidents, and the quiet
   activity_bloat warning never count); the publish page renders it above
   the run7 audit-findings copy.
+  2026-07-25 Arc F.3 F2: the headline is composed from the two counts
+  separately (four explicit cases, so a structural finding can never borrow
+  privacy language again). `privacyWarningCount` was REMOVED rather than
+  redefined — its name no longer matched its contents — and replaced by
+  `openFindingCount`, which drives `state` only, never the wording, so the
+  compiler names every consumer instead of letting an old meaning survive
+  silently. The publish page consumes only `state` + `headline`. Enforced by
+  `tests/trip-publish-policy.test.ts` with the run-7.25.0 outcome shape
+  verbatim (asserting the headline contains no "privacy" at all) plus the
+  inverse control — a lone identity P0 still says "privacy", so the
+  amendment did not mute the signal it protects.
 - Tests: `tests/published-snapshots.test.ts`,
   `tests/structured-trip-snapshot.test.ts`,
   `tests/trip-publish-policy.test.ts`

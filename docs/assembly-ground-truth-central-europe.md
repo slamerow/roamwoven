@@ -315,6 +315,42 @@ Unresolved answers never block publishing — they become descriptions.
    total" line inside a tips blob is scrubbed with a recorded disposition,
    not shipped inside a city note.
 
+## Δ3 Amendment (2026-07-24, Eli-approved — run-7.25.0 audit)
+
+**On travel cards, protection covers CONFIRMATION / BOOKING / TICKET CODES
+ONLY. Seat number, seat class, route and times are PUBLIC.**
+
+Eli, verbatim: *"it's fine if they see seats too. we just need to hide
+confirmation codes so a bad actor can't get the info and cancel a transit."*
+
+This is Δ2's sabotage-surface principle applied consistently — a seat number
+cannot cancel a transit, so it is not sabotage surface. Δ3 therefore **narrows
+the 🔒 column of the travel table above**: within each travel row's 🔒 cell,
+the `conf #…` value stays protected and the `seat …` value becomes public.
+Row 8's cell (`conf #GHFHPG, seat 13D`) is the canonical example: `#GHFHPG`
+protected, `13D` public. Δ2 amendment 1's sentence "The 🔒 markers on travel
+cards and stays above stand" is superseded to this extent, and only to this
+extent — stays are untouched, and inter-city travel CONFIRMATIONS remain
+protected class.
+
+**Audit procedure:** apply Δ3 BEFORE scoring bar item 6. Item 6 means zero
+PROTECTED-class code tokens in any public field; seats, seat class, route
+endpoints and clock times are not code tokens. The 7.25.0 docket originally
+scored chain A (seats in public transport prose) as a FAIL and planned an F.3
+"seat fix"; that verdict was re-scored **PASS** and the fix **DROPPED**.
+
+**Display rule, approved with Δ3:** a travel card shows title + route + times
+publicly; the protected details (the codes) sit behind ONE password entry. The
+traveler-side screen enforcing this is not built yet —
+`lib/traveler-view-model.ts` is the demo seed builder and no generated-trip
+transport → traveler rendering path exists.
+
+Locked both directions by `tests/delta3-travel-card-publicity.test.ts`: every
+one of the eight live rows' seat tokens, plus route endpoints, flight/train
+numbers, clock times and dates, SURVIVE the protected-code sweep, while the
+RegioJet travel code and ÖBB ticket code are still swept out of the same
+prose — so a future sweep-widening cannot silently re-lock seats.
+
 ## Δ Rules added or refined this round (2026-07-17, Eli-approved)
 
 1. **Calls** explain system *action* (grouping), never absence of action or plain logic.

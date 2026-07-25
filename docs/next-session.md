@@ -6,6 +6,154 @@
 
 ## Current State
 
+### 2026-07-25 (F.3 session, cloud) — ARC F.3 CODED AND COMMITTED: F1 review-surface identity gate, F2 publish copy split, F3 dead-gate honesty (test-only), F4 Δ3 fixture + ledger v21. FOUR positional privacy-predicate false positives found and fixed by the dark-factory sweep Eli requested. ZERO live runs. NEXT: Eli's local gate → replay all four pinned parses → push → one baseline run on mini → Arc G.
+
+Read first: this entry, ledger v21 (RW-PRI-001 Δ3 + F.3 evidence, RW-QUE-001
+identity absolute + KNOWN_GAP, RW-PUB-001 Δ-copy amendment), and the new Δ3
+section in docs/assembly-ground-truth-central-europe.md.
+Commits on top of 588ad33, each suite-green + tsc-clean in the cloud clone:
+6ad7809 F1 → a328e80 F2 → 7049397 predicate sweep → 200a29a F3 → (this docs
+commit). Suite 72 files / 499 checks.
+
+- CEO RULINGS THIS SESSION (Eli, verbatim where it matters):
+  (1) IDENTITY IS NEVER ASKED. "that should absolutely be scrubbed, and
+      should never be asked as a question. questions should be asked if
+      there is something material that would impact the shape of a day (or
+      the trip). asking the maker's name is never useful and should never be
+      a question." Recorded as an absolute in RW-QUE-001.
+  (2) PUBLISH COPY: "Ready — 1 item to review" for structural findings;
+      privacy language reserved for privacy findings. Recorded as the
+      RW-PUB-001 Δ-copy amendment — it SUPERSEDES the 2026-07-24 formula, a
+      genuine contract conflict recorded rather than averaged (RW-GOV-001).
+  (3) SCOPE: privacy only. The other 3 junk questions (day-title date ask,
+      Museum of Communism date ask, the "15.01.2019 14:30" self-feeding
+      loop) stay for Arc G so the baseline run measures them honestly.
+  (4) DARK-FACTORY SWEEP REQUESTED: "please make sure we're not making
+      similar in nature mistake elsewhere" (after the date-range/phone
+      finding). Done — see below.
+- F1 (6ad7809): `lib/extraction/review-identity-gate.ts` — ONE pure
+  idempotent predicate set at TWO boundaries: the draft boundary
+  (`canonicalizeCanonicalReviewDetails` — every build AND every rebuild
+  passes through it; Arc E's dead-target rule already lives there) and
+  projection (`createReviewQuestions`). Deliberately NOT added to
+  `gateOffContractQuestions` — that gate is dead (see F3). Three rules:
+  identity-soliciting `targetField`; identity-soliciting prose on a generic
+  targetField; a prompt that scrubbing empties (suppress whole, no husk).
+  Dismissal is IN PLACE, never a filter, because
+  `validateStructuredTripRecords` requires one projected review record per
+  draft `missingDetail` (draft-to-structured-trip.ts:846-851) — dropping one
+  would fail a compile invariant and could kill a usable run. Both live
+  7.25.0 asks (`customer`, `reserved_by_created`) now die with an auditable
+  reason naming the signal SHAPE, never the value. A Call is never dismissed
+  (RW-REV-001 — a statement is not an ask). `scrubReviewEvidence`'s private
+  colon-required copy is layered UNDER the shared predicates, so the change
+  is strictly additive and the run7 receipt fixture's
+  "[private contact removed]" marker behavior is preserved.
+  `dropIdentitySegments` promoted into identity-prose.ts — it was a closure
+  over a FIFTH byte-identical copy of the segment-split regex.
+  tests/review-identity-gate.test.ts.
+- F2 (a328e80): four explicit headline cases; `privacyWarningCount` REMOVED
+  rather than redefined so the compiler names every consumer;
+  `openFindingCount` drives `state` only, never the wording. Publish still
+  never blocks (canPublish untouched). Fixture asserts the 7.25.0 outcome
+  shape's headline contains no "privacy" at all, with the inverse control (a
+  lone identity P0 still says privacy, so the signal is not muted).
+- F3 (200a29a): TEST-ONLY, zero runtime lines changed.
+  tests/question-gate-production-shape.test.ts pins production truth so the
+  suite is green AND honest, and fails loudly when the wiring is fixed (the
+  instruction is written into the assertion message). The run7 fixture now
+  carries an in-line note that it may not be cited as live coverage.
+  **THE DOCKET'S FRAMING IS CORRECTED BY THE TRACE, and the correction is
+  the more useful finding:** "all 7 rules never run" is true of the GATE,
+  but the settled-date family IS handled in production — by the Phase-2
+  reconciliation gate — through a DIFFERENT TERMINAL STATE. Seeded path:
+  RETAINED as `dismissed` with a quotable reason. Production path: FILTERED
+  OUT of the draft entirely — no record, no reason, nothing an audit can
+  quote. So the fixture's green hid an audit-trail loss, not merely a
+  coverage over-claim. **Arc G must CONVERGE these on the
+  retained-and-reasoned terminal state (RW-OPS-001: every path terminates in
+  a named outcome), not merely rewire the filter.** The mode/type family is
+  the clean unreachable case — it ships OPEN, asking what the source names.
+- F4 (this commit): Δ3 recorded in the ledger AND the GT doc, where it
+  narrows the travel table's 🔒 cells (`conf #…` protected, `seat …` public
+  — Δ2 amendment 1's "the markers stand" sentence superseded to exactly that
+  extent, stays untouched); the travel-card display rule recorded as a BUILD
+  ITEM, not as enforced behavior; the do-not-block standing directive
+  recorded in RW-PRI-001. tests/delta3-travel-card-publicity.test.ts locks
+  Δ3 both directions on all eight live rows.
+- **DARK-FACTORY PREDICATE SWEEP (Eli's request): 24 legitimate itinerary
+  strings from this corpus probed against every shape-based predicate. 11
+  false positives found, 4 fixed, all 10 leak shapes still caught.** One
+  root cause: a positional regex cannot distinguish trip content from
+  personal data.
+  FIXED (each proven both directions):
+  * DATE RANGE read as a phone. `TRAILING_PHONE_PATTERN` matched the run
+    "2038-04-05", so "2038-04-02 to 2038-04-05" was an identity leak. Caught
+    by tests/canonical-factory-boundary.test.ts the moment F1 ran. **It was
+    LIVE in the CARD lane**, silently deleting any description sentence
+    ending in a date, and could raise a false
+    `identity_value_in_public_prose` P0 on an itinerary date (RW-AUD-001:
+    reporting correct output as a defect).
+  * ROLE WORD + ITINERARY NOUN read as a person: "Passenger Terminal 3",
+    "Driver Instructions", "Customer Service desk". **Highest severity** —
+    a title-borne identity signal suppresses the WHOLE card
+    (evidence-clustering.ts:4619-4626), so legitimate cards were being
+    DELETED, not cleaned. The narrowing touches the colon-less branch only,
+    uses a closed follower set, and judges EVERY role match in a segment (my
+    first pass checked only the first — "Customer Service desk, Customer Eli
+    kamerow." would have leaked; now fixture-guarded).
+  * DATE + CLOCK TIME read as a protected code: "2019-01-18 06:20" was
+    captured as the token "2019-01-18 06" (the char class takes the space,
+    not the colon) and scrubbed down to ":20". Found by the Δ3 fixture on
+    the live Wizz Air row. Directly against Δ3 (times are public).
+  REPORTED, NOT FIXED — both pinned as KNOWN_GAP characterisation
+  assertions in tests/delta3-travel-card-publicity.test.ts so any change
+  fails loudly:
+  * **VENUE ADDRESSES are deleted** ("Borkonyha, 3 Sas street, 1051
+    Budapest"; "Meet at 12 Vaci street, 1052 Budapest"). Shape alone cannot
+    separate a venue address (public trip content) from the traveler's home
+    address (identity), and the live leak sits in its OWN segment so
+    context-coupling would miss it. Consequence is content loss, not a leak.
+    Real design work → Arc G.
+  * **FUSED TRAIN NUMBERS are swept** ("REX2513", "NJ40295") from
+    transport/stay descriptions. **In TENSION WITH Δ3 (route is public) and
+    needs an ELI DECISION**, because any widening of the flight-code
+    exemption that admits 3-letters+4-digits also admits short booking
+    locators of the same shape — trading a content bug for a privacy
+    loosening. Not a CTO call. MITIGATION verified in source
+    (evidence-clustering.ts:4472): transport TITLES and routeLabels are NOT
+    swept, only descriptions, so the row's public identity survives — which
+    is why the live bundle never showed this. Lower urgency than it looks.
+  * Flagged, low severity, no action: currency tokens ("EUR45", "395CZK")
+    and coordinate pairs in transport/stay prose. Lodging costs must not
+    ship anywhere per decision 2 and coordinates are fields not prose, so
+    practical harm is ~nil.
+- OPS: `tsconfig` now excludes the gitignored `_to_delete/` scratch area.
+  tsc was compiling it, so `npx tsc --noEmit` reported 2 errors from Claude
+  scratch files — the local gate was not a usable green signal. Pre-existing
+  condition, unrelated to F.3.
+- EXIT GATE STATUS — **COMMITTED CHECKPOINT ONLY, NOT PUSH-SAFE YET.**
+  In order: (1) Eli runs the local gate (`npm test && npx tsc --noEmit`)
+  after the transfer — expect 72 files / 499 checks and a clean tsc;
+  (2) replay ALL FOUR pinned parses (cloud cannot reach Supabase):
+  `node scripts/replay-pinned-parse.mjs <tripId> <parseKey>` for 67de9b43…,
+  790f80db…, 1d5668af… (trip aa218430) and 472411b3… (trip 79cff4be).
+  EXPECTED: the Arc F/F.2 bar UNCHANGED on every parse — 5 legs / 8
+  transport / 5 stays, zero identity signals, zero PROTECTED-class code
+  tokens. NEW and specific to F.3: the identity-soliciting questions
+  (`customer`, `reserved_by_created`) must be DISMISSED WITH A REASON rather
+  than open, so the open-question count on 472411b3 drops by 2; and NO card
+  or note may DISAPPEAR relative to the previous replay — the three
+  predicate fixes only ever preserve MORE content, so any content LOSS is a
+  regression while a content GAIN (a card whose description ends in a date,
+  or one titled like an airport sign) is the fix working. Then push →
+  pre-flight (deploy green, fresh tab, env verified from the 7.25.0
+  telemetry) → ONE baseline run on mini.
+- RUN BUDGET for the next arc: one live run (the mini baseline). F.3 spent
+  zero, as approved.
+- ELI DECISION WAITING: the fused-train-number / Δ3 tension above. It does
+  not block the baseline run.
+
 ### 2026-07-24 (audit session, cloud) — RUN 7.25.0 AUDITED: **RUN BAR PASSES ALL 8 ITEMS — first clean pass on a real parse**. Arc F privacy objective MET. OCR ran on luna (rolled back) so all CONTENT findings are quarantined. NEXT: Arc F.3 (small, privacy-only, ZERO live runs) -> one baseline run on mini -> Arc G.
 
 Read first: docs/assembly-defect-docket-2026-07-24-run-7.25.0.md (both

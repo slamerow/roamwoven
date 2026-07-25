@@ -268,6 +268,19 @@ const CODE_TOKEN_FLIGHT_PATTERN = /^[A-Z]{1,2}\d{3,4}$/;
 const CODE_TOKEN_DATE_PATTERNS = [
   /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$/,
   /^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}$/,
+  // A date immediately followed by a clock time. The token matcher's
+  // character class (`[\d ()./-]`) includes the space but NOT the colon, so
+  // "2019-01-18 06:20" is captured as the token "2019-01-18 06" — eight
+  // digits, matching neither the date nor the clock exemption, and therefore
+  // treated as a protected code. Scrubbing it left ":20" behind in the prose.
+  //
+  // Found by the Δ3 negative-control fixture (Arc F.3 F4) on the live Wizz
+  // Air row, and it is the SAME class as the date-read-as-phone and
+  // role-word-read-as-name findings: a positional shape matching real
+  // itinerary content. Δ3 makes it explicit that route and TIMES are public,
+  // so this had to be exempt.
+  /^\d{4}[-./]\d{1,2}[-./]\d{1,2}\s+\d{1,2}$/,
+  /^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}\s+\d{1,2}$/,
 ];
 const CODE_TOKEN_CLOCK_PATTERN =
   /^\d{1,2}[:.]\d{2}(?:\s*[-–]\s*\d{1,2}[:.]\d{2})?$/;
