@@ -6,6 +6,127 @@
 
 ## Current State
 
+### 2026-07-24 (audit session, cloud) — RUN 7.25.0 AUDITED: **RUN BAR PASSES ALL 8 ITEMS — first clean pass on a real parse**. Arc F privacy objective MET. OCR ran on luna (rolled back) so all CONTENT findings are quarantined. NEXT: Arc F.3 (small, privacy-only, ZERO live runs) -> one baseline run on mini -> Arc G.
+
+Read first: docs/assembly-defect-docket-2026-07-24-run-7.25.0.md (both
+correction blocks at the top), docs/code-audit-2026-07-24.md, this entry.
+NO code written this session — audit only.
+
+- RUN 7.25.0 (trip 79cff4be, "USE FOR TESTING CZECH.pdf", bundle sha256
+  7cf3912c..., 255,335 B, includePrivate:true zero masks): **BAR PASS ON ALL
+  8 ITEMS.** 5 legs / 8 transport / 5 stays, all GT-exact. Zero identity
+  signals in any public field. Zero confirmation/booking/ticket codes in any
+  public field (all in privateDetails at traveler_password). No cost cards,
+  no lodging-cost text. Pinning proven: write=true, saved=true, parseKey
+  472411b3... = **4th replay-corpus entry** (67de9b43, 790f80db, 1d5668af,
+  472411b3).
+- **ALL THREE F.2 COMMITS PROVEN LIVE.** C2 floor held WITH its negative
+  control (the anchorless-but-endpointed Ryanair row correctly survived).
+  C3: 5 stays, no document-artifact stay, same_leg_stay_night_overlap
+  correctly silent. C4 is the standout: retryAttempted/retryChanged BOTH
+  true, identityRecoveryStatus "repaired" naming activities[81]/[82]/[83] —
+  THE SAME three Notes & Tips pieces as 7.24.1 — and the rebuilt output is
+  CLEAN: no "HOW TO GET IN", no "use the key", no FAHRSCHEIN/Zugbindung OCR,
+  no $-lodging lines. The retry -> rebuild -> re-sweep mechanism works
+  end-to-end on a real parse.
+- **Delta-3 AMENDMENT (Eli ruling, this session): on travel cards, protection
+  covers CONFIRMATION / BOOKING / TICKET CODES ONLY. Seat number, seat class,
+  route and times are PUBLIC.** Verbatim: "it's fine if they see seats too.
+  we just need to hide confirmation codes so a bad actor can't get the info
+  and cancel a transit." This is Delta-2's sabotage-surface principle applied
+  consistently. Bar item 6 was re-scored FAIL -> PASS on it and the F.3 seat
+  fix was DROPPED. Future audits must apply Delta-3 BEFORE scoring item 6.
+  Travel-card display rule, also approved: title + route + times public;
+  details (codes) behind ONE password entry. The traveler-side screen that
+  enforces this still needs building — lib/traveler-view-model.ts is the DEMO
+  seed builder (imports asia-trip-seed.json, transport hard-coded to []), and
+  no generated-trip transport->traveler rendering path was found.
+- **STANDING DIRECTIVE (Eli, this session, binding): DO NOT BLOCK THE RUN.**
+  "we are close, so as you work on privacy and stuff in 99% of times we
+  should not block the run (unless there is corrupted source data)." Every
+  privacy mechanism terminates in suppression/scrub + an auditable
+  disposition. No new throws, no quarantines, no hard warnings, no invariants
+  that can fail a run. Corrupted source data is the ONLY exception. (7.23.1
+  died to a defensive invariant; this directive is that lesson made standing.)
+- **OCR MODEL CONFOUND — READ BEFORE TRUSTING ANY CONTENT NUMBER.** All 5 OCR
+  batches / 19 pages / 31,173 chars ran **gpt-5.6-luna**; model extraction and
+  sourceRecovery ran gpt-5.4-mini. Eli: luna "really sucked", already rolled
+  back to mini. QUARANTINED as luna artifacts, NOT pipeline defects: 77-vs-40
+  card count, missing GT stops (Koscom, New York Cafe, Vorosmarty Ter,
+  Gloriette), and "Jewish Quarter (Joselov)" — an OCR misread of "Josefov"
+  that the run then raised and dismissed a spelling question about.
+  uncoveredLineCount 41 of 399 is consistent with lossy OCR. **parseKey
+  472411b3 is pinned to a luna substrate — valid for testing pipeline logic
+  against fixed input, but its content expectations must NOT calibrate an Arc
+  G bar.**
+- ARC F.3 (approved scope — CTO call, Eli deferred; PRIVACY ONLY, assembly
+  waits for G; ZERO live runs, replay-validated on all four parses):
+  F1: identity predicates (identity-prose.ts) applied to the QUESTION surface
+      at mint and at projection. Live defect: the run shipped questions with
+      targetField `customer` ("What is the customer name...?") and
+      `reserved_by_created` — the system solicits the exact identity data it
+      scrubs from card prose. Today identity-prose has FIVE consumers, all on
+      piece.payload; nothing tests prompt/reason/targetField/relatedTitle/
+      guessedValue. Do this surgically — do NOT switch on
+      gateOffContractQuestions (see F3). Drop-or-scrub only, never block.
+  F2: publish readiness copy separates privacy P0s from structural hard
+      warnings. trip-publish-policy.ts:84-122 sums them, so run 7.25.0's
+      duplicate-title warning renders as "Ready with 1 privacy warning" with
+      zero privacy content — and a real P0 is indistinguishable in the
+      headline. Cosmetic-only; publish still never blocks.
+  F3: HONESTY FIX, TEST-ONLY, NO RUNTIME CHANGE. gateOffContractQuestions
+      (ec.ts:1746) filters on _canonicalReviewDisposition === "question"
+      (:1750-1755), but that field is first assigned in
+      canonicalizeCanonicalReviewDetails (:10420-10433) called at :11043 —
+      ONE LINE AFTER the gate at :11042. Parser missingDetails carry no
+      disposition (parser schema is additionalProperties:false), so all 7
+      dismissal rules NEVER RUN in production. It is green only because
+      fixtures hand-seed the field (tests/assembly-ground-truth-run7.test.ts:
+      729+) onto a shape production cannot emit. Make the test exercise the
+      PRODUCTION shape so the gap goes RED. Actually fixing the wiring is an
+      Arc G behaviour change (it would start dismissing questions) and must
+      not ride F.3.
+  F4: contracts — record Delta-3 in the GT doc + ledger (RW-PRI-001), the
+      travel-card display rule, and the do-not-block standing directive.
+      Add a Delta-3 negative-control fixture: seats/route/times SURVIVE in
+      public travel-card prose while every code is swept, both directions.
+  EXIT GATE: suite + typecheck green, replay all four pinned parses, Eli's
+  local gate, then push. NO live run for F.3 itself.
+- THEN: **one live run on mini** (Eli approved) purely to establish a clean
+  content baseline for Arc G — the current content picture is luna-polluted
+  and G would otherwise risk fixing defects that were never real.
+- CODE AUDIT (docs/code-audit-2026-07-24.md) — the structural findings, all
+  verified in source, none of them F.3 work:
+  * **sameEntity was NEVER BUILT.** 07-18 Phase 1 shipped the winner ladder
+    (entity-winner.ts) and left the IDENTITY half as six private triggers.
+    The only `sameEntity` is a local const inside collapseSlotCollisions
+    (:6853). This is the direct cause of the duplicate Prague Castle.
+  * **Two stopword sets 25 lines apart deliberately disagree about `castle`**
+    (:6472 vs :6497), and both detectors strip `visit` — so the pipeline is
+    FORBIDDEN from merging the pair its own detectors call identical.
+  * Lane-coverage matrix: **15 of 54 cells COVERED, 14 PARTIAL, 25 NOT
+    COVERED.** No shared public-field registry (inline literal at :4563,
+    variants at :4587/:4596, a fourth copy in the detector at :910).
+    classifyCityNoteSegmentSafety (:5223) — the most complete concern-union
+    in the codebase — is non-exported and reachable from ONE lane.
+  * A5 (merges discard payloads, :2236-2314) and A10 (dedup/demotion run
+    before grouping, :10953-10970) are BOTH still unfixed after two arcs.
+  * The remediation corridor CANNOT repair content defects —
+    reapplyCanonicalOutputInvariants (:9017-9060) contains no dedup, grouping
+    or demotion-reversal pass, so conservative_fallback_preserved_for_review
+    is the only terminal state a duplicate can reach.
+  * Recommended Phase 1 for G: three shared registries (public-field walk,
+    record-shape predicates, exported segment-safety classifier) + ONE
+    declarative candidacy pass with entries marked lanes:"all" | Lane[], with
+    the retry lane bound to the same pass. isPlanningCostMaterial is the
+    existence proof: the one genuinely shared predicate is the one concern
+    that has never recurred.
+- Standing-challenge status: the trigger fires, but its premise needs
+  correcting — the full-field-walk principle NEVER LANDED (C1 was dropped
+  after the Delta-2 correction). Re-plan on paper before G codes, using the
+  lane matrix above rather than a recurrence count.
+
+
 ### 2026-07-24 (F.2 session, cloud) — ARC F.2 CODED AND COMMITTED: step-0 chain-D trace CORRECTED the docket, C1 DROPPED (Eli: Δ2 stands, chain C tokens are public), C2/C3/C4 landed fixture-proven; NEXT: transfer verified on Eli's machine → local gate → replay all three pinned parses → push → run 2
 
 Read first: docket 7.24.1 CORRECTION block (bar item 6 re-scored),
