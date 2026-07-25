@@ -24,6 +24,86 @@
 const IDENTITY_ROLE_NAME_PATTERN =
   /\b(?:[Cc]ustomer|[Rr]enter|[Dd]river|[Pp]assenger|[Ll]ead\s+(?:[Tt]raveler|[Gg]uest))\s*(?::|\s+[A-Z][\w'’-]+)/;
 
+// Words that follow a role label in ITINERARY prose rather than naming a
+// person. The colon-less branch above only requires "role word + capitalized
+// token", so "Passenger Terminal 3", "Driver Instructions" and "Customer
+// Service desk" all read as identity blocks — and because an identity signal
+// in a TITLE suppresses the whole card (evidence-clustering.ts:4619-4626),
+// that silently DELETES a legitimate card rather than merely scrubbing a
+// sentence.
+//
+// Found in the Arc F.3 dark-factory sweep (Eli, 2026-07-25: "please make sure
+// we're not making similar in nature mistake elsewhere") after the same class
+// of positional false positive was found in the phone shapes. This narrows
+// only the colon-LESS branch: an explicit "Customer:" label is still an
+// identity block whatever follows it, and the live 7.18.3 leak shape
+// ("Customer Eli kamerow") is unaffected because "Eli" is not a role-follower
+// noun. A traveler is not named "Terminal".
+const ROLE_FOLLOWER_NON_NAME_WORDS = new Set([
+  "assistance",
+  "care",
+  "centre",
+  "center",
+  "check",
+  "copy",
+  "desk",
+  "details",
+  "drop",
+  "entrance",
+  "experience",
+  "gate",
+  "hall",
+  "help",
+  "information",
+  "instruction",
+  "instructions",
+  "lounge",
+  "manifest",
+  "name",
+  "names",
+  "number",
+  "parking",
+  "pickup",
+  "pick",
+  "policy",
+  "reference",
+  "relations",
+  "seat",
+  "seats",
+  "service",
+  "services",
+  "support",
+  "terminal",
+  "ticket",
+  "tickets",
+  "waiting",
+]);
+
+// Global twin of IDENTITY_ROLE_NAME_PATTERN. EVERY role match in the segment
+// is judged, not just the first: a segment carrying both an itinerary phrase
+// and a real name ("Customer Service desk, Customer Eli kamerow") must still
+// report the leak, so one benign match can never vouch for the segment.
+const IDENTITY_ROLE_NAME_PATTERN_GLOBAL = new RegExp(
+  IDENTITY_ROLE_NAME_PATTERN.source,
+  "g"
+);
+
+// True when the segment carries a role label that actually introduces a
+// person: an explicit "Role:" label, or a colon-less "Role Name" whose
+// follower is not an itinerary noun.
+function hasRoleLabelledPersonName(segment: string) {
+  IDENTITY_ROLE_NAME_PATTERN_GLOBAL.lastIndex = 0;
+  for (const match of segment.matchAll(IDENTITY_ROLE_NAME_PATTERN_GLOBAL)) {
+    const matched = match[0];
+    // An explicit label is always an identity block, whatever follows.
+    if (matched.includes(":")) return true;
+    const follower = /\s+([A-Z][\w'’-]*)$/.exec(matched)?.[1];
+    if (!follower) return true;
+    if (!ROLE_FOLLOWER_NON_NAME_WORDS.has(follower.toLowerCase())) return true;
+  }
+  return false;
+}
+
 // Postal home-address shape: a street number, street words, a street-type
 // word, and a 4-6 digit postal code later in the same segment
 // ("1225 Harvard street nw, 20009 Washington, USA"). Requiring the postal
@@ -100,7 +180,7 @@ export function findIdentityProseSignal(
 ): IdentityProseSignal | null {
   if (!segment) return null;
   if (EMAIL_PATTERN.test(segment)) return "email";
-  if (IDENTITY_ROLE_NAME_PATTERN.test(segment)) return "role_labelled_name";
+  if (hasRoleLabelledPersonName(segment)) return "role_labelled_name";
   if (STREET_ADDRESS_PATTERN.test(segment)) return "street_address";
   if (
     LABELLED_PHONE_PATTERN.test(segment) ||

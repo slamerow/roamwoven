@@ -273,6 +273,47 @@ export default async function run() {
     }
   });
 
+  test("shared predicate: a role word followed by an itinerary noun is not a person", () => {
+    // Same false-positive class as the date/phone one, found in the F.3
+    // dark-factory sweep. Severity is HIGHER than a prose scrub: an identity
+    // signal in a TITLE suppresses the WHOLE card
+    // (evidence-clustering.ts:4619-4626), so a card titled "Passenger
+    // Terminal 3" or "Customer Service desk" was silently DELETED.
+    for (const itinerary of [
+      "Passenger Terminal 3 opens at 04:00.",
+      "Driver Instructions are in the rental packet.",
+      "Customer Service desk is past security.",
+      "Customer Support is open 24 hours.",
+      "Renter Details are on page 2.",
+      "Lead Traveler Name field was blank.",
+    ]) {
+      assert.equal(
+        findIdentityProseSignal(itinerary),
+        null,
+        `itinerary prose is not an identity block: ${itinerary}`
+      );
+      assert.equal(dropIdentityProseSegments(itinerary), itinerary);
+    }
+    // The narrowing is only on the colon-LESS branch, and EVERY role match in
+    // a segment is judged — one benign phrase can never vouch for a segment
+    // that also carries a real name.
+    for (const leak of [
+      "Customer Eli kamerow.",
+      "Customer: Eli Kamerow",
+      "Customer Service desk, Customer Eli kamerow.",
+      "Passenger Eli Kamerow, seat 12A.",
+      "Driver Sarah Novak will meet you.",
+      "Lead Traveler Eli Kamerow",
+    ]) {
+      assert.equal(
+        findIdentityProseSignal(leak),
+        "role_labelled_name",
+        `real identity block still caught: ${leak}`
+      );
+      assert.equal(dropIdentityProseSegments(leak), "");
+    }
+  });
+
   test("F1 gate is pure and idempotent (retry/rebuild lane runs it twice)", () => {
     const fields = {
       evidence:
