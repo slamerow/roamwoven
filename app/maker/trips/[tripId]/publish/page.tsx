@@ -116,7 +116,12 @@ export default async function PublishPage({
                 <h2 className="text-xl font-semibold text-ink">
                   {/* Arc F (CEO decisions 1+7): identity P0s and hard
                       warnings flip the headline to a warning state; quiet
-                      warnings never do; publishing never blocks. */}
+                      warnings never do; publishing never blocks.
+                      Arc F.3 F2 (Eli, 2026-07-25): the headline now words the
+                      two classes separately — privacy language is reserved
+                      for privacy findings, so run 7.25.0's structural
+                      duplicate-title warning no longer reads as
+                      "1 privacy warning". */}
                   {readinessCopy.state === "ready_with_warnings"
                     ? readinessCopy.headline
                     : survivingDefects > 0

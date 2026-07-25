@@ -141,8 +141,45 @@ export default function run() {
   assert.equal(warned.state, "ready_with_warnings");
   assert.equal(warned.openPrivacyP0Count, 2);
   assert.equal(warned.openHardWarningCount, 1);
-  assert.equal(warned.privacyWarningCount, 3);
-  assert.equal(warned.headline, "Ready with 3 privacy warnings");
+  assert.equal(warned.openFindingCount, 3);
+  // Arc F.3 F2 (Eli, 2026-07-25): the two classes are worded separately. The
+  // 2026-07-24 formula summed them into "Ready with 3 privacy warnings",
+  // which made a structural finding read as a privacy finding.
+  assert.equal(
+    warned.headline,
+    "Ready with 2 privacy warnings and 1 item to review"
+  );
+
+  // THE 7.25.0 SHAPE, verbatim from the bundle's remediation outcomes: one
+  // structural duplicate-title warning, zero privacy content. This must NOT
+  // say "privacy" anywhere — the whole point of the amendment.
+  const structuralOnly = assessTripPublishReadinessCopy({
+    qualityRemediation: {
+      outcomes: [
+        outcome("warning:activity_duplicate_title:prague-castle"),
+        outcome("warning:activity_bloat:day-3"),
+      ],
+    },
+  });
+  assert.equal(structuralOnly.state, "ready_with_warnings");
+  assert.equal(structuralOnly.openPrivacyP0Count, 0);
+  assert.equal(structuralOnly.openHardWarningCount, 1);
+  assert.equal(structuralOnly.headline, "Ready — 1 item to review");
+  assert.equal(
+    /privacy/i.test(structuralOnly.headline),
+    false,
+    "a structural duplicate never borrows privacy language (run 7.25.0 chain E)"
+  );
+
+  // And the inverse control: a real privacy P0 alone still says privacy, so
+  // the amendment did not mute the signal it exists to protect.
+  const privacyOnly = assessTripPublishReadinessCopy({
+    qualityRemediation: {
+      outcomes: [outcome("diagnostic:identity_value_in_public_prose")],
+    },
+  });
+  assert.equal(privacyOnly.headline, "Ready with 1 privacy warning");
+  assert.equal(privacyOnly.state, "ready_with_warnings");
 
   const clean = assessTripPublishReadinessCopy({
     qualityRemediation: {
@@ -151,5 +188,6 @@ export default function run() {
   });
   assert.equal(clean.state, "ready");
   assert.equal(clean.headline, "Private app is ready");
+  assert.equal(clean.openFindingCount, 0);
   assert.equal(assessTripPublishReadinessCopy(null).state, "ready");
 }

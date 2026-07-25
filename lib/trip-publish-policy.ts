@@ -63,11 +63,22 @@ export const PRIVACY_P0_DIAGNOSTIC_CODES = [
   "protected_code_shape_in_public_prose",
 ] as const;
 
+// Arc F.3 F2 amendment (Eli, 2026-07-25). Run 7.25.0's only open finding was
+// a structural duplicate-title warning — ZERO privacy content — and the page
+// rendered "Ready with 1 privacy warning", so a real privacy leak and a
+// duplicate Prague Castle card were indistinguishable in the headline. The
+// two classes are now counted and worded separately: privacy language is
+// reserved for privacy findings, structural findings get neutral wording.
+// This supersedes the 2026-07-24 formula (N = identity P0s + hard warnings)
+// recorded in RW-PUB-001; `privacyWarningCount` is deliberately REMOVED
+// rather than redefined, so the compiler names every consumer instead of
+// letting an old meaning survive silently.
 export type TripPublishReadinessCopy = {
   headline: string;
   openHardWarningCount: number;
   openPrivacyP0Count: number;
-  privacyWarningCount: number;
+  // Both classes together. Drives `state` only — never the wording.
+  openFindingCount: number;
   state: "ready" | "ready_with_warnings";
 };
 
@@ -121,28 +132,36 @@ export function countOpenPublishWarnings(usage: unknown): {
   return { openHardWarningCount, openPrivacyP0Count };
 }
 
+function plural(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 export function assessTripPublishReadinessCopy(
   usage: unknown
 ): TripPublishReadinessCopy {
   const { openHardWarningCount, openPrivacyP0Count } =
     countOpenPublishWarnings(usage);
-  const privacyWarningCount = openHardWarningCount + openPrivacyP0Count;
-  if (privacyWarningCount === 0) {
-    return {
-      headline: "Private app is ready",
-      openHardWarningCount,
-      openPrivacyP0Count,
-      privacyWarningCount,
-      state: "ready",
-    };
-  }
+  const openFindingCount = openHardWarningCount + openPrivacyP0Count;
+  // Publishing still NEVER blocks (RW-PUB-001) — this function only chooses
+  // wording. The four cases are explicit so a structural finding can never
+  // borrow privacy language again.
+  const headline =
+    openFindingCount === 0
+      ? "Private app is ready"
+      : openPrivacyP0Count > 0 && openHardWarningCount > 0
+      ? `Ready with ${plural(
+          openPrivacyP0Count,
+          "privacy warning"
+        )} and ${plural(openHardWarningCount, "item")} to review`
+      : openPrivacyP0Count > 0
+      ? `Ready with ${plural(openPrivacyP0Count, "privacy warning")}`
+      : `Ready — ${plural(openHardWarningCount, "item")} to review`;
+
   return {
-    headline: `Ready with ${privacyWarningCount} privacy warning${
-      privacyWarningCount === 1 ? "" : "s"
-    }`,
+    headline,
+    openFindingCount,
     openHardWarningCount,
     openPrivacyP0Count,
-    privacyWarningCount,
-    state: "ready_with_warnings",
+    state: openFindingCount === 0 ? "ready" : "ready_with_warnings",
   };
 }
