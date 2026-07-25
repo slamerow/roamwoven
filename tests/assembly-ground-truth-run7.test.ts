@@ -697,6 +697,17 @@ export default async function run() {
     assert.equal(timeQuestion, undefined, "no departure-time question rides on a dead fragment");
   });
 
+  // COVERAGE HONESTY (Arc F.3 F3, verified at 588ad33): the missingDetails in
+  // this test hand-seed `_canonicalReviewDisposition: "question"` and
+  // `resolverDecisionId`. A live parse emits NEITHER — the parser's JSON schema
+  // is additionalProperties:false and declares no such property — and
+  // gateOffContractQuestions filters on exactly that field, which
+  // canonicalizeCanonicalReviewDetails assigns one line AFTER the gate runs
+  // (:11042 vs :11043). This test therefore proves the gate's RULES are
+  // correct; it does NOT prove they execute in production, where they do not.
+  // tests/question-gate-production-shape.test.ts pins the real production
+  // behaviour and the KNOWN_GAP. Do not cite this test as live coverage for
+  // RW-QUE-001's question gate.
   await test("run7 PC-8: off-contract question families are dismissed and the Δ2 same-section fold holds", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
