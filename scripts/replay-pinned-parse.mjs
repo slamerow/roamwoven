@@ -95,19 +95,77 @@ const serverModule = require2(path.join(rootDir, "lib/supabase/server.ts"));
 serverModule.createSupabaseServerClient = async () =>
   adminModule.createSupabaseAdminClient();
 
-const [tripId, parseKeyPrefix] = process.argv.slice(2);
-if (!tripId || !parseKeyPrefix) {
+// Args (2026-07-25): the parse key has always accepted a PREFIX, but the trip
+// id went straight into a Postgres `uuid` column via `.eq()`, so an 8-char
+// trip prefix died with "invalid input syntax for type uuid" — and every trip
+// id recorded in docs/next-session.md and the dockets is an 8-char prefix.
+// That asymmetry made the documented replay commands unrunnable as written.
+//
+// A pinned parse row already carries its own `trip_id`, so the trip does not
+// need to be supplied at all. Accepted forms:
+//
+//   node scripts/replay-pinned-parse.mjs <parseKeyPrefix>
+//   node scripts/replay-pinned-parse.mjs <tripIdOrPrefix> <parseKeyPrefix>
+//
+// The two-arg form stays supported so existing handoff commands keep working;
+// a full uuid narrows the query, and a prefix is verified against the trip the
+// parse resolves to.
+const argv = process.argv.slice(2);
+if (argv.length === 0 || argv.length > 2) {
   console.error(
-    "usage: node scripts/replay-pinned-parse.mjs <tripId> <parseKeyPrefix>"
+    "usage: node scripts/replay-pinned-parse.mjs [<tripIdOrPrefix>] <parseKeyPrefix>"
   );
   process.exit(2);
 }
+const parseKeyPrefix = argv.length === 2 ? argv[1] : argv[0];
+const requestedTrip = argv.length === 2 ? argv[0] : null;
+const FULL_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const admin = adminModule.createSupabaseAdminClient();
 
 function fail(message) {
   console.error(`REPLAY FAIL: ${message}`);
   process.exitCode = 1;
+}
+
+// Resolve the parse FIRST — it knows its own trip.
+let parseQuery = admin
+  .from("trip_extraction_parses")
+  .select("trip_id,parse_key,extraction_model,sampling_params,material_fingerprints,calls_json,stats_json")
+  .like("parse_key", `${parseKeyPrefix}%`);
+if (requestedTrip && FULL_UUID.test(requestedTrip)) {
+  parseQuery = parseQuery.eq("trip_id", requestedTrip);
+}
+const { data: parseRows, error: parseError } = await parseQuery;
+if (parseError || !parseRows?.length) {
+  console.error(
+    `cannot load pinned parse ${parseKeyPrefix}…${
+      requestedTrip ? ` for trip ${requestedTrip}` : ""
+    }: ${parseError?.message ?? "no row"}`
+  );
+  process.exit(2);
+}
+// An ambiguous prefix is an explicit failure, never a silent first-match:
+// replaying the wrong parse would look like a passing bar on the wrong input.
+if (parseRows.length > 1) {
+  console.error(
+    `parse key prefix ${parseKeyPrefix}… is ambiguous (${parseRows.length} rows): ` +
+      parseRows.map((row) => `${row.parse_key.slice(0, 16)} (trip ${row.trip_id})`).join(", ")
+  );
+  process.exit(2);
+}
+const parseRow = parseRows[0];
+const tripId = parseRow.trip_id;
+if (
+  requestedTrip &&
+  !FULL_UUID.test(requestedTrip) &&
+  !tripId.startsWith(requestedTrip.toLowerCase())
+) {
+  console.error(
+    `trip prefix ${requestedTrip} does not match the trip this parse belongs to (${tripId})`
+  );
+  process.exit(2);
 }
 
 const { data: tripRow, error: tripError } = await admin
@@ -119,19 +177,7 @@ if (tripError || !tripRow) {
   console.error(`cannot load trip ${tripId}: ${tripError?.message}`);
   process.exit(2);
 }
-
-const { data: parseRows, error: parseError } = await admin
-  .from("trip_extraction_parses")
-  .select("parse_key,extraction_model,sampling_params,material_fingerprints,calls_json,stats_json")
-  .eq("trip_id", tripId)
-  .like("parse_key", `${parseKeyPrefix}%`);
-if (parseError || !parseRows?.length) {
-  console.error(
-    `cannot load pinned parse ${parseKeyPrefix}… for trip ${tripId}: ${parseError?.message ?? "no row"}`
-  );
-  process.exit(2);
-}
-const parseRow = parseRows[0];
+console.log(`trip ${tripId} — ${tripRow.name ?? "(unnamed)"}`);
 console.log(
   `pinned parse ${parseRow.parse_key.slice(0, 12)}… — ${parseRow.calls_json.length} calls, model ${parseRow.extraction_model}`
 );
