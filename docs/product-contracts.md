@@ -1,8 +1,18 @@
 # Roamwoven Product Contracts
 
-Ledger version: 21
+Ledger version: 22
 
-Ledger date: 2026-07-25 (Arc F.3 — privacy only, zero live runs: the identity
+Ledger date: 2026-07-25 (Δ4 — a travel card's DESCRIPTION becomes a
+protected container unlocked by ONE password entry, superseding the Δ3
+display rule; the public card face is composed from structured route/time
+fields. Travel cards only for now; "follower" means a link-holder without
+the password, not a tracked role. Enforcement `KNOWN_GAP` — the
+traveler-side path is unbuilt and the prose-side code sweep is the
+load-bearing interim protection until it exists. Recorded now, built after
+the mini baseline run, as its own arc. Δ4 also resolves the escalated
+fused-train-number tension without loosening any privacy predicate.)
+
+Prior: ledger version 21 (2026-07-25) — Arc F.3 — privacy only, zero live runs: the identity
 gate reaches the QUESTION surface, so identity data is scrubbed from review
 prose and is never asked as a question; publish readiness copy words privacy
 findings and structural findings separately; the Delta-3 travel-card
@@ -512,7 +522,12 @@ path is bypassed.
   changes where the traveler sleeps. One card per segment; connections are
   never merged into a single card (a two-flight connection is two travel
   cards). The travel-card treatment exists so protected booking details blur
-  cleanly. A same-day round trip that returns to the same stay — such as a
+  cleanly. (2026-07-25, Δ4 — see RW-PRI-001: "blur cleanly" is now specified.
+  A travel card's DESCRIPTION is a protected container unlocked by ONE
+  password entry, while the card face is composed from structured route/time
+  fields and stays public. Enforcement is `KNOWN_GAP`: the traveler-side
+  path is not built, and the prose-side code sweep remains the load-bearing
+  interim protection until it is.) A same-day round trip that returns to the same stay — such as a
   rental car picked up and returned at one location — is a timed Activity, not
   a travel card. Airport-prep lines ("leave for airport", "wake for flight")
   attach to their travel card as prep notes, never as separate activities.
@@ -1115,7 +1130,96 @@ exact live payload shapes.
   question. questions should be asked if there is something material that
   would impact the shape of a day (or the trip). asking the maker's name is
   never useful and should never be a question." See RW-QUE-001.
+
+  Δ4 AMENDMENT — TRAVEL-CARD DESCRIPTION IS A PROTECTED CONTAINER
+  (Eli, 2026-07-25; SUPERSEDES the Δ3 travel-card display rule above, and
+  partially supersedes Δ3 itself). Verbatim: "it is good to have the train
+  numbers. they can go in the description and we can make the whole
+  description of a travel card password protected. so if a 'traveler' clicks
+  in, they enter password once, all are unlocked. if a 'follower' clicks in
+  they are prompted for password and if can't answer/they don't see the
+  description on the card."
+
+  The rule:
+  - A travel card's DESCRIPTION is protected in full — one container, not a
+    set of classified fragments. Nothing inside it needs to be judged
+    individually, so route prose, train numbers, seats, class and codes may
+    all live there.
+  - The card FACE stays public and is composed from STRUCTURED FIELDS, never
+    from the description: title, `routeLabel`, `departureLocation`,
+    `arrivalLocation`, `departureTime`, `arrivalTime`, `date`, `provider`,
+    `transportType`. A locked description therefore costs the public card
+    nothing.
+  - ONE password entry unlocks every protected detail for that viewing
+    session ("enter password once, all are unlocked") — not per-card, not
+    per-field.
+  - A viewer WITHOUT the password is prompted, and on failure simply does not
+    see the description. It is not an error state and never blocks the rest
+    of the card or the app.
+  - "Follower" is NOT a tracked role (Eli, 2026-07-25): it means a
+    link-holder who does not have the password. There is one share link and
+    one password. Eli has flagged that UI differences between the two viewer
+    kinds are planned LATER, so the implementation must not foreclose
+    distinguishing them — but no role model, second link, or revocation is in
+    scope now.
+  - SCOPE: travel cards ONLY for now (Eli, 2026-07-25). Stays keep their
+    existing per-field protection (`addressVisibility`,
+    `accessDetailsVisibility`), which is enforced and passing its bar.
+    Activity/note descriptions stay public.
+
+  Effect on Δ3: seats and seat class move from "public on the card face" to
+  "inside the protected container", i.e. visible to any traveler after ONE
+  unlock. Δ3's INTENT is preserved — travelers were never meant to be denied
+  their seat numbers — but its letter ("seat number, seat class, route and
+  times are PUBLIC") is superseded for the description surface. Route and
+  times remain public because they are structured fields. Audit scoring under
+  Δ4: bar item 6 means zero PROTECTED-class code tokens in any field that is
+  actually PUBLIC; a code inside a description whose `descriptionVisibility`
+  is `traveler_password` is not a leak.
+
+  WHY THIS IS THE RIGHT SHAPE, recorded so it is not re-litigated: the Arc
+  F.3 dark-factory sweep found 11 positional false positives in the shared
+  privacy predicates — a date range read as a phone number, "Passenger
+  Terminal 3" read as a person, a date+clock run read as a booking code —
+  because a shape-matching regex cannot distinguish trip content from
+  secrets inside free prose. Protecting the CONTAINER removes the need to
+  classify its contents at all, which dissolves that entire defect class for
+  travel cards. It also returns to RW-TRV-001's original stated intent: "the
+  travel-card treatment exists so protected booking details blur cleanly."
+  It further RESOLVES the escalated fused-train-number tension (REX2513 /
+  NJ40295 swept from transport descriptions against Δ3): no widening of the
+  code exemption is needed, so no privacy loosening is traded for it.
+
+  ENFORCEMENT — `KNOWN_GAP`, and the interim protection is LOAD-BEARING.
+  Today transport descriptions ship PUBLIC in structured records, QA bundles
+  and published snapshots; `TripTransportRecord` has
+  `confirmationVisibility` and `bookingUrlVisibility` but NO
+  `descriptionVisibility`; `app/t/[token]` is the only traveler page;
+  `lib/traveler-view-model.ts:608` hard-codes `transport: []`; and no
+  generated-trip transport → traveler rendering path exists. Therefore:
+  **the prose-side protected-code sweep MUST REMAIN in force until the
+  protected container is built and every consumer honors it.** Removing or
+  loosening the sweep first would put real booking codes into public
+  payloads with nothing protecting them — the dark-factory rule
+  (RW-OPS-001) that a protection is not real until its route-level outcome
+  is traced and tested. Build items, in dependency order: (1)
+  `descriptionVisibility` on `TripTransportRecord` plus its projection
+  default; (2) the traveler transport rendering path; (3) the one-shot
+  password unlock and its session state; (4) serve-time masking so an
+  unauthenticated read never returns the description; (5) the audit
+  detector's public-field list must treat a password-gated description as
+  non-public (or it will report correct output as a defect, RW-AUD-001);
+  (6) only then, revisit the sweep's scope. Sequencing (Eli, 2026-07-25):
+  recorded now, built AFTER the mini baseline run, as its own arc — not
+  folded into Arc G.
 - Enforcement: `PARTIAL`
+- Δ4 enforcement: `KNOWN_GAP`. Recorded on its own line because the
+  contract-level `Enforcement` field is machine-validated against a fixed
+  vocabulary (`tests/product-contracts.test.ts`) and must stay a bare value.
+  RW-PRI-001 as a whole remains `PARTIAL`; the Δ4 travel-card container
+  specifically is a `KNOWN_GAP` — current behavior ships transport
+  descriptions publicly, and the prose-side code sweep is the load-bearing
+  interim protection until the container is built.
 - Contract: Clearly sensitive details default protected without a user Question.
   Exact lodging and private-residence addresses, access codes, private contacts,
   stay/travel booking-control identifiers, credentials, and personal safety

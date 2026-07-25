@@ -151,8 +151,56 @@ commit). Suite 72 files / 499 checks.
   telemetry) → ONE baseline run on mini.
 - RUN BUDGET for the next arc: one live run (the mini baseline). F.3 spent
   zero, as approved.
-- ELI DECISION WAITING: the fused-train-number / Δ3 tension above. It does
-  not block the baseline run.
+- **Δ4 DECIDED (Eli, 2026-07-25) — the escalated fused-train-number tension
+  is RESOLVED by a better design, not by a privacy trade.** Asked whether to
+  widen the code exemption for train numbers, Eli instead ruled: "it is good
+  to have the train numbers. they can go in the description and we can make
+  the whole description of a travel card password protected. so if a
+  'traveler' clicks in, they enter password once, all are unlocked. if a
+  'follower' clicks in they are prompted for password and if can't
+  answer/they don't see the description on the card."
+  Recorded in ledger v22 (RW-PRI-001 Δ4, cross-referenced from RW-TRV-001).
+  Why it is the right shape: protecting the CONTAINER removes the need to
+  classify its contents, which dissolves the entire positional-false-positive
+  class this session found (11 of them) for travel cards — and no exemption
+  is widened, so no privacy is traded for content. The card face keeps
+  working because route/times/provider/train identity are STRUCTURED FIELDS
+  (`routeLabel`, `departureLocation`, `arrivalLocation`, `departureTime`,
+  `arrivalTime`, `date`, `provider`, `transportType`), not description prose.
+  Clarifications given: "follower" = a link-holder without the password, NOT
+  a tracked role (one link, one password; UI differences between the two
+  viewer kinds are planned LATER, so do not foreclose them, but no role
+  model / second link / revocation now). Scope: TRAVEL CARDS ONLY for now —
+  stays keep their working per-field protection, activity/note descriptions
+  stay public. Sequencing: recorded now, BUILT AFTER the mini baseline run,
+  as its own arc, NOT folded into Arc G.
+  Effect on Δ3: seats and seat class move from "public on the card face" to
+  "inside the protected container" — visible to any traveler after one
+  unlock, so Δ3's intent holds while its letter is superseded for the
+  description surface. Audit scoring under Δ4: bar item 6 = zero
+  PROTECTED-class code tokens in any ACTUALLY PUBLIC field; a code inside a
+  `traveler_password`-gated description is not a leak.
+  **HARD CONSTRAINT, do not get this wrong: the prose-side code sweep MUST
+  REMAIN in force until the container is built AND every consumer honors it.**
+  Today transport descriptions ship PUBLIC in structured records, QA bundles
+  and published snapshots. Verified state: `TripTransportRecord` has
+  `confirmationVisibility` and `bookingUrlVisibility` but NO
+  `descriptionVisibility`; `app/t/[token]` is the only traveler page;
+  `lib/traveler-view-model.ts:608` hard-codes `transport: []`; no
+  generated-trip transport → traveler rendering path exists at all. Loosening
+  the sweep before the gate exists would put real booking codes in public
+  payloads with nothing protecting them (RW-OPS-001: a protection is not real
+  until its route-level outcome is traced). Build order: (1)
+  `descriptionVisibility` + projection default; (2) traveler transport
+  rendering path; (3) one-shot password unlock + session state; (4)
+  serve-time masking so an unauthenticated read never returns the
+  description; (5) audit detector's public-field list must treat a gated
+  description as non-public, or it will report correct output as a defect
+  (RW-AUD-001); (6) ONLY THEN revisit the sweep's scope.
+- STILL OPEN, not blocking: the venue-address false positive (content loss;
+  shape alone cannot separate a venue address from a home address) — Arc G
+  design work. Note that a stay-side version of Δ4 would dissolve it too, but
+  Eli scoped Δ4 to travel cards only for now.
 
 ### 2026-07-24 (audit session, cloud) — RUN 7.25.0 AUDITED: **RUN BAR PASSES ALL 8 ITEMS — first clean pass on a real parse**. Arc F privacy objective MET. OCR ran on luna (rolled back) so all CONTENT findings are quarantined. NEXT: Arc F.3 (small, privacy-only, ZERO live runs) -> one baseline run on mini -> Arc G.
 
