@@ -197,6 +197,61 @@ commit). Suite 72 files / 499 checks.
   description; (5) audit detector's public-field list must treat a gated
   description as non-public, or it will report correct output as a defect
   (RW-AUD-001); (6) ONLY THEN revisit the sweep's scope.
+- **REPLAY EVIDENCE (2026-07-25, on Eli's machine, at 587879f — gate GREEN:
+  suite 73 files / 28 node:test subtests / 0 fail, tsc silent).** Three of four
+  pinned parses are faithful (hits=62 misses=0) and BAR PASSED: 790f80db
+  (7.23.2), 472411b3 (7.25.0), 67de9b43 (7.23.1). All three: 5 legs / 8
+  transport / 5 stays, zero identity signals, zero code-shape tokens, no cost
+  cards, repair not_needed.
+  **F.3's OBJECTIVE IS PROVEN ON A REAL PARSE.** On 472411b3 the two live
+  chain-C junk questions are dismissed with the new reason, verbatim from the
+  replay:
+    "What are the reserved-by and created values for this booking detail?"
+      -> the question solicits personal identity data, which is never trip
+         content and never a maker decision (RW-PRI-001 + RW-QUE-001;
+         Eli 2026-07-25)
+    "What is the customer name or value associated with this line?"  -> same
+  No content regression on any parse. Also newly visible on 472411b3:
+  **p1:duplicate_same_venue_activity** — the duplicate Prague Castle, Arc G's
+  headline item, now firing as a P1 rather than being invisible.
+- **1d5668af (7.24.1) IS NOW STALE AS A REPLAY TARGET — do not treat its bar
+  as evidence.** The replay-integrity fix (587879f) made this visible for the
+  first time: misses=2, naming `schema=roamwoven_trip_recovery` (hash
+  2034d79a…) and `schema=roamwoven_canonical_evidence_resolution` (hash
+  7cae0441…), 2 seeded pins unused, REPLAY FAIL. Before the fix it printed
+  `misses=0` and `BAR PASSED` while running with both stages MISSING (the
+  sentinel API key killed them and the fail-soft handlers swallowed it).
+  ROOT CAUSE, one cascade: run 7.24.1 was pinned at e3f7e3e, BEFORE F.2. F.2
+  C4 changed the SHARED cost predicate that gates recovery batching (the
+  em-dash added to the ledger-line pattern in source-coverage.ts), so the
+  recovery call's excerpt batch — and therefore its hash — differs from the
+  recorded one; recovery then contributes nothing, clustering differs, and the
+  resolver's input diverges too. Consistent with the replay reporting
+  uncoveredLineCount 70 against live telemetry's "sourceRecovery 69 batched"
+  (NOT a clean comparison — batched and uncovered are different metrics — so
+  the cascade, not the arithmetic, is the evidence).
+  Not a defect in shipped code, and NOT blocking: a live run makes real calls
+  and records fresh pins, and this parse's bar items are independently covered
+  by tests/transport-candidacy-floor.test.ts and tests/stay-venue-shape.test.ts
+  (both green). Action: RE-PIN after the baseline run, then restore it to the
+  corpus.
+- **RULE, learned here and worth stating once (pin validity):** a pinned parse
+  is replay-valid only while EVERY stage that feeds a model call's INPUT is
+  unchanged — not just the prompts. extraction-pinning.ts's own header says "a
+  prompt change simply misses (live call, re-recorded)", which is true and
+  harmless for a LIVE run and FATAL for an OFFLINE replay, where a miss cannot
+  be re-recorded and instead silently removes a stage. So any change to
+  chunking, coverage, the shared cost/classifier predicates, or anything else
+  upstream of a model call invalidates affected pins for replay purposes. Two
+  consequences for future arcs: (1) after a live run, re-pin before relying on
+  older corpus entries; (2) treat a replay MISS as "this parse is stale",
+  investigate the named stage, and never read the bar underneath it.
+- WANTED in the replay bar (gap noticed this session): it counts legs,
+  transport and stays but NOT activity cards or notes, so "no card vanished"
+  cannot actually be verified from its output. The F.3 predicate fixes can only
+  ever PRESERVE more content, so the risk direction is benign — but that is
+  reasoning, not measurement. Add an activity/note count line before the next
+  arc leans on it.
 - STILL OPEN, not blocking: the venue-address false positive (content loss;
   shape alone cannot separate a venue address from a home address) — Arc G
   design work. Note that a stay-side version of Δ4 would dissolve it too, but
