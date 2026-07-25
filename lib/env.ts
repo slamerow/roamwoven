@@ -62,9 +62,30 @@ export function getOpenAIConfig() {
     extractionAllowedTripIds: parseOptionalEnvList(
       getOptionalEnv("ROAMWOVEN_EXTRACTION_ALLOWED_TRIP_IDS")
     ),
+    // OCR model default. This is `gpt-5.4-mini` deliberately, and it must
+    // stay the same family as `extractionModel` above unless a migration
+    // says otherwise (AGENTS.md §Operating discipline 1: the pipeline is
+    // SHAPE-CALIBRATED to the extraction model).
+    //
+    // History, and why this line has a test (2026-07-25): commit 1d862ec
+    // (2026-07-10) changed this default from "gpt-5.4-mini" to
+    // "gpt-5.6-luna", and `git log --all -S'gpt-5.6-luna'` shows it was
+    // NEVER reverted. Run 7.25.0's telemetry then read exactly as that
+    // asymmetry predicts — all 5 OCR batches / 19 pages / 31,173 chars on
+    // gpt-5.6-luna while extraction and sourceRecovery ran gpt-5.4-mini,
+    // because extractionModel defaulted to mini and ocrModel defaulted to
+    // luna. Eli's verdict on luna was that it "really sucked" and the
+    // decision was to roll back; the run's output corroborates it (41 of
+    // 399 uncovered lines, four missing ground-truth stops, and "Josefov"
+    // misread as "Joselov", which the run then raised a spelling question
+    // about). That rollback existed only as a hosted env var, if at all —
+    // so DELETING the env var, the most natural way to undo a model
+    // change, silently restored luna. A code default is the durable place
+    // for an approved rollback; the env var stays available for a
+    // deliberate, telemetry-verified experiment.
     ocrModel:
       getOptionalEnv("OPENAI_OCR_MODEL") ??
-      "gpt-5.6-luna",
+      "gpt-5.4-mini",
     ocrMaxFilesPerRun: getOptionalPositiveInteger(
       "OPENAI_OCR_MAX_FILES_PER_RUN",
       20
