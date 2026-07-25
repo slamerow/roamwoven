@@ -14,6 +14,11 @@ yarn-error.log*
 # Local extraction-run artifacts (real trip data, never commit)
 run-*.json
 
+# Source test documents (real trip data, never commit). These carry the exact
+# values Arc F exists to protect — traveller names, confirmation codes, seats,
+# flight numbers — and git history is permanent regardless of repo visibility.
+*.pdf
+
 # Claude scratch area (never commit)
 _to_delete/
 repo-snapshot-arc-e.tgz

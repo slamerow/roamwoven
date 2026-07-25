@@ -6,6 +6,160 @@
 
 ## Current State
 
+### 2026-07-25 (OCR incident + verification session, cloud) — **NO CODE CHANGES. The OCR break was already reverted before this session began; the remaining work was proving it and DEMOLISHING FIVE WRONG PREMISES sitting in these docs.** One live run spent: the Arc F.3 live validation (re-purposed from the impossible "mini baseline" — see below). NEXT: audit that run.
+
+**READ THIS BEFORE ANY OTHER ENTRY. Five claims in these docs are WRONG and
+acting on any of them costs a run. Today's incident was caused by exactly
+that: a session read a stale premise, reasoned impeccably from it, and
+swapped the OCR model to one that cannot see.**
+
+**RETIRED PREMISE 1 — "OCR was rolled back to `gpt-5.4-mini`."** FALSE, and
+it is stated as fact in the 7.25.0 docket's CORRECTION block. `gpt-5.4-mini`
+is TEXT-ONLY. The OCR lane sends `input_image`/`input_file`
+(`lib/ai/openai.ts` `getOcrContent`), so on mini it extracts NOTHING. This is
+what `d3bfa43` did and what `6a6e959` reverted. The OCR default is
+`gpt-5.6-luna` and MUST stay on `OCR_VISION_CAPABLE_MODELS`.
+VERIFIED THIS SESSION: `lib/env.ts:115` defaults to luna; suite 73 files
+green; `tsc` clean; `origin/main` == local HEAD == `4765715` (confirmed
+against GitHub, not just locally); Vercel production deploy Ready on
+`4765715`; **no `OPENAI_OCR_MODEL` exists in Vercel** — checked both the
+Project and Shared tabs, all 14 variables enumerated — so production resolves
+to the code default.
+
+**RETIRED PREMISE 2 — "one baseline run on mini" (the run budget's stated
+purpose).** IMPOSSIBLE AS WRITTEN, for the same reason. Extraction and
+sourceRecovery already ran mini in 7.25.0; the OCR substrate cannot. Under
+the current allowlist luna is the ONLY vision model, so **no run can lift the
+"luna artifacts" quarantine on 7.25.0's content numbers** — the quarantine's
+exit condition was never achievable. ELI'S RULING (2026-07-25): the run is
+re-purposed as **Arc F.3 LIVE VALIDATION**, and luna IS the OCR lane, so luna
+content numbers are the product's real baseline, not a confound to be
+eliminated. Lifting the quarantine by dropping an unachievable premise, not
+by meeting it. NOTE THE BONUS: lane assignment is now IDENTICAL to 7.25.0
+(luna OCR, mini downstream), so the run is a CONTROLLED comparison in which
+the only changed variable is Arc F.2/F.3 code — strictly better evidence than
+the "mini baseline" would have produced.
+
+**RETIRED PREMISE 3 — "`uncoveredLineCount` 41 of 399 is consistent with
+lossy OCR rather than lossy assembly" (7.25.0 docket), repeated in
+`6a6e959`'s message as evidence that luna's OCR is poor.** BACKWARDS, and
+provably so. `computeDaySectionSourceCoverage`
+(`lib/extraction/source-coverage.ts:356`) walks `stageInput.sourceText` — THE
+OCR OUTPUT — and counts lines no stage's assembled output covers. The
+denominator IS what OCR produced. A line OCR never read is absent from
+`sourceText` and can appear in neither the 41 nor the 399. **The metric is
+structurally incapable of measuring OCR loss; it can only measure ASSEMBLY
+loss.** Those 41 lines are an assembly-lane lead and should be traced there.
+What DOES survive as OCR-quality evidence: "Josefov" -> "Joselov" is a
+character-level misread, which only OCR can produce. The four missing GT
+stops (Koscom, New York Cafe, Vorosmarty Ter, Gloriette) remain genuinely
+ambiguous between the two lanes — STILL OPEN.
+
+**RETIRED PREMISE 4 — the over-batching / omission lead
+(`OPENAI_OCR_PDF_BATCH_PAGES`), which `4765715` built a whole A/B harness to
+chase.** TESTED DIRECTLY AND DISPROVEN. Same file, same model, same day, one
+variable:
+  - 5 batches x 4 pages -> 17,978 chars, 946 chars/page
+  - 19 batches x 1 page -> 18,252 chars, 961 chars/page
+A 4x change in pages-per-call moved yield **1.5%** — below the 2.6%
+run-to-run nondeterminism measured on the same pages minutes apart (3,563 vs
+3,656 chars, with visibly different field labels). **Batch size does not
+cause omission on this document. Do not re-open this; do not change
+`OPENAI_OCR_PDF_BATCH_PAGES`.** Recorded as a PROVEN NEGATIVE.
+
+**RETIRED PREMISE 5 — "~1,640 chars/page (31,173 / 19)" as a smoke-test
+target.** `scripts/ocr-smoke-test.mjs` prints this baseline in its closing
+message and `4765715` claims its counts are "directly comparable to a live
+run's ocrSummary". BOTH ARE WRONG, for two independent reasons:
+  (a) Production re-OCRs pages the script does not.
+      `findTransportOcrVerificationPages` re-reads up to
+      `MAX_TRANSPORT_VERIFICATION_PAGES = 4` pages with `focus: "transport"`
+      and CONCATENATES that text into the same `textContent`
+      (`ocr-processor.ts` `completedText`), so those characters are counted
+      TWICE in a live run's total. The smoke test does primary passes only.
+  (b) HYPOTHESIS, NOT YET CONFIRMED — **31,173 may be OCR output PLUS the
+      pdf.js text layer, not OCR alone.** Measured this session: OCR single
+      pass = 18,252 (stable across a 4x batch-size change, so this is the
+      true single-pass yield); PDF embedded text layer = 12,760 (pdf.js, per
+      page: pages 17/18/19 are ZERO — pure scans; page 11 is the densest at
+      1,994). **18,252 + 12,760 = 31,012, which is 0.5% from 31,173** —
+      tighter than measured nondeterminism. NEXT SESSION: open the 7.25.0
+      bundle and check WHICH FIELD the 31,173 was summed from. If it is a
+      combined material total, there was never a shortfall and this closes.
+
+**THE PATTERN BEHIND ALL OF THESE, worth naming because it is the actual
+systemic defect:** every one is *two numbers measured differently, compared
+as if they were not*. Four separate alarms today all pointed at "the OCR is
+degraded" and not one was evidence of it. The same root cause produced the
+model swap that cost a run. Before citing any telemetry number against a
+baseline, verify BOTH were measured the same way.
+
+**THE OPENAI OUTAGE (2026-07-25, ~09:00-11:00 UTC) — explains every 500/503
+in today's logs; NOT a code defect.** `scripts/ocr-triage.mjs` (NEW, written
+this session, still untracked) fires four probes that vary model and
+image-payload independently. At the height of it ALL FOUR failed: text+mini
+500, text+luna 500, image+luna 1-page **503 "upstream connect error or
+disconnect/reset before headers. reset reason: connection termination"** (an
+Envoy message — OpenAI's edge could not reach OpenAI's backend), image+luna
+4-page 500. Probe 1 is a 16-token "say ok" call, so no payload, model or
+config explanation exists. Not the network either: well-formed HTTP responses
+carrying OpenAI request IDs. Not auth (401) or quota (429). Corroborated by a
+ChatGPT/Codex `biscuit_baker_service_me_circuit_open` 503 in the same window.
+status.openai.com claimed "fully operational" throughout — **the status page
+lagged the outage by hours; do not trust it over your own probes.** All four
+probes passed afterward and the smoke test then extracted clean text
+(`Delta Flight 5925 / Confirmation #: GHFHPG / DCA -> JFK / Seat: 11C`).
+**DISCIPLINE POINT: a 500 storm is never a reason to change the model.**
+Probe 2 proved luna and mini were failing identically, 500ms apart. Reacting
+to a symptom by changing config is precisely this morning's mistake.
+Also note `OCR_MAX_ATTEMPTS = 2` with no backoff — during a real degradation
+both attempts fail milliseconds apart, so "it retried and still failed" is
+weaker evidence than it looks. Backoff is a reasonable hardening item; it was
+deliberately NOT done mid-incident (one variable at a time).
+
+**WHAT THE RUN IS.** Arc F.3 live validation on `4765715`, batch size
+UNCHANGED at 4 to preserve the controlled comparison. Audit it against:
+OCR substrate on `gpt-5.6-luna` (`materialPipeline.checkpoints[0]
+.metadata.model`, `ocrBatches.rows[*].model`); the Arc F bar unchanged — 5
+legs / 8 transport / 5 stays, zero identity signals in any public field, zero
+PROTECTED-class code tokens in public prose, no cost cards; and F.3's own
+objective — the two identity questions (`customer`, `reserved_by_created`)
+DISMISSED WITH A REASON rather than open, and **no card or note disappearing
+versus the 472411b3 replay** (content gain is the predicate fixes working;
+content loss is a regression).
+
+**STILL OPEN / NOT VERIFIED THIS SESSION.**
+  - The 31,173 composition (premise 5b) — checkable in the bundle.
+  - The four missing GT stops — OCR or assembly, unresolved.
+  - The 41 uncovered lines — now correctly an ASSEMBLY lead, untraced.
+  - Vercel values are all masked `Sensitive`, so `ROAMWOVEN_ENABLE_AI_EXTRACTION`
+    was confirmed to EXIST but not to equal the literal string `"true"`.
+    `lib/env.ts:76` compares with `===`, so `"True"`/`"1"` would silently
+    disable all AI extraction with no error. 5-second check, worth doing.
+  - luna's transcription quality remains the real open issue. Its fix is a
+    BETTER VISION MODEL, smoke-tested on one page first
+    (`scripts/ocr-smoke-test.mjs`), then added to `OCR_VISION_CAPABLE_MODELS`.
+    Never a text model.
+  - The OCR prompt (`lib/ai/openai.ts:594`) opens "Extract all readable
+    travel-planning text" — a SELECTIVE instruction, not a verbatim
+    transcription one. Unexamined as an omission source, and invisible to the
+    batch-size A/B because both arms share it.
+
+**UNCOMMITTED / PENDING (nothing was pushed; HEAD == origin/main ==
+`4765715`).**
+  - `scripts/ocr-triage.mjs` — new, untracked, worth keeping.
+  - `USE FOR TESTING CZECH.pdf` — untracked and **should be gitignored, not
+    committed**. It is real trip data (`Eli J Kamerow`, confirmation
+    `GHFHPG`, seats, flight numbers) — the very values Arc F exists to
+    protect — and `.gitignore` already states the policy for
+    `run-*.json`: "real trip data, never commit". Git history is permanent
+    regardless of repo visibility.
+  - Suggested follow-ups, all docs/scripts with ZERO runtime change: guard
+    the smoke test's baseline comparison behind `--all`; correct or delete
+    the "~1,640 chars/page" claim; record the batching proven-negative in the
+    docket; fix the 7.25.0 docket's mini-rollback and uncovered-line
+    statements at the source, not only here.
+
 ### 2026-07-25 (F.3 session, cloud) — ARC F.3 CODED AND COMMITTED: F1 review-surface identity gate, F2 publish copy split, F3 dead-gate honesty (test-only), F4 Δ3 fixture + ledger v21. FOUR positional privacy-predicate false positives found and fixed by the dark-factory sweep Eli requested. ZERO live runs. NEXT: Eli's local gate → replay all four pinned parses → push → one baseline run on mini → Arc G.
 
 Read first: this entry, ledger v21 (RW-PRI-001 Δ3 + F.3 evidence, RW-QUE-001
