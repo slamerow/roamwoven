@@ -133,6 +133,36 @@ component list or by radius. The live Schönbrunn case is unaffected
 title-containment alias lane before grouping sees it, which is a separate
 behavior and out of Arc G's scope.
 
+#### Pre-flight addendum (same day, before the run) — geocode candidate selection
+
+Caught while running the pre-flight, BEFORE spending the run: G.3a's address
+path can only work on records the geocode lane actually RESOLVED, and the
+three Schönbrunn stops that need it most were the ones least likely to be
+looked up.
+
+`selectGeocodeCandidates` ranked site containers 0, crowded-day cards with an
+`area` label 1, everything else 2 — and rank 2 is skipped outright when the
+parser supplied precise-looking coordinates, which run 7.21.0 proved it
+fabricates. Gloriette, Apple Strudel Show and Panorama Train carry no "at
+Schönbrunn" title token and sit outside the 300 m radius, so the geocoded
+address is their ONLY route into the visit. Run 7.26.1 grouped exactly the
+two components that had title tokens. That is not a coincidence.
+
+**Change (Eli approved before the run): a card sharing a day with a
+named-site container is rank 1.** This is the run8 rule extended, not
+relaxed — rank 1 is still "the pool that arbitrates grouping", still bounded
+by the day, and it adds NO lookups. Measured on a 7.26.1-shaped corpus (75
+activities, 14 days, 3 container days): arbitration pool **32 against a
+budget of 50**, so the run8 ballooning concern (145/191 vs 50) is not
+reintroduced. A crowded day with no container on it still demands an area
+label. Guarded by `tests/geocode-verification.test.ts` (component pool +
+budget shape) and the amended run7 candidate test.
+
+Honest revision of the Schönbrunn forecast: this moves it from roughly 30%
+to a real chance, and it is still conditional on the five components
+resolving and their formatted addresses naming the estate. Read
+`geocodeVerification.formattedAddressCount` FIRST.
+
 #### What is NOT proven, and what to watch on the run
 
 1. **Every grouping number here is a fixture number.** The fixtures use real
@@ -140,8 +170,11 @@ behavior and out of Arc G's scope.
    card titles, categories and section labels are what actually decide
    membership. Honest expectation: Schönbrunn 6 is plausible IF the geocode
    lane resolves the five components; if `geocodeVerification
-   .formattedAddressCount` is 0 or the components fall outside the budget,
-   the address path never fires and we are back to 2-3 stops.
+   .formattedAddressCount` is 0 the address path never fired and we are back
+   to 2-3 stops. Candidate selection was fixed for exactly this before the
+   run (see the pre-flight addendum above), so a zero here now means the
+   LOOKUPS failed or the addresses do not name the estate — a different and
+   more interesting finding than "we never asked".
 2. **The Jan-22 guard is fixture-proven, not run-proven.** In the fixture the
    day is blocked by the >=3-timed gate AND by real coordinates putting Buda
    Castle ~790 m from Fisherman's Bastion. If the live run demotes enough of

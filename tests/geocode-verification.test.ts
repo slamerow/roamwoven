@@ -243,4 +243,86 @@ export default async function run() {
       "crowded-day sights are walk candidates"
     );
   });
+
+  await test("Arc G.3a: a site container's same-day components are lookup candidates, so the address path can reach them", async () => {
+    // The live shape (run 7.26.1, Jan 19): the palace is a container, the
+    // five components carry precise-LOOKING parser coordinates and no area
+    // label. As rank 2 they were skipped outright, so they had no address,
+    // so the only components that could join the visit were the two with an
+    // "at Schönbrunn" title token — which is exactly the 2 of 6 that
+    // grouped.
+    const component = (title: string) => ({
+      approxLatitude: 48.184,
+      approxLongitude: 16.312,
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title,
+    });
+    const candidates = selectGeocodeCandidates([
+      stageWith([
+        component("Schönbrunn Palace"),
+        component("Gloriette"),
+        component("Apple Strudel Show"),
+        component("Panorama Train"),
+        component("Orangeriegarten at Schönbrunn"),
+        component("Palm House at Schönbrunn"),
+      ]),
+    ]);
+
+    const queries = candidates.map((candidate) => candidate.query);
+    for (const title of [
+      "Schönbrunn Palace",
+      "Gloriette",
+      "Apple Strudel Show",
+      "Panorama Train",
+    ]) {
+      assert.ok(
+        queries.some((query) => query.startsWith(title)),
+        `${title} is a lookup candidate`
+      );
+    }
+    assert.equal(
+      candidates[0].rank,
+      0,
+      "the container is still verified first"
+    );
+  });
+
+  await test("Arc G.3a: the arbitration pool stays inside the budget on a trip-shaped corpus", async () => {
+    // Run8's concern was a candidate pool ballooning past the budget
+    // (145/191 vs 50). The promotion is bounded by the day, so assert the
+    // number rather than trusting the rule to stay cheap: a 14-day trip
+    // with three site-container days, ~6 cards a day.
+    const days = Array.from({ length: 14 }, (_, index) => {
+      const day = `2019-01-${String(12 + index).padStart(2, "0")}`;
+      const containerDay = [2, 4, 10].includes(index);
+      return Array.from({ length: 6 }, (_, cardIndex) => ({
+        approxLatitude: 48.184 + cardIndex / 1000,
+        approxLongitude: 16.312,
+        city: "Vienna",
+        date: day,
+        itemType: "activity",
+        title:
+          containerDay && cardIndex === 0
+            ? `Site ${index} Palace`
+            : `Card ${index}-${cardIndex}`,
+      }));
+    }).flat();
+
+    const candidates = selectGeocodeCandidates([stageWith(days)]);
+    const arbitrationPool = candidates.filter(
+      (candidate) => candidate.rank <= 1
+    );
+
+    assert.ok(
+      arbitrationPool.length <= 50,
+      `the pool that decides grouping fits inside the budget (got ${arbitrationPool.length})`
+    );
+    assert.equal(
+      candidates.filter((candidate) => candidate.rank === 0).length,
+      3,
+      "one container per container day"
+    );
+  });
 }

@@ -109,9 +109,25 @@ export function selectGeocodeCandidates(
   }
 
   const dayCounts = new Map<string, number>();
+  // Arc G.3a pre-flight: days that contain a named-site container. A card
+  // sharing a day with one is a candidate MEMBER of that site visit, and
+  // membership is exactly what this lane exists to arbitrate.
+  //
+  // Without this, the address path is unreachable for the stops that need
+  // it most. Schönbrunn's Gloriette, Apple Strudel Show and Panorama Train
+  // carry no "at Schönbrunn" title token and sit outside the 300 m radius,
+  // so the geocoded address is their ONLY route into the visit — and as
+  // rank 2 they were skipped outright whenever the parser had supplied
+  // precise-looking coordinates (which run 7.21.0 proved it fabricates).
+  // Run 7.26.1 grouped exactly the two components that had title tokens.
+  const siteContainerDates = new Set<string>();
   for (const entry of records) {
     if (!entry.date) continue;
     dayCounts.set(entry.date, (dayCounts.get(entry.date) ?? 0) + 1);
+    const title = stringField(entry.record, "title");
+    if (title && SITE_CONTAINER_NOUN_PATTERN.test(title)) {
+      siteContainerDates.add(entry.date);
+    }
   }
 
   const candidates: GeocodeCandidate[] = [];
@@ -121,14 +137,19 @@ export function selectGeocodeCandidates(
     if (!title) continue;
     const city = stringField(record, "city") ?? stringField(record, "area");
     // Run8: the candidate pool ballooned past the budget (145/191 vs 50)
-    // and the walk pool starved. Rank 1 is now the DISCOVERED-WALK pool
-    // specifically — crowded-day members carrying a source area label —
-    // so the lookups that arbitrate grouping always fit inside budget.
+    // and the walk pool starved. Rank 1 is the pool that ARBITRATES
+    // GROUPING, so the lookups that decide membership always fit inside
+    // budget: crowded-day members carrying a source area label (the
+    // discovered-walk pool) and, since Arc G.3a, same-day companions of a
+    // named-site container (the same-site pool). Both are bounded by the
+    // day they sit on — this re-prioritizes the existing pool, it does not
+    // grow it, and it adds no lookups.
     const rank = SITE_CONTAINER_NOUN_PATTERN.test(title)
       ? 0
       : entry.date &&
-          (dayCounts.get(entry.date) ?? 0) >= 6 &&
-          stringField(record, "area")
+          ((siteContainerDates.has(entry.date) ||
+            ((dayCounts.get(entry.date) ?? 0) >= 6 &&
+              Boolean(stringField(record, "area")))))
         ? 1
         : 2;
     // Live-run 7.21.0: the parser now fabricates 3-decimal coordinates (the

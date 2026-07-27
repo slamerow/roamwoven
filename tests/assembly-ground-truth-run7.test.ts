@@ -292,6 +292,16 @@ export default async function run() {
               itemType: "activity",
               title: "Colosseum",
             },
+            // Arc G.3a boundary: a crowded day with NO site container on it
+            // still demands an area label. Trevi has precise coords, no
+            // area, and no container to sit beside — it stays rank 2.
+            ...Array.from({ length: 7 }, (_, index) => ({
+              approxLatitude: 41.9009,
+              approxLongitude: 12.4833,
+              date: "2019-01-14",
+              itemType: "activity",
+              title: `Rome stop ${index + 1}`,
+            })),
           ],
           missingDetails: [],
           places: [],
@@ -311,13 +321,33 @@ export default async function run() {
       titles.some((query) => /parliament/i.test(query)),
       "area-labeled crowded-day members (the walk pool) are lookup candidates despite precise parser coords"
     );
+    // Arc G.3a: a card sharing a day with a named-site container is a
+    // candidate MEMBER of that visit, so it is verified even without an
+    // area label. This is the run8 rule extended, not relaxed: rank 1 is
+    // still "the pool that arbitrates grouping", and it is still bounded
+    // by the day. Without it the address path is unreachable for exactly
+    // the stops that need it (Schönbrunn's Gloriette, Apple Strudel Show
+    // and Panorama Train carry no title token and sit outside 300 m).
     assert.ok(
-      !titles.some((query) => /shoes on the danube/i.test(query)),
-      "a crowded-day member WITHOUT an area label and with precise coords stays rank-2 and skips (run8 budget fix)"
+      titles.some((query) => /shoes on the danube/i.test(query)),
+      "a same-day companion of a site container is verified — membership is what this lane arbitrates"
+    );
+    assert.ok(
+      !titles.some((query) => /rome stop/i.test(query)),
+      "but a crowded day with NO site container still demands an area label (run8 budget fix stands)"
     );
     assert.ok(
       !titles.some((query) => /colosseum/i.test(query)),
       "background records with precise parser coords still skip the budget"
+    );
+    // Run8's actual concern was budget pressure, so assert the shape of
+    // the pool rather than trusting the ranking to stay cheap.
+    const arbitrationPool = candidates.filter(
+      (candidate) => candidate.rank <= 1
+    );
+    assert.ok(
+      arbitrationPool.length <= 8,
+      `the grouping-arbitration pool stays bounded by the day (got ${arbitrationPool.length})`
     );
   });
 
