@@ -6,6 +6,214 @@
 
 ## Current State
 
+### 2026-07-27 (later) — ARC G IMPLEMENTED: note anchoring, transport field repair, grouping address + claim ledger (Claude/Cowork cloud session; COMMITTED, NOT PUSHED, NOT RUN)
+
+**Read first:** `docs/arc-g-scope-2026-07-27.md` (the locked scope, including
+the demotion-lane addendum and the Jan-22 trap), then the ledger entries below.
+Suite **76 files green**, `tsc` clean. Nothing has been run live — every claim
+below is a FIXTURE claim until a run says otherwise.
+
+**Run budget for G: 1.** Eli pushes; audit that run before starting H.
+
+#### What shipped
+
+**G.1 — note anchoring (`draft-to-structured-trip.ts`).** Trip range is now
+SPINE-ANCHORED: legs, transport and stays define the window, and an item date
+participates only inside a window it cannot itself create. A draft with no
+spine keeps the old behavior. Notes are no longer structurally unflaggable —
+`reviewRequired: itemType === "note" ? false : …` is gone. An UNDATED note
+stays a clean draft (that is the normal city-note shape); a note whose date
+anchors to no leg is `needs_review`. Dated-but-unanchored ACTIVITIES are
+deliberately unchanged — demotion lane, out of scope. `unanchoredDraftItemDates()`
+is exported for audit tooling. Publish still never blocks (verified in the
+fixture, not just asserted in prose).
+
+**G.2 — transport field repair (`lib/extraction/transport-field-repair.ts`,
+NEW).** Two deterministic defects: an endpoint type-incompatible with its
+record (bare IATA code on train/bus/ferry; rail-station marker on a flight)
+and `arrivalTime === departureTime`. Both are REPAIRED from the matching
+source anchor — the anchors already carried Wien Hbf 13:23 and
+Budapest-Keleti 13:19, and `trip-extraction-audit-diagnostics.ts:591` was
+already saying "source text is authoritative for times" while only PRINTING
+the disagreement. Nothing consumed it; now something does.
+- **Eli's ruling this session on the fallback:** when a value is provably
+  corrupt and no anchor supplies the truth, CLEAR it and raise ONE typed
+  transport question — asked because we destroyed a known value, never
+  because the source was merely sparse. A source that never stated an
+  arrival stays silent exactly as before, so no new question class fires on
+  sparse trips.
+- Pure, idempotent, re-runs in the retry lane (anchors now threaded into
+  `reapplyCanonicalOutputInvariants`). Repairs land in
+  `usage.openai.transportFieldRepairs` + `canonicalization.transportFieldRepairCount`
+  — support telemetry, never maker-facing.
+- The repaired fields are marked decided, so `createCanonicalConflictQuestions`
+  cannot also ask about them. **Both live questions should disappear.**
+
+**G.3a — the geocoder's formatted address is finally kept.**
+`parseGeocodeResponse` returned `{lat,lng}` and threw away a field we were
+already paying for. It now returns `formattedAddress` too, attached as
+`verifiedFormattedAddress` (no extra lookup, same proximity-only posture,
+counted as `geocodeVerification.formattedAddressCount`). A child whose
+address names the container is a same-site member regardless of radius —
+this is what reaches the Gloriette at ~800 m. Address tokens must be >=5
+chars and exclude generic site nouns and trip cities, so "palace" and
+"Vienna" can never carry containment. Confirmed members with VERIFIED
+coordinates may extend the site footprint (cap 1.2 km, >=2 confirmed
+members, untimed + verified-coordinate members only).
+
+**G.3b — grouping claim ledger (`lib/extraction/grouping-claim-ledger.ts`,
+NEW).** The bare `Set` is gone. Claims carry a STRENGTH (hierarchy vs
+proximity-only); only a geo claim is contestable, only when the holder keeps
+two stops; an abandoned decision RELEASES its pieces instead of stranding
+them; contention is telemetry (`evidence.groupingClaims`).
+
+**Bonus fix, and the one most likely to matter later:** same-site membership
+was judged TWICE with different rules — the lane matched container tokens on
+whole words and distrusted unverified coordinates once the geocode lane had
+run, while the executor's re-verification used a SUBSTRING match and trusted
+any precise-looking coordinate. Both now call one shared membership context.
+A decision can no longer be built under one rule and audited under another.
+**Note the direction of the change:** the executor's title matching got
+STRICTER (whole word, not substring) and its coordinate policy got stricter
+(verified-only once the geocode lane ran). The address path is what pays that
+back. If a group that used to survive verification now disappears, this is the
+first place to look, and `evidence.groupingClaims` will show it.
+
+#### The fixture bar (`tests/assembly-ground-truth-arc-g.test.ts`)
+
+| Target | Result |
+|---|---|
+| Schönbrunn groups all 6 stops | PASS — parent + 5, Gloriette joins on address |
+| Prague Castle groups | PASS |
+| Malá Strana walk can form | PASS — and on the SAME day as the castle group |
+| Jan-15 walking tour groups | PASS (resolver lane, booked-tour parent) |
+| **Jan 22 forms NO group** | PASS — both lanes silent, no call |
+| Trip range 2019-01-12..01-25 with 2018 notes present | PASS |
+| Zero transport questions | PASS (`tests/transport-field-repair.test.ts`) |
+
+Negative controls that also pass: a Vienna museum 4 km away never joins the
+palace; a shared city or the word "palace" is not containment; airport
+transfers and flights keep their IATA codes; an anchor that would
+re-introduce the same defect is refused rather than trusted.
+
+#### Two adversarial review passes were run over this diff — read this
+
+The first pass found **10 defects in my own implementation**, the second
+found **6 more, mostly inside the fixes**. All are closed with regression
+tests. Recording the two that would have cost a run:
+
+1. **G.2 would have silently failed.** `reconcileCanonicalConflicts` rebuilds
+   every conflict from the observations and recomputes `requiresReview`, so
+   clearing that flag BEFORE it ran was a no-op and the "equally
+   authoritative" question came straight back. The repair now runs after
+   that pass AND records `_canonicalRepairedTransportFields` on the piece,
+   which the conflict-question lane consults — ordering-independent.
+2. **The repair could have written a WRONG value.** The audit-grade anchor
+   join accepts two shared route tokens, and adjacent rail legs always share
+   the interchange station — a Wien→Salzburg anchor matched the
+   Salzburg→Innsbruck row. A repair now requires CORROBORATION (departure
+   time, confirmation, or transport number) and a single agreed value across
+   all corroborating anchors; disagreement clears and asks. Turning a maker
+   question into silently wrong data would have been worse than the defect.
+
+Also fixed, each with a test: the spine window could shrink a trip BELOW its
+own day records (a last leg with no `leaveDate`); notes on the final day of
+every trip were being flagged (leg lookup is half-open); `"Terminal"` as
+airport context would have exempted nearly every transport row in the corpus;
+generic site nouns ("palace", "grounds") and city names read as source-
+confirmed containment; a walk that failed to form still ejected stops from a
+healthy site visit; the executor applied the deterministic lane's strict
+coordinate policy to resolver decisions built without it.
+
+**A known, deliberate limitation:** a container named only by a trip city and
+a generic noun ("Prague Castle") has no distinctive tokens left after
+filtering, so it has no title-token path — it groups via its description's
+component list or by radius. The live Schönbrunn case is unaffected
+("Schönbrunn" is neither). The "X at Prague Castle" shape is consumed by the
+title-containment alias lane before grouping sees it, which is a separate
+behavior and out of Arc G's scope.
+
+#### What is NOT proven, and what to watch on the run
+
+1. **Every grouping number here is a fixture number.** The fixtures use real
+   coordinates and realistic Google-shaped addresses, but the live parser's
+   card titles, categories and section labels are what actually decide
+   membership. Honest expectation: Schönbrunn 6 is plausible IF the geocode
+   lane resolves the five components; if `geocodeVerification
+   .formattedAddressCount` is 0 or the components fall outside the budget,
+   the address path never fires and we are back to 2-3 stops.
+2. **The Jan-22 guard is fixture-proven, not run-proven.** In the fixture the
+   day is blocked by the >=3-timed gate AND by real coordinates putting Buda
+   Castle ~790 m from Fisherman's Bastion. If the live run demotes enough of
+   the day to drop below 3 timed cards, that first gate disappears. Check
+   `evidence.groupingClaims.claimsByLane.walk` on Jan 22 specifically.
+3. **`CROWDED_DAY_VISIBLE_CARDS` was NOT touched** — current card counts are
+   inflated by missed demotion (Jan 19 shows 12 where the key says 2), so
+   calibrating against them would bake in the defect.
+4. **Card count.** G removes the 2 note overage and may fold ~9 stops into
+   parents. Expect **65-69**, not 49. Debris routing and the demotion lane
+   are still out. That is the plan, not a miss.
+5. **OCR substrate unchanged: `gpt-5.6-luna`.** Not touched, not discussed,
+   not a variable in this run. mini is text-only (`lib/env.ts:18`).
+
+#### Audit bar for the run
+
+MUST PASS: 5 legs / 8 transport / 5 stays; trip header reads **January 12-25,
+2019** and 14 days; **zero transport questions** and `arrival` = Wien Hbf
+13:23 / Budapest-Keleti 13:19 on the two train rows; Schönbrunn parent with
+>=4 sub-stops; **no group on Jan 22**; no wrong walk anywhere; privacy clean
+(Δ3 applied before scoring item 6).
+NEW TELEMETRY TO READ FIRST: `geocodeVerification.formattedAddressCount`,
+`evidence.groupingClaims`, `canonicalization.transportFieldRepairCount`,
+`usage.openai.transportFieldRepairs`. If a repair shows
+`cleared_pending_review`, the anchor join failed — that is a lead, not a
+success.
+
+#### Ledger
+
+Updated in the same change: RW-SRC-001 (G.2 repair + question discipline),
+RW-GRP-001 (G.3a address path, G.3b ledger, one shared membership context),
+RW-PLC-001 (G.1 spine-anchored range + flaggable notes). All three keep
+`PARTIAL` — the fixtures are meaningful behavioral coverage, but no live run
+has exercised any of it.
+
+### 2026-07-27 (7.26.1 audit + Arc G scoping, cloud) — **NO CODE CHANGES.**
+
+**Full entry: `docs/arc-g-scope-2026-07-27.md`.** Read it before touching
+grouping — this session re-derived several conclusions already recorded in this
+file (the ~300 m radius, Gloriette ~800 m out, the "geo coordinate + logic"
+rider at line ~1133). Read `next-session.md` FIRST next time.
+
+Headline, all VERIFIED against the live qa-bundle or source:
+
+- **7.26.1 ran OCR on `gpt-5.6-luna`.** "Roll back to mini" is a RETIRED
+  premise — mini is text-only (`lib/env.ts:18`), it was tried 2026-07-25 and
+  destroyed a run. Eli's decision: stay on luna, hold the substrate constant.
+- Spine still GT-exact (5/8/5, 8th clean run). Content regressed: active
+  activities 69 → **75** (GT **49**, settled with Eli this session,
+  superseding "GT ≈ 40"), questions 8 → **11** (GT 3), notes 3 → 5,
+  grouped stops **2**.
+- **2018 header root cause found:** two `itemType: note` records with
+  `legId: null` carry 2018 dates; `trip.startDate` equals one of them exactly.
+  Notes are also structurally unflaggable
+  (`draft-to-structured-trip.ts:481`/`:484`).
+- **Transport field bleed:** `arr "JFK"` on the Prague→Vienna train (arrival
+  TIME is GT-exact — location only), and `arrivalTime == departureTime` on the
+  Vienna→Budapest train. Both reach the maker as "equally authoritative"
+  questions; both are deterministic with a known GT answer.
+- **The approved grouping rider was never built.** `formattedAddress` appears
+  NOWHERE in the repo; `parseGeocodeResponse`
+  (`geocode-verification.ts:152–173`) discards everything but `{lat,lng}`. The
+  claim ledger was never built either — the walk-lane guard is still at
+  `evidence-clustering.ts:8326`. `sameEntity` DID land.
+
+**Arc G scope LOCKED with Eli: correctness + grouping.** G.1 note anchoring,
+G.2 cross-record field bleed, G.3 the two approved grouping pieces. Debris
+routing and the idea-vs-plan demotion lane (~19 cards between them, demotion
+NEVER audited) are explicitly OUT — expect G to land at 65–69 cards, not 49,
+and treat that as success. Publish gate: warn loudly, do not block.
+
+
 ### 2026-07-25 (OCR incident + verification session, cloud) — **NO CODE CHANGES. The OCR break was already reverted before this session began; the remaining work was proving it and DEMOLISHING FIVE WRONG PREMISES sitting in these docs.** One live run spent: the Arc F.3 live validation (re-purposed from the impossible "mini baseline" — see below). NEXT: audit that run.
 
 **HOW TO READ THIS ENTRY — it is a correction record, NOT a verdict on the

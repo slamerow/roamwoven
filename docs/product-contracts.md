@@ -297,8 +297,30 @@ path is bypassed.
   supersession is clear, equal-authority alternatives remain one Question.
 - Evidence: Canonical source-hierarchy tests pass, but the latest live run still
   misattached an explicit train ticket and created source-obvious Questions.
+  2026-07-27 Arc G.2 (run 7.26.1 field bleed): a transport field that CANNOT
+  belong to its record is not an equal-authority contradiction and never
+  becomes a Question. Two defect shapes are deterministic:
+  `arrivalLocation` type-incompatible with the record (a train, bus or ferry
+  arriving at a bare IATA code — "JFK" on the RegioJet row, legitimate on the
+  four Delta rows in the same trip; a flight departing a Hauptbahnhof), and
+  `arrivalTime` equal to its own `departureTime` (the ÖBB row, a verbatim
+  field copy — the transport analogue of the locked degenerate-time repair
+  already applied to activities). Both are REPAIRED from the matching
+  source-text anchor, which already carries the right answers (Wien Hbf
+  13:23, Budapest-Keleti 13:19) and was previously only reported against by
+  the audit diagnostic. When no anchor supplies the truth the bad value is
+  CLEARED and one typed transport Question is raised — asked only because a
+  known value was destroyed, never because a source was merely sparse
+  (Eli's ruling 2026-07-27). Repairs are support telemetry
+  (`usage.openai.transportFieldRepairs`, `canonicalization
+  .transportFieldRepairCount`), never maker-facing mechanics. The pass is
+  pure, idempotent, and re-runs in the retry lane. Enforced by
+  `tests/transport-field-repair.test.ts` (both live shapes, negative
+  controls: airport transfers, flights, sparse rows, and an anchor that
+  would re-introduce the defect).
 - Tests: `tests/canonical-factory-boundary.test.ts`,
-  `tests/source-transport-anchors.test.ts`
+  `tests/source-transport-anchors.test.ts`,
+  `tests/transport-field-repair.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
@@ -425,10 +447,39 @@ path is bypassed.
   additive migration alongside pinning). Enforced by
   `tests/geocode-verification.test.ts` and the run6 verified-coords
   grouping check.
+  2026-07-27 Arc G.3 — the two approved pieces that were never built (CEO
+  direction 2026-07-23, "geo coordinate + logic"; scope locked
+  2026-07-27). (a) FORMATTED ADDRESS: the geocoder's `formatted_address`
+  is captured alongside the coordinates it already returns (no extra
+  lookup, same proximity-only posture) and attached as
+  `verifiedFormattedAddress`. A child whose address names the container is
+  a same-site member regardless of radius — this is what admits
+  Schönbrunn's Gloriette, ~800 m out, which the locked ~300 m radius
+  refuses BY DESIGN. Address tokens must be >=5 characters and are
+  filtered of generic site nouns and trip city names, so sharing a city —
+  or the word "palace" — is never containment. Confirmed members carrying
+  VERIFIED coordinates may extend the site footprint (capped at 1.2 km,
+  minimum two confirmed members, untimed and verified-coordinate members
+  only). (b) CLAIM LEDGER (`lib/extraction/grouping-claim-ledger.ts`):
+  lane contention is arbitrated, not decided by statement order. Claims
+  carry a strength — source/address HIERARCHY or proximity-only GEO — and
+  only a geo claim is contestable, only by a lane that needs it, and only
+  when the holder still keeps two stops. An abandoned decision RELEASES
+  its pieces instead of stranding them out of the walk pool. Contention is
+  visible in run telemetry (`evidence.groupingClaims`). Membership is now
+  judged by ONE shared context used by both the decision creator and the
+  execution verifier, ending the whole-word-vs-substring and
+  verified-coordinate divergence between them. Enforced by
+  `tests/assembly-ground-truth-arc-g.test.ts` (Schönbrunn's six stops,
+  Prague Castle and the Malá Strana walk on the same day, the Jan-15
+  booked walking tour, and the JAN-22 NO-GROUP guard the demotion-lane
+  audit demanded) and `tests/grouping-claim-ledger.test.ts`.
 - Tests: `tests/canonical-evidence-resolver.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`,
-  `tests/geocode-verification.test.ts`
+  `tests/geocode-verification.test.ts`,
+  `tests/assembly-ground-truth-arc-g.test.ts`,
+  `tests/grouping-claim-ledger.test.ts`
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -910,9 +961,25 @@ exact live payload shapes.
   that moves the same canonical record. The remaining gap is a deterministic
   placement fallback when the canonical trip spine itself has no usable place
   boundary.
+  2026-07-27 Arc G.1 (run 7.26.1 header defect): the trip date range is
+  SPINE-ANCHORED. Legs, transport rows and stays define the window; an
+  itinerary item's date participates only when it falls inside a window it
+  cannot itself create, and a draft with no spine at all keeps the previous
+  behavior. Run 7.26.1 shipped a 2018 header over a 16-day trip because two
+  `itemType: note` records anchored to no leg carried 2018 dates and one of
+  them became `trip.startDate` verbatim — while the spine (5 legs / 8
+  transport / 5 stays) was GT-exact beside it. Notes also stopped being
+  structurally unflaggable: `reviewRequired` was hardcoded false for every
+  note, so a note with a garbage date could never surface. An UNDATED note
+  is the normal City Note shape and stays a clean draft; a note carrying a
+  date that anchors to no leg is now `needs_review`. Dated-but-unanchored
+  ACTIVITIES are deliberately unchanged — that is demotion-lane work, out
+  of Arc G's scope. Publishing still never blocks (GT:269). Enforced by
+  `tests/assembly-ground-truth-arc-g.test.ts`.
 - Tests: `tests/generated-trip-model.test.ts`,
   `tests/evidence-clustering.test.ts`,
-  `tests/structured-assembly-idempotency.test.ts`
+  `tests/structured-assembly-idempotency.test.ts`,
+  `tests/assembly-ground-truth-arc-g.test.ts`
 
 ## RW-REV-001 — Calls explain; Questions request material decisions
 

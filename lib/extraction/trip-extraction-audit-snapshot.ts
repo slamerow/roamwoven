@@ -158,6 +158,8 @@ export function createCanonicalizationSummary(usage: unknown) {
       Number(evidence.sourceAnchorObservationCount) || 0,
     suppressedStandaloneAnchorCount:
       Number(evidence.suppressedWeakAnchorCount) || 0,
+    transportFieldRepairCount:
+      Number(evidence.transportFieldRepairCount) || 0,
     undisposedObservationCount: Math.max(0, observationCount - dispositionCount),
   };
 }

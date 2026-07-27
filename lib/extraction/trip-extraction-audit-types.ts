@@ -198,6 +198,8 @@ export type TripExtractionAuditReport = {
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedStandaloneAnchorCount: number;
+    // Arc G.2: deterministic transport repairs applied this run.
+    transportFieldRepairCount: number;
     undisposedObservationCount: number;
   };
   diagnostics: TripExtractionAuditDiagnostic[];

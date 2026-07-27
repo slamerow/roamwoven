@@ -1509,6 +1509,9 @@ export async function extractTripDraftWithOpenAI({
       },
       evidence: evidence.summary,
       parserArtifactRepairs: evidence.parserArtifactRepairs,
+      // Arc G.2 support telemetry: every transport field the pipeline
+      // repaired or cleared, and the anchor it used. Never maker-facing.
+      transportFieldRepairs: evidence.transportFieldRepairs,
       sourceCoverage,
       geocodeVerification: geocodeVerification.usage,
     sourceRecovery: recovery.usage,

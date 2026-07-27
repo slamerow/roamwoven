@@ -43,12 +43,19 @@ const CONFIG = {
   timeoutMs: 1000,
 };
 
-function okFetch(lat: number, lng: number) {
+function okFetch(lat: number, lng: number, formattedAddress?: string) {
   return async () =>
     ({
       ok: true,
       json: async () => ({
-        results: [{ geometry: { location: { lat, lng } } }],
+        results: [
+          {
+            ...(formattedAddress
+              ? { formatted_address: formattedAddress }
+              : {}),
+            geometry: { location: { lat, lng } },
+          },
+        ],
         status: "OK",
       }),
     }) as Response;
@@ -104,6 +111,58 @@ export default async function run() {
     for (const field of ["title", "date", "city", "description", "itemType", "category"]) {
       assert.equal(card[field], before[field], `${field} never changes`);
     }
+  });
+
+  await test("Arc G.3a: the formatted address in the response is KEPT, and it is still proximity-only", async () => {
+    // The lane was already paying for this field and parsing it away. It
+    // is what lets a same-site visit recognize a stop 800 m out that the
+    // radius refuses (Schönbrunn's Gloriette).
+    const card: Record<string, unknown> = {
+      category: "art_culture",
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Gloriette",
+    };
+    const before = { ...card };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: okFetch(
+        48.1774,
+        16.3121,
+        "Gloriette, Schönbrunner Schloßstraße 47, 1130 Wien, Austria"
+      ) as unknown as typeof fetch,
+      stages: [stageWith([card])],
+    });
+
+    assert.equal(result.usage.resolvedCount, 1);
+    assert.equal(result.usage.formattedAddressCount, 1);
+    assert.equal(
+      card.verifiedFormattedAddress,
+      "Gloriette, Schönbrunner Schloßstraße 47, 1130 Wien, Austria"
+    );
+    for (const field of ["title", "date", "city", "itemType", "category"]) {
+      assert.equal(card[field], before[field], `${field} never changes`);
+    }
+  });
+
+  await test("Arc G.3a: a response without a formatted address still resolves on coordinates alone", async () => {
+    const card: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Gloriette",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: okFetch(48.1774, 16.3121) as unknown as typeof fetch,
+      stages: [stageWith([card])],
+    });
+
+    assert.equal(result.usage.resolvedCount, 1);
+    assert.equal(result.usage.formattedAddressCount, 0);
+    assert.equal(card.verifiedFormattedAddress, undefined);
+    assert.equal(card._geoVerified, true);
   });
 
   await test("hard per-trip budget: lookups stop at maxLookups and the overflow is counted, never silent", async () => {

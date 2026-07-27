@@ -25,6 +25,7 @@ import {
   prepareCanonicalEvidencePieces,
 } from "@/lib/extraction/canonical-trip-assembly";
 import { reapplyCanonicalOutputInvariants } from "@/lib/extraction/evidence-clustering";
+import { getSourceTransportAnchorsFromDraft } from "@/lib/extraction/source-transport-anchors";
 import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
@@ -584,6 +585,14 @@ export async function POST(
       const retry = reapplyCanonicalOutputInvariants({
         pieces: currentPieces,
         sensitiveDetails: draftSensitiveDetails,
+        // Arc G.2: the anchors ride on the assembled draft, so the retry
+        // lane repairs transport fields from the same source evidence
+        // cluster time used. No question is minted here — dispositions
+        // and manifests are already stamped, and any defect this pass can
+        // still see was introduced AFTER the repair already ran.
+        sourceTransportAnchors: getSourceTransportAnchorsFromDraft(
+          assembly.draft
+        ),
       });
       retryChanged = retry.changed;
 

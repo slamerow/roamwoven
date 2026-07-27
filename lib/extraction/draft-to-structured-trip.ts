@@ -169,14 +169,44 @@ function getFinalLeaveDate(legs: TripLegRecord[]) {
     .at(-1) ?? null;
 }
 
-function collectDraftDates(draft: unknown) {
-  const dates: string[] = [];
-  const addDate = (value: string | null) => {
-    if (isIsoDate(value)) {
-      dates.push(value);
-    }
-  };
-  const addObjectDates = (collection: string, fields: string[]) => {
+// Arc G.1 — trip-range derivation is SPINE-ANCHORED.
+//
+// Run 7.26.1 shipped a trip header reading 2018 and a 16-day trip for a
+// 14-day itinerary. Root cause: two `itemType: note` records carried a
+// stray 2018 date, anchored to no leg (`legId: null`), and still reached
+// `trip.startDate` because the range was the min/max of EVERY date in the
+// draft. The spine itself (5 legs / 8 transport rows / 5 stays) was
+// GT-exact at the time — the range was wrong while the evidence for the
+// right range sat next to it.
+//
+// Rule: legs, transport and stays define the window, and an item date
+// participates unless it sits FAR outside that window. Two guards keep the
+// fix from becoming a worse defect than the one it replaces:
+//
+//   - The window must be a window. One spine date is a point, not a range
+//     (a trip whose only dated spine record is the outbound flight), so a
+//     single distinct spine date clips nothing.
+//   - Dates just past the edge are kept. A last leg with no `leaveDate`, or
+//     a final day the spine never names, is ordinary — clipping there would
+//     produce a trip whose own day records fall outside its date range.
+//     A stray YEAR (2018 against a 2019 spine) is 300+ days out and is
+//     nowhere near this slack.
+const SPINE_WINDOW_SLACK_DAYS = 7;
+// A single dated spine record (one one-way flight, places without dates) is
+// a POINT, not a range, so the tight slack cannot apply — but "no window at
+// all" is how the 2018 header gets back in. A lone spine date anchors a
+// generous window instead: a stray YEAR is 300+ days out and still refused,
+// while any plausible trip around that record survives untouched.
+const SPINE_ANCHOR_DRIFT_DAYS = 90;
+
+type DraftDateSurvey = {
+  itemDates: string[];
+  spineDates: string[];
+};
+
+function surveyDraftDates(draft: unknown): DraftDateSurvey {
+  const collect = (collection: string, fields: string[]) => {
+    const dates: string[] = [];
     for (const item of getArray(draft, collection)) {
       const object =
         item && typeof item === "object" && !Array.isArray(item)
@@ -188,17 +218,55 @@ function collectDraftDates(draft: unknown) {
       }
 
       for (const field of fields) {
-        addDate(getString(object, field));
+        const value = getString(object, field);
+        if (isIsoDate(value)) {
+          dates.push(value);
+        }
       }
     }
+    return dates;
   };
 
-  addObjectDates("activities", ["date"]);
-  addObjectDates("transport", ["date"]);
-  addObjectDates("places", ["arriveDate", "leaveDate"]);
-  addObjectDates("stays", ["checkIn", "firstNightDate", "checkOut"]);
+  return {
+    itemDates: collect("activities", ["date"]),
+    spineDates: [
+      ...collect("transport", ["date"]),
+      ...collect("places", ["arriveDate", "leaveDate"]),
+      ...collect("stays", ["checkIn", "firstNightDate", "checkOut"]),
+    ],
+  };
+}
 
-  return Array.from(new Set(dates)).sort();
+function spineDateWindow(spineDates: string[]) {
+  const sorted = Array.from(new Set(spineDates)).sort();
+
+  if (sorted.length === 0) {
+    return null;
+  }
+
+  const slack =
+    sorted.length === 1 ? SPINE_ANCHOR_DRIFT_DAYS : SPINE_WINDOW_SLACK_DAYS;
+
+  return {
+    end: addDays(sorted[sorted.length - 1], slack),
+    sorted,
+    start: addDays(sorted[0], -slack),
+  };
+}
+
+function collectDraftDates(draft: unknown) {
+  const { itemDates, spineDates } = surveyDraftDates(draft);
+  const window = spineDateWindow(spineDates);
+
+  if (!window) {
+    return Array.from(new Set([...spineDates, ...itemDates])).sort();
+  }
+
+  const anchoredItemDates = itemDates.filter(
+    (date) => date >= window.start && date <= window.end
+  );
+
+  return Array.from(new Set([...window.sorted, ...anchoredItemDates])).sort();
 }
 
 function createTripRecord({
@@ -427,11 +495,23 @@ function createItemRecords({
   draft,
   legs,
   tripId,
+  tripRange,
 }: {
   draft: unknown;
   legs: TripLegRecord[];
   tripId: string;
+  tripRange: { endDate: string | null; startDate: string | null };
 }): TripItemRecord[] {
+  // Arc G.1: the flag test is "is this date outside the trip", NOT "did it
+  // find a leg". Leg lookup is half-open (`date < leaveDate`), so the final
+  // day of the trip and every leg-to-leg handover day legitimately match no
+  // leg — flagging on that would put a `needs_review` badge on the
+  // fly-home note of every well-formed trip.
+  const outsideTripRange = (date: string | null) => {
+    if (!date) return false;
+    if (tripRange.startDate && date < tripRange.startDate) return true;
+    return Boolean(tripRange.endDate && date > tripRange.endDate);
+  };
   return getArray(draft, "activities").map((item, index) => {
     const activity = item && typeof item === "object" && !Array.isArray(item)
       ? (item as DraftObject)
@@ -454,6 +534,22 @@ function createItemRecords({
     const leg = candidateLeg;
     const categoryId = exactCanonicalCategoryId(activity);
     const parentCanonicalId = getString(activity, "_canonicalParentPieceId");
+    // Arc G.1: notes are no longer structurally unflaggable.
+    //
+    // `itemType === "note" ? false : ...` meant a note could carry any
+    // date at all — including the 2018 dates that re-dated the whole trip
+    // in run 7.26.1 — and still project as a clean draft record nobody
+    // ever looked at. An UNDATED note is the normal city-note shape and
+    // stays clean. A note carrying a date that anchors to no leg is the
+    // defect shape, and it now shows up in review.
+    //
+    // Non-note behavior is deliberately unchanged here: dated-but-
+    // unanchored ACTIVITIES are a demotion-lane question, and the demotion
+    // lane is out of Arc G's scope.
+    const flagged =
+      itemType === "note"
+        ? recoveryRequired || outsideTripRange(finalDate)
+        : recoveryRequired || !finalDate;
 
     return {
       address: getString(activity, "address"),
@@ -475,15 +571,11 @@ function createItemRecords({
       parentItemId: parentCanonicalId
         ? `${tripId}-item-${parentCanonicalId}`
         : null,
-      reviewRequired:
-        itemType === "note" ? false : recoveryRequired || !finalDate,
+      reviewRequired: flagged,
       sortOrder: index,
       sourceConfidence: "medium",
       startTime,
-      status:
-        (recoveryRequired || !finalDate) && itemType !== "note"
-          ? "needs_review"
-          : "draft",
+      status: flagged ? "needs_review" : "draft",
       summary: null,
       title,
       tripId,
@@ -622,17 +714,28 @@ function createDayRecords({
   legs,
   transport,
   tripId,
+  tripRange,
 }: {
   items: TripItemRecord[];
   legs: TripLegRecord[];
   transport: TripTransportRecord[];
   tripId: string;
+  tripRange: { endDate: string | null; startDate: string | null };
 }): StructuredTripRecords["days"] {
   const finalLeaveDate = getFinalLeaveDate(legs);
+  // Arc G.1: this is where run 7.26.1's "16 days" actually came from — the
+  // day list is built from ITEM dates, so the two stray 2018 notes minted
+  // two extra day records on top of the trip's real 14. A day outside the
+  // trip's own range is not a day of this trip. Spine-derived dates are
+  // exempt: they DEFINE the range, so they can never fall outside it.
+  const withinTripRange = (date: string) => {
+    if (tripRange.startDate && date < tripRange.startDate) return false;
+    return !(tripRange.endDate && date > tripRange.endDate);
+  };
   const dates = Array.from(
     new Set(
       [
-        ...items.map((item) => item.date),
+        ...items.map((item) => item.date).filter((date) => date && withinTripRange(date)),
         ...transport.map((item) => item.date),
         finalLeaveDate,
         ...legs.flatMap((leg) =>
@@ -905,7 +1008,12 @@ export function createStructuredTripRecordsFromDraft({
     legs,
     tripId,
   });
-  const items = createItemRecords({ draft: finalizedDraft, legs, tripId });
+  const items = createItemRecords({
+    draft: finalizedDraft,
+    legs,
+    tripId,
+    tripRange: { endDate: trip.endDate, startDate: trip.startDate },
+  });
   const categories = createCategoryRecords({ items, tripId });
   const privateDetails = createPrivateDetailRecords({
     draft: finalizedDraft,
@@ -913,7 +1021,13 @@ export function createStructuredTripRecordsFromDraft({
     transport,
     tripId,
   });
-  const days = createDayRecords({ items, legs, transport, tripId });
+  const days = createDayRecords({
+    items,
+    legs,
+    transport,
+    tripId,
+    tripRange: { endDate: trip.endDate, startDate: trip.startDate },
+  });
   const weatherHooks = createWeatherHooks({ days, legs, tripId });
 
   const records: StructuredTripRecords = {

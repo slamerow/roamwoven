@@ -10,6 +10,16 @@ import {
   SOURCE_TRANSPORT_ANCHORS_DRAFT_KEY,
   sourceTransportAnchorMatchesRecord,
 } from "@/lib/extraction/source-transport-anchors";
+import type {
+  TransportFieldRepair,
+  TransportRepairQuestion,
+} from "@/lib/extraction/transport-field-repair";
+import {
+  repairTransportFieldBleed,
+  TRANSPORT_REPAIR_FIELD_ALIASES,
+} from "@/lib/extraction/transport-field-repair";
+import type { GroupingClaimLedgerTelemetry } from "@/lib/extraction/grouping-claim-ledger";
+import { createGroupingClaimLedger } from "@/lib/extraction/grouping-claim-ledger";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
 import {
   normalizeParserStageArtifacts,
@@ -113,6 +123,14 @@ export type CanonicalEvidenceAction = {
 
 export type CanonicalGroupingDecision = {
   callRequired?: boolean;
+  // Arc G.3: verification must apply the SAME rule the decision was built
+  // under. The deterministic geo lane refuses unverified parser
+  // coordinates once the geocode lane has run anywhere in the trip; the
+  // resolver lane was never built under that rule, and geocoding is
+  // budget-limited and fail-soft, so partial verification is normal.
+  // Applying the strict policy to a resolver decision silently deletes
+  // valid groups.
+  verificationPolicy?: "strict_verified_coordinates";
   candidateIds: string[];
   claim: string;
   containerCandidateId?: string | null;
@@ -196,6 +214,7 @@ export type EvidenceClusteringResult = {
   observations: EvidenceObservation[];
   parserArtifactRepairs: ParserArtifactRepair[];
   pieces: CanonicalEvidencePiece[];
+  transportFieldRepairs: TransportFieldRepair[];
   summary: {
     canonicalPieceCount: number;
     clusteredObservationCount: number;
@@ -204,8 +223,11 @@ export type EvidenceClusteringResult = {
     observationCount: number;
     parserArtifactRepairCount: number;
     rejectedObservationCount: number;
+    groupingClaims: GroupingClaimLedgerTelemetry;
     sourceAnchorObservationCount: number;
     suppressedWeakAnchorCount: number;
+    transportFieldRepairCount: number;
+    transportFieldRepairQuestionCount: number;
   };
 };
 
@@ -450,6 +472,7 @@ export function canonicalPiecePublicPayload(
     _canonicalNoteEntry,
     _canonicalRoleDecision,
     _canonicalProvisionalFields,
+    _canonicalRepairedTransportFields,
     _canonicalSourceDecisions,
     _resolverCandidateId,
     _sourceSupport,
@@ -4922,6 +4945,86 @@ function reconcileCanonicalStayIdentity(
   }
 }
 
+// Arc G.2 adapter. The defect predicates and the repair decision live in
+// `transport-field-repair.ts`; this function is the only part that knows
+// about canonical pieces, so the repair stays testable without a pipeline
+// and this file gains no new decision surface.
+//
+// Ordering (the call site carries the authoritative note): AFTER
+// `finalizeCanonicalOutputFields` so the alias coalesce has happened, and
+// AFTER `reconcileCanonicalConflicts` — that pass rebuilds conflicts from
+// the observations and recomputes `requiresReview`, so running before it
+// would have the repair's decision silently reverted. The repaired fields
+// are also recorded on the piece, so the conflict-question lane cannot
+// re-ask regardless of ordering.
+function applyCanonicalTransportFieldRepair({
+  anchors,
+  pieces,
+}: {
+  anchors: SourceTransportAnchor[];
+  pieces: CanonicalEvidencePiece[];
+}) {
+  const transportPieces = pieces.filter(
+    (piece) => piece.outputEligible && piece.kind === "transport"
+  );
+  if (transportPieces.length === 0) {
+    return { questions: [] as TransportRepairQuestion[], repairs: [] as TransportFieldRepair[] };
+  }
+
+  const byId = new Map(transportPieces.map((piece) => [piece.id, piece]));
+  const { questions, repairs, resolvedFields } = repairTransportFieldBleed({
+    anchors,
+    targets: transportPieces.map((piece) => ({
+      id: piece.id,
+      payload: piece.payload,
+    })),
+  });
+
+  for (const resolved of resolvedFields) {
+    const piece = byId.get(resolved.pieceId);
+    if (!piece) continue;
+    const aliases = TRANSPORT_REPAIR_FIELD_ALIASES[resolved.field];
+    // A repaired field is DECIDED, not contested.
+    //
+    // Clearing `requiresReview` alone is NOT enough and was a real defect:
+    // `reconcileCanonicalConflicts` rebuilds every conflict from the
+    // observations and recomputes that flag, so the mutation survives only
+    // until the next pass touches the piece. The decision is therefore
+    // recorded ON THE PIECE, and the conflict-question lane consults it —
+    // ordering can change without the maker inheriting a question about a
+    // field we already settled. The competing values stay in the conflict
+    // record for the audit trail.
+    const decided = new Set([
+      ...asArray(piece.payload._canonicalRepairedTransportFields).filter(
+        (value): value is string => typeof value === "string"
+      ),
+      ...aliases,
+    ]);
+    piece.payload._canonicalRepairedTransportFields = [...decided];
+    for (const conflict of piece.conflicts) {
+      if (decided.has(conflict.field)) {
+        conflict.requiresReview = false;
+      }
+    }
+  }
+
+  for (const repair of repairs) {
+    const piece = byId.get(repair.pieceId);
+    if (!piece) continue;
+    addCanonicalAction(piece, {
+      absorbedTitles: [],
+      observationIds: [],
+      reason:
+        repair.outcome === "repaired_from_source_anchor"
+          ? `Repaired ${repair.field} from source text: ${repair.before} cannot belong to this ${repair.transportType ?? "travel"} card.`
+          : `Removed an impossible ${repair.field} (${repair.before}); the source text does not state the right one.`,
+      type: "field_selected",
+    });
+  }
+
+  return { questions, repairs };
+}
+
 function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
   for (const piece of pieces.filter((candidate) => candidate.outputEligible)) {
     if (piece.kind === "transport") {
@@ -5867,52 +5970,33 @@ function executeCanonicalGroupingDecisions({
       if (PASSING_MENTION_TITLE_PATTERN.test(containerRawTitle)) {
         continue;
       }
-      const origin = precisePieceCoordinates(siteContainer);
-      const containerText = normalizedComparable(
-        [siteContainer.payload.title, siteContainer.payload.description]
-          .filter(Boolean)
-          .join(" ")
-      );
-      const containerTokens = distinctiveTitleTokens(containerRawTitle);
+      // Arc G.3a: verification now asks the SAME membership context the
+      // lane used. Before this, the lane matched container tokens on whole
+      // words and distrusted unverified coordinates once the geocode lane
+      // had run, while this filter used a substring match and trusted any
+      // precise-looking coordinate — a decision could be built under one
+      // rule and audited under another, and the address path would have
+      // been invisible here. One context, two callers.
+      const membership = createSiteMembershipContext({
+        candidates: sourcePieces.filter((piece) => piece !== siteContainer),
+        container: siteContainer,
+        excludedContainerTokens: tripCityAddressTokens(pieces),
+        geocodeLaneRan:
+          decision.verificationPolicy === "strict_verified_coordinates"
+            ? groupingGeocodeLaneRan(pieces)
+            : false,
+      });
       let geoVerifiedCount = 0;
       verifiedSourcePieces = sourcePieces.filter((piece) => {
         if (piece === siteContainer) return true;
         const text = activityText(piece.payload);
         if (COSTS_CONTENT_PATTERN.test(text)) return false;
-        // Run5 PB-4: the geo path requires precise coordinates on both
-        // ends; a timed stop joins by coordinates only when it shares the
-        // container's category (RW-GRP-001 timed-child rule). Source
-        // hierarchy below still admits timed children.
-        const coords = precisePieceCoordinates(piece);
-        const timedCategoryOk =
-          !timeFrom(piece.payload) ||
-          (Boolean(stringValue(piece.payload, "category")) &&
-            stringValue(piece.payload, "category") ===
-              stringValue(siteContainer.payload, "category"));
-        if (
-          origin &&
-          coords &&
-          timedCategoryOk &&
-          haversineKm(origin, coords) <= SAME_SITE_RADIUS_KM
-        ) {
+        const evidence = membership.evidenceFor(piece);
+        if (evidence === "geo") {
           geoVerifiedCount += 1;
           return true;
         }
-        const childRawTitle = stringValue(piece.payload, "title");
-        const childTitle = normalizedComparable(childRawTitle);
-        if (!childTitle) return false;
-        if (
-          childRawTitle &&
-          containerListsComponent(
-            stringValue(siteContainer.payload, "description"),
-            childRawTitle
-          )
-        ) {
-          return true;
-        }
-        return containerTokens.some(
-          (token) => token.length >= 5 && childTitle.includes(token)
-        );
+        return evidence === "hierarchy";
       });
       if (
         verifiedSourcePieces.filter((piece) => piece !== siteContainer).length < 2
@@ -6297,10 +6381,19 @@ function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
             : piece.kind === "place"
               ? new Set(["arriveDate", "city", "leaveDate"])
               : new Set<string>();
+    // Arc G.2: a field the transport repair has already settled is never
+    // also a "which value should we use?" question, whatever order the
+    // passes run in.
+    const repairedFields = new Set(
+      asArray(piece.payload._canonicalRepairedTransportFields).filter(
+        (value): value is string => typeof value === "string"
+      )
+    );
     const conflict = piece.conflicts.find(
       (candidate) =>
         candidate.requiresReview &&
         materialFields.has(candidate.field) &&
+        !repairedFields.has(candidate.field) &&
         candidate.values.length > 1
     );
 
@@ -8099,6 +8192,222 @@ function maxPairwiseKm(coords: Array<{ lat: number; lng: number }>) {
   return max;
 }
 
+// --- Arc G.3a: site membership evidence, in ONE place -----------------------
+//
+// Membership used to be judged twice with two subtly different rule sets:
+// the lane matched container tokens on WHOLE WORDS and downgraded
+// unverified coordinates once the geocode lane had run, while the executor
+// re-verified with a SUBSTRING match and no downgrade. Two copies of a rule
+// are two rules. Everything below is the single source of truth, and both
+// callers keep only their own surrounding vetoes.
+//
+// Three kinds of proof, in strength order:
+//   1. COMPONENT LIST — the container's own description lists the child.
+//   2. TITLE TOKEN — "Palm House at Schönbrunn" carries the site's name.
+//   3. FORMATTED ADDRESS (new) — the geocoder's own answer for the child
+//      names the site ("Schönbrunner Schloßstraße 47, 1130 Wien"). This is
+//      the evidence that finally reaches Schönbrunn's Gloriette: it is
+//      ~800 m from the palace and the locked ~300 m radius refuses it BY
+//      DESIGN, but its address is inside the estate.
+//   4. RADIUS — proximity alone, the weakest claim and the only contestable
+//      one.
+//
+// FOOTPRINT EXTENSION: a site whose own confirmed members demonstrably
+// spread out is allowed to admit untimed neighbours across that measured
+// extent instead of a fixed 300 m. Deliberately hard to trigger — it needs
+// at least two source/address-confirmed members carrying VERIFIED
+// coordinates, admits only untimed pieces on verified coordinates, and is
+// capped. Live-run 7.21.0 is the cautionary case: the parser fabricated
+// precise-looking coordinates for a whole day and a "peek inside the
+// Gresham Palace" card nearly swallowed Budapest.
+const SITE_FOOTPRINT_MAX_KM = 1.2;
+const SITE_FOOTPRINT_MIN_CONFIRMED_MEMBERS = 2;
+
+function pieceVerifiedAddress(piece: CanonicalEvidencePiece) {
+  return piece.payload._geoVerified === true
+    ? stringValue(piece.payload, "verifiedFormattedAddress")
+    : null;
+}
+
+// Tokens that can identify a SITE, used by both the title path and the
+// address path. Generic site nouns and trip city names are excluded: an
+// address containing "palace" says nothing, "Prague" says only that we are
+// in Prague, and neither is containment.
+//
+// This filter used to apply to the address path only, and the asymmetry was
+// a live false-grouping generator: `SOURCE_SUPPORT_STOPWORDS` happens to
+// contain "castle" and "museum" but NOT "palace", "complex", "grounds",
+// "citadel", "fortress", "abbey" or "monastery" — every one of them a
+// SAME_SITE_CONTAINER_PATTERN noun of five or more characters. "Belvedere
+// Palace" therefore read as a source-confirmed member of the Schönbrunn
+// Palace visit five kilometres away, and G.3b would have recorded that as
+// HIERARCHY strength — permanently uncontestable.
+function siteIdentifyingTokens(
+  containerTitle: string,
+  excludedTokens: Set<string>
+) {
+  return distinctiveTitleTokens(containerTitle).filter(
+    (token) =>
+      token.length >= 5 &&
+      !SAME_SITE_CONTAINER_PATTERN.test(token) &&
+      !excludedTokens.has(token)
+  );
+}
+
+function addressNamesSite(address: string | null, tokens: string[]) {
+  if (!address || tokens.length === 0) return false;
+  const folded = foldForSourceSupport(address);
+  // Substring, not whole word: German and Czech addresses inflect the site
+  // name ("Schönbrunner Schloßstraße" for Schönbrunn), and a >=5-character
+  // distinctive token is specific enough to carry it.
+  return tokens.some((token) => folded.includes(token));
+}
+
+export type SiteMembershipEvidence = "geo" | "hierarchy";
+
+// Live-run 7.21.0: when the geocode lane ran on this build, radius rules
+// trust ONLY verified coordinates (the parser fabricates precise-looking
+// ones). Without the lane (no key), the precise-parser fallback stands —
+// the env-keyed contract promises no behavior change when disabled.
+function groupingGeocodeLaneRan(pieces: CanonicalEvidencePiece[]) {
+  return pieces.some((piece) => piece.payload._geoVerified === true);
+}
+
+function tripCityAddressTokens(pieces: CanonicalEvidencePiece[]) {
+  return new Set(
+    pieces
+      .filter((piece) => piece.kind === "place")
+      .flatMap((piece) =>
+        foldForSourceSupport(stringValue(piece.payload, "city") ?? "").split(
+          /\s+/
+        )
+      )
+      .filter(Boolean)
+  );
+}
+
+function createSiteMembershipContext({
+  candidates,
+  container,
+  geocodeLaneRan,
+  excludedContainerTokens = new Set<string>(),
+}: {
+  candidates: CanonicalEvidencePiece[];
+  container: CanonicalEvidencePiece;
+  geocodeLaneRan: boolean;
+  excludedContainerTokens?: Set<string>;
+}) {
+  const containerTitle = stringValue(container.payload, "title") ?? "";
+  const containerTokens = siteIdentifyingTokens(
+    containerTitle,
+    excludedContainerTokens
+  );
+  const addressTokens = containerTokens;
+  const containerCategory = stringValue(container.payload, "category");
+  const containerDescription = stringValue(container.payload, "description");
+
+  const radiusCoordinates = (piece: CanonicalEvidencePiece) => {
+    const coords = precisePieceCoordinates(piece);
+    if (!coords) return null;
+    // Live-run 7.21.0: when the geocode lane ran, radius rules trust ONLY
+    // verified coordinates — the parser fabricates precise-looking ones.
+    return geocodeLaneRan && !coords.verified ? null : coords;
+  };
+  const originCoords = radiusCoordinates(container);
+
+  // Filtering generic nouns and city names out of the token list is what
+  // stops "Belvedere Palace" reading as part of "Schönbrunn Palace" — but
+  // it would also strip EVERY token from containers like "Prague Castle"
+  // (city + generic noun), which would lose the source-hierarchy path they
+  // legitimately use. A child naming the container's FULL title is
+  // unambiguous containment whatever its tokens are, so that path is kept
+  // alongside.
+  const containerFullTitle = normalizedComparable(containerTitle);
+  const containerFullTitleUsable =
+    containerFullTitle.length >= 6 && containerFullTitle.includes(" ");
+
+  const hierarchyMember = (piece: CanonicalEvidencePiece) => {
+    const childRawTitle = stringValue(piece.payload, "title");
+    const childTitle = normalizedComparable(childRawTitle);
+    if (!childTitle) return false;
+    if (
+      childRawTitle &&
+      containerListsComponent(containerDescription, childRawTitle)
+    ) {
+      return true;
+    }
+    if (
+      containerFullTitleUsable &&
+      childTitle !== containerFullTitle &&
+      childTitle.includes(containerFullTitle)
+    ) {
+      return true;
+    }
+    if (
+      containerTokens.some((token) => ` ${childTitle} `.includes(` ${token} `))
+    ) {
+      return true;
+    }
+    return addressNamesSite(pieceVerifiedAddress(piece), addressTokens);
+  };
+
+  const confirmedMembers = candidates.filter(
+    (piece) => piece !== container && hierarchyMember(piece)
+  );
+  const confirmedCoords = confirmedMembers
+    .map((piece) => radiusCoordinates(piece))
+    .filter(
+      (value): value is { lat: number; lng: number; verified: boolean } =>
+        Boolean(value?.verified)
+    );
+
+  let footprintKm = SAME_SITE_RADIUS_KM;
+  if (
+    originCoords?.verified &&
+    confirmedCoords.length >= SITE_FOOTPRINT_MIN_CONFIRMED_MEMBERS
+  ) {
+    for (const coords of confirmedCoords) {
+      footprintKm = Math.max(footprintKm, haversineKm(originCoords, coords));
+    }
+    footprintKm = Math.min(footprintKm, SITE_FOOTPRINT_MAX_KM);
+  }
+
+  const timedCategoryOk = (piece: CanonicalEvidencePiece) =>
+    !timeFrom(piece.payload) ||
+    (Boolean(stringValue(piece.payload, "category")) &&
+      stringValue(piece.payload, "category") === containerCategory);
+
+  const evidenceFor = (
+    piece: CanonicalEvidencePiece
+  ): SiteMembershipEvidence | null => {
+    if (piece === container) return null;
+    if (hierarchyMember(piece)) return "hierarchy";
+    if (!timedCategoryOk(piece)) return null;
+    const coords = radiusCoordinates(piece);
+    if (!originCoords || !coords) return null;
+    const distanceKm = haversineKm(originCoords, coords);
+    if (distanceKm <= SAME_SITE_RADIUS_KM) return "geo";
+    // Extension zone: verified coordinates and untimed only.
+    if (
+      distanceKm <= footprintKm &&
+      coords.verified &&
+      !timeFrom(piece.payload)
+    ) {
+      return "geo";
+    }
+    return null;
+  };
+
+  return {
+    addressTokens,
+    evidenceFor,
+    footprintKm,
+    hierarchyMember,
+    originCoords,
+    radiusCoordinates,
+  };
+}
+
 function createDeterministicGeoGroupingDecisions({
   existingDecisions = [],
   missingDetails,
@@ -8109,7 +8418,10 @@ function createDeterministicGeoGroupingDecisions({
   missingDetails: unknown[];
   observations: EvidenceObservation[];
   pieces: CanonicalEvidencePiece[];
-}): CanonicalGroupingDecision[] {
+}): {
+  decisions: CanonicalGroupingDecision[];
+  telemetry: GroupingClaimLedgerTelemetry;
+} {
   // Candidates the resolver has already ruled on stay with the resolver's
   // decision — the deterministic pass never re-groups or overrides them.
   const claimedCandidateIds = new Set(
@@ -8165,14 +8477,109 @@ function createDeterministicGeoGroupingDecisions({
   }
 
   const decisions: CanonicalGroupingDecision[] = [];
-  const grouped = new Set<CanonicalEvidencePiece>();
-  // Live-run 7.21.0: when the geocode lane ran on this build, radius rules
-  // trust ONLY verified coordinates (the parser fabricates precise-looking
-  // ones). Without the lane (no key), the precise-parser fallback stands —
-  // the env-keyed contract promises no behavior change when disabled.
-  const geocodeLaneRan = pieces.some(
-    (piece) => piece.payload._geoVerified === true
-  );
+  // Arc G.3b: lane contention is a LEDGER, not statement order. See
+  // `grouping-claim-ledger.ts` for why the bare Set had to go.
+  const ledger = createGroupingClaimLedger();
+  const grouped = {
+    has: (piece: CanonicalEvidencePiece) => ledger.isClaimed(piece.id),
+  };
+  const decisionById = new Map<string, CanonicalGroupingDecision>();
+  // Everything needed to keep a same-site decision HONEST after it loses a
+  // member: the maker-facing claim states counts, so a decision that
+  // quietly drops a stop while still saying "3 stops" is a lie in the
+  // product, not just a stale variable.
+  type SiteDecisionState = {
+    childCount: number;
+    containerTitle: string;
+    geoChildCount: number;
+    // The radius that actually admitted the geo members. With the footprint
+    // extension this is not always 300 m, and a call claiming "within 300 m"
+    // about a stop 800 m out is a false statement to the maker.
+    radiusMeters: number;
+  };
+  const siteDecisionState = new Map<string, SiteDecisionState>();
+  // Address tokens that identify nothing: a Vienna address containing
+  // "Vienna" is not evidence of containment.
+  const tripCityTokens = tripCityAddressTokens(pieces);
+
+  const sameSiteClaimText = (state: SiteDecisionState) => {
+    const membershipClaim =
+      state.geoChildCount === state.childCount
+        ? `${state.childCount} stops sit inside ${state.containerTitle}'s grounds (within ${state.radiusMeters} m)`
+        : state.geoChildCount === 0
+          ? `the source lists ${state.childCount} stops inside ${state.containerTitle}'s own visit`
+          : `${state.geoChildCount} stops sit inside ${state.containerTitle}'s grounds (within ${state.radiusMeters} m) and the source places ${state.childCount - state.geoChildCount} more inside the same visit`;
+    return `same-site visit: ${membershipClaim}, so one visit card owns them`;
+  };
+
+  // A same-site visit can spare a proximity-only member as long as the
+  // visit still owns two stops — the minimum that makes it a group at all.
+  const contestable = (piece: CanonicalEvidencePiece) => {
+    const held = ledger.claimFor(piece.id);
+    if (!held) return true;
+    return (
+      held.strength === "geo" &&
+      held.lane === "same_site" &&
+      (siteDecisionState.get(held.decisionId)?.childCount ?? 0) - 1 >= 2
+    );
+  };
+
+  // Contesting is genuinely two-phase. The walk lane may LOOK at a
+  // proximity-only claim while choosing members (`contestable`), but
+  // NOTHING is released until a walk is known to form. The earlier version
+  // released inside the member filter, so a walk that then failed its
+  // >=3-member test still ejected stops from a perfectly good site visit —
+  // the exact silent consumption the ledger exists to prevent, with the
+  // added insult of being caused by the fix.
+  const planReleases = (walkers: CanonicalEvidencePiece[]) => {
+    const pending = new Map<string, number>();
+    const releasable: CanonicalEvidencePiece[] = [];
+    for (const piece of walkers) {
+      const held = ledger.claimFor(piece.id);
+      if (!held) {
+        releasable.push(piece);
+        continue;
+      }
+      if (held.strength !== "geo" || held.lane !== "same_site") continue;
+      const state = siteDecisionState.get(held.decisionId);
+      if (!state) continue;
+      const projected =
+        state.childCount - (pending.get(held.decisionId) ?? 0) - 1;
+      if (projected < 2) continue;
+      pending.set(held.decisionId, (pending.get(held.decisionId) ?? 0) + 1);
+      releasable.push(piece);
+    }
+    return releasable;
+  };
+
+  const commitRelease = (piece: CanonicalEvidencePiece) => {
+    const held = ledger.claimFor(piece.id);
+    if (!held) return true;
+    const granted = ledger.contest({
+      pieceId: piece.id,
+      survivesWithout: (claim) =>
+        claim.lane === "same_site" &&
+        (siteDecisionState.get(claim.decisionId)?.childCount ?? 0) - 1 >= 2,
+    });
+    if (!granted) return false;
+    const decision = decisionById.get(held.decisionId);
+    const candidateId = candidateIdFor(piece);
+    if (decision && candidateId) {
+      decision.candidateIds = decision.candidateIds.filter(
+        (value) => value !== candidateId
+      );
+    }
+    const state = siteDecisionState.get(held.decisionId);
+    if (state) {
+      state.childCount = Math.max(0, state.childCount - 1);
+      // Only a proximity-only member can be contested, so the geo count is
+      // the one that drops — and the claim is rewritten to match.
+      state.geoChildCount = Math.max(0, state.geoChildCount - 1);
+      if (decision) decision.claim = sameSiteClaimText(state);
+    }
+    return true;
+  };
+  const geocodeLaneRan = groupingGeocodeLaneRan(pieces);
   const radiusCoordinates = (piece: CanonicalEvidencePiece) => {
     const coords = precisePieceCoordinates(piece);
     if (!coords) return null;
@@ -8208,113 +8615,107 @@ function createDeterministicGeoGroupingDecisions({
       if (PASSING_MENTION_TITLE_PATTERN.test(containerOwnProse)) {
         continue;
       }
-      const origin = precisePieceCoordinates(container);
-      const containerText = normalizedComparable(
-        [container.payload.title, container.payload.description]
-          .filter(Boolean)
-          .join(" ")
+      // Arc G.3a: membership evidence comes from the shared context, so
+      // this lane and the executor's re-verification can never drift apart
+      // again. A booking-carrying stop is its own plan and is excluded
+      // from the candidate pool before the site ever sees it.
+      const candidatePool = dayPieces.filter(
+        (piece) =>
+          piece !== container &&
+          !grouped.has(piece) &&
+          !confirmationFrom(piece.payload)
       );
-      const containerTokens = distinctiveTitleTokens(containerTitle);
-      const children = dayPieces.filter((piece) => {
-        if (piece === container || grouped.has(piece)) return false;
-        if (confirmationFrom(piece.payload)) return false;
+      const membership = createSiteMembershipContext({
+        candidates: candidatePool,
+        container,
+        excludedContainerTokens: tripCityTokens,
+        geocodeLaneRan,
+      });
+      const memberEvidence = new Map<
+        CanonicalEvidencePiece,
+        SiteMembershipEvidence
+      >();
+      for (const piece of candidatePool) {
         const childRawTitle = stringValue(piece.payload, "title");
-        const childTitle = normalizedComparable(childRawTitle);
-        if (!childTitle) return false;
-        // Source-hierarchy membership: a child the container's own
-        // description lists, or a child titled with the container's own
-        // name ("Palm House at Schönbrunn"). This path admits timed
-        // children (the guard change inside the castle) because the SOURCE
-        // places them inside the visit.
-        const sourceHierarchyMember = Boolean(
-          (childRawTitle &&
-            containerListsComponent(
-              stringValue(container.payload, "description"),
-              childRawTitle
-            )) ||
-            containerTokens.some(
-              (token) =>
-                token.length >= 5 && ` ${childTitle} `.includes(` ${token} `)
-            )
-        );
-        if (sourceHierarchyMember) return true;
+        if (!childRawTitle) continue;
+        const evidence = membership.evidenceFor(piece);
+        if (!evidence) continue;
         // Live-run 7.21.0 (Gresham, 3rd appearance): a piece that is itself
         // a named site container (Buda Castle) is grouping structure in its
         // own right — it never joins ANOTHER site's visit by coordinates.
+        // Source hierarchy still may place it inside one.
         if (
-          childRawTitle &&
+          evidence === "geo" &&
           SAME_SITE_CONTAINER_PATTERN.test(childRawTitle)
         ) {
-          return false;
+          continue;
         }
-        // Geo-radius membership. Live-run 7.21.0: the parser fabricated
-        // 3-decimal coordinates for the whole Jan-22 day (Parliament, Buda
-        // Castle, Vörösmarty tér all "within 300 m" of Gresham Palace), so
-        // when the geocode lane ran, the radius rule accepts only VERIFIED
-        // coordinates on both ends (radiusCoordinates). A TIMED stop joins
-        // by coordinates only when it shares the container's own category
-        // (RW-GRP-001 locked reconciliation: the timed guard change stays
-        // inside the castle visit).
-        const timedCategoryOk =
-          !timeFrom(piece.payload) ||
-          (Boolean(stringValue(piece.payload, "category")) &&
-            stringValue(piece.payload, "category") ===
-              stringValue(container.payload, "category"));
-        if (!timedCategoryOk) return false;
-        const originCoords = origin ? radiusCoordinates(container) : null;
-        const coords = radiusCoordinates(piece);
-        return Boolean(
-          originCoords &&
-            coords &&
-            haversineKm(originCoords, coords) <= SAME_SITE_RADIUS_KM
-        );
-      });
+        memberEvidence.set(piece, evidence);
+      }
+      const children = dayPieces.filter((piece) => memberEvidence.has(piece));
       if (children.length < 2) continue;
+
+      const containerId = candidateIdFor(container);
+      // Only children that actually made it into the decision count. The
+      // ledger, the decision and the claim text must agree on ONE number —
+      // counting `children` here while the decision carries `childIds` let
+      // a visit "spare" a member it never had, and survive with one stop.
+      const childEntries = children
+        .map((child) => ({ child, candidateId: candidateIdFor(child) }))
+        .filter(
+          (entry): entry is {
+            child: CanonicalEvidencePiece;
+            candidateId: string;
+          } => Boolean(entry.candidateId)
+        );
+      if (!containerId || childEntries.length < 2) continue;
 
       // Call claims state the actual rule that fired (doctrine v3). A geo
       // child is one admitted by the radius path (verified-only when the
       // lane ran).
-      const claimOrigin = radiusCoordinates(container);
-      const geoChildCount = claimOrigin
-        ? children.filter((piece) => {
-            const timedOk =
-              !timeFrom(piece.payload) ||
-              (Boolean(stringValue(piece.payload, "category")) &&
-                stringValue(piece.payload, "category") ===
-                  stringValue(container.payload, "category"));
-            if (!timedOk) return false;
-            const coords = radiusCoordinates(piece);
-            return Boolean(
-              coords &&
-                haversineKm(claimOrigin, coords) <= SAME_SITE_RADIUS_KM
-            );
-          }).length
-        : 0;
-      const membershipClaim =
-        geoChildCount === children.length
-          ? `${children.length} stops sit inside ${containerTitle}'s grounds (within ${Math.round(SAME_SITE_RADIUS_KM * 1000)} m)`
-          : geoChildCount === 0
-            ? `the source lists ${children.length} stops inside ${containerTitle}'s own visit`
-            : `${geoChildCount} stops sit inside ${containerTitle}'s grounds (within ${Math.round(SAME_SITE_RADIUS_KM * 1000)} m) and the source places ${children.length - geoChildCount} more inside the same visit`;
+      const state: SiteDecisionState = {
+        childCount: childEntries.length,
+        containerTitle,
+        geoChildCount: childEntries.filter(
+          (entry) => memberEvidence.get(entry.child) === "geo"
+        ).length,
+        radiusMeters: Math.round(membership.footprintKm * 1000),
+      };
 
-      const containerId = candidateIdFor(container);
-      const childIds = children
-        .map(candidateIdFor)
-        .filter((value): value is string => Boolean(value));
-      if (!containerId || childIds.length < 2) continue;
-
-      decisions.push({
+      // The container's own candidate id is part of the key: two same-named
+      // containers on one date used to collide on `decisionId`, leaving the
+      // second one's state to overwrite the first's while both decisions
+      // shipped.
+      const decisionId = `deterministic-site-${stableHash({ containerId, date, title: containerTitle })}`;
+      const decision: CanonicalGroupingDecision = {
         callRequired: true,
-        candidateIds: [containerId, ...childIds],
-        claim: `same-site visit: ${membershipClaim}, so one visit card owns them`,
+        candidateIds: [containerId, ...childEntries.map((entry) => entry.candidateId)],
+        claim: sameSiteClaimText(state),
         containerCandidateId: containerId,
-        decisionId: `deterministic-site-${stableHash({ date, title: containerTitle })}`,
+        decisionId,
         parentCandidateId: containerId,
         parentTitle: `${containerTitle} visit`,
         source: "canonical_resolver",
+        verificationPolicy: "strict_verified_coordinates",
+      };
+      decisions.push(decision);
+      decisionById.set(decisionId, decision);
+      siteDecisionState.set(decisionId, state);
+      // The claim is recorded WITH ITS STRENGTH. A stop the source or the
+      // geocoder places inside this site is not contestable; a stop that
+      // merely fell inside the radius can be released to the walk lane if
+      // this visit can spare it.
+      ledger.claim({
+        decisionId,
+        entries: [
+          { pieceId: container.id, strength: "hierarchy" },
+          ...childEntries.map((entry) => ({
+            pieceId: entry.child.id,
+            strength: memberEvidence.get(entry.child) ?? "geo",
+          })),
+        ],
+        lane: "same_site",
       });
-      grouped.add(container);
-      children.forEach((child) => grouped.add(child));
     }
 
     // DISCOVERED WALK: at most one per day, crowded unsequenced days only.
@@ -8323,7 +8724,10 @@ function createDeterministicGeoGroupingDecisions({
     if ((timedCounts.get(date) ?? 0) >= 3) continue;
 
     const walkers = located.filter((piece) => {
-      if (grouped.has(piece)) return false;
+      // Arc G.3b: a piece another lane holds is not automatically out of
+      // reach — a proximity-only claim the holder can spare is contestable.
+      // Nothing is released here; this only decides who may be considered.
+      if (grouped.has(piece) && !contestable(piece)) return false;
       if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) {
         return false;
       }
@@ -8401,26 +8805,67 @@ function createDeterministicGeoGroupingDecisions({
 
     if (!bestWalk) continue;
 
-    const walkIds = bestWalk
+    // The walk has been chosen. Plan the releases WITHOUT mutating
+    // anything, and only commit them if a walk still forms — otherwise a
+    // walk that fails its own three-member test would have ejected stops
+    // from a perfectly good site visit on the way out.
+    // Every guard that can still kill the walk runs BEFORE any release is
+    // committed — including the candidate-id filter. A walk that dies at
+    // its last check must not have taken stops out of a healthy site visit
+    // on the way, which is the whole point of the plan/commit split.
+    const plannedMembers = planReleases(bestWalk).filter((piece) =>
+      Boolean(candidateIdFor(piece))
+    );
+    if (plannedMembers.length < 3) continue;
+    const walkMembers = plannedMembers.filter((piece) => commitRelease(piece));
+    if (walkMembers.length < 3) continue;
+
+    const walkIds = walkMembers
       .map(candidateIdFor)
       .filter((value): value is string => Boolean(value));
-    if (walkIds.length < 3) continue;
-    const areaLabel = stringValue(bestWalk[0].payload, "area") ?? "Walking";
+    const areaLabel = stringValue(walkMembers[0].payload, "area") ?? "Walking";
 
-    decisions.push({
+    const walkDecisionId = `deterministic-walk-${stableHash({ areaLabel, date })}`;
+    const walkDecision: CanonicalGroupingDecision = {
       callRequired: true,
       candidateIds: walkIds,
-      claim: `discovered walk: this day has ${visibleCount} cards, and ${bestWalk.length} untimed sights sit within a 15-minute walk in ${areaLabel}, so they read cleaner as one route`,
+      claim: `discovered walk: this day has ${visibleCount} cards, and ${walkIds.length} untimed sights sit within a 15-minute walk in ${areaLabel}, so they read cleaner as one route`,
       containerCandidateId: null,
-      decisionId: `deterministic-walk-${stableHash({ areaLabel, date })}`,
+      decisionId: walkDecisionId,
       parentCandidateId: walkIds[0],
       parentTitle: `${areaLabel} walk`,
       source: "canonical_resolver",
+      verificationPolicy: "strict_verified_coordinates",
+    };
+    decisions.push(walkDecision);
+    decisionById.set(walkDecisionId, walkDecision);
+    ledger.claim({
+      decisionId: walkDecisionId,
+      entries: walkMembers.map((piece) => ({
+        pieceId: piece.id,
+        strength: "geo" as const,
+      })),
+      lane: "walk",
     });
-    bestWalk.forEach((piece) => grouped.add(piece));
   }
 
-  return decisions;
+  // A same-site decision that lost members to a contest can fall below the
+  // two-stop minimum. Drop it and release what it still holds, so the
+  // ledger never reports a claim behind a group that will not exist.
+  const survivingDecisions = decisions.filter((decision) => {
+    const decisionId = decision.decisionId;
+    if (!decisionId) return true;
+    const state = siteDecisionState.get(decisionId);
+    if (!state) return true;
+    if (state.childCount >= 2) return true;
+    ledger.releaseDecision(decisionId);
+    return false;
+  });
+
+  return {
+    decisions: survivingDecisions,
+    telemetry: ledger.telemetry(),
+  };
 }
 
 // --- Researched-but-uncommitted list question (RW-REV-001, 2026-07-17) ---
@@ -9017,10 +9462,16 @@ function dedupeObjects(items: unknown[]) {
 export function reapplyCanonicalOutputInvariants({
   pieces: inputPieces,
   sensitiveDetails = [],
+  sourceTransportAnchors = [],
   tripYear = null,
 }: {
   pieces: CanonicalEvidencePiece[];
   sensitiveDetails?: unknown[];
+  // Arc G.2: the retry lane re-runs the transport repair so a row the
+  // accessory router touches on the way through cannot re-acquire an
+  // impossible endpoint. Absent anchors the pass is still safe — an
+  // already-repaired row presents no defect and it is a no-op.
+  sourceTransportAnchors?: SourceTransportAnchor[];
   tripYear?: number | null;
 }) {
   const pieces = structuredClone(inputPieces);
@@ -9038,6 +9489,10 @@ export function reapplyCanonicalOutputInvariants({
     tripYear,
   });
   finalizeCanonicalOutputFields(pieces);
+  applyCanonicalTransportFieldRepair({
+    anchors: sourceTransportAnchors,
+    pieces,
+  });
   // Arc F.2 C4 (run 7.24.1 chains D/E, step-0 trace): this retry is the
   // ONE post-sweep payload mutation point in the live route — the
   // accessory router re-runs here (attaching/removing prose) AFTER
@@ -11012,14 +11467,15 @@ export function clusterExtractedEvidence({
   reconcileCardsAgainstCityNotes(pieces, missingDetails, observations);
   demoteIdeaListMentions(pieces, observations, missingDetails);
   demoteHedgedSingleUncommittedMentions(pieces, missingDetails);
+  const deterministicGrouping = createDeterministicGeoGroupingDecisions({
+    existingDecisions: groupingDecisions,
+    missingDetails,
+    observations,
+    pieces,
+  });
   const combinedGroupingDecisions = [
     ...groupingDecisions,
-    ...createDeterministicGeoGroupingDecisions({
-      existingDecisions: groupingDecisions,
-      missingDetails,
-      observations,
-      pieces,
-    }),
+    ...deterministicGrouping.decisions,
   ];
   executeCanonicalGroupingDecisions({
     decisions: combinedGroupingDecisions,
@@ -11045,6 +11501,15 @@ export function clusterExtractedEvidence({
   mergeCanonicalCityNotes(pieces);
   finalizeCanonicalOutputFields(pieces);
   reconcileCanonicalConflicts(pieces, observations);
+  // Arc G.2 runs AFTER conflict reconciliation on purpose: that pass
+  // rebuilds conflicts from the observations and would recompute
+  // `requiresReview` over the repair's head. It runs BEFORE the protected-
+  // value sweep so the sweep stays the last text mutation before outputs
+  // are composed (the 7.23.0r ordering rule below).
+  const transportFieldRepair = applyCanonicalTransportFieldRepair({
+    anchors: sourceTransportAnchors,
+    pieces,
+  });
   // Run 7.23.0r ordering fix: the sweep is the LAST text mutation before
   // outputFor — conflict reconciliation selects field values and could
   // otherwise resurrect unscrubbed prose after an earlier sweep.
@@ -11088,6 +11553,7 @@ export function clusterExtractedEvidence({
     ...canonicalSourceUpdateCalls,
     ...canonicalConflictQuestions,
     ...canonicalOwnedQuestions,
+    ...transportFieldRepair.questions,
     ...researchedListQuestions,
     ...dayLabelSlotQuestions,
     ...canonicalSpineQuestions,
@@ -11137,6 +11603,9 @@ export function clusterExtractedEvidence({
     observations,
     parserArtifactRepairs,
     pieces,
+    // Arc G.2: successful internal repair is support telemetry, never
+    // maker-facing extraction mechanics (AGENTS.md dark-factory).
+    transportFieldRepairs: transportFieldRepair.repairs,
     summary: {
       canonicalPieceCount: pieces.filter((piece) => piece.outputEligible).length,
       clusteredObservationCount: pieces.reduce(
@@ -11155,8 +11624,11 @@ export function clusterExtractedEvidence({
           .filter((piece) => !piece.outputEligible)
           .flatMap((piece) => piece.observationIds)
       ).size,
+      groupingClaims: deterministicGrouping.telemetry,
       sourceAnchorObservationCount: sourceTransportAnchors.length,
       suppressedWeakAnchorCount,
+      transportFieldRepairCount: transportFieldRepair.repairs.length,
+      transportFieldRepairQuestionCount: transportFieldRepair.questions.length,
     },
   };
 }

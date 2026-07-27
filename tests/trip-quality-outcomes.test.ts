@@ -57,6 +57,7 @@ function report(
       rejectedObservationCount: 0,
       sourceAnchorObservationCount: 0,
       suppressedStandaloneAnchorCount: 0,
+      transportFieldRepairCount: 0,
       undisposedObservationCount: 0,
     },
     detectorIncidents: [],

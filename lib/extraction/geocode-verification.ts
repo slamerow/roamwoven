@@ -36,6 +36,11 @@ export type GeocodeVerificationUsage = {
   endpointHost: string | null;
   error: string | null;
   failedCount: number;
+  // Arc G.3a: how many resolved lookups also returned a formatted address.
+  // Env-verification is run telemetry, never the console — a zero here on
+  // a completed lane means the container-token path had nothing to work
+  // with and grouping fell back to the radius.
+  formattedAddressCount: number;
   // Arc E: batch width actually used — env-verification is run telemetry,
   // never the console (AGENTS.md env-surgery protocol).
   lookupConcurrency: number;
@@ -149,7 +154,25 @@ export function selectGeocodeCandidates(
   return candidates;
 }
 
-function parseGeocodeResponse(json: unknown): { lat: number; lng: number } | null {
+// Arc G.3a: the response ALREADY carries the formatted address and this
+// parser threw it away — the lane paid for a lookup and kept two numbers
+// out of it. The address is what actually names a site
+// ("Schloß Schönbrunn, Schönbrunner Schloßstraße 47, 1130 Wien"), which is
+// the evidence a radius cannot supply: Schönbrunn's Gloriette is ~800 m
+// from the palace and the locked ~300 m same-site radius refuses it BY
+// DESIGN, while its address names the estate outright. This is the "geo
+// coordinate + logic" rider Eli approved on 2026-07-23.
+//
+// Still PROXIMITY-ONLY in posture: the address is consumed exclusively by
+// grouping containment checks. It never changes intent, type, date, city,
+// title or booking state, and no extra lookup is made to obtain it.
+export type GeocodeVerificationResult = {
+  formattedAddress: string | null;
+  lat: number;
+  lng: number;
+};
+
+function parseGeocodeResponse(json: unknown): GeocodeVerificationResult | null {
   const record =
     json && typeof json === "object" && !Array.isArray(json)
       ? (json as Record<string, unknown>)
@@ -170,7 +193,8 @@ function parseGeocodeResponse(json: unknown): { lat: number; lng: number } | nul
   const lat = finiteCoordinate(location?.lat);
   const lng = finiteCoordinate(location?.lng);
   if (lat === null || lng === null || (lat === 0 && lng === 0)) return null;
-  return { lat, lng };
+  const formattedAddress = first ? stringField(first, "formatted_address") : null;
+  return { formattedAddress, lat, lng };
 }
 
 export async function runGeocodeVerification({
@@ -194,6 +218,7 @@ export async function runGeocodeVerification({
     })(),
     error: null,
     failedCount: 0,
+    formattedAddressCount: 0,
     lookupConcurrency: 0,
     lookupCount: 0,
     outcome: "disabled",
@@ -272,6 +297,10 @@ export async function runGeocodeVerification({
       // other field is ever written.
       candidate.record.verifiedLatitude = coords.lat;
       candidate.record.verifiedLongitude = coords.lng;
+      if (coords.formattedAddress) {
+        candidate.record.verifiedFormattedAddress = coords.formattedAddress;
+        usage.formattedAddressCount += 1;
+      }
       candidate.record._geoVerified = true;
       candidate.record._geoVerification = {
         provider: "geocode",
