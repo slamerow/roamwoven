@@ -8,6 +8,11 @@
 
 ### 2026-07-27 (later) — ARC G IMPLEMENTED: note anchoring, transport field repair, grouping address + claim ledger (Claude/Cowork cloud session; COMMITTED, NOT PUSHED, NOT RUN)
 
+**AUDITING THE ARC G RUN? Read `docs/arc-g-audit-brief-2026-07-28.md` first**
+— it is the self-contained brief for that session: retired premises, run
+identity checks, the new telemetry fields to read before scoring, the audit
+bar, and my predictions quarantined at the end so they cannot anchor you.
+
 **Read first:** `docs/arc-g-scope-2026-07-27.md` (the locked scope, including
 the demotion-lane addendum and the Jan-22 trap), then the ledger entries below.
 Suite **76 files green**, `tsc` clean. Nothing has been run live — every claim
