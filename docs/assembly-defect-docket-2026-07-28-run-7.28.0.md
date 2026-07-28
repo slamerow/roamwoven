@@ -178,7 +178,7 @@ the Guard was verified, and the verification was garbage.
 The Arc G handoff called this shot exactly: *"If a group that used to survive
 verification now disappears, this is the first place to look."*
 
-### A.4 Cause 3 — Schönbrunn's sub-stops were never pieces
+### A.4 Cause 3 — the model never emitted Schönbrunn's sub-stops, and a ≥2-member floor finishes the job
 
 Four of the five sub-stops do not exist as records. They were folded into the
 parent card's description:
@@ -193,12 +193,75 @@ pass."
 Across the whole 239 KB bundle, `Orangerie`, `Palm House` and `Panorama` occur
 **exactly once each** — inside that string.
 
+**Confirmed at the source.** `scripts/inspect-pinned-parse.mjs ff706e4d` reads
+the pinned model output for this exact parse (61 calls, 0 misses,
+parse-key byte-identical). Titles emitted by the model:
+
+```
+Gloriette              as TITLE: 1   in a DESCRIPTION: 3
+Orangerie              as TITLE: 0   in a DESCRIPTION: 2
+Palm house             as TITLE: 0   in a DESCRIPTION: 2
+Apple Strudel Show     as TITLE: 0   in a DESCRIPTION: 3
+Panorama               as TITLE: 0   in a DESCRIPTION: 2
+Schönbrunn Palace visit as TITLE: 1
+```
+
+The four missing stops exist only as prose, in the parent's own description and
+in a day-level `"Explore Vienna"` blob that semicolon-lists the whole day.
+**This is extraction-side, not assembly-side.** No grouping change reaches it.
+
+### A.4b The ≥2-member floor — why Arc G could not have grouped Schönbrunn at all
+
 Schönbrunn and Gloriette **both resolved**, 893 m apart (matching the recorded
-~800 m offset; not re-derived). So the budget did not starve this target
-either. At 893 m the 300 m radius fails; footprint extension needs ≥2 confirmed
-members and only Gloriette exists. **The group hinged entirely on G.3a's
-address path** — the one thing `formattedAddressCount` would tell us, and
-cannot (§C).
+~800 m offset; not re-derived), so the budget did not starve this target either.
+
+The source-hierarchy path would have carried Gloriette regardless of that
+893 m: `containerListsComponent` splits the container description on `;` and
+`:`, and `"…Notes in source: Gloriette; Orangeriegarten at Schönbrunn; …"`
+yields a segment normalizing to exactly `gloriette`. Hierarchy membership hits
+with no coordinates required. **That path is healthy.**
+
+The kill is in the executor's verification
+(`evidence-clustering.ts`, same-site branch):
+
+```js
+if (verifiedSourcePieces.filter((piece) => piece !== siteContainer).length < 2
+```
+
+**A same-site visit requires at least two members besides the container.** The
+model emitted two Schönbrunn pieces total. One member. Below the floor.
+
+Therefore: **even a perfect G.3a formatted-address match on Gloriette yields one
+member, and one is still less than two.** Arc G's address path could not have
+produced a Schönbrunn group on this parse under any circumstances. This is a
+proof, not an inference, and it retires the "unobservable" framing for this
+specific target — though §C still stands for every other candidate.
+
+### A.4c Prague Castle fails the same floor, for different reasons
+
+Its container tokens are `prague` + `castle` — a city name and a generic site
+noun, both stripped by G.3a's filter, leaving the token list empty. The
+full-title fallback needs a child whose title *contains* "prague castle";
+neither child does. And `"Changing of the Guard at Prague Castle"` is the
+child's **description**, not its title, so the `<stop> at <Site>` title rule
+never sees it. **Zero hierarchy members.** Geo members: St. Vitus unverified →
+rejected; Changing of the Guard verified-at-centroid 3,108 m → rejected. Zero.
+
+### A.4d The scoping split this produces
+
+- **Prague Castle is geocoder-fixable.** Real coordinates for St. Vitus and the
+  Changing of the Guard put two members inside 300 m — floor met, group forms.
+- **Schönbrunn is not.** It needs the model to emit its sub-stops. No geocoder
+  change reaches it.
+
+### A.4e A second retraction: "Arc G lost the group that worked" is withdrawn
+
+An earlier revision of this docket said Arc G regressed a group the baseline had
+achieved. Given the ≥2 floor, 7.26.1's two grouped stops required the model to
+emit **at least three** Schönbrunn pieces that run; this run it emitted two.
+That difference is **parse variance in extraction**, not an Arc G regression.
+Both of this docket's earlier attempts to explain the grouping collapse reached
+for an Arc G cause when the cause was upstream.
 
 ### A.5 Near-miss on MUST-PASS 7
 
@@ -453,8 +516,38 @@ screen.
   public dated card. Δ2 keeps arrival directions as protected "getting there"
   detail. **Explicitly NOT a bar-6 failure** — the Δ3 procedure scopes item 6
   to code tokens — but chain 3b from run 7.23.2, still open.
-- **Luna OCR misread unchanged**: `Joselov` once against `Josefov` three times.
-  Real and open. Fix is a better VISION model via `scripts/ocr-smoke-test.mjs`.
+- **OCR — re-scored against every bundle on disk, and the previous framing was
+  wrong.** "OCR was rock solid a few days ago and something changed" does not
+  survive the data:
+
+  | Run | chars | pages | model | `Josefov` | `Joselov` |
+  |---|---|---|---|---|---|
+  | 7.17.1 | 31,448 | 19 | luna | 0 | 1 |
+  | 7.17.2 | 32,127 | 19 | luna | — | — |
+  | 7.18.0 | 31,390 | 19 | luna | — | — |
+  | 7.18.1 | 30,990 | 19 | luna | 0 | 2 |
+  | 7.21.0 | 31,704 | 19 | luna | 0 | 2 |
+  | 7.21.1a | 31,616 | 19 | luna | — | — |
+  | 7.21.1b | 30,929 | 19 | luna | 0 | 3 |
+  | **7.28.0** | **32,355** | 19 | luna | **3** | **1** |
+
+  Yield is flat within ±2% across every run and **7.28.0 is the highest of all
+  of them**. The `Josefov` misread is in EVERY bundle back to 7.17.1, and in all
+  the older ones the correct spelling appears **zero times** — 7.28.0 is the
+  first run where it reads correctly more often than not. **Nothing regressed;
+  transcription accuracy was simply never solid and never instrumented.**
+  What was made solid a few days ago is the MODEL AND CONFIG discipline —
+  durable default, tripwire, smoke test, batching A/B — and that held perfectly
+  here: luna on all five batches and all five checkpoints, no drift.
+  The reason it felt solved is that the watched metric was
+  `uncoveredLineCount`, which §1 of the brief correctly calls backwards: it
+  walks the OCR OUTPUT, so a character OCR never read right is invisible to it.
+  **There is no transcription-accuracy metric anywhere in the pipeline.**
+  *Method caveat:* these counts are of tokens that survived into each bundle,
+  not of raw OCR output, so a token could be read correctly and dropped
+  downstream. `Joselov` occurrences prove misreads happened; the zero `Josefov`
+  counts are strong but not airtight.
+  Fix remains a better VISION model via `scripts/ocr-smoke-test.mjs`.
   **`gpt-5.4-mini` is text-only and destroyed the 2026-07-25 run.**
 - Jan-19 idea flood (11 cards, GT 2); Kutná Hora scoping question.
 - 75 activities vs GT 49: debris routing (~9) and demotion (~10) are Eli's
@@ -618,26 +711,49 @@ Ordered, each with verification and undo per rule 6:
 4. **Fix the literal-`null` serialisation** (§G) — a projection writing
    `String(null)` into a time field. Small, user-visible, and the cheapest win
    in this docket.
-5. **Replay the parse offline before writing any grouping code** —
-   `node scripts/replay-pinned-parse.mjs 67b2bc76 <parseKeyPrefix>` — to settle
-   whether the Schönbrunn sub-stop fold (§A.4) is deterministic or parse
-   variance. Costs no run budget and decides whether Arc H touches grouping at
-   all.
+5. **DONE, 2026-07-28 — the fold question is answered.** Replay A ran clean
+   (61/61 hits, 0 misses, byte-identical parse key) but **a replay can never
+   answer a grouping question**: the harness disables the geocode lane
+   (`replay-pinned-parse.mjs:14`), a limitation already recorded in
+   `next-session.md` under the 2026-07-24 replay notes. `scripts/inspect-pinned-parse.mjs`
+   (new, read-only, no run budget) answered it directly from the pin corpus
+   instead — see §A.4. **Arc H does not need a grouping investigation; it needs
+   an extraction one.**
 6. **Then scope Arc H on upstream segmentation and attribution** — §B's
-   day-section misfiling, §A.4's fold, §F's address misrouting and §H's question
-   flattening are one family: content lost or misrouted before assembly sees it.
-   That is also where the 75-vs-49 gap lives.
-7. **Do not** change the OCR model. **Do not** calibrate
+   day-section misfiling, §A.4's model-side fold, §F's address misrouting and
+   §H's question flattening are one family: content lost or misrouted before
+   assembly sees it. That is also where the 75-vs-49 gap lives, and per §A.4d it
+   is the ONLY path to a Schönbrunn group.
+7. **Add a transcription-accuracy metric.** Per §K, nothing in the pipeline
+   measures whether OCR read characters correctly, and the metric everyone
+   watched cannot. A held-out set of known-correct proper nouns checked against
+   OCR output would have surfaced `Joselov` eleven runs ago.
+8. **Do not** change the OCR model. **Do not** calibrate
    `CROWDED_DAY_VISIBLE_CARDS` against this run's inflated counts.
 
-**Prediction for run 2, per rule 4.** With steps 1–4 shipped, Schönbrunn's
-grouping becomes genuinely *testable* for the first time and Prague Castle
-recovers if and only if step 2c gives St. Vitus and the Changing of the Guard
-real coordinates. **Confidence 7/10 that Prague Castle groups** (two children,
-both mechanically explained, both addressed by 2c). **Confidence 5/10 that
-Schönbrunn groups**, because at 893 m it still depends entirely on the G.3a
-address path, which no run has ever exercised observably — step 3 is what makes
-that answerable either way. **Low confidence that card count moves**; nothing in
-steps 1–4 touches demotion or debris. Cost if wrong: one run, and a docket that
-can finally distinguish "address path silent" from "counter not plumbed."
-Rollback: none of steps 1–4 changes assembly semantics.
+**Prediction for run 2, per rule 4 — revised after §A.4.**
+
+- **Prague Castle groups: 7/10.** Step 2c must give St. Vitus and the Changing
+  of the Guard real coordinates; that puts two members inside 300 m and clears
+  the ≥2 floor. Falsified by either child still lacking a verified coordinate,
+  or by a member count of 1.
+- **Schönbrunn groups: <2/10, and steps 1–4 cannot change that.** Per §A.4b the
+  model emitted one groupable child, the floor is two, and no geocoder or
+  address work alters either number. Anyone predicting otherwise has not read
+  the floor. **Falsified only by the model emitting ≥3 pieces for the complex**,
+  which is an extraction change, not an Arc H grouping change.
+- **Card count moves: low.** Nothing in steps 1–4 touches demotion or debris.
+- **Literal-`null` cards drop to 0: 9/10.** It is a serialization bug with a
+  deterministic fix and a visible check.
+
+Cost if wrong on Prague Castle: one run, plus a docket that can finally
+attribute per-candidate geocode outcomes. Rollback: none of steps 1–4 changes
+assembly semantics.
+
+**A standing caution this docket earned.** Three separate times it proposed an
+Arc G explanation for the grouping collapse — the alphabetical cut, then a lost
+baseline group, then an unobservable address path — and all three were wrong for
+the same reason: the cause was upstream of grouping, in what the model emitted.
+The evidence that settled it was available from the first hour in
+`/data/audit/payload` and the pin corpus. Prefer the parse over the pipeline
+when a card is missing.

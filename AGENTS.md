@@ -93,3 +93,22 @@ cleanup that silently broke OCR, and two wasted runs on a stale deployment.
 6. OPS INSTRUCTIONS ARE CODE. Steps a human executes in a console get the
    same rigor as a commit: numbered, with a verification step and an undo
    step, and an "inventory first" rule when state is unknown.
+7. CITE BEFORE YOU DIAGNOSE (added 2026-07-28 after the run-7.28.0 audit).
+   Reading the handoff docs is necessary and NOT sufficient. That audit read
+   `next-session.md`'s replay notes in its first ten minutes and then proposed
+   a replay to answer a grouping question those same notes say a replay cannot
+   answer (the geocode lane is not pinned). Reading without applying is the
+   failure mode; a rule that only says "read the docs" does not catch it.
+   Therefore, before proposing a diagnostic method, a root cause, or a fix:
+   (a) name the doc section or source line that says the method answers THIS
+   question, and the one recording its known limits — a method proposed
+   without its limitation cited is not a method;
+   (b) when attributing a defect to a code change, check the layer BELOW it
+   first: the model's own output before the assembly, the parse before the
+   pipeline, the raw payload before the projection;
+   (c) an explanation offered without a cited artifact is a HYPOTHESIS and
+   must be labelled one, in the docket and in conversation.
+   Three separate attributions in the run-7.28.0 audit were wrong in the same
+   direction — each reached for a pipeline cause before reading what the model
+   actually emitted, and the settling evidence was available from the first
+   hour in `/data/audit/payload` and the pin corpus.

@@ -6,7 +6,84 @@
 
 ## Current State
 
+### >>> NEXT SESSION: START HERE <<<
+
+**The work order is `docs/geocoder-remediation-scope-2026-07-28.md`.** It is
+LOCKED with Eli, carries the rule 1 arithmetic (measured from run 7.28.0's own
+event timestamps: 187.6 s against maxDuration 800 = 76.5 % headroom), and lists
+four OPEN questions that need Eli before coding.
+
+Order: (1) that scope doc, (2)
+`docs/assembly-defect-docket-2026-07-28-run-7.28.0.md` for the evidence behind
+it, (3) the ledger entry below. `AGENTS.md` rule 7 (CITE BEFORE YOU DIAGNOSE)
+is new and binding.
+
+Three things that will save you a day:
+
+1. **Do not touch grouping code.** It is healthy. Schönbrunn did not group
+   because the MODEL emitted one groupable child and the executor requires two
+   (`verifiedSourcePieces.filter(p => p !== siteContainer).length < 2`). No
+   geocoder or grouping change reaches it — that is Arc H, extraction-side.
+2. **Do not run a replay to answer a grouping question.** The harness disables
+   the geocode lane (`replay-pinned-parse.mjs:14`). Use
+   `scripts/inspect-pinned-parse.mjs <parseKeyPrefix>` to ask what the MODEL
+   emitted; it is read-only and costs no run budget.
+3. **Do not change the OCR model, and do not treat OCR as regressed.** Yield is
+   at its highest measured level; the misread is eleven runs old. See the OCR
+   table in the entry below.
+
+Run budget: 1 run for the geocoder pass, 1 for Arc H.
+
+
 ### 2026-07-28 — RUN 7.28.0 AUDITED (two independent passes, reconciled): Arc G RAN and shipped ZERO groups. Root cause is GEO TRUST, not the lookup budget. Grouping + placement contracts downgraded to KNOWN_GAP (ledger v23). Verdict NO-SHIP, non-blocking.
+
+**UPDATE, later 2026-07-28 — the grouping question is CLOSED, and it was never
+an Arc G question.** Read this before acting on anything below it.
+
+- **A ≥2-MEMBER FLOOR ends the Schönbrunn story.** The executor's same-site
+  verification requires at least two members besides the container
+  (`evidence-clustering.ts`: `verifiedSourcePieces.filter(p => p !== siteContainer).length < 2`).
+  `scripts/inspect-pinned-parse.mjs ff706e4d` (NEW, read-only, no run budget)
+  proves the MODEL emitted only two Schönbrunn pieces — parent + Gloriette.
+  Orangeriegarten / Palm House / Apple Strudel Show / Panorama Train: **zero
+  titles each**, prose only. One member < two. **Even a perfect G.3a address
+  match could not have grouped Schönbrunn on this parse.** Proof, not inference.
+  The source-hierarchy path itself is HEALTHY — `containerListsComponent` splits
+  on `;`/`:` and would match "Gloriette" with no coordinates at all.
+- **PRAGUE CASTLE fails the same floor differently:** container tokens
+  `prague`+`castle` are a city name and a generic noun, both stripped by G.3a's
+  filter → empty token list; no child title contains "prague castle"; and
+  "Changing of the Guard **at Prague Castle**" is the child's DESCRIPTION, not
+  its title, so the `<stop> at <Site>` rule never sees it. Zero hierarchy
+  members, zero geo members.
+- **SCOPING SPLIT this produces:** Prague Castle is **geocoder-fixable** (real
+  coords for St. Vitus + Changing of the Guard → two members inside 300 m →
+  floor met). **Schönbrunn is NOT** — it needs the model to emit its sub-stops.
+  Different arcs, no overlap.
+- **RETRACTED (second time): "Arc G lost the group that worked."** Given the
+  floor, 7.26.1's 2 grouped stops required the model to emit ≥3 Schönbrunn
+  pieces that run; this run it emitted 2. That is **parse variance in
+  extraction**, not an Arc G regression.
+- **REPLAY B: DO NOT RUN.** Replay A was clean (61/61, 0 misses, byte-identical
+  parse key) but a replay can NEVER answer a grouping question — the harness
+  disables the geocode lane (`replay-pinned-parse.mjs:14`), a limit already
+  recorded in the 2026-07-24 replay notes below.
+- **OCR RE-SCORED — "it was solid a few days ago" does not survive the data.**
+  Every bundle on disk is luna, 19 pages, 5 batches. Chars: 31,448 / 32,127 /
+  31,390 / 30,990 / 31,704 / 31,616 / 30,929 → **7.28.0 = 32,355, the HIGHEST
+  of all**. `Joselov` appears in EVERY bundle back to 7.17.1 (1/2/2/3) with
+  `Josefov` at **ZERO** in all of them; 7.28.0 is the first run reading it right
+  more often than wrong (3 vs 1). **Nothing regressed.** What was made solid was
+  MODEL AND CONFIG discipline (durable default, tripwire, smoke test, batching
+  A/B) — which held perfectly. Transcription accuracy was never solid and is
+  **not instrumented anywhere**; the watched metric, `uncoveredLineCount`, walks
+  the OCR OUTPUT and is structurally blind to a misread character. **Add a
+  transcription-accuracy check** (held-out proper nouns vs OCR output) — it
+  would have caught `Joselov` eleven runs ago.
+- **AGENTS.md gained rule 7, CITE BEFORE YOU DIAGNOSE**, at Eli's request after
+  this session repeatedly proposed pipeline explanations before reading the
+  model's own output. Reading the docs is necessary and not sufficient — this
+  session HAD read the replay caveat and proposed the replay anyway.
 
 **Read first:** `docs/assembly-defect-docket-2026-07-28-run-7.28.0.md` (chains
 A–K + §R two-audit reconciliation), then `docs/arc-g-audit-brief-2026-07-28.md`,
