@@ -343,7 +343,7 @@ export default async function run() {
     // Run8's actual concern was budget pressure, so assert the shape of
     // the pool rather than trusting the ranking to stay cheap.
     const arbitrationPool = candidates.filter(
-      (candidate) => candidate.rank <= 1
+      (candidate) => candidate.rank <= 2
     );
     assert.ok(
       arbitrationPool.length <= 8,

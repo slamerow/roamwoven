@@ -137,21 +137,42 @@ export function selectGeocodeCandidates(
     if (!title) continue;
     const city = stringField(record, "city") ?? stringField(record, "area");
     // Run8: the candidate pool ballooned past the budget (145/191 vs 50)
-    // and the walk pool starved. Rank 1 is the pool that ARBITRATES
-    // GROUPING, so the lookups that decide membership always fit inside
-    // budget: crowded-day members carrying a source area label (the
-    // discovered-walk pool) and, since Arc G.3a, same-day companions of a
-    // named-site container (the same-site pool). Both are bounded by the
-    // day they sit on — this re-prioritizes the existing pool, it does not
-    // grow it, and it adds no lookups.
-    const rank = SITE_CONTAINER_NOUN_PATTERN.test(title)
+    // and the walk pool starved. The ranks below are the two pools that
+    // ARBITRATE GROUPING, ordered so the budget cut is DELIBERATE rather
+    // than alphabetical:
+    //
+    //   0  named-site containers
+    //   1  same-day companions of a container — the same-site pool. These
+    //      are the only records that can join a visit by address, and the
+    //      address is the only route in for a stop that carries no title
+    //      token and sits outside 300 m (Schönbrunn's Gloriette).
+    //   2  crowded-day members carrying a source area label — the
+    //      discovered-walk pool (run8's rank 1).
+    //   3  everything else, skipped outright when the parser already
+    //      supplied precise-looking coordinates.
+    //
+    // MEASURED, and the earlier "this adds no lookups" note was WRONG:
+    // promoting companions moves them out of the rank-3 skip, so on a
+    // 7.26.1-shaped corpus candidates go 20 -> 41 and lookups rise with
+    // them. They stay hard-capped at maxLookups, and ranks 0/1 now take
+    // the slots first, so the stops the ship bar depends on cannot lose
+    // their lookup to an alphabetically luckier card.
+    const isContainer = SITE_CONTAINER_NOUN_PATTERN.test(title);
+    const isSiteCompanion = Boolean(
+      entry.date && siteContainerDates.has(entry.date)
+    );
+    const isWalkPoolMember = Boolean(
+      entry.date &&
+        (dayCounts.get(entry.date) ?? 0) >= 6 &&
+        stringField(record, "area")
+    );
+    const rank = isContainer
       ? 0
-      : entry.date &&
-          ((siteContainerDates.has(entry.date) ||
-            ((dayCounts.get(entry.date) ?? 0) >= 6 &&
-              Boolean(stringField(record, "area")))))
+      : isSiteCompanion
         ? 1
-        : 2;
+        : isWalkPoolMember
+          ? 2
+          : 3;
     // Live-run 7.21.0: the parser now fabricates 3-decimal coordinates (the
     // whole Jan-22 guided day collapsed onto one point near Gresham Palace,
     // passing the precision gate the run5 calibration assumed only real
@@ -160,7 +181,7 @@ export function selectGeocodeCandidates(
     // crowded-day members — the records radius rules actually consume —
     // are verified regardless; only background records (rank 2) skip
     // verification when the parser already supplied precise coordinates.
-    if (rank === 2 && hasPreciseParserCoordinates(record)) continue;
+    if (rank === 3 && hasPreciseParserCoordinates(record)) continue;
     candidates.push({
       query: city ? `${title}, ${city}` : title,
       rank,

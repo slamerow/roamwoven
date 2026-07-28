@@ -149,19 +149,69 @@ address is their ONLY route into the visit. Run 7.26.1 grouped exactly the
 two components that had title tokens. That is not a coincidence.
 
 **Change (Eli approved before the run): a card sharing a day with a
-named-site container is rank 1.** This is the run8 rule extended, not
-relaxed — rank 1 is still "the pool that arbitrates grouping", still bounded
-by the day, and it adds NO lookups. Measured on a 7.26.1-shaped corpus (75
-activities, 14 days, 3 container days): arbitration pool **32 against a
-budget of 50**, so the run8 ballooning concern (145/191 vs 50) is not
-reintroduced. A crowded day with no container on it still demands an area
-label. Guarded by `tests/geocode-verification.test.ts` (component pool +
-budget shape) and the amended run7 candidate test.
+named-site container becomes its own rank, ABOVE the discovered-walk pool.**
+The ladder is now 0 containers, 1 same-site companions, 2 area-labeled
+crowded-day members (run8's rank 1), 3 the rest — still skipped outright when
+the parser supplied precise-looking coordinates.
+
+**CORRECTION, recorded because I stated the opposite first:** "this adds no
+lookups" is WRONG. Promoting companions moves them out of the rank-3 skip, so
+on a 7.26.1-shaped corpus candidates go **20 → 41** and lookups rise with
+them. They stay hard-capped at `maxLookups`, and on that corpus all 41 fit
+inside the budget of 50 with nothing skipped. The live 7.26.1 pool was 83
+candidates, so on the real trip some records WILL be cut — which is exactly
+why the ranks are split: the cut is now deliberate rather than alphabetical,
+and the same-site components the ship bar depends on take their slots before
+the general pool. Watch `skippedOverBudgetCount`; if it is large, the geocode
+budget moves from Arc H to now.
+
+Cost note: each promoted candidate is one paid geocoding lookup. Latency
+worst case ⌈50/8⌉ × 4 s ≈ 28 s against `maxDuration` 800.
+
+Guarded by `tests/geocode-verification.test.ts` (component pool, explicit
+rank assertions on Gloriette / Panorama Train / Apple Strudel Show, budget
+shape) and the amended run7 candidate test.
 
 Honest revision of the Schönbrunn forecast: this moves it from roughly 30%
 to a real chance, and it is still conditional on the five components
 resolving and their formatted addresses naming the estate. Read
 `geocodeVerification.formattedAddressCount` FIRST.
+
+#### Block-risk audit (asked for by Eli before the run)
+
+An independent pass hunted specifically for ways this arc could BLOCK a run —
+the 7.23.0 class (`assembly-recovery-required`, "missingDetails[n] targets
+missing canonical identity"), uncaught throws, invariant trips, timeouts.
+**Verdict: it cannot.** The load-bearing findings, each verified in source:
+
+- Nothing between the transport repair and output composition can suppress,
+  merge or re-key a transport piece, so the repair's questions cannot be
+  orphaned. Even if one were, `canonicalizeCanonicalReviewDetails` dismisses
+  a dead-target detail and nulls its subject — both escape hatches in the
+  invariant at `canonical-identity.ts:188-196` are actively taken.
+- `assertCanonicalProjectionInvariant` does not compare arrival/departure
+  fields at all, so the repair's writes are invisible to it. Nothing requires
+  an item's date to have a day record, and no consumer reads `records.days`
+  in the audit path — so the day filter cannot trip anything.
+- A null trip range makes BOTH new G.1 filters no-ops, so a spine-less draft
+  behaves exactly as before.
+- `needs_review` items never block: `canPublish` is true whenever records
+  exist, and the route's terminal branch redirects `completed-with-review`.
+- The repair is idempotent, so the retry lane does not spuriously flip
+  `changed`; when it does, the rebuild deletes `_canonicalFinalization`
+  before re-finalizing, so `FinalizedCanonicalMutationError` is unreachable.
+- No new network calls. Geocode lookups stay hard-capped at `maxLookups`.
+
+Three quality findings from that audit were fixed before the run: the
+geocode-lookup claim above (corrected and re-measured), the formatted address
+riding into the persisted draft (now stripped in
+`canonicalPiecePublicPayload` — the pre-existing `verifiedLatitude` /
+`verifiedLongitude` gap is deliberately left alone), and the retry lane
+clearing a transport value with no Question available. The last one now
+records a named recovery action
+(`cleared_impossible_transport_<field>_without_question:<route>`) so it warns
+loudly instead of vanishing — the standing publish-gate posture applied to a
+lane that cannot ask.
 
 #### What is NOT proven, and what to watch on the run
 

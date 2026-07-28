@@ -599,6 +599,12 @@ export async function POST(
       if (retryChanged) {
         currentPieces = retry.pieces;
         failureStage = "assembly";
+        // Arc G.2: this lane cannot mint a Question, so a transport value
+        // it had to CLEAR is recorded as a named recovery action instead
+        // of vanishing quietly. Warn loudly, never block.
+        const clearedTransportFields = retry.transportFieldRepairs.filter(
+          (repair) => repair.outcome === "cleared_pending_review"
+        );
         assembly = assembleCanonicalTripDraft({
           draft: assembly.draft,
           evidencePieces: currentPieces,
@@ -606,6 +612,10 @@ export async function POST(
           priorRecoveryActions: [
             ...preparedEvidence.recoveryActions,
             "reapplied_canonical_output_invariants",
+            ...clearedTransportFields.map(
+              (repair) =>
+                `cleared_impossible_transport_${repair.field}_without_question:${repair.routeLabel}`
+            ),
           ],
           tripId,
         });

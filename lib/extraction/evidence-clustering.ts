@@ -474,6 +474,14 @@ export function canonicalPiecePublicPayload(
     _canonicalProvisionalFields,
     _canonicalRepairedTransportFields,
     _canonicalSourceDecisions,
+    // Arc G.3a: the geocoder's formatted address is grouping evidence and
+    // nothing else. RW-GRP-001's lane posture says results are consumed
+    // ONLY by proximity checks, so a postal address must not ride into the
+    // persisted draft with the card. (The pre-existing verifiedLatitude /
+    // verifiedLongitude / _geoVerified fields have the same gap; they are
+    // left alone deliberately — changing them is a behavior change to make
+    // on purpose, not on the way past.)
+    verifiedFormattedAddress: _verifiedFormattedAddress,
     _resolverCandidateId,
     _sourceSupport,
     _verificationNotes,
@@ -9489,10 +9497,14 @@ export function reapplyCanonicalOutputInvariants({
     tripYear,
   });
   finalizeCanonicalOutputFields(pieces);
-  applyCanonicalTransportFieldRepair({
+  // The retry lane cannot mint Questions — dispositions and the identity
+  // manifest are already stamped — so a value it CLEARS would otherwise
+  // disappear with nobody told. It is reported instead, and the route
+  // records it as a recovery action.
+  const retryTransportRepairs = applyCanonicalTransportFieldRepair({
     anchors: sourceTransportAnchors,
     pieces,
-  });
+  }).repairs;
   // Arc F.2 C4 (run 7.24.1 chains D/E, step-0 trace): this retry is the
   // ONE post-sweep payload mutation point in the live route — the
   // accessory router re-runs here (attaching/removing prose) AFTER
@@ -9513,6 +9525,7 @@ export function reapplyCanonicalOutputInvariants({
   return {
     changed: JSON.stringify(pieces) !== before,
     pieces,
+    transportFieldRepairs: retryTransportRepairs,
   };
 }
 

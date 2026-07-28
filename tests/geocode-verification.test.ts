@@ -287,6 +287,15 @@ export default async function run() {
       0,
       "the container is still verified first"
     );
+    // The budget cut must be deliberate, not alphabetical: every component
+    // of a site visit outranks the general crowded-day pool, so a stop the
+    // ship bar depends on cannot lose its lookup to a luckier name.
+    for (const title of ["Gloriette", "Panorama Train", "Apple Strudel Show"]) {
+      const candidate = candidates.find((entry) =>
+        entry.query.startsWith(title)
+      );
+      assert.equal(candidate?.rank, 1, `${title} is in the same-site pool`);
+    }
   });
 
   await test("Arc G.3a: the arbitration pool stays inside the budget on a trip-shaped corpus", async () => {
@@ -312,7 +321,7 @@ export default async function run() {
 
     const candidates = selectGeocodeCandidates([stageWith(days)]);
     const arbitrationPool = candidates.filter(
-      (candidate) => candidate.rank <= 1
+      (candidate) => candidate.rank <= 2
     );
 
     assert.ok(

@@ -581,4 +581,60 @@ export default async function run() {
     assert.equal(payload.arrivalTime, null);
     assert.equal(payload.endTime, null, "the coalesce source is cleared as the same instant");
   });
+
+  await test("the geocoder's address is grouping evidence, not draft content", () => {
+    // RW-GRP-001's lane posture: geocode results are consumed ONLY by
+    // proximity checks. A postal address must not ride into the persisted
+    // draft attached to the card.
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "geo",
+          source: "model_chunk",
+          stage: {
+            activities: [
+              {
+                _geoVerified: true,
+                category: "art_culture",
+                city: "Vienna",
+                date: "2019-01-19",
+                description: "Schönbrunn Palace visit.",
+                itemType: "activity",
+                title: "Schönbrunn Palace",
+                verifiedFormattedAddress:
+                  "Schloß Schönbrunn, Schönbrunner Schloßstraße 47, 1130 Wien, Austria",
+                verifiedLatitude: 48.1845,
+                verifiedLongitude: 16.3122,
+              },
+            ],
+            missingDetails: [],
+            places: [],
+            sensitiveDetails: [],
+            stays: [],
+            transport: [],
+          },
+        },
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    for (const card of draft.activities) {
+      assert.equal(
+        card.verifiedFormattedAddress,
+        undefined,
+        "no formatted address ships with the card"
+      );
+    }
+    // ...but the piece still carries it, because grouping reads pieces.
+    assert.ok(
+      result.pieces.some(
+        (piece) => piece.payload.verifiedFormattedAddress !== undefined
+      ),
+      "grouping still has the evidence it needs"
+    );
+  });
 }
