@@ -3,6 +3,7 @@ import {
   runGeocodeVerification,
   selectGeocodeCandidates,
 } from "@/lib/extraction/geocode-verification";
+import { getGeocodeVerificationConfig } from "@/lib/env";
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 
 // Geocoding verification lane (Arc B; standing CEO decision 2026-07-17/18):
@@ -42,6 +43,77 @@ const CONFIG = {
   maxLookups: 10,
   timeoutMs: 1000,
 };
+
+// --- Remediation-pass fixtures --------------------------------------------
+
+type FakeGeocodeResult = {
+  formatted_address?: string;
+  lat: number;
+  lng: number;
+  types?: string[];
+};
+
+// The literal run-7.28.0 centroid, with the viewport Google returns
+// alongside it. That viewport IS the city's bounding box, which is what
+// G4.3's retry is checked against — no extra lookup is made to obtain it.
+const PRAGUE_VIEWPORT = {
+  northeast: { lat: 50.1774301, lng: 14.7067869 },
+  southwest: { lat: 49.9419006, lng: 14.2244533 },
+};
+
+const PRAGUE_CENTROID: FakeGeocodeResult = {
+  lat: 50.0755381,
+  lng: 14.4378005,
+  types: ["locality", "political"],
+};
+
+const PRAGUE_CENTROID_RESULT = {
+  address_components: [
+    { long_name: "Prague", short_name: "Praha", types: ["locality", "political"] },
+  ],
+  geometry: {
+    location: { lat: PRAGUE_CENTROID.lat, lng: PRAGUE_CENTROID.lng },
+    viewport: PRAGUE_VIEWPORT,
+  },
+  types: PRAGUE_CENTROID.types,
+};
+
+// Dispatches on the query string so a test can answer the standalone
+// lookup and its container retry differently — which is the whole of G4.3.
+function respondWith(byQuery: (query: string) => FakeGeocodeResult | null) {
+  return (async (url: string) => {
+    const address = new URL(url).searchParams.get("address") ?? "";
+    const result = byQuery(address);
+
+    return {
+      ok: true,
+      json: async () => ({
+        results: result
+          ? [
+              {
+                ...(result.formatted_address
+                  ? { formatted_address: result.formatted_address }
+                  : {}),
+                address_components: [
+                  {
+                    long_name: "Prague",
+                    short_name: "Praha",
+                    types: ["locality", "political"],
+                  },
+                ],
+                geometry: {
+                  location: { lat: result.lat, lng: result.lng },
+                  viewport: PRAGUE_VIEWPORT,
+                },
+                ...(result.types ? { types: result.types } : {}),
+              },
+            ]
+          : [],
+        status: result ? "OK" : "ZERO_RESULTS",
+      }),
+    } as Response;
+  }) as unknown as typeof fetch;
+}
 
 function okFetch(lat: number, lng: number, formattedAddress?: string) {
   return async () =>
@@ -332,6 +404,383 @@ export default async function run() {
       candidates.filter((candidate) => candidate.rank === 0).length,
       3,
       "one container per container day"
+    );
+  });
+
+  // ---------------------------------------------------------------------
+  // Geocoder remediation pass, run 7.28.0
+  // (docs/geocoder-remediation-scope-2026-07-28.md, LOCKED with Eli).
+  // ---------------------------------------------------------------------
+
+  await test("G4.1: the shipped default budget is the 150 hard cap, not just a Vercel variable", () => {
+    const previous = process.env.GEOCODE_VERIFICATION_MAX_LOOKUPS;
+    delete process.env.GEOCODE_VERIFICATION_MAX_LOOKUPS;
+    try {
+      // A fresh environment must not be silently starved: run 7.28.0 left
+      // 48 of 98 candidates unlooked-up, and Rome's whole Jan-13 leg
+      // unverified, at the old default of 50.
+      assert.equal(getGeocodeVerificationConfig().maxLookups, 150);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GEOCODE_VERIFICATION_MAX_LOOKUPS;
+      } else {
+        process.env.GEOCODE_VERIFICATION_MAX_LOOKUPS = previous;
+      }
+    }
+  });
+
+  await test("G4.2: a locality-granularity result is NOT stamped verified, and is NOT an error", async () => {
+    // The exact run-7.28.0 defect: the geocoder could not resolve the venue,
+    // returned the Prague city centroid, and the lane recorded it as
+    // verified — putting Changing of the Guard 3,108 m from the castle it
+    // happens inside, and 31 activities on only 29 distinct points.
+    const card: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-14",
+      itemType: "activity",
+      title: "Catacombs tour",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith(() => PRAGUE_CENTROID),
+      stages: [stageWith([card])],
+    });
+
+    assert.equal(result.usage.outcome, "completed", "rejection is not failure");
+    assert.equal(result.usage.failedCount, 0, "a place is not a transport error");
+    assert.equal(result.usage.localityRejectedCount, 1);
+    assert.equal(result.usage.resolvedCount, 0);
+    assert.equal(card.verifiedLatitude, undefined);
+    assert.equal(card.verifiedLongitude, undefined);
+    assert.equal(card._geoVerified, undefined, "no false verification");
+  });
+
+  await test("G4.2: administrative_area and postal_code results are rejected on the same criterion (D2)", async () => {
+    for (const types of [
+      ["administrative_area_level_1", "political"],
+      ["administrative_area_level_2"],
+      ["postal_code"],
+      ["country", "political"],
+    ]) {
+      const card: Record<string, unknown> = {
+        city: "Prague",
+        date: "2019-01-14",
+        itemType: "activity",
+        title: "Some regional thing",
+      };
+      const result = await runGeocodeVerification({
+        config: CONFIG,
+        fetchImpl: respondWith(() => ({ ...PRAGUE_CENTROID, types })),
+        stages: [stageWith([card])],
+      });
+
+      assert.equal(
+        card._geoVerified,
+        undefined,
+        `${types.join("+")} is place granularity, not a venue`
+      );
+      assert.equal(result.usage.localityRejectedCount, 1);
+    }
+  });
+
+  await test("G4.2: a venue result is unaffected — the guard is not a blanket tightening", async () => {
+    const card: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "St. Vitus Cathedral",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith(() => ({
+        lat: 50.0909,
+        lng: 14.4006,
+        types: ["church", "place_of_worship", "point_of_interest"],
+      })),
+      stages: [stageWith([card])],
+    });
+
+    assert.equal(result.usage.resolvedCount, 1);
+    assert.equal(result.usage.localityRejectedCount, 0);
+    assert.equal(card._geoVerified, true);
+  });
+
+  await test("G4.3: a locality result is retried ONCE with the day's container, and the venue is accepted", async () => {
+    // This is the part that actually recovers Prague Castle: with the
+    // Changing of the Guard resolved to a real point, two members land
+    // inside 300 m and the >=2 floor is met (scope §G4.3, docket §A.4d).
+    const castle: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Prague Castle",
+    };
+    const guard: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Changing of the Guard",
+    };
+    const queries: string[] = [];
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) => {
+        queries.push(query);
+        if (query === "Prague Castle, Prague") {
+          return { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] };
+        }
+        if (query === "Changing of the Guard, Prague Castle") {
+          // Inside the Prague viewport the centroid response carried.
+          return { lat: 50.0911, lng: 14.4004, types: ["tourist_attraction"] };
+        }
+        return PRAGUE_CENTROID;
+      }),
+      stages: [stageWith([castle, guard])],
+    });
+
+    assert.equal(result.usage.outcome, "completed");
+    assert.equal(result.usage.retryCount, 1, "exactly one retry, and only one");
+    assert.equal(result.usage.retryAcceptedCount, 1);
+    assert.equal(guard._geoVerified, true);
+    assert.equal(guard.verifiedLatitude, 50.0911);
+    assert.equal(
+      (guard._geoVerification as Record<string, unknown>).query,
+      "Changing of the Guard, Prague Castle",
+      "provenance records the query that actually resolved it"
+    );
+    assert.equal(
+      queries.filter((query) => query.includes("Changing of the Guard")).length,
+      2,
+      "one standalone lookup plus exactly one container retry"
+    );
+    // The container itself is never retried against itself.
+    assert.equal(
+      queries.filter((query) => query === "Prague Castle, Prague Castle").length,
+      0
+    );
+  });
+
+  await test("G4.3: a retry that lands outside the day's city bounds is REFUSED — a wrong coordinate is worse than none", async () => {
+    // Scope §3 failure mode 2: "Peklo, Prague" finding a different Peklo.
+    // Bar item 7 rates a wrong group worse than a missing one, so this
+    // predicate fails closed.
+    const castle: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Prague Castle",
+    };
+    const peklo: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Peklo",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) => {
+        if (query === "Peklo, Prague Castle") {
+          // A real venue — in Vienna, 250 km outside the Prague viewport.
+          return { lat: 48.2082, lng: 16.3738, types: ["point_of_interest"] };
+        }
+        if (query === "Prague Castle, Prague") {
+          return { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] };
+        }
+        return PRAGUE_CENTROID;
+      }),
+      stages: [stageWith([castle, peklo])],
+    });
+
+    assert.equal(result.usage.outcome, "completed");
+    assert.equal(result.usage.retryCount, 1);
+    assert.equal(result.usage.retryAcceptedCount, 0);
+    assert.equal(result.usage.retryOutOfCityCount, 1);
+    assert.equal(peklo._geoVerified, undefined, "no verified coordinate at all");
+    assert.equal(peklo.verifiedLatitude, undefined);
+  });
+
+  await test("G4.3 + D3: retries count against the budget, so the cap stays a true ceiling", async () => {
+    const castle: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Prague Castle",
+    };
+    const guard: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Changing of the Guard",
+    };
+    let calls = 0;
+    const result = await runGeocodeVerification({
+      // Budget exactly equals the candidate pool: nothing is left to spend
+      // on a retry, and the telemetry says the CAP bounded recovery rather
+      // than letting the guard take the blame.
+      config: { ...CONFIG, maxLookups: 2 },
+      fetchImpl: respondWith((query) => {
+        calls += 1;
+        return query === "Prague Castle, Prague"
+          ? { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] }
+          : PRAGUE_CENTROID;
+      }),
+      stages: [stageWith([castle, guard])],
+    });
+
+    assert.equal(calls, 2, "the cap is a HARD ceiling including retries");
+    assert.equal(result.usage.lookupCount, 2);
+    assert.equal(result.usage.retryCount, 0);
+    assert.equal(result.usage.retrySkippedOverBudgetCount, 1);
+    assert.equal(guard._geoVerified, undefined);
+  });
+
+  await test("G4.4: every candidate carries its rank and outcome, including the ones that never got a lookup", async () => {
+    // The question run 7.28.0 could not answer: St. Vitus sat on a crowded
+    // day, was a same-day component of a container, eight of its twelve
+    // day-mates resolved — and nobody could say why it lost its lookup,
+    // because this record did not exist (docket §C, field 4).
+    const castle: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Prague Castle",
+    };
+    const vitus: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "St. Vitus Cathedral",
+    };
+    const result = await runGeocodeVerification({
+      config: { ...CONFIG, maxLookups: 1 },
+      fetchImpl: respondWith(() => ({
+        lat: 50.0910966,
+        lng: 14.4016165,
+        types: ["tourist_attraction"],
+      })),
+      stages: [stageWith([castle, vitus])],
+    });
+
+    assert.equal(result.usage.candidates.length, 2, "the POOL, not the lookups");
+
+    // The contract is that the ledger MIRRORS the ranking ladder — not that
+    // the ladder has any particular shape. Asserting a hardcoded rank here
+    // would silently couple this test to the contents of
+    // SITE_CONTAINER_NOUN_PATTERN, which is not what G4.4 promises.
+    const ladder = selectGeocodeCandidates([stageWith([{ ...castle }, { ...vitus }])]);
+    assert.deepEqual(
+      result.usage.candidates.map((row) => ({ query: row.query, rank: row.rank })),
+      ladder.map((entry) => ({ query: entry.query, rank: entry.rank })),
+      "every candidate appears, in rank order, with the rank it was given"
+    );
+
+    const [first, second] = result.usage.candidates;
+    assert.equal(first.outcome, "resolved");
+    assert.equal(first.granularity, "venue");
+    assert.equal(first.retried, false);
+    assert.equal(
+      second.outcome,
+      "skipped_over_budget",
+      "the answer to 'why did this stop not resolve' is now on the record"
+    );
+    assert.equal(second.granularity, null, "it was never looked up");
+    assert.equal(
+      result.usage.candidates.filter((row) => row.outcome === "resolved").length,
+      1
+    );
+  });
+
+  await test("G4.4: a retried candidate records the retry query and its final granularity", async () => {
+    const castle: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Prague Castle",
+    };
+    const guard: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      itemType: "activity",
+      title: "Changing of the Guard",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) =>
+        query === "Changing of the Guard, Prague Castle"
+          ? { lat: 50.0911, lng: 14.4004, types: ["tourist_attraction"] }
+          : query === "Prague Castle, Prague"
+            ? { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] }
+            : PRAGUE_CENTROID
+      ),
+      stages: [stageWith([castle, guard])],
+    });
+
+    const row = result.usage.candidates.find((candidate) =>
+      candidate.query.startsWith("Changing of the Guard")
+    );
+    if (!row) {
+      throw new Error("the retried candidate is missing from the ledger");
+    }
+    assert.equal(row.retried, true);
+    assert.equal(row.retryQuery, "Changing of the Guard, Prague Castle");
+    assert.equal(row.outcome, "resolved");
+    assert.equal(row.granularity, "venue");
+  });
+
+  await test("G4.3: the retry runs in its own wave, so scope §2's ceil(lookups / 8) arithmetic still holds", async () => {
+    // A retry issued INLINE would cost its parent wave two sequential
+    // round-trips and quietly break the 4 s-per-wave headroom arithmetic.
+    // Queued into a later wave, concurrency never exceeds the configured
+    // width.
+    const cards = [
+      {
+        city: "Prague",
+        date: "2019-01-16",
+        itemType: "activity",
+        title: "Prague Castle",
+      },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        city: "Prague",
+        date: "2019-01-16",
+        itemType: "activity",
+        title: `Courtyard stop ${index}`,
+      })),
+    ];
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const result = await runGeocodeVerification({
+      // Headroom above the 10-card pool so D3 leaves something to retry
+      // with; the point under test is wave WIDTH, not the cap.
+      config: { ...CONFIG, maxLookups: 30 },
+      fetchImpl: (async (url: string) => {
+        inFlight += 1;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        inFlight -= 1;
+        const query =
+          new URL(url).searchParams.get("address") ?? "";
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              query.includes("Prague Castle") && !query.startsWith("Prague Castle")
+                ? {
+                    geometry: { location: { lat: 50.0911, lng: 14.4004 } },
+                    types: ["tourist_attraction"],
+                  }
+                : PRAGUE_CENTROID_RESULT,
+            ],
+            status: "OK",
+          }),
+        } as Response;
+      }) as unknown as typeof fetch,
+      stages: [stageWith(cards)],
+    });
+
+    assert.ok(result.usage.retryCount > 0, "retries did happen");
+    assert.ok(
+      peakInFlight <= result.usage.lookupConcurrency,
+      `concurrency stays at the configured width (peak ${peakInFlight})`
     );
   });
 }

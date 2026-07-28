@@ -190,6 +190,16 @@ export type TripExtractionAuditReport = {
     clusteredObservationCount: number;
     contextObservationCount: number;
     dispositionCount: number;
+    // G4.4 (docket §C, field 2): produced by the claim ledger at
+    // evidence-clustering.ts and, before this, consumed by NOBODY
+    // repo-wide — never persisted, never served. Lane contention was
+    // designed to be visible in run telemetry and was not.
+    groupingClaims: {
+      claimedPieceCount: number;
+      claimsByLane: Record<string, number>;
+      contestedPieceCount: number;
+      releasedDecisionCount: number;
+    } | null;
     identityRepairCount: number;
     identityRecoveryInitialViolations: string[];
     identityRecoveryStatus: "not_needed" | "repaired";
@@ -200,6 +210,17 @@ export type TripExtractionAuditReport = {
     suppressedStandaloneAnchorCount: number;
     // Arc G.2: deterministic transport repairs applied this run.
     transportFieldRepairCount: number;
+    // G4.4 (docket §C, field 3): written to usage since Arc G.2, and no
+    // audit endpoint serves `usage`. The OUTCOME is the load-bearing part —
+    // `cleared_pending_review` versus `repaired_from_source_anchor` is the
+    // difference between a repair that worked and one that gave up.
+    transportFieldRepairs: Array<{
+      defect: string;
+      field: string;
+      outcome: string;
+      pieceId: string;
+      routeLabel: string;
+    }>;
     undisposedObservationCount: number;
   };
   diagnostics: TripExtractionAuditDiagnostic[];
@@ -230,11 +251,33 @@ export type TripExtractionAuditReport = {
     } | null;
     geocodeVerification: {
       budget: number;
+      // G4.4 (docket §C, field 4): per-candidate rank + outcome. Without
+      // it, "St. Vitus lost its lookup and there is no telemetry that says
+      // why" is a permanent condition, and shipping G4.1/G4.2/G4.3 in one
+      // run is unattributable under AGENTS.md rule 1.
+      candidates: Array<{
+        granularity: string | null;
+        outcome: string;
+        query: string;
+        rank: number;
+        retried: boolean;
+        retryQuery: string | null;
+      }>;
       candidateCount: number;
       failedCount: number;
+      // G4.4 (docket §C, field 1): computed by the lane since Arc G.3a and
+      // dropped by this whitelist, which made every G.3a address-path
+      // conclusion unfalsifiable — ABSENT was read as ZERO.
+      formattedAddressCount: number;
+      // G4.2 / G4.3 outcome counters.
+      localityRejectedCount: number;
       lookupCount: number;
       outcome: string;
       resolvedCount: number;
+      retryAcceptedCount: number;
+      retryCount: number;
+      retryOutOfCityCount: number;
+      retrySkippedOverBudgetCount: number;
       skippedOverBudgetCount: number;
     } | null;
     staged: boolean;

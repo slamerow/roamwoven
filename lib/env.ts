@@ -170,7 +170,29 @@ export function getGeocodeVerificationConfig() {
       // Live-run 7.21.0: a 15-lookup budget starved the discovered-walk
       // pool (29 of 44 candidates skipped) while radius rules ran on
       // fabricated parser coordinates. Env-tunable; raise/lower in Vercel.
-      50
+      //
+      // G4.1, run 7.28.0 (docs/geocoder-remediation-scope-2026-07-28.md
+      // §G4.1, decision D1): 50 -> 150, a HARD CAP. That run measured
+      // candidateCount 98 / budget 50 / skippedOverBudgetCount 48, and
+      // Rome's entire Jan-13 leg — Colosseum, Pantheon, Trevi Fountain,
+      // Spanish Steps — received no verified coordinate at all, because a
+      // 4-card day never ranks. The 50 was an arbitrary cost cap that did
+      // not behave as intended (docs/arc-g-scope-2026-07-27.md §Geocode
+      // budget).
+      //
+      // Arithmetic, MEASURED not estimated (scope §2): run 7.28.0 spent
+      // 187.6 s wall clock against maxDuration 800 s. Waves =
+      // ceil(lookups / 8) at GEOCODE_LOOKUP_CONCURRENCY 8, worst case 4 s
+      // per wave (i.e. EVERY lookup times out; the run's actual failedCount
+      // was 0). 150 lookups = 19 waves = 76 s => ~235.6 s worst case =>
+      // 70.5 % headroom, clearing AGENTS.md rule 1's >=40 % bar with 30
+      // points to spare. G4.3's retries are bounded at one per locality
+      // result and COUNT against this same cap (D3), so they cannot extend
+      // the ceiling.
+      //
+      // The DEFAULT moves, not just the Vercel variable, so a fresh
+      // environment is not silently starved.
+      150
     ),
     timeoutMs: getOptionalPositiveInteger(
       "GEOCODE_VERIFICATION_TIMEOUT_MS",

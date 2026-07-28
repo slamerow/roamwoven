@@ -40,6 +40,7 @@ export type ParserArtifactRepair = {
     | "degenerate_end_time"
     | "disjunction_split"
     | "heading_fragment_card"
+    | "literal_null_time_field"
     | "opening_hours_end_time"
     | "provider_text_bleed"
     | "ticket_page_activity";
@@ -154,6 +155,74 @@ function activityText(activity: Record<string, unknown>) {
   return [stringValue(activity, "title"), stringValue(activity, "description")]
     .filter(Boolean)
     .join(" ");
+}
+
+// --- Rule 0: literal-nullish time strings ----------------------------------
+
+// Run 7.28.0, docket §G: 31 cards carried the LITERAL STRING "null" as
+// their startTime and 14 as their endTime (against 33 and, separately, real
+// nulls), and the summary surface rendered text such as "null · Art and
+// culture." Transport rows were clean — 0 affected — so the defect is
+// confined to the activity projection.
+//
+// This lands squarely against AGENTS.md §Dark-factory: "A processing stage
+// may be recorded as completed only after its output passes the validation
+// required by the next persisted boundary." Assembly was recorded
+// `completed` with output that fails the render boundary. It is malformed
+// output, not an unresolved decision, so it is repaired here — bounded,
+// deterministic, silent, counted (RW-QA-001 / RW-OPS-001) — rather than
+// surfaced to the maker as a question.
+//
+// ON ORIGIN, and this is a HYPOTHESIS, labelled as one per AGENTS.md rule
+// 7(c). No pipeline code stringifies these fields: `getString`
+// (draft-value.ts) passes strings through untouched and the projection does
+// no coercion. Sorting the three qa-bundles on disk — run-7.17.1,
+// run-7.21.0, run-7.21.1b — finds ZERO literal-"null" time fields across
+// all three, through this same projection. That points upstream to the
+// MODEL emitting the four characters n-u-l-l, which the parser schema
+// (`type: ["string","null"]`) accepts as a valid string. It is NOT
+// confirmed against the pinned parse; confirming it needs
+// `scripts/inspect-pinned-parse.mjs` against run 7.28.0's parse key, which
+// is Arc H's business. THE REPAIR BELOW IS CORRECT UNDER EITHER ORIGIN — it
+// normalizes the value at the earliest boundary that sees it, so a
+// model-side cause and a pipeline-side cause both terminate here.
+//
+// Deliberately bounded to TIME fields and to the two stringified-nullish
+// tokens actually observed. A wider sweep over every string field is a
+// different change with a different blast radius, and nothing evidences it.
+const LITERAL_NULLISH_VALUE = /^(?:null|undefined)$/i;
+
+const NULLABLE_ACTIVITY_TIME_FIELDS = ["endTime", "startTime"] as const;
+const NULLABLE_TRANSPORT_TIME_FIELDS = [
+  "arrivalTime",
+  "departureTime",
+] as const;
+
+function repairLiteralNullTimeFields(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  stageLabel: string,
+  repairs: ParserArtifactRepair[],
+  fallbackTitle: string
+) {
+  const title =
+    stringValue(record, "title") ??
+    stringValue(record, "routeLabel") ??
+    fallbackTitle;
+
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value !== "string" || !LITERAL_NULLISH_VALUE.test(value.trim())) {
+      continue;
+    }
+    record[field] = null;
+    repairs.push({
+      detail: `${field} carried the literal string "${value.trim()}" and was cleared to a real null — the summary surface renders it verbatim ("null · Art and culture", run 7.28.0 docket §G).`,
+      kind: "literal_null_time_field",
+      stageLabel,
+      title,
+    });
+  }
 }
 
 // --- Rule 1: degenerate time pairs -----------------------------------------
@@ -836,6 +905,18 @@ export function normalizeParserStageArtifacts(
       .filter((value): value is string => Boolean(value));
 
     for (const activity of activities) {
+      // Rule 0 runs FIRST, and the ordering is load-bearing: a card with
+      // startTime "null" and endTime "null" satisfies the degenerate-pair
+      // test below (they compare equal), which would clear endTime, return
+      // early, and leave the literal "null" sitting in startTime — the
+      // exact field the bar counts.
+      repairLiteralNullTimeFields(
+        activity,
+        NULLABLE_ACTIVITY_TIME_FIELDS,
+        stageInput.label,
+        repairs,
+        "(untitled)"
+      );
       repairDegenerateTimes(activity, stageInput.label, repairs);
       repairDayTitleCard(
         activity,
@@ -852,6 +933,16 @@ export function normalizeParserStageArtifacts(
     repairSplitDisjunctions(activities, stageInput, repairs);
 
     for (const item of transport) {
+      // Transport rows measured 0 affected in run 7.28.0. Covered anyway:
+      // it is the same malformed-output family against the same render
+      // boundary, and on clean input this is a no-op that adds no repairs.
+      repairLiteralNullTimeFields(
+        item,
+        NULLABLE_TRANSPORT_TIME_FIELDS,
+        stageInput.label,
+        repairs,
+        "(unlabelled transport)"
+      );
       repairTransportProvider(item, stageInput, repairs);
     }
 

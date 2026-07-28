@@ -137,6 +137,30 @@ export function createCanonicalizationSummary(usage: unknown) {
     clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
     contextObservationCount: Number(evidence.contextObservationCount) || 0,
     dispositionCount,
+    // G4.4 (docket §C, field 2): the claim ledger's telemetry has been
+    // produced by evidence-clustering since Arc G.3b with ZERO consumers
+    // repo-wide — lane contention was designed to be visible in run
+    // telemetry and never reached a served surface. A probe of run 7.28.0's
+    // response bodies found `claimsByLane` 0 times.
+    groupingClaims: (() => {
+      const claims = asRecord(evidence.groupingClaims);
+
+      if (Object.keys(claims).length === 0) return null;
+
+      const byLane = asRecord(claims.claimsByLane);
+
+      return {
+        claimedPieceCount: Number(claims.claimedPieceCount) || 0,
+        claimsByLane: Object.fromEntries(
+          Object.entries(byLane).map(([lane, count]) => [
+            lane,
+            Number(count) || 0,
+          ])
+        ),
+        contestedPieceCount: Number(claims.contestedPieceCount) || 0,
+        releasedDecisionCount: Number(claims.releasedDecisionCount) || 0,
+      };
+    })(),
     identityRepairCount: Array.isArray(identityRecovery.actions)
       ? identityRecovery.actions.length
       : 0,
@@ -160,6 +184,36 @@ export function createCanonicalizationSummary(usage: unknown) {
       Number(evidence.suppressedWeakAnchorCount) || 0,
     transportFieldRepairCount:
       Number(evidence.transportFieldRepairCount) || 0,
+    // G4.4 (docket §C, field 3): written to `usage` at Arc G.2 and served
+    // by no audit endpoint. The COUNT alone cannot distinguish a repair
+    // that recovered the field from a source anchor
+    // (`repaired_from_source_anchor`) from one that gave up and cleared it
+    // (`cleared_pending_review`) — Chain E's flagging branch was never
+    // exercised and this is the surface that would have shown it. Support
+    // telemetry only (AGENTS.md dark-factory), never maker-facing.
+    transportFieldRepairs: Array.isArray(openai.transportFieldRepairs)
+      ? openai.transportFieldRepairs.flatMap((repair) => {
+          const record = asRecord(repair);
+
+          return typeof record.outcome === "string"
+            ? [
+                {
+                  defect:
+                    typeof record.defect === "string" ? record.defect : "unknown",
+                  field:
+                    typeof record.field === "string" ? record.field : "unknown",
+                  outcome: record.outcome,
+                  pieceId:
+                    typeof record.pieceId === "string" ? record.pieceId : "",
+                  routeLabel:
+                    typeof record.routeLabel === "string"
+                      ? record.routeLabel
+                      : "",
+                },
+              ]
+            : [];
+        })
+      : [],
     undisposedObservationCount: Math.max(0, observationCount - dispositionCount),
   };
 }
@@ -256,14 +310,58 @@ export function createExtractionSummary(usage: unknown) {
       return Object.keys(geocode).length > 0
         ? {
             budget: Number(geocode.budget) || 0,
+            // G4.4: the per-candidate ledger, carried whole and
+            // unaggregated — the question it exists to answer ("why did
+            // THIS stop not resolve?") is per-row by construction. This is
+            // what makes a run-2 failure attributable across G4.1/G4.2/G4.3
+            // instead of chargeable to "the geocoder pass".
+            candidates: Array.isArray(geocode.candidates)
+              ? geocode.candidates.flatMap((candidate) => {
+                  const record = asRecord(candidate);
+
+                  return typeof record.query === "string"
+                    ? [
+                        {
+                          granularity:
+                            typeof record.granularity === "string"
+                              ? record.granularity
+                              : null,
+                          outcome:
+                            typeof record.outcome === "string"
+                              ? record.outcome
+                              : "unknown",
+                          query: record.query,
+                          rank: Number(record.rank) || 0,
+                          retried: record.retried === true,
+                          retryQuery:
+                            typeof record.retryQuery === "string"
+                              ? record.retryQuery
+                              : null,
+                        },
+                      ]
+                    : [];
+                })
+              : [],
             candidateCount: Number(geocode.candidateCount) || 0,
             failedCount: Number(geocode.failedCount) || 0,
+            // G4.4 (docket §C): declared and incremented by the lane since
+            // Arc G.3a and dropped HERE, which is why "the address path
+            // never fired" and "nobody plumbed the counter" were
+            // indistinguishable — and per docket §A.4 that is precisely the
+            // question Schönbrunn turned on. Absent is not zero.
+            formattedAddressCount: Number(geocode.formattedAddressCount) || 0,
+            localityRejectedCount: Number(geocode.localityRejectedCount) || 0,
             lookupCount: Number(geocode.lookupCount) || 0,
             outcome:
               typeof geocode.outcome === "string"
                 ? geocode.outcome
                 : "unknown",
             resolvedCount: Number(geocode.resolvedCount) || 0,
+            retryAcceptedCount: Number(geocode.retryAcceptedCount) || 0,
+            retryCount: Number(geocode.retryCount) || 0,
+            retryOutOfCityCount: Number(geocode.retryOutOfCityCount) || 0,
+            retrySkippedOverBudgetCount:
+              Number(geocode.retrySkippedOverBudgetCount) || 0,
             skippedOverBudgetCount:
               Number(geocode.skippedOverBudgetCount) || 0,
           }

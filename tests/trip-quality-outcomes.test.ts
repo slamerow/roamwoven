@@ -49,6 +49,8 @@ function report(
       clusteredObservationCount: 0,
       contextObservationCount: 0,
       dispositionCount: 0,
+      // G4.4: structured telemetry, absent on a synthetic report.
+      groupingClaims: null,
       identityRepairCount: 0,
       identityRecoveryInitialViolations: [],
       identityRecoveryStatus: "not_needed",
@@ -58,6 +60,7 @@ function report(
       sourceAnchorObservationCount: 0,
       suppressedStandaloneAnchorCount: 0,
       transportFieldRepairCount: 0,
+      transportFieldRepairs: [],
       undisposedObservationCount: 0,
     },
     detectorIncidents: [],

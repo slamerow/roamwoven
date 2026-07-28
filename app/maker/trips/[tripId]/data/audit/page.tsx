@@ -22,10 +22,20 @@ import {
 type AuditReport = NonNullable<TripExtractionAuditPayload["report"]>;
 type ProcessingEvent = TripExtractionAuditPayload["processingEvents"][number];
 
-const canonicalizationLabels: Array<[
-  keyof AuditReport["canonicalization"],
-  string,
-]> = [
+// G4.4 added two STRUCTURED fields to the canonicalization summary —
+// `groupingClaims` (the claim ledger's lane contention) and
+// `transportFieldRepairs` (per-repair outcomes). This grid renders ONE value
+// per tile, so its key list is constrained to the metrics that are a single
+// value. Putting a structured field in the array below is now a type error
+// rather than a rendered "[object Object]". Those two ride in the audit
+// report for the QA bundle, which is the served surface docket §C is about.
+type CanonicalizationMetricKey = {
+  [Key in keyof AuditReport["canonicalization"]]: AuditReport["canonicalization"][Key] extends ReactNode
+    ? Key
+    : never;
+}[keyof AuditReport["canonicalization"]];
+
+const canonicalizationLabels: Array<[CanonicalizationMetricKey, string]> = [
   ["observationCount", "Observations"],
   ["dispositionCount", "Dispositioned"],
   ["undisposedObservationCount", "Undisposed"],

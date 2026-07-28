@@ -527,6 +527,87 @@ path is bypassed.
   only by the timed-stop gate. Eli's decision this date: fix geocoder coverage
   and trust rather than relax verified-only — a wrong group stays worse than a
   missing one.
+  2026-07-28 geocoder remediation pass LANDED (scope
+  `docs/geocoder-remediation-scope-2026-07-28.md`, LOCKED with Eli; evidence
+  `docs/assembly-defect-docket-2026-07-28-run-7.28.0.md`, bundle sha256
+  `4db233d3…`). This is the EXECUTION of the standing decision already recorded
+  in this ledger's v23 header, not a new decision — hence no version bump. Four
+  changes to the geocode lane and NONE to grouping: the source-hierarchy path,
+  the >=2-member floor and `createSiteMembershipContext` are healthy and
+  untouched, because docket §A.4b proves Schönbrunn's failure is extraction-side
+  (the model emitted one groupable child, and one is less than two, so no
+  grouping change could have reached it).
+  (a) BUDGET, D1: the `GEOCODE_VERIFICATION_MAX_LOOKUPS` default moves 50 -> 150
+  as a HARD CAP, on measured arithmetic — run 7.28.0 spent 187.6 s of
+  `maxDuration` 800 s, and 150 lookups adds at most 19 waves x 4 s worst case,
+  leaving 70.5 % headroom against AGENTS.md rule 1's >=40 % bar.
+  (b) LOCALITY GUARD, D2 — and this one NARROWS WHAT "VERIFIED" MEANS, which is
+  the contract-adjacent part of this pass: a geocode result is no longer
+  verified merely because it returned coordinates. `parseGeocodeResponse` now
+  rejects a result whose Google `types[]` includes `locality`, `political`,
+  `administrative_area_level_*`, `country` or `postal_code` — the endpoint
+  saying it resolved a PLACE, not a venue. Rejection is NOT an error and NOT a
+  maker question: the lane stays fail-soft and the piece simply keeps no
+  verified coordinate. Because the verified-only coordinate policy (84b8676) is
+  locked and consumes this definition, tightening the definition is the honest
+  way to fix trust without relaxing the policy — which is exactly Eli's stated
+  preference, a wrong group being worse than a missing one. It retires the
+  MUST-PASS 7 near-miss in which Peklo and Changing of the Guard shared an
+  identical verified coordinate on the same day, and stops the Prague centroid
+  `50.0755381,14.4378005` being stamped `geoVerified: true` on three unrelated
+  venues.
+  (c) CONTAINER RETRY, D3: a locality-granularity result is retried exactly ONCE
+  with the day's single named-site container appended ("Changing of the Guard,
+  Prague Castle"), accepted only if it is non-locality AND inside the day's city
+  bounds — taken from the viewport the rejected locality result already carried,
+  so the mitigation costs no extra lookup and fails CLOSED when no bounds are
+  available. Retries COUNT against the same cap, so the ceiling and its
+  arithmetic hold exactly, and they run as their own waves so
+  `waves = ceil(lookups / 8)` stays true. A day with two or more containers
+  yields no retry context: ambiguous context is worse than none.
+  (d) TELEMETRY, and it is a PRECONDITION rather than a nicety — it is what
+  makes three changes in one run legitimate under rule 1, because it separates
+  them after the fact. Per-candidate `{query, rank, outcome, retried,
+  granularity, retryQuery}` now ships for the WHOLE candidate pool, INCLUDING
+  candidates that never received a lookup — the record that did not exist when
+  St. Vitus Cathedral lost its lookup and nobody could say why (docket §C).
+  Alongside it, three fields that were computed and then dropped reach a served
+  surface for the first time: `formattedAddressCount` (added to the
+  audit-snapshot whitelist, which is why every G.3a address-path conclusion was
+  previously unfalsifiable — absent read as zero), `evidence.groupingClaims`
+  (produced since Arc G.3b with zero consumers repo-wide), and
+  `transportFieldRepairs[].outcome` (support telemetry only, never
+  maker-facing, per §Dark-factory).
+  Verified coordinates remain proximity-only and consumed solely by
+  grouping-proximity checks; no lookup changes intent, type, date, city, title
+  or booking state. COVERAGE STAYS `KNOWN_GAP` on Eli's decision this date: no
+  live run has yet produced a group, and fixture-green is never sufficient
+  (§Coverage honesty). Restoring it is a run-2 decision on run-2 evidence.
+  DEFERRED deliberately: candidate restriction ("only look up things that aren't
+  obviously standalone", Eli 2026-07-28) is held for Arc H, because it tightens
+  the same candidate ranker that just failed while that ranker is still
+  unobservable — rule 7(b) violated in advance. Write it from run 2's
+  per-candidate data, where every stop the rule would skip can be checked.
+  Enforced by `tests/geocode-verification.test.ts` (G4.1-G4.4, including the D3
+  budget ceiling and the out-of-city retry refusal).
+  2026-07-28 (docket §G, shipped alongside): 31 cards rendered the LITERAL
+  STRING "null" as their start time and 14 as their end time, producing summary
+  text such as "null · Art and culture"; transport rows measured 0 affected, so
+  the defect was confined to the activity projection. Assembly was recorded
+  `completed` with output that fails the render boundary, against §Dark-factory:
+  a stage may be recorded completed only after its output passes the validation
+  required by the next persisted boundary. Repaired as a bounded deterministic
+  parser artifact in `normalizeParserStageArtifacts`
+  (`literal_null_time_field`), silently and counted, never as a maker Question,
+  and ordered BEFORE the degenerate-time rule because two literal "null"s
+  compare equal and would otherwise be mistaken for a zero-length window.
+  Bounded to time fields and to the two stringified-nullish tokens observed.
+  ORIGIN IS A HYPOTHESIS, labelled per rule 7(c): no pipeline code stringifies
+  these fields, and the three qa-bundles on disk (7.17.1, 7.21.0, 7.21.1b) carry
+  zero literal-"null" time fields through the same projection, which points at
+  the model emitting the four characters — NOT confirmed against the pinned
+  parse. The repair is correct under either origin. Enforced by
+  `tests/literal-null-time-fields.test.ts`.
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
