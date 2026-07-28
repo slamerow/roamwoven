@@ -6,6 +6,192 @@
 
 ## Current State
 
+### 2026-07-28 — RUN 7.28.0 AUDITED (two independent passes, reconciled): Arc G RAN and shipped ZERO groups. Root cause is GEO TRUST, not the lookup budget. Grouping + placement contracts downgraded to KNOWN_GAP (ledger v23). Verdict NO-SHIP, non-blocking.
+
+**Read first:** `docs/assembly-defect-docket-2026-07-28-run-7.28.0.md` (chains
+A–K + §R two-audit reconciliation), then `docs/arc-g-audit-brief-2026-07-28.md`,
+then this entry. Audit only — NO product code was written; the only file changes
+are this entry, the docket, and the coverage/evidence updates in
+`docs/product-contracts.md`.
+
+Bundle: trip `67b2bc76`, processing run `097c69c4-50f9-458b-8b69-c44dfd66c0b8`
+(**that id is the RUN id, not a second trip** — it is `reportRun.id`; a second
+audit quoted it as a trip and it caused a false discrepancy). `generatedAt`
+2026-07-28T00:32:30.862Z, qa-bundle sha256 `4db233d3…` (239,627 bytes, verified
+in-browser), fingerprint `c56c89a7…`.
+
+- **ARC G SHIPPED AND ARC G RAN.** An earlier draft of this entry claimed the
+  run "did not execute Arc G." **That was wrong; Eli rejected it and was
+  right.** Push reflog: `84b8676` (**Arc G** — G.1 note anchoring, G.2
+  transport field repair, G.3a address, G.3b claim ledger) PUSHED 23:39:54Z;
+  `c15d879` (pre-flight) PUSHED 23:48:13Z, deploy green; `0077c3a` (block-risk
+  audit) committed **00:06:19Z — eighteen minutes AFTER the last push**, never
+  pushed; `c76dcc4` (brief) 00:27:51Z, never pushed; run 00:32:30Z. A fetch at
+  00:21:44Z (`.git/FETCH_HEAD`) still recorded remote main as `c15d879`. Brief
+  §2's "if it is `c15d879`, stop" was written at 00:27 by a session holding
+  `0077c3a` locally and assuming it was upstream. **This run is a fair test of
+  Arc G.** Falsifier: all evidence reads Eli's clone and would miss a deploy
+  routed around it — but there is no `.vercel/` dir and every reflog entry is
+  `update by push` from here.
+- **RETRACTED: the "alphabetical geocode cut" hypothesis.** Sorting all 79
+  draft activities A→Z against which got a verified coordinate shows FULL
+  INTERLEAVING (first miss at index 1, last hit at index 76). A name-ordered cut
+  leaves a clean break; there isn't one. The ranked tiers consumed all 50
+  lookups before the tail mattered. **Consequence: the unpushed `0077c3a` is NOT
+  why grouping collapsed.** Arc G's grouping failed on its own merits.
+- **THE REAL CAUSE — FALSE VERIFICATION. This is the finding of the run.**
+  `50.0755381,14.4378005` is the **Prague city centroid**, and THREE unrelated
+  venues sit on it stamped `geoVerified: true`: Catacombs tour (Jan 14), Peklo
+  and Changing of the Guard (both Jan 16). The geocoder failed to resolve the
+  venue, returned the locality, and the lane recorded it as verified. 31 of 79
+  activities hold verified coords across only 29 distinct points.
+- **PRAGUE CASTLE, fully traced.** Prague Castle VERIFIED @50.0911,14.4016
+  (correct). Changing of the Guard VERIFIED at the centroid = **3,108 m** from
+  the castle it happens inside. St. Vitus Cathedral **approx only** = **168 m**
+  from the castle, excluded because `84b8676` made the executor trust verified
+  coords ONLY once the geocode lane has run. **Two candidate children, both
+  rejected — one for a garbage verification, one for having no verification.**
+  The Arc G handoff called the shot: "If a group that used to survive
+  verification now disappears, this is the first place to look."
+- **SCHÖNBRUNN — the budget was not the problem either.** Schönbrunn AND
+  Gloriette both resolved, **893 m apart** (matches the recorded ~800 m offset;
+  not re-derived). At 893 m the 300 m radius fails and footprint extension needs
+  ≥2 confirmed members while only Gloriette exists — so the group hinged
+  ENTIRELY on the G.3a address path, which is unobservable. Separately, four of
+  five sub-stops were never pieces: they were folded into the parent's
+  description (`"Notes in source: Gloriette; Orangeriegarten…; Palm house…;
+  Apple Studel Show; Panorama Train pass."`), and `Orangerie` / `Palm House` /
+  `Panorama` occur EXACTLY ONCE each in the entire 239 KB bundle — inside that
+  string.
+- **NEAR-MISS on the wrong-group bar:** Peklo and Changing of the Guard share an
+  IDENTICAL verified coordinate on the SAME day, kept apart only by the
+  timed-stop gate. **Rome's whole Jan-13 leg has no geo at all** (Colosseum,
+  Pantheon, Trevi, Spanish Steps) — not crowded, so nothing ranked.
+- **BAR: 5 of 7 MUST-PASS clean, 1 FAIL, 1 vacuous.** PASS — completes (14/14
+  events); spine 5/8/5 GT-exact (9 runs); header 2019-01-12..25, 14 days (G.1
+  landed, cleanest result); **privacy clean post-Δ3, zero protected code tokens
+  across every public surface, all 45 privateDetails `traveler_password`,
+  judged on `includePrivate=1` real values — and INDEPENDENTLY cleared by a
+  second audit**; Jan 22 no group on its own ≥3-timed gate (5 timed). FAIL —
+  item 4: zero transport questions ✓ but the ÖBB row misattributed. Vacuous —
+  "no wrong groups", there are none. **ALL TARGETS MISSED**; notes 5→3 GT-exact
+  is the one target met. Cards **76**, identical to 7.26.1's 75.
+- **NEW — 31 CARDS RENDER THE LITERAL STRING `null` AS START TIME** (14 more as
+  end time; transport clean). The summary shows "null · Art and culture." Found
+  by the second audit; the first pass filtered `!== 'null'` in its own queries
+  and never reported it. This is malformed output, not an unresolved decision,
+  and it violates AGENTS.md §Dark-factory: a stage may be recorded completed
+  only after its output passes the next persisted boundary. **Cheapest win in
+  the docket.**
+- **NEW — QUESTION TARGETING is worse than the 11→5 count suggests.** Of the
+  three GT questions: #1 castle ticket present but fragmented into THREE
+  (guard / castle / St. Vitus) against a whole-trip budget of three; **#2 the
+  Friday Vienna list was FLATTENED INTO THREE Jan-18 ACTIVITY CARDS** (State
+  Hall Library, Time Travel Vienna, Belvedere); **#3 the baths question was
+  FLATTENED INTO TWO CARDS** ("Bath houses" Jan 21, "Gellert Bath House"
+  Jan 23). Plus two spurious (deterministic Kutná Hora scoping; a
+  client/provider header that should have been suppressed). **Converting an open
+  choice into a scheduled commitment is worse than a redundant question — it
+  ships a decision the traveler never made.**
+- **NEW — duplicates the P1 detector cannot see.** TWO trdelník cards on Jan 16
+  (`"Trdlnik breakfast"` food_dining + `"Trdelník for breakfast"`
+  **nature_outdoors**) — diacritics + word order defeat normalised identity, so
+  the detector catches Pinball Museum and misses this. **The detector gap
+  matters more than either duplicate.** Also: `"House of Terror Museum or Retró
+  Lángos Büfé"` (a museum fused with a lángos stand), `Great Synagogue / Jewish
+  History` categorised **food_dining**, rental car split across "Car selection"
+  + "Pick up car", and `"Ehr-nee-zhest"` — a pronunciation phrase — as the lone
+  `social` card.
+- **NEW — PUBLISH DECLARES READY** ("Step 6 of 7 complete · The app is ready to
+  share") with 5 open questions, 31 literal-nulls, zero groups and a live P1.
+  **Re-aim this finding: open questions deliberately do NOT block** (locked in
+  three places). The gap is that the gate reasons only about review items and
+  has **no concept of malformed output**. Bonus bug: the page shows "Not
+  published yet" AND "Published snapshot is current." simultaneously.
+- **CHAIN B unchanged and still first-pass-only — the ÖBB row ships under
+  RegioJet.** Jan 21: `provider "REGIOJET"`, arrival `"Budapest"`, conf
+  `"Operator"` (7.21.1b had ÖBB / VXFHXKCQEPHPUSNT). Cause: **all 27
+  `uncoveredLines` are the ÖBB ticket page, every one labelled "January 24th
+  Rome- $118(private room-ensuite)"** — a Jan-21 Vienna→Budapest ticket filed
+  under Jan-24 Rome. Anchor never joined (`materialTransportAnchors 9` /
+  `runAuditMatched 8` / **`finalMatched 7`**); the row inherited its operator
+  from the adjacent rail leg across the shared Wien Hbf interchange — the exact
+  hazard the G.2 review named. **G.2 UNTESTED**: `transportFieldRepairCount 0`,
+  neither trigger shape present. The second audit recorded "both train records
+  now have correct stations and times" and missed this.
+- **TELEMETRY — now FOUR unobservable fields, verified in source at HEAD.**
+  `formattedAddressCount` dropped by the snapshot whitelist
+  (`trip-extraction-audit-snapshot.ts:253-269`, `-types.ts:231-239`);
+  `groupingClaims` produced at `evidence-clustering.ts:11640` with **zero
+  consumers repo-wide**; `usage.openai.transportFieldRepairs` written at
+  `openai-trip-parser.ts:1514` but no endpoint serves `usage`; **NEW — no
+  per-candidate geocode rank/outcome telemetry at all**, so *St. Vitus lost its
+  lookup and nothing can say why*. Only `skippedOverBudgetCount` (48) is
+  readable. Absent ≠ zero.
+- **ALSO STILL OPEN:** Rome-2 stay carries the WATCH SHOP address (`Via della
+  Fontanella Borghese 33` instead of `Via Torino n. 45`; the `Watches In Rome`
+  card reads "Watches In Rome is located at." — new since 7.21.1b); G.1's
+  out-of-range note flagging UNEXERCISED (both 2018 pieces suppressed at
+  canonicalization, no output note is `reviewRequired`); luna's
+  `Joselov`/`Josefov` misread persists (**`gpt-5.4-mini` IS TEXT-ONLY AND
+  DESTROYED THE 2026-07-25 RUN**); "From Termini Station" arrival directions as
+  a public card (chain 3b — explicitly NOT a bar-6 fail under the Δ3 procedure).
+- **CONTRACTS CHANGED — ledger v22 → v23, applied in the same change.** On Eli's
+  explicit decisions this date: **grouping (RW-GRP-001) `PARTIAL` →
+  `KNOWN_GAP`** and **placement (RW-PLC-001) `PARTIAL` → `KNOWN_GAP`**;
+  source precedence (RW-SRC-001) **stays `PARTIAL`** with chain B added to
+  Evidence (neither G.2 defect shape occurred, so the repair is untested rather
+  than violated). No contract TEXT changed — coverage and evidence only.
+- **ELI'S DECISION 2026-07-28 — fix the geocoder, keep the policy strict.**
+  Verified-only coordinate trust STAYS; a wrong group remains worse than a
+  missing one. Instead, fix coverage and trust, and accept more lookup spend for
+  a premium result. Four parts: (a) raise the budget to cover the pool (98
+  here); (b) locality-granularity guard so a city-centroid result can never be
+  stamped `geoVerified`; (c) **retry with container context** before abandoning
+  a venue ("Changing of the Guard, Prague Castle") — **note (b) alone does NOT
+  fix Prague Castle**, it only converts a wrongly-verified stop into an
+  unverified one, still excluded; (d) per-candidate rank/outcome telemetry.
+- **BEFORE RUN 2, in order** (rule 6, each with verify + undo): (1) push
+  `0077c3a` + `c76dcc4`; verify `rev-list` → `0 0`, green deploy; undo = revert
+  the deploy. (2) geocoder (a)–(d) above; **rule 1 arithmetic REQUIRED first** —
+  98 lookups at `GEOCODE_LOOKUP_CONCURRENCY = 8` vs `maxDuration`, ≥40%
+  headroom, written down; verify = no two venues sharing a coordinate, St. Vitus
+  and the Jan-13 Rome landmarks resolved, `skippedOverBudgetCount 0`. (3) plumb
+  the three original telemetry fields; verify in the next qa-bundle; undo =
+  revert, additive read-only. (4) fix the literal-`null` serialisation. (5)
+  **replay offline BEFORE touching grouping code** — `node
+  scripts/replay-pinned-parse.mjs 67b2bc76 <parseKeyPrefix>` — to settle whether
+  the Schönbrunn fold is deterministic or parse variance; costs no run budget.
+  (6) THEN scope Arc H on **upstream segmentation and attribution** — the ÖBB
+  day-section misfiling, the Schönbrunn fold, the Rome-2 address misrouting and
+  the question flattening are ONE family: content lost or misrouted before
+  assembly sees it, and where the 75-vs-49 gap lives. (7) Do NOT change the OCR
+  model; do NOT calibrate `CROWDED_DAY_VISIBLE_CARDS` against this run.
+- **RUN BUDGET for the remediation pass + Arc H: 2**, stated up front per
+  rule 5.
+- **PREDICTION for run 2 (rule 4):** **7/10 Prague Castle groups** (two
+  children, both mechanically explained, both addressed by step 2c); **5/10
+  Schönbrunn groups** — at 893 m it still rides entirely on the G.3a address
+  path, which no run has ever exercised observably, and step 3 is what makes it
+  answerable either way; **LOW that card count moves** — nothing in steps 1–4
+  touches demotion or debris. Cost if wrong: one run, plus a docket that can
+  finally distinguish "address path silent" from "counter not plumbed".
+  Rollback: steps 1–4 change no assembly semantics.
+- **AUDIT METHOD, worth keeping.** Two independent passes agreed on spine, span,
+  chunk health, geocode counts, card counts and **privacy** — that convergence
+  is the strongest evidence here. They diverged usefully: the second pass was
+  stronger on RENDERED ARTEFACTS AND SEMANTICS (what a traveler sees), the first
+  on PROVENANCE AND TELEMETRY (how the data got there). The first pass's
+  concrete failure was reading `records.items` and never opening
+  **`/data/audit/payload`, where the per-piece coordinates live** — that one
+  omission hid the centroid bug and therefore the whole root cause. Two of the
+  second pass's items were themselves wrong and are corrected in §R: its
+  ">3 km from expected city" metric flags four placements that are all CORRECT
+  (Schönbrunn really is 5.2 km from Vienna's centre) and would have missed the
+  centroid trio; and `activity_bloat` DID fire on all three crowded days.
+  **Keep the check that matters: identical coordinates across distinct venues,
+  not distance from city centre.**
+
 ### 2026-07-27 (later) — ARC G IMPLEMENTED: note anchoring, transport field repair, grouping address + claim ledger (Claude/Cowork cloud session; COMMITTED, NOT PUSHED, NOT RUN)
 
 **AUDITING THE ARC G RUN? Read `docs/arc-g-audit-brief-2026-07-28.md` first**

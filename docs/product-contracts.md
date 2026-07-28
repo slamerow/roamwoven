@@ -1,8 +1,21 @@
 # Roamwoven Product Contracts
 
-Ledger version: 22
+Ledger version: 23
 
-Ledger date: 2026-07-25 (Δ4 — a travel card's DESCRIPTION becomes a
+Ledger date: 2026-07-28 (run 7.28.0 audit — COVERAGE ONLY, no contract text
+changed. RW-GRP-001 `PARTIAL` → `KNOWN_GAP` and RW-PLC-001 `PARTIAL` →
+`KNOWN_GAP`, both on Eli's explicit decisions this date; RW-SRC-001 stays
+`PARTIAL` with run-7.28.0 evidence added. Supersession: the Evidence sections
+of these three entries supersede their 2026-07-27 Arc G text, which described
+FIXTURE claims only — run 7.28.0 is the first live evidence for G.1/G.2/G.3a/
+G.3b. Coverage mapping: the grouping and placement promises are now recorded as
+known-broken rather than partially enforced, so a future session does not spend
+a run rediscovering it. Eli's standing decision this date: fix geocoder coverage
+and trust — budget, locality-granularity guard, retry-with-container-context,
+per-candidate telemetry — rather than relax the verified-only coordinate
+policy, because a wrong group stays worse than a missing one.)
+
+Prior: ledger version 22 (2026-07-25) — (Δ4 — a travel card's DESCRIPTION becomes a
 protected container unlocked by ONE password entry, superseding the Δ3
 display rule; the public card face is composed from structured route/time
 fields. Travel cards only for now; "follower" means a link-holder without
@@ -321,6 +334,18 @@ path is bypassed.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/source-transport-anchors.test.ts`,
   `tests/transport-field-repair.test.ts`
+  2026-07-28 (run 7.28.0): enforcement stays `PARTIAL`. Neither G.2 defect
+  shape occurred in this parse (`transportFieldRepairCount 0`: no bare IATA on
+  a rail row, no `arrival == departure`), so the Arc G.2 repair is UNTESTED
+  live rather than violated. A DIFFERENT precedence failure is confirmed: all
+  27 `uncoveredLines` are the ÖBB ticket page and every one carries the Jan-24
+  Rome day-section label, so a Jan-21 Vienna→Budapest ticket never joined its
+  own row (`materialTransportAnchors 9` / `runAuditMatched 8` /
+  `finalMatched 7`). The row inherited `provider: "REGIOJET"` from the adjacent
+  rail leg across the shared Wien Hbf interchange — the exact hazard the G.2
+  adversarial review named — and kept `"Operator"` as its confirmation label
+  where run-7.21.1b had `VXFHXKCQEPHPUSNT`. Day-section attribution, not the
+  repair lane, is the precedence gap to close.
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
@@ -340,7 +365,7 @@ path is bypassed.
   walk per day; a trip city or day-trip town name never groups; expect a
   handful of groups per trip; grouping call claims must state the actual rule
   that fired.
-- Enforcement: `PARTIAL`
+- Enforcement: `KNOWN_GAP`
 - Contract: A continuous source-authored walking route becomes one parent card
   with ordered sub-stops when no stop has an independent booking or fixed time.
   Same-site clusters become one parent visit with sub-stops. In addition,
@@ -480,6 +505,28 @@ path is bypassed.
   `tests/geocode-verification.test.ts`,
   `tests/assembly-ground-truth-arc-g.test.ts`,
   `tests/grouping-claim-ledger.test.ts`
+  2026-07-28 (run 7.28.0, the first live run with G.3a/G.3b): coverage
+  downgraded `PARTIAL` → `KNOWN_GAP` on Eli's explicit decision this date. The
+  run shipped ZERO grouped stops and ZERO calls (baseline 7.26.1: 2 / 1;
+  run-7.21.0: 13 / 3) with both Arc G grouping mechanisms live. Two days met
+  every doctrine-v3 walk gate and still formed nothing (Jan 16: 12 cards /
+  2 timed; Jan 19: 11 / 0). Two causes are traced, NEITHER attributable to the
+  unpushed 0077c3a. (a) FALSE VERIFICATION: the geocoder returned the Prague
+  city centroid `50.0755381,14.4378005` for three unrelated venues — Catacombs
+  tour (Jan 14), Peklo and Changing of the Guard (both Jan 16) — and the lane
+  stamped all three `geoVerified: true`, putting Changing of the Guard 3,108 m
+  from the Prague Castle it happens inside. (b) The 84b8676 verified-only
+  coordinate policy excluded St. Vitus Cathedral, 168 m from the castle but
+  carrying an approx coordinate only. Prague Castle therefore had exactly two
+  candidate children and the lane rejected both. Schönbrunn and Gloriette BOTH
+  resolved (893 m apart), so the lookup budget did not starve the ship-bar
+  targets; that group hinged entirely on the G.3a address path, which is
+  unobservable because `formattedAddressCount` is dropped by the audit-snapshot
+  whitelist. NEAR-MISS on the wrong-group bar: Peklo and Changing of the Guard
+  share an IDENTICAL verified coordinate on the SAME day and were kept apart
+  only by the timed-stop gate. Eli's decision this date: fix geocoder coverage
+  and trust rather than relax verified-only — a wrong group stays worse than a
+  missing one.
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -943,7 +990,7 @@ exact live payload shapes.
 
 - Status: `LOCKED`
 - Decision date: `2026-07-15`
-- Enforcement: `PARTIAL`
+- Enforcement: `KNOWN_GAP`
 - Contract: Today remains the traveler app's home; Roamwoven does not create an
   inaccessible Unscheduled bucket. When a source-supported Activity has an
   unresolved date, the canonical resolver keeps it an Activity, assigns the
@@ -980,6 +1027,19 @@ exact live payload shapes.
   `tests/evidence-clustering.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`,
   `tests/assembly-ground-truth-arc-g.test.ts`
+  2026-07-28 (run 7.28.0): coverage downgraded `PARTIAL` → `KNOWN_GAP` on
+  Eli's explicit decision this date. Prague Castle shipped TWICE —
+  `piece_e97bee98` as a dated Jan-16 draft activity, and `piece_264b4ac8` as an
+  UNDATED `itemType: "placeholder"` in `needs_review` carrying "Need to decide
+  which ticket to get". That is duplication plus the dateless stranding this
+  contract forbids, on deployed code, independent of the unpushed commit and of
+  the geocoder defects — fixing the geocoder will not change it. Downstream
+  cost: the castle decision fragmented into THREE open questions (Changing of
+  the Guard ticket, Prague Castle ticket, St. Vitus tour) against a
+  ground-truth budget of three questions for the ENTIRE trip, violating Δ2
+  amendment 2 ("St. Vitus folds into ONE castle ticket question"). Chains A and
+  D of the run-7.28.0 docket are one wound: with no castle parent, each
+  sub-stop keeps its own decision.
 
 ## RW-REV-001 — Calls explain; Questions request material decisions
 
