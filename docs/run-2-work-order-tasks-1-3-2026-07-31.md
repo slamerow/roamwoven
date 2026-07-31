@@ -88,42 +88,71 @@ model call and is not seeded, so the input document still varies. Per §6, do
 not try to score the seed change on one run; measuring variance reduction
 needs the same input parsed twice.
 
-**Run ordering — Eli's decision 2026-07-31, FINAL: the next live run carries
-EVERYTHING (Tasks 1-5). The sampling params stay ON.**
+**Run ordering — Eli's decision 2026-07-31, and this one is settled: the next
+live run's VARIABLE IS TASK 2. Task 1's sampling params are HELD OFF.**
 
-Two earlier positions were considered and dropped, recorded so nobody re-opens
-them: "Task 1 alone" was chosen before Task 2 turned out to be fixable, and a
-run that cannot move the bar is an expensive way to learn whether an API
-accepts a parameter; "hold Task 1" was then proposed to keep the model call
-byte-identical, and dropped because holding it also holds the pin corpus empty
-for another run, which is the methodology blocker §5 names.
+Scope, stated explicitly because "Task 2 alone" is ambiguous in a tree that
+holds five changes: the run ships Tasks 2, 3, 4 and 5, and holds Task 1. Task 1
+is the only change that touches the MODEL CALL, and holding it is what makes
+this run's parse comparable to run 2's. Task 3 changes assembly output but its
+tell is disjoint from Task 2's (a stay count vs a castle card), Task 4 is docs,
+and Task 5 is audit telemetry that cannot alter output. So the run carries
+exactly one variable in the sense rule 1(d) means, and one more independently
+observable assembly fix.
 
-Rule 1(d) is satisfied on its own terms. Task 1 is the only model/infra change
-in the set, §6 already rules out SCORING it on a single run (OCR is a separate
-unseeded model call, so the input document varies regardless), and it is not
-being scored on this one. Everything else is assembly-side and cannot alter the
-model call. What makes one run legitimate rather than merely convenient is that
-each change has its own unambiguous tell:
+Decision history, recorded so nobody re-opens it a fourth time. "Task 1 alone"
+came first, before Task 2 was known to be fixable — a run that cannot move any
+bar item is an expensive way to learn whether an API accepts a parameter.
+"Everything together" was then argued on the grounds that each change has its
+own tell. Both are superseded by this: the castle is the only change that can
+move the TARGET, and running it against a parse produced by an unchanged model
+call is the only way a null result means something. If the castle card does not
+appear on a run where the model call is byte-identical to run 2's, that is
+Task 2 failing — not the parse re-rolling. That inference is the entire value
+of holding Task 1, and it is worth one extra run.
+
+**Holding it needs no branch, no revert, and no code change — it is already
+env-gated.** `resolveExtractionSamplingParams()` returns `{}` unless
+`OPENAI_EXTRACTION_SEED` / `OPENAI_EXTRACTION_TEMPERATURE` are set, and both
+are currently set in Vercel Production (added 2026-07-28, §6).
+
+Ops steps, per rule 6 (numbered, with verification and undo):
+
+1. Vercel → Production → DELETE `OPENAI_EXTRACTION_SEED` and
+   `OPENAI_EXTRACTION_TEMPERATURE`. Redeploy.
+2. VERIFY FROM TELEMETRY, never the console (rule 2): the run's
+   `extraction.extractionSampling` must read `resolved: {}`, `sent: {}`,
+   `strippedCallCount: 0`. That reading doubles as the first live proof Task 1's
+   plumbing works — on a run where it deliberately changes nothing.
+3. UNDO / next run: re-add `OPENAI_EXTRACTION_SEED=7` and
+   `OPENAI_EXTRACTION_TEMPERATURE=0`, redeploy. `sent` becomes
+   `{seed: 7, temperature: 0}`, and THAT run is Task 1's variable, alone.
+
+Deleting the two vars changes the parse key again. Costs nothing — §6 already
+emptied the pin corpus, so there is nothing to invalidate, and this run writes
+the first valid pin either way.
+
+What proves each shipped change fired:
 
 | change | what proves it fired |
 |---|---|
-| Task 1 | `extraction.extractionSampling.sent` = `{seed: 7, temperature: 0}` |
-| Task 2 | a DATED Jan-16 Prague Castle card, and it is grouping-container ELIGIBLE |
+| Task 2 (the variable) | a DATED Jan-16 Prague Castle card, and it is grouping-container ELIGIBLE |
 | Task 3 | `stays` back to 5, and no stay with `checkInDate 2019-01-12` |
 | Task 5 | `audit.lineage.rows[].observations[].verifiedLatitude` non-null |
+| Task 1 (HELD) | `extractionSampling.sent` = `{}` — the control reading |
 
-`strippedCallCount > 0` means the model rejected the params and the fail-soft
-strip-retry fired — one extra call, never the run, and now visible instead of
-invisible.
+Then, in order, the run's real questions: is the castle card grouping-container
+ELIGIBLE (not merely dated)? Is `retryCount` > 0 — and if it is still 0 with a
+dated Jan-16 container present, the container-map keying is a second,
+independent defect. Did `groupedStops` gain the castle?
 
 Pre-flight (rule 3): deploy green, fresh browser tab, and confirm from run 2's
-telemetry that `EXTRACTION_PIN_WRITE` and `EXTRACTION_PIN_REUSE` are both on
-before starting.
+telemetry that `EXTRACTION_PIN_WRITE` and `EXTRACTION_PIN_REUSE` are both on.
 
-Expect NO pin cache hit on this run — §6 emptied the corpus. This run writes
-the first valid pin. From the run after, assembly changes replay for free
-(Task 3b below), with one permanent exception: a replay can never answer a
-geocode question, because `replay-pinned-parse.mjs:14` disables that lane.
+Expect NO pin cache hit — this run writes the first valid pin. From the run
+after, assembly changes replay for free (§7), with one permanent exception: a
+replay can never answer a geocode question
+(`replay-pinned-parse.mjs:14` disables that lane).
 
 ---
 
