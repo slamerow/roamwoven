@@ -112,3 +112,33 @@ cleanup that silently broke OCR, and two wasted runs on a stale deployment.
    direction — each reached for a pipeline cause before reading what the model
    actually emitted, and the settling evidence was available from the first
    hour in `/data/audit/payload` and the pin corpus.
+8. BLAST RADIUS BEFORE YOU EDIT (added 2026-07-29 after a "cosmetic" fix
+   turned out to be a classification change).
+   (a) For every field whose value or value-DOMAIN you change, run
+   `scripts/blast-radius.sh <field>` and read every consumer BEFORE editing.
+   Three traps have already bitten: TRUTHINESS — `"null"`, `"none"`, `"0"` are
+   non-empty strings and pass `Boolean(x)`, so converting one to a real null
+   silently reclassifies every record that held it (31 cards flipped from timed
+   to untimed through `trip-card-taxonomy.ts` `hasTime()`); MAP KEYS — a field
+   used to group records removes them from that grouping entirely when nulled,
+   which is how an undated container became invisible to both the geocode lane
+   and grouping; CLASSIFICATION GATES — timed-ness, `itemType`, `evidenceRole`
+   and `outputEligible` decide what a record IS, not how it renders. A change
+   sold as cosmetic that touches one of these is a second variable, and rule 1
+   applies to it.
+   (b) A CHANGE YOU CANNOT OBSERVE IS NOT FINISHED. Name the field and value
+   that will prove it fired, and confirm that field reaches a SERVED surface,
+   not just `usage`. ABSENT IS NOT ZERO. Two incidents:
+   `formattedAddressCount` was incremented for weeks and dropped by the
+   audit-snapshot whitelist, making every conclusion it supported
+   unfalsifiable; and `samplingParams` was computed in `lib/ai/openai.ts` and
+   never passed to any `requestStructuredResponse` call site, so setting
+   `OPENAI_EXTRACTION_SEED` / `_TEMPERATURE` invalidated every stored pin and
+   changed nothing about the model call.
+   (c) A CHECKLIST CAN CROWD OUT THINKING. Working through gates is not a
+   substitute for naming an alternative cause. When a premise arrives with the
+   request ("lookups are timing out", "grouping regressed"), check whether any
+   artifact supports it before optimising for it — measured against a run
+   where `failedCount` was 0, a timeout fix is a fix to a symptom nobody
+   observed. Structure earns its place only when it surfaces something
+   unstructured attention would have missed.
