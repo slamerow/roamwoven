@@ -1,4 +1,4 @@
-# Run-2 work order — Tasks 1, 2, 3, 4 and 5 landed
+# Run-2 work order — Tasks 1, 2, 3, 3b, 4 and 5 landed
 
 Session date 2026-07-31. Input: `docs/run-2-audit-handoff-2026-07-28.md` §7.
 Per AGENTS.md rule 7(c) every claim below is VERIFIED (with its artifact) or
@@ -8,13 +8,17 @@ labelled HYPOTHESIS.
 checkpoint, not a push-ready deploy claim (§Dark-factory: those are different
 statements).
 
-Locked contracts touched, evidence only: **RW-OPS-001** (Task 1),
-**RW-PLC-001** and **RW-GRP-001** (Task 2), **RW-TRV-001** (Task 3). No
-contract TEXT changed and no ledger version bump — all three are executions of
-decisions already recorded, the same posture as the 2026-07-28 geocoder
-remediation entry. RW-PLC-001 coverage deliberately STAYS `KNOWN_GAP`: no live
-run has shipped the repaired card, and fixture-green is never sufficient.
-Ledger stays v23.
+Locked contracts touched: **RW-OPS-001** (Task 1), **RW-PLC-001** and
+**RW-GRP-001** (Task 2), **RW-TRV-001** (Task 3) — evidence only, no contract
+TEXT changed.
+
+**Ledger bumped to v24** for one COVERAGE change: **RW-GRP-001 `KNOWN_GAP` →
+`PARTIAL`**, on Eli's explicit decision 2026-07-31, on run-2 evidence (2
+grouped stops, both correct, ZERO wrong). `KNOWN_GAP` asserts current behavior
+VIOLATES the contract, and that is no longer true. The uncovered path is named
+in the entry rather than hidden by the label: the TARGET has not grouped live.
+**RW-PLC-001 deliberately STAYS `KNOWN_GAP`** — its defect is fixed in code and
+unproven by a run, and fixture-green is never sufficient (§Coverage honesty).
 
 ---
 
@@ -26,6 +30,7 @@ Ledger stays v23.
 | Task 2 — Prague Castle container | **LANDED.** Root cause found in the pinned parse; it is neither (A1) nor (B). Tests green. |
 | Task 3 — collapse the duplicate generic stay | **LANDED**, tests green |
 | Task 4 — amend the misleading docket §A.4b | **LANDED** (docs only) |
+| Task 3b — pinning as the iteration loop | **LANDED** — env was already on; one code trap fixed (§7) |
 | Task 5 — make the verified-coordinate bar item checkable | **LANDED**, and the premise was subtler than written |
 | Suite | 79 test files, 0 failures, `tsc --noEmit` clean |
 
@@ -84,39 +89,41 @@ not try to score the seed change on one run; measuring variance reduction
 needs the same input parsed twice.
 
 **Run ordering — Eli's decision 2026-07-31, FINAL: the next live run carries
-Tasks 2, 3, 4 and 5 ONLY. Task 1's sampling params are HELD.** Rule 1(d), one
-variable per run: Task 1 is the only model/infra change in the set, and holding
-it makes the next run's model call byte-identical to run 2's, so every bar
-movement is attributable to assembly.
+EVERYTHING (Tasks 1-5). The sampling params stay ON.**
 
-**Holding it needs no branch and no revert — it is already env-gated.**
-`resolveExtractionSamplingParams()` returns `{}` unless
-`OPENAI_EXTRACTION_SEED` / `OPENAI_EXTRACTION_TEMPERATURE` are set, and those
-two vars are currently set in Vercel Production (added 2026-07-28, §6). So:
+Two earlier positions were considered and dropped, recorded so nobody re-opens
+them: "Task 1 alone" was chosen before Task 2 turned out to be fixable, and a
+run that cannot move the bar is an expensive way to learn whether an API
+accepts a parameter; "hold Task 1" was then proposed to keep the model call
+byte-identical, and dropped because holding it also holds the pin corpus empty
+for another run, which is the methodology blocker §5 names.
 
-- **Before the assembly run:** delete both vars from Vercel Production and
-  redeploy. Task 1's code ships but sends nothing. Verify from telemetry, never
-  the console (rule 2): `extraction.extractionSampling` must show
-  `resolved: {}`, `sent: {}`, `strippedCallCount: 0`. That reading is itself
-  the first proof Task 1's plumbing works, on a run where it changes nothing.
-- **Undo / next run:** re-add `OPENAI_EXTRACTION_SEED=7` and
-  `OPENAI_EXTRACTION_TEMPERATURE=0`, redeploy, and `sent` becomes
-  `{seed: 7, temperature: 0}`. That run is Task 1's variable, alone.
-- Deleting them changes the parse key again. Costs nothing — §6 already emptied
-  the pin corpus, so there is nothing to invalidate.
-
-What proves each shipped change fired on the assembly run:
+Rule 1(d) is satisfied on its own terms. Task 1 is the only model/infra change
+in the set, §6 already rules out SCORING it on a single run (OCR is a separate
+unseeded model call, so the input document varies regardless), and it is not
+being scored on this one. Everything else is assembly-side and cannot alter the
+model call. What makes one run legitimate rather than merely convenient is that
+each change has its own unambiguous tell:
 
 | change | what proves it fired |
 |---|---|
+| Task 1 | `extraction.extractionSampling.sent` = `{seed: 7, temperature: 0}` |
 | Task 2 | a DATED Jan-16 Prague Castle card, and it is grouping-container ELIGIBLE |
 | Task 3 | `stays` back to 5, and no stay with `checkInDate 2019-01-12` |
 | Task 5 | `audit.lineage.rows[].observations[].verifiedLatitude` non-null |
-| Task 1 (held) | `extractionSampling.sent` = `{}` — the control reading |
 
-This run writes the first valid pin. Runs after it can replay assembly changes
-for free — except geocode questions, which a replay can never answer
-(`replay-pinned-parse.mjs:14` disables the lane).
+`strippedCallCount > 0` means the model rejected the params and the fail-soft
+strip-retry fired — one extra call, never the run, and now visible instead of
+invisible.
+
+Pre-flight (rule 3): deploy green, fresh browser tab, and confirm from run 2's
+telemetry that `EXTRACTION_PIN_WRITE` and `EXTRACTION_PIN_REUSE` are both on
+before starting.
+
+Expect NO pin cache hit on this run — §6 emptied the corpus. This run writes
+the first valid pin. From the run after, assembly changes replay for free
+(Task 3b below), with one permanent exception: a replay can never answer a
+geocode question, because `replay-pinned-parse.mjs:14` disables that lane.
 
 ---
 
@@ -370,12 +377,49 @@ to fail when sub-stop subject resolution is fixed and must then be updated to
 
 ---
 
-## 7. What is NOT done
+## 7. Task 3b — the replay loop, and the trap that would have broken it
+
+`EXTRACTION_PIN_WRITE` and `EXTRACTION_PIN_REUSE` are both already ON in
+production (Eli, 2026-07-28), so the loop needs no env change. It needed one
+code fix, found by reading `replay-pinned-parse.mjs` against Task 1.
+
+The replay rebuilds the parse key to prove the materials reconstruct
+byte-identically, and it took the sampling params for that rebuild from
+`resolveExtractionSamplingParams()` — i.e. from whatever `.env.local` holds on
+the machine running the replay. Production sets `OPENAI_EXTRACTION_SEED` and
+`_TEMPERATURE`; `.env.local` does not. So the FIRST run that records a pin
+under a seeded key would have made every local replay of it die on
+`parse key mismatch (materials or sampling params differ)` — a message pointing
+at the materials, which are fine. The loop would have broken at the exact
+moment it became useful, and the error would have sent the next session hunting
+the wrong layer.
+
+Fixed: the rebuild now takes the sampling params from the STORED ROW, which is
+the only correct value for reproducing the recording run's key. Local env is
+still read, but only to warn when it diverges (worth knowing — it means a fresh
+live run from that machine would write under a different key) and never
+fatally. The mismatch message now says plainly that sampling params came from
+the pin, so a mismatch IS a materials difference.
+
+The loop, once this run writes a pin:
+
+```
+node scripts/replay-pinned-parse.mjs <parseKeyPrefix>
+```
+
+Keep reuse ON for assembly work, OFF when testing extraction itself. A replay
+cannot answer a geocode question (`replay-pinned-parse.mjs:14`); for those,
+spend a live run.
+
+---
+
+## 8. What is NOT done
 
 - **Sub-stop question subject resolution** — §6. The single highest-value item
   left, and now precisely located.
-- **Task 3b** (pinning as the iteration loop) — untouched. The first run after
-  this lands writes the first valid pin; runs after that can replay.
+- **RW-PLC-001 coverage** — stays `KNOWN_GAP`. Its defect (the duplicate +
+  dateless castle) is fixed in code and unproven by a run. RW-GRP-001 moved to
+  `PARTIAL` this date on Eli's explicit decision; ledger is now v24.
 - **RW-GRP-001 coverage** — §9 of the run-2 handoff says whether run 2's
   2-correct/0-wrong groups earn `PARTIAL` is Eli's explicit call. Deferred to
   the next run's evidence, so it stays `KNOWN_GAP`.

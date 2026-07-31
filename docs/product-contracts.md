@@ -1,8 +1,24 @@
 # Roamwoven Product Contracts
 
-Ledger version: 23
+Ledger version: 24
 
-Ledger date: 2026-07-28 (run 7.28.0 audit — COVERAGE ONLY, no contract text
+Ledger date: 2026-07-31 (run-2 work order — COVERAGE ONLY, no contract text
+changed. RW-GRP-001 `KNOWN_GAP` → `PARTIAL` on Eli's explicit decision this
+date, on run-2 evidence: 2 grouped stops, both correct, ZERO wrong groups —
+the first live proof since the collapse that the grouping mechanism fires on
+real parse output rather than fixtures. `KNOWN_GAP` means the implementation
+VIOLATES the contract, and 2-correct/0-wrong is no longer that. What is still
+missing is named in the entry rather than hidden by the label: the TARGET
+(Prague Castle) has not grouped live, and the reason is now understood and
+fixed in code but unproven by a run. Supersession: this supersedes the
+2026-07-28 downgrade of RW-GRP-001 only; RW-PLC-001 stays `KNOWN_GAP` because
+its defect — the duplicate + dateless castle — is fixed in code and has not
+yet shipped. Coverage mapping: grouping is now recorded as partially enforced
+with a named uncovered path, which is what `PARTIAL` is for. Eli's standing
+decision on the geocoder is unchanged and still binding: a wrong group stays
+worse than a missing one.)
+
+Prior: ledger version 23 (2026-07-28) — (run 7.28.0 audit — COVERAGE ONLY, no contract text
 changed. RW-GRP-001 `PARTIAL` → `KNOWN_GAP` and RW-PLC-001 `PARTIAL` →
 `KNOWN_GAP`, both on Eli's explicit decisions this date; RW-SRC-001 stays
 `PARTIAL` with run-7.28.0 evidence added. Supersession: the Evidence sections
@@ -365,7 +381,7 @@ path is bypassed.
   walk per day; a trip city or day-trip town name never groups; expect a
   handful of groups per trip; grouping call claims must state the actual rule
   that fired.
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: A continuous source-authored walking route becomes one parent card
   with ordered sub-stops when no stop has an independent booking or fixed time.
   Same-site clusters become one parent visit with sub-stops. In addition,
@@ -608,6 +624,25 @@ path is bypassed.
   the model emitting the four characters — NOT confirmed against the pinned
   parse. The repair is correct under either origin. Enforced by
   `tests/literal-null-time-fields.test.ts`.
+  2026-07-31 (run 2, work order): coverage upgraded `KNOWN_GAP` → `PARTIAL` on
+  Eli's explicit decision this date. Run 2 produced **2 grouped stops, both
+  correct, and ZERO wrong groups** (Schönbrunn) — the first live evidence since
+  the collapse that the mechanism works on real parse output. Under §How to use
+  this ledger, `KNOWN_GAP` asserts that current behavior VIOLATES the contract,
+  and that assertion is no longer true: the source-hierarchy path carried the
+  members, the >=2-member floor was met, and the wrong-group bar held.
+  THE UNCOVERED PATH, named rather than hidden by the label: the TARGET (Prague
+  Castle) has never grouped on a live run. Its cause is no longer a mystery —
+  `reclassifySourceContainers` demoted the dated container to context, verified
+  from run 2's pinned parse (see RW-PLC-001, 2026-07-31) — and the repair has
+  landed with fixture coverage, but no run has yet shipped a dated, eligible
+  castle container. `PARTIAL` is the honest state for exactly that shape:
+  meaningful behavioral coverage exists, and an important live path does not.
+  Also corrected this date: docket §A.4b's "Arc G could not have grouped
+  Schönbrunn at all" is amended in place to state that its proof was
+  CONDITIONAL on the 7.28.0 parse. Run 2's parse emitted the second groupable
+  child the proof assumed impossible, which is precisely how these 2 groups
+  came to exist, and the general framing had already misled one session.
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 

@@ -205,16 +205,44 @@ const pinning = require2(
   path.join(rootDir, "lib/extraction/extraction-pinning.ts")
 );
 const openaiModule = require2(path.join(rootDir, "lib/ai/openai.ts"));
-const samplingParams = openaiModule.resolveExtractionSamplingParams();
+// Task 3b (2026-07-31) — the sampling params for the key REBUILD come from
+// the STORED ROW, not from local env.
+//
+// They used to come from `resolveExtractionSamplingParams()`, i.e. from
+// whatever `.env.local` happened to hold on the laptop running the replay.
+// Production sets `OPENAI_EXTRACTION_SEED` / `_TEMPERATURE`; `.env.local` does
+// not. So the moment a live run records a pin under a seeded key, every local
+// replay of it rebuilds a DIFFERENT key and dies on "parse key mismatch
+// (materials or sampling params differ)" — a message that points at the
+// materials, which are fine. That failure has nothing to do with the parse and
+// everything to do with the operator's dotfile, and it would have made the
+// pinning iteration loop unusable exactly when it finally became useful.
+//
+// The stored row records what the RECORDING run used, which is the only
+// correct value for reproducing its key. Local env is still read, but only to
+// warn: a divergence is worth knowing about (it means a fresh live run from
+// this machine would write under a different key), and it is never fatal.
+const storedSamplingParams =
+  parseRow.sampling_params && typeof parseRow.sampling_params === "object"
+    ? parseRow.sampling_params
+    : {};
+const localSamplingParams = openaiModule.resolveExtractionSamplingParams();
+if (
+  JSON.stringify(storedSamplingParams) !== JSON.stringify(localSamplingParams)
+) {
+  console.warn(
+    `note: local sampling env ${JSON.stringify(localSamplingParams)} differs from the pin's ${JSON.stringify(storedSamplingParams)} — replaying against the STORED value. A fresh live run from this machine would write a different parse key.`
+  );
+}
 const materialFingerprints = pinning.fingerprintExtractionMaterials(materials);
 const parseKey = pinning.computeExtractionParseKey({
   materialFingerprints,
   model: parseRow.extraction_model,
-  samplingParams,
+  samplingParams: storedSamplingParams,
 });
 if (parseKey !== parseRow.parse_key) {
   fail(
-    `parse key mismatch: rebuilt ${parseKey.slice(0, 12)}… vs stored ${parseRow.parse_key.slice(0, 12)}… (materials or sampling params differ)`
+    `parse key mismatch: rebuilt ${parseKey.slice(0, 12)}… vs stored ${parseRow.parse_key.slice(0, 12)}…. Sampling params were taken from the pin itself, so this is a MATERIALS difference — the uploads or their OCR checkpoints are not what they were when the pin was recorded.`
   );
   process.exit(1);
 }
