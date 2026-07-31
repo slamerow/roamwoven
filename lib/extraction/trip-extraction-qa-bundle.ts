@@ -652,6 +652,24 @@ function createAuditSummary({
         identityKey: row.identityKey,
         mergeReasons: row.mergeReasons,
         observations: row.observations.map((observation) => ({
+          // Run-2 work order Task 5. The geo fields ride on lineage
+          // observations precisely so grouping-radius claims are verifiable
+          // from the QA bundle — RW-GRP-001's Arc A run5 entry says so in
+          // those words — but THIS projection dropped all five, so the claim
+          // was false and the run-2 MUST-IMPROVE item "no two venues sharing
+          // a verified coordinate" scored NOT CHECKABLE and had to be argued
+          // by proxy. Same defect class as `formattedAddressCount`,
+          // `excludedPlanningCostLineCount` and `extractionSampling`: a value
+          // computed, carried most of the way, and dropped by the last
+          // projection before the served surface (AGENTS.md rule 8(b)).
+          //
+          // These are AUDIT coordinates, not draft content: they already sit
+          // on the audit report's own lineage rows, and this change moves
+          // nothing into the persisted draft or the traveler projection. The
+          // geocode lane's proximity-only posture is untouched.
+          approxLatitude: observation.approxLatitude,
+          approxLongitude: observation.approxLongitude,
+          area: observation.area,
           date: observation.date,
           id: observation.id,
           kind: observation.kind,
@@ -662,6 +680,8 @@ function createAuditSummary({
             includePrivate
           ),
           title: redactSensitiveText(observation.title, includePrivate),
+          verifiedLatitude: observation.verifiedLatitude,
+          verifiedLongitude: observation.verifiedLongitude,
         })),
         outputEligible: row.outputEligible,
         status: row.status,

@@ -4688,6 +4688,29 @@ function stayRangesOverlapOrTouch(
   return leftIn <= rightOut && rightIn <= leftOut;
 }
 
+// Run-2 §3 / Task 3: the 6th stay. `Rome Stay` (Jan 12-14) shipped beside
+// `The Yellow` (Jan 13-14) on the same leg, because Pass 1 merges on VENUE
+// identity and the two names share no token — so the reconciler correctly
+// declined, and the bar item ("5 stays") correctly failed.
+//
+// The discriminator is NOT overlap (two real hostels in one city on
+// overlapping dates must never collapse) and NOT the generic word list alone
+// ("Rome Stay" and "The Yellow" both survive `GENERIC_STAY_IDENTITY_TOKENS`
+// with one token each). It is whether a name carries venue identity BEYOND
+// ITS OWN CITY. `finalizeCanonicalStayFields` has already rewritten every
+// unnamed stay to `<City> <Type>` by the time the reconciler runs, so a
+// placeholder's only surviving token IS the city token — which identifies the
+// leg, never the venue.
+function stayVenueIdentityBeyondCity(
+  payload: Record<string, unknown>,
+  city: string | null
+) {
+  const cityTokens = new Set(identityTokens(city ?? ""));
+  return stayVenueIdentityTokens(payload).filter(
+    (token) => !cityTokens.has(token)
+  );
+}
+
 function stayPayloadRichness(payload: Record<string, unknown>) {
   return (
     (stringValue(payload, "address") ? 4 : 0) +
@@ -4950,6 +4973,82 @@ function reconcileCanonicalStayIdentity(
         target: covering,
       });
     }
+  }
+
+  // Pass 3: a GENERIC PLACEHOLDER stay is the same stay as the one named
+  // venue it overlaps (run-2 §3, the live 6th stay). Runs LAST so Pass 1's
+  // venue-identity merge and Pass 2's cost/context absorption get first
+  // refusal; this pass only sees what both declined.
+  //
+  // Three guards, each protecting a fixture-proven negative control:
+  //  - NO VENUE IDENTITY beyond the city on the placeholder side, so two
+  //    independently named stays ("Hotel Central" / "Hotel Plaza", identical
+  //    Paris dates) can never see each other here, and two unnamed
+  //    `<City> Airbnb` rentals cannot collapse into one another either —
+  //    neither side qualifies as the named target.
+  //  - NO ANCHOR: a placeholder-named stay carrying an address or a booking
+  //    code is real lodging evidence, not residue. Leave it and let the
+  //    same_leg_stay_night_overlap advisory speak.
+  //  - EXACTLY ONE named candidate. An ambiguous fragment with two named
+  //    same-city stays in range ("Lisbon" beside "Hotel A" and "Hotel B")
+  //    stays put; guessing which venue it duplicates is a wrong merge, and a
+  //    wrong merge is worse than a duplicate.
+  //
+  // The named venue's dates ALWAYS win (Eli, 2026-07-31). The placeholder
+  // contributes no dates, so absorbing `Rome Stay` cannot extend `The Yellow`
+  // back to Jan 12 — RW-TRV-001 forbids fabricating a stay for a night spent
+  // in transit, and Jan 12 is covered by the overnight Delta 444 arrival. The
+  // discarded range is recorded on the action so the dropped coverage claim
+  // stays auditable rather than silent.
+  for (const placeholder of stays()) {
+    if (!placeholder.outputEligible) continue;
+    if (
+      stringValue(placeholder.payload, "address") ||
+      stringValue(placeholder.payload, "confirmation") ||
+      stringValue(placeholder.payload, "confirmationLabel")
+    ) {
+      continue;
+    }
+    const placeholderCity = stayCity(placeholder, places);
+    if (!placeholderCity) continue;
+    if (
+      stayVenueIdentityBeyondCity(placeholder.payload, placeholderCity).length >
+      0
+    ) {
+      continue;
+    }
+    const named = stays().filter(
+      (candidate) =>
+        candidate !== placeholder &&
+        candidate.outputEligible &&
+        normalizeText(stayCity(candidate, places)) ===
+          normalizeText(placeholderCity) &&
+        stayVenueIdentityBeyondCity(
+          candidate.payload,
+          stayCity(candidate, places)
+        ).length > 0 &&
+        stayRangesOverlapOrTouch(placeholder.payload, candidate.payload)
+    );
+    if (named.length !== 1) continue;
+    const target = named[0];
+    const placeholderIn =
+      stringValue(placeholder.payload, "checkIn") ??
+      stringValue(placeholder.payload, "firstNightDate");
+    const placeholderOut = stringValue(placeholder.payload, "checkOut");
+    mergeCanonicalPieceInto({
+      reason:
+        "generic placeholder stay absorbed by the one named venue it overlaps on this leg: a name whose only token is its own city carries no venue identity, so it is the same stay reported twice",
+      source: placeholder,
+      target,
+    });
+    addCanonicalAction(target, {
+      absorbedTitles: [],
+      observationIds: [...target.observationIds],
+      reason: `named venue dates kept over the absorbed placeholder range ${
+        placeholderIn ?? "?"
+      }–${placeholderOut ?? "?"}`,
+      type: "field_selected",
+    });
   }
 }
 
@@ -9224,6 +9323,48 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
       observation.payload._canonicalRoleDecision === "keep_activity";
 
     if (observation.role === "grouping_proposal" && !approvedGrouping) {
+      // A grouping proposal whose group never formed is normally redundant
+      // structure, and demoting it is what keeps "Explore Vienna" and bare
+      // day/route headings out of the traveler's day. A NAMED SITE container
+      // is not a heading: it is a real dated place, and demoting it deletes
+      // both the card AND the anchor any open decision on it hangs from.
+      //
+      // Run 2, VERIFIED from the pinned parse (2026-07-31): the model emitted
+      // "Prague Castle visit" and "Prague castle" as `grouping_proposal`, both
+      // `date: 2019-01-16`, both `sourceSectionType: dated_itinerary`, section
+      // label "Wednesday, January 16th". The model was RIGHT — the parser
+      // prompt's own grouping-proposal rule asks for exactly that shape. No
+      // group formed (the geocode lane could not place the children), so this
+      // branch converted BOTH to context, the Jan-16 castle card vanished, and
+      // `recoverMissingNamedEvidence` then synthesized an UNDATED placeholder
+      // for the orphaned ticket question — which in turn left Jan 16 with zero
+      // containers, which is the entirety of `retryCount: 0`. One line, four
+      // downstream symptoms. The earlier hypothesis that the model mis-filed
+      // the castle as notes is FALSIFIED by the parse.
+      //
+      // Eli, 2026-07-28: a named site container carrying an unresolved
+      // decision survives as a DATED CARD *and* raises the question — not one
+      // or the other (RW-GRP-001, "grouping cannot swallow unresolved source
+      // decisions"; RW-PLC-001, no dateless stranding).
+      //
+      // The rescue is deliberately narrow, because this branch is load-bearing
+      // against day-heading cards. It requires (a) the SHARED site-container
+      // noun — the same `SAME_SITE_CONTAINER_PATTERN` grouping itself uses, so
+      // the two can never diverge, and the same guard the generic-container
+      // demotion below already honors — and (b) a real date, since an undated
+      // survivor is the defect being fixed, not the fix. Heading fragments are
+      // already demoted upstream by parser-artifact normalization
+      // (`heading_fragment_card`), so this does not need to re-judge them.
+      const containerTitle = stringValue(observation.payload, "title");
+      if (
+        observation.kind === "activity" &&
+        containerTitle &&
+        stringValue(observation.payload, "date") &&
+        SAME_SITE_CONTAINER_PATTERN.test(containerTitle)
+      ) {
+        observation.role = "atomic_candidate";
+        continue;
+      }
       observation.kind = "context";
       observation.role = "context";
       continue;

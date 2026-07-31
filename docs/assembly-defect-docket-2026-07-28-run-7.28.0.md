@@ -210,7 +210,29 @@ The four missing stops exist only as prose, in the parent's own description and
 in a day-level `"Explore Vienna"` blob that semicolon-lists the whole day.
 **This is extraction-side, not assembly-side.** No grouping change reaches it.
 
-### A.4b The ≥2-member floor — why Arc G could not have grouped Schönbrunn at all
+### A.4b The ≥2-member floor — why Arc G could not have grouped Schönbrunn ON THIS PARSE
+
+> **AMENDED 2026-07-31 (run-2 work order, Task 4). READ THIS BEFORE THE PROOF
+> BELOW.** The proof is CONDITIONAL ON THE 7.28.0 PARSE, not general, and the
+> original heading ("could not have grouped Schönbrunn at all") did not say so.
+> Its load-bearing premise is the sentence "The model emitted two Schönbrunn
+> pieces total" — a fact about ONE parse, not about the code. Run 2's parse
+> emitted TWO groupable children instead of one, the hierarchy path carried
+> them, the ≥2-member floor was met, **and Schönbrunn grouped.** Grouped stops
+> went 0 → 2, with zero wrong groups.
+>
+> Everything below remains correct as written FOR THE 7.28.0 PARSE. What is
+> withdrawn is only the generalisation: nothing here shows the code cannot
+> group Schönbrunn, and it must not be cited as showing that. This framing
+> already misled one session into treating a parse-variance outcome as a
+> structural impossibility (run-2 handoff §5) — exactly the failure AGENTS.md
+> rule 7(c) exists to prevent, a conclusion outliving the artifact that
+> conditioned it.
+>
+> Practical consequence for future audits: this trip's parse varies enough
+> run-to-run that single-run A/B comparison of assembly changes is unreliable.
+> Pin the parse (`EXTRACTION_PIN_REUSE`) before drawing a structural conclusion
+> from one run's member counts.
 
 Schönbrunn and Gloriette **both resolved**, 893 m apart (matching the recorded
 ~800 m offset; not re-derived), so the budget did not starve this target either.
@@ -742,6 +764,14 @@ Ordered, each with verification and undo per rule 6:
   address work alters either number. Anyone predicting otherwise has not read
   the floor. **Falsified only by the model emitting ≥3 pieces for the complex**,
   which is an extraction change, not an Arc H grouping change.
+  > **RESOLVED 2026-07-31: this prediction was WRONG, and it was wrong in the
+  > way it named its own falsifier.** Run 2's parse emitted the extra piece, the
+  > floor was met, and Schönbrunn grouped. The prediction was sound about the
+  > CODE and unsound about treating one parse's piece count as fixed — see the
+  > amendment at the top of §A.4b. The lesson is not "predict less
+  > confidently"; it is that a confidence stated over a variable input has to
+  > name the input as the variable, which this one did only in its final clause
+  > and its heading did not carry at all.
 - **Card count moves: low.** Nothing in steps 1–4 touches demotion or debris.
 - **Literal-`null` cards drop to 0: 9/10.** It is a serialization bug with a
   deterministic fix and a visible check.

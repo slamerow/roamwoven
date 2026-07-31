@@ -162,4 +162,133 @@ export default async function run() {
       process.env = savedEnv;
     }
   });
+
+  // Run-2 handoff §6 / work-order Task 1. The three tests below close the gap
+  // that let a production env change be a NO-OP: every existing assertion
+  // stopped at `resolveExtractionSamplingParams()`, so nothing checked that
+  // the resolved value reached the REQUEST. It did not — all call sites
+  // omitted the argument, `requestStructuredResponse` spread `{}`, and the
+  // only observable effect of setting OPENAI_EXTRACTION_SEED was that every
+  // stored pin was invalidated.
+  const withStubbedOpenAI = async (
+    handlers: Array<
+      () => { body: unknown; ok: boolean; status?: number }
+    >,
+    fn: () => Promise<unknown>
+  ) => {
+    const originalFetch = globalThis.fetch;
+    const savedEnv = process.env;
+    const sent: Array<Record<string, unknown>> = [];
+    let call = 0;
+    process.env = {
+      ...savedEnv,
+      OPENAI_API_KEY: "test-key",
+      OPENAI_EXTRACTION_SEED: "7",
+      OPENAI_EXTRACTION_TEMPERATURE: "0",
+      ROAMWOVEN_ENABLE_AI_EXTRACTION: "true",
+    };
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+      );
+      const handler = handlers[Math.min(call, handlers.length - 1)];
+      call += 1;
+      const response = handler();
+      return {
+        json: async () => response.body,
+        ok: response.ok,
+        status: response.status ?? (response.ok ? 200 : 400),
+      } as Response;
+    }) as typeof fetch;
+    try {
+      const result = await fn();
+      return { result, sent };
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.env = savedEnv;
+    }
+  };
+
+  const okBody = { output_text: JSON.stringify({ ok: true }), usage: null };
+  const structuredCall = {
+    input: "day one",
+    schema: { type: "object", properties: {} },
+    schemaName: "test_schema",
+    system: "system",
+  };
+
+  await test("sampling params reach the REQUEST BODY, not just the resolver", async () => {
+    const { createOpenAIStructuredResponse } = await import("@/lib/ai/openai");
+    const { result, sent } = await withStubbedOpenAI(
+      [() => ({ body: okBody, ok: true })],
+      () => createOpenAIStructuredResponse(structuredCall)
+    );
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].seed, 7, "seed is on the wire");
+    assert.equal(sent[0].temperature, 0, "temperature is on the wire");
+    assert.deepEqual(
+      (result as { sentSamplingParams: unknown }).sentSamplingParams,
+      { seed: 7, temperature: 0 },
+      "and the result reports what was SENT, which is the only honest telemetry"
+    );
+  });
+
+  await test("a rejected sampling param costs one call and is reported as NOT sent", async () => {
+    const { createOpenAIStructuredResponse } = await import("@/lib/ai/openai");
+    const { result, sent } = await withStubbedOpenAI(
+      [
+        () => ({
+          body: { error: { message: "Unsupported parameter: 'temperature'." } },
+          ok: false,
+          status: 400,
+        }),
+        () => ({ body: okBody, ok: true }),
+      ],
+      () => createOpenAIStructuredResponse(structuredCall)
+    );
+
+    assert.equal(
+      sent.length,
+      2,
+      "the strip-retry fires — one extra call, never the run"
+    );
+    assert.equal(sent[0].seed, 7);
+    assert.equal(
+      sent[1].seed,
+      undefined,
+      "the retry carries no sampling params"
+    );
+    assert.deepEqual(
+      (result as { sentSamplingParams: unknown }).sentSamplingParams,
+      {},
+      "reporting the RESOLVED value here would claim seed 7 on a call that never carried it"
+    );
+  });
+
+  await test("a pin HIT reports null, because no request was made at all", async () => {
+    const { createOpenAIStructuredResponse } = await import("@/lib/ai/openai");
+    const cache = createExtractionParseCache([]);
+    const { sent } = await withStubbedOpenAI(
+      [() => ({ body: okBody, ok: true })],
+      () =>
+        runWithExtractionParseCache(cache, async () => {
+          const first = await createOpenAIStructuredResponse(structuredCall);
+          assert.deepEqual(first.sentSamplingParams, {
+            seed: 7,
+            temperature: 0,
+          });
+          const replayed = await createOpenAIStructuredResponse(structuredCall);
+          assert.equal(
+            replayed.sentSamplingParams,
+            null,
+            "ABSENT IS NOT ZERO: a replay must not inherit the recording run's sent params"
+          );
+          return null;
+        })
+    );
+
+    assert.equal(sent.length, 1, "the second call was served from the pin");
+    assert.equal(cache.hits, 1);
+  });
 }

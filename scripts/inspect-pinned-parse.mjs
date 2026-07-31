@@ -73,10 +73,18 @@ const require2 = Module.createRequire(import.meta.url);
 const adminModule = require2(path.join(rootDir, "lib/supabase/admin.ts"));
 const admin = adminModule.createSupabaseAdminClient();
 
-const argv = process.argv.slice(2);
+// --dump prints the FULL object the model emitted for each match, not just
+// title/date. Added 2026-07-31 for run-2 Task 2: §4's two candidate causes
+// need opposite fixes, and the field that separates them — whether the model
+// itself tagged the piece as notes/context, or the pipeline demoted a normal
+// dated day-section activity — lives in sourceSectionType / sourceSectionLabel
+// / evidenceRole / itemType, none of which the title-and-date view shows.
+const rawArgv = process.argv.slice(2);
+const DUMP = rawArgv.includes("--dump");
+const argv = rawArgv.filter((value) => value !== "--dump");
 if (argv.length === 0) {
   console.error(
-    "usage: node scripts/inspect-pinned-parse.mjs <parseKeyPrefix> [token ...]"
+    "usage: node scripts/inspect-pinned-parse.mjs [--dump] <parseKeyPrefix> [token ...]"
   );
   process.exit(2);
 }
@@ -168,6 +176,7 @@ for (const call of calls) {
             typeof node.description === "string"
               ? node.description.slice(0, 160)
               : null,
+          node,
         });
       }
     }
@@ -186,6 +195,19 @@ for (const tok of TOKENS) {
   );
   for (const t of asTitle.slice(0, 4)) {
     console.log(`    TITLE  "${t.title}"  date=${t.date ?? "-"}`);
+    if (DUMP) {
+      // Scalars only: the point is the CLASSIFICATION fields the model
+      // emitted (sourceSectionType, sourceSectionLabel, evidenceRole,
+      // itemType, startTime, area). Nested arrays/objects would bury them.
+      const scalars = Object.entries(t.node)
+        .filter(([, v]) => v === null || typeof v !== "object")
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
+      console.log(`           ${scalars.join("  ")}`);
+      const headingPath = t.node.sourceHeadingPath;
+      if (Array.isArray(headingPath) && headingPath.length) {
+        console.log(`           sourceHeadingPath=${JSON.stringify(headingPath)}`);
+      }
+    }
   }
   for (const t of inDesc.slice(0, 3)) {
     console.log(`    DESC   under "${t.title}": ${t.desc}`);

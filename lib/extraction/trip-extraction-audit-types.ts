@@ -240,6 +240,17 @@ export type TripExtractionAuditReport = {
       uncoveredLineCount: number;
       uncoveredLines: Array<{ excerpt: string; label: string }>;
     } | null;
+    // Run-2 handoff §6: `sent` is what the request carried, `resolved` is what
+    // the env vars asked for. They differ when the model rejects the params
+    // and the fail-soft strip-retry fires — and they differed silently for
+    // every run before this field existed, because no call site passed them.
+    extractionSampling: {
+      liveCallCount: number;
+      replayedCallCount: number;
+      resolved: Record<string, number>;
+      sent: Record<string, number>;
+      strippedCallCount: number;
+    } | null;
     sourceRecovery: {
       batchedLineCount: number;
       droppedLineCount: number;

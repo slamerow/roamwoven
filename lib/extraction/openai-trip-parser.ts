@@ -1,4 +1,7 @@
-import { createOpenAIStructuredResponse } from "@/lib/ai/openai";
+import {
+  createOpenAIStructuredResponse,
+  resolveExtractionSamplingParams,
+} from "@/lib/ai/openai";
 import { getGeocodeVerificationConfig, getOpenAIConfig } from "@/lib/env";
 import { runGeocodeVerification } from "@/lib/extraction/geocode-verification";
 import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evidence-resolver";
@@ -59,6 +62,54 @@ const LONG_SECTION_CHUNK_OVERLAP_CHARS = 800;
 type OpenAIStructuredResult = Awaited<
   ReturnType<typeof createOpenAIStructuredResponse>
 >;
+
+export type ExtractionSamplingUsage = {
+  liveCallCount: number;
+  replayedCallCount: number;
+  resolved: Record<string, number>;
+  sent: Record<string, number>;
+  strippedCallCount: number;
+};
+
+// Run-2 handoff §6 / AGENTS.md rule 8(b). `OPENAI_EXTRACTION_SEED` and
+// `_TEMPERATURE` were set in production, invalidated every stored pin, and
+// changed nothing about the model call, because `samplingParams` was computed
+// and never passed to a call site. Nobody could see it, because the value
+// reached no served surface. This summary is the observation that makes the
+// fix falsifiable, and it deliberately reports the SENT value, never the
+// resolved one:
+//   resolved            what the env vars asked for
+//   sent                what live requests actually carried ({} = nothing)
+//   liveCallCount       requests that reached the API
+//   replayedCallCount   calls served from the extraction pin (no request)
+//   strippedCallCount   live requests that carried nothing while `resolved`
+//                       was non-empty, i.e. the model rejected the params and
+//                       the fail-soft strip-retry fired
+// Scope: the spine call plus every activity chunk call — the calls that make
+// the parse. The resolver and recovery lanes record their own usage.
+function summarizeExtractionSampling(
+  results: OpenAIStructuredResult[]
+): ExtractionSamplingUsage {
+  const resolved = resolveExtractionSamplingParams();
+  const live = results.filter((result) => result.sentSamplingParams !== null);
+  const sent =
+    live.find(
+      (result) => Object.keys(result.sentSamplingParams ?? {}).length > 0
+    )?.sentSamplingParams ?? {};
+  return {
+    liveCallCount: live.length,
+    replayedCallCount: results.length - live.length,
+    resolved,
+    sent,
+    strippedCallCount:
+      Object.keys(resolved).length === 0
+        ? 0
+        : live.filter(
+            (result) =>
+              Object.keys(result.sentSamplingParams ?? {}).length === 0
+          ).length,
+  };
+}
 
 type ActivityExtractionAttemptMode = "primary" | "retry" | "split" | "rescue";
 
@@ -1508,6 +1559,12 @@ export async function extractTripDraftWithOpenAI({
         canonicalDraft,
       },
       evidence: evidence.summary,
+      // What the extraction requests ACTUALLY sent (never the resolved
+      // config) — see summarizeExtractionSampling.
+      extractionSampling: summarizeExtractionSampling([
+        spineResult,
+        ...activityResults.map(({ result }) => result),
+      ]),
       parserArtifactRepairs: evidence.parserArtifactRepairs,
       // Arc G.2 support telemetry: every transport field the pipeline
       // repaired or cleared, and the anchor it used. Never maker-facing.

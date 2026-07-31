@@ -757,7 +757,32 @@ path is bypassed.
   `tests/stay-venue-shape.test.ts` (live shapes verbatim, negative
   controls: Delta 2934, missing-arrival-time, anchored endpoint-less row,
   Wombats "The Lounge", Prague Airbnb).
+  2026-07-31 (run 2 §3, work-order Task 3 — the 6th stay): `Rome Stay`
+  (Jan 12-14) shipped beside `The Yellow` (Jan 13-14) on the same leg. The
+  reconciler was not wrong to decline — Pass 1 merges on VENUE identity and
+  the names share no token, Pass 2 requires a fragment with no checkout and
+  `Rome Stay` carried one. A third pass now absorbs a GENERIC PLACEHOLDER
+  stay into the single named venue it overlaps, where "placeholder" means a
+  name whose only surviving identity token is its own CITY token
+  (`finalizeCanonicalStayFields` has already rewritten every unnamed stay to
+  `<City> <Type>` by reconcile time, so the city token is exactly what a
+  placeholder has left, and it names the leg rather than the venue). Overlap
+  is never sufficient on its own. Guards, each pinned by a fixture-proven
+  negative control: an anchored placeholder (address or booking code) is real
+  lodging and survives; an ambiguous placeholder with two named same-city
+  venues in range stays put, because guessing which one it duplicates is a
+  wrong merge and a wrong merge is worse than a duplicate; a non-overlapping
+  placeholder survives, because absorbing it would delete real night
+  coverage. THE NAMED VENUE'S DATES ALWAYS WIN (Eli, 2026-07-31): the
+  placeholder contributes no dates, so this cannot pull `The Yellow` back to
+  a Jan-12 check-in — the Jan-12 night is covered by the overnight Delta 444
+  arrival and this contract forbids fabricating a stay for a night in
+  transit. The discarded range is recorded on the merge action, so dropped
+  coverage is auditable rather than silent. Enforced by
+  `tests/generic-placeholder-stay.test.ts` (live run-2 shape verbatim plus
+  four negative controls, proven both directions).
 - Tests: `tests/assembly-ground-truth.test.ts`,
+  `tests/generic-placeholder-stay.test.ts`,
   `tests/source-transport-anchors.test.ts`,
   `tests/stay-candidacy-gate.test.ts`,
   `tests/transport-candidacy-floor.test.ts`,
@@ -1107,7 +1132,8 @@ exact live payload shapes.
 - Tests: `tests/generated-trip-model.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/structured-assembly-idempotency.test.ts`,
-  `tests/assembly-ground-truth-arc-g.test.ts`
+  `tests/assembly-ground-truth-arc-g.test.ts`,
+  `tests/site-container-survives-rejected-grouping.test.ts`
   2026-07-28 (run 7.28.0): coverage downgraded `PARTIAL` → `KNOWN_GAP` on
   Eli's explicit decision this date. Prague Castle shipped TWICE —
   `piece_e97bee98` as a dated Jan-16 draft activity, and `piece_264b4ac8` as an
@@ -1121,6 +1147,44 @@ exact live payload shapes.
   amendment 2 ("St. Vitus folds into ONE castle ticket question"). Chains A and
   D of the run-7.28.0 docket are one wound: with no castle parent, each
   sub-stop keeps its own decision.
+  2026-07-31 — ROOT CAUSE FOUND, and it is neither the model nor the geocoder.
+  VERIFIED from run 2's pinned parse (`trip_extraction_parses`, parse key
+  `5d2ad2d66cba52f5…`): the model emitted "Prague Castle visit" AND "Prague
+  castle" as `evidenceRole: grouping_proposal`, `itemType: activity`, both
+  `date: 2019-01-16`, both `sourceSectionType: dated_itinerary`,
+  `sourceSectionLabel: "Wednesday, January 16th"`. The source agrees — `USE
+  FOR TESTING CZECH.pdf` carries "Prague castle (2 hours)" inside the dated
+  Jan-16 day section under the heading "Lesser Town & Prague Castle", with
+  "Changing of the Guard -12:00 PM" and "Need to decide which ticket to get"
+  beneath it. The model did exactly what the parser prompt's grouping-proposal
+  rule asks. `reclassifySourceContainers` (`evidence-clustering.ts`) then
+  converted BOTH to `kind/role: context`, unconditionally, because no grouping
+  decision had been approved for them — their children were the ones the
+  geocode lane could not place. ONE line produced four symptoms: the Jan-16
+  castle card disappeared; `recoverMissingNamedEvidence` synthesized an UNDATED
+  `placeholder` for the orphaned ticket question (the duplicate + dateless
+  stranding recorded above); Jan 16 held zero dated containers, so
+  `retryQueryFor` returned null for every Jan-16 card, which is the ENTIRETY of
+  run 2's `retryCount: 0` and the reason G4.3 was never exercised; and grouping
+  had no container either, which is the missed TARGET. The prior hypothesis
+  that the model mis-filed the castle into a notes blob is FALSIFIED — that
+  `"…CZECH.pdf notes"` label was the chunk name, not the section.
+  FIX, per Eli's 2026-07-28 decision (a named site container carrying an
+  unresolved decision survives as a DATED CARD *and* raises the question):
+  a rejected grouping proposal that is a NAMED SITE container with a real date
+  is rescued to `atomic_candidate` instead of demoted. The demotion itself
+  stays — it is load-bearing against day/route-heading cards (RW-ASM-001) — so
+  the rescue is gated on the SHARED `SAME_SITE_CONTAINER_PATTERN` grouping
+  itself uses (the two can never diverge) plus a date, since an undated
+  survivor is the defect rather than the fix. Heading fragments are already
+  demoted upstream by parser-artifact normalization and are not re-judged here.
+  Enforced by `tests/site-container-survives-rejected-grouping.test.ts` (live
+  parse shape verbatim; negative controls for a day-heading proposal and for an
+  undated container; proven both directions).
+  COVERAGE STAYS `KNOWN_GAP`: no live run has yet shipped a dated Jan-16 castle
+  card, and fixture-green is never sufficient (§Coverage honesty). Restoring it
+  is a decision on the NEXT run's evidence, and the first thing that run's audit
+  must check is ELIGIBILITY as a grouping container, not merely the date.
 
 ## RW-REV-001 — Calls explain; Questions request material decisions
 
@@ -1826,7 +1890,30 @@ exact live payload shapes.
   clone (idempotency fixture-proven). Chain D's rebuild-bypass hypothesis
   is CORRECTED in the docket: the corridor itself never un-swept — the
   retry lane did. Enforced by `tests/note-lane-protections.test.ts`.
+  2026-07-31 (run-2 handoff §6, work-order Task 1 — a change nobody could
+  observe): `OPENAI_EXTRACTION_SEED=7` / `_TEMPERATURE=0` were set in Vercel
+  production on 2026-07-28 and were a NO-OP.
+  `resolveExtractionSamplingParams()` fed exactly one consumer, the pin hash;
+  `requestStructuredResponse` accepted the params, spread them into the body,
+  and even implemented a fail-soft strip-and-retry for a 400 — but every call
+  site omitted the argument, so that branch was dead code, the API never saw a
+  seed, and the only effect of the env change was that every stored pin was
+  invalidated. No telemetry could have caught it, because `samplingParams`
+  reached no served surface (rule 8(b): ABSENT IS NOT ZERO). Both real call
+  sites now pass the params, and the run records what the request ACTUALLY
+  SENT rather than the resolved config — `usage.openai.extractionSampling`
+  carries `resolved`, `sent`, `liveCallCount`, `replayedCallCount` and
+  `strippedCallCount` — and it is added to the audit-snapshot whitelist in the
+  SAME change, because that whitelist is what silently dropped
+  `formattedAddressCount` and `excludedPlanningCostLineCount` before it. A pin
+  HIT reports `sent: null`, never `{}`: a replayed call made no request, and
+  recording the recording run's params on it would be the same dishonesty in
+  the opposite direction. Enforced by `tests/extraction-pinning.test.ts`
+  (request-body assertion, strip-retry reported as not-sent, pin-hit null) and
+  `tests/arc-f-telemetry.test.ts` 8.4/8.5 (whitelist survival, sent-vs-resolved
+  divergence).
 - Tests: `tests/extraction-route-recovery.test.ts`,
+  `tests/extraction-pinning.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,
   `tests/trip-quality-outcomes.test.ts`,
   `tests/trip-audit-reconciliation.test.ts`,

@@ -66,6 +66,19 @@ export type OpenAIStructuredResponseResult = {
   json: unknown;
   model: string;
   rawText: string;
+  // The sampling params the REQUEST ACTUALLY CARRIED, not the resolved config
+  // (AGENTS.md rule 8(b); run-2 handoff §6). Recording the resolved value
+  // would have shown `seed: 7` on a run that never sent it, which is worse
+  // than no telemetry. Three distinct values:
+  //   {seed, temperature}  a live request carried them
+  //   {}                   a live request carried none — the env vars are
+  //                        unset, or a 400 stripped them and the retry
+  //                        succeeded without them
+  //   null                 NO REQUEST WAS MADE (a pin replay served this
+  //                        result). ABSENT IS NOT ZERO: `{}` would read as
+  //                        "the API was asked for nothing" rather than "the
+  //                        API was never asked".
+  sentSamplingParams: Record<string, number> | null;
   sources: Array<{ title: string | null; url: string }>;
   usage: unknown;
 };
@@ -260,7 +273,10 @@ async function requestStructuredResponse({
   if (!response.ok) {
     // Fail-soft sampling-param strip (Arc E): a 400 that names the param is
     // retried once WITHOUT temperature/seed and the strip is logged — a
-    // rejected param must cost one call, never the run.
+    // rejected param must cost one call, never the run. Reachable for the
+    // first time as of the run-2 remediation: until the call sites started
+    // passing `samplingParams`, `Object.keys({}).length > 0` was always false
+    // and this whole branch was dead code.
     if (
       response.status === 400 &&
       Object.keys(samplingParams).length > 0 &&
@@ -298,7 +314,10 @@ async function requestStructuredResponse({
     );
   }
 
-  return body;
+  // `sentSamplingParams` is reported from INSIDE the request, so a strip-retry
+  // reports `{}` — what the successful call actually carried — rather than the
+  // params the caller hoped for.
+  return { body, sentSamplingParams: samplingParams };
 }
 
 function getPartialOutputDetails(rawText: string | null) {
@@ -428,9 +447,14 @@ export async function createOpenAIStructuredResponse({
     : null;
   if (parseCache && callHash && parseCache.entries.has(callHash)) {
     parseCache.hits += 1;
-    return structuredClone(
+    const hit = structuredClone(
       parseCache.entries.get(callHash)
     ) as OpenAIStructuredResponseResult;
+    // A pin HIT made no request at all. Whatever the recording run sent is
+    // not what THIS run sent, so the stored value is overwritten with the
+    // honest answer rather than replayed as if a call had happened.
+    hit.sentSamplingParams = null;
+    return hit;
   }
 
   // A pin MISS is counted HERE, at the moment the lookup fails — not after
@@ -460,23 +484,25 @@ export async function createOpenAIStructuredResponse({
     parseCache.missedCalls.push({ hash: callHash, schemaName });
   }
 
-  const firstBody = await requestStructuredResponse({
+  const first = await requestStructuredResponse({
     apiKey: config.apiKey,
     input,
     maxInputChars: effectiveMaxInputChars,
     maxOutputTokens: initialMaxOutputTokens,
     model: requestModel,
+    samplingParams,
     schema,
     schemaName,
     system,
     webSearch,
   });
 
-  let body = firstBody;
+  let body = first.body;
+  let sentSamplingParams = first.sentSamplingParams;
   let parsed: ReturnType<typeof parseStructuredResponseBody>;
 
   try {
-    parsed = parseStructuredResponseBody(firstBody);
+    parsed = parseStructuredResponseBody(first.body);
   } catch (error) {
     if (
       retryOnIncompleteOutput &&
@@ -487,17 +513,20 @@ export async function createOpenAIStructuredResponse({
         initialMaxOutputTokens,
         retryMaxOutputTokens: RETRY_STRUCTURED_OUTPUT_TOKENS,
       });
-      body = await requestStructuredResponse({
+      const retried = await requestStructuredResponse({
         apiKey: config.apiKey,
         input,
         maxInputChars: effectiveMaxInputChars,
         maxOutputTokens: RETRY_STRUCTURED_OUTPUT_TOKENS,
         model: requestModel,
+        samplingParams,
         schema,
         schemaName,
         system,
         webSearch,
       });
+      body = retried.body;
+      sentSamplingParams = retried.sentSamplingParams;
       parsed = parseStructuredResponseBody(body);
     } else {
       throw error;
@@ -508,6 +537,7 @@ export async function createOpenAIStructuredResponse({
     json: parsed.json,
     model: requestModel,
     rawText: parsed.rawText,
+    sentSamplingParams,
     sources: getWebSearchSources(body),
     usage: body.usage ?? null,
   };

@@ -127,6 +127,51 @@ export default function run() {
     assert.equal(summary.sourceRecovery?.excludedPlanningCostLineCount, 11);
   });
 
+  // Run-2 handoff §6 — the same whitelist-drop defect class, third instance.
+  // `formattedAddressCount` and `excludedPlanningCostLineCount` were both
+  // computed for weeks and dropped here; `extractionSampling` is whitelisted
+  // in the same change that starts producing it, so the sent-vs-resolved
+  // distinction is verifiable from the QA bundle on the FIRST run that
+  // carries it rather than the run after someone notices.
+  test("8.4 extractionSampling survives the audit-snapshot whitelist, sent and resolved both", () => {
+    const summary = createExtractionSummary({
+      extractionSampling: {
+        liveCallCount: 9,
+        replayedCallCount: 0,
+        resolved: { seed: 7, temperature: 0 },
+        sent: { seed: 7, temperature: 0 },
+        strippedCallCount: 0,
+      },
+    });
+    assert.deepEqual(summary.extractionSampling?.sent, {
+      seed: 7,
+      temperature: 0,
+    });
+    assert.equal(summary.extractionSampling?.liveCallCount, 9);
+  });
+
+  test("8.5 a run whose params were stripped reports resolved WITHOUT sent", () => {
+    // The failure mode this pins: a reasoning model rejects seed/temperature,
+    // the fail-soft strip-retry succeeds, and the run completes normally. If
+    // the summary echoed the resolved config it would read "seed 7" on a run
+    // that sent nothing — worse than no telemetry (§6).
+    const summary = createExtractionSummary({
+      extractionSampling: {
+        liveCallCount: 9,
+        replayedCallCount: 0,
+        resolved: { seed: 7, temperature: 0 },
+        sent: {},
+        strippedCallCount: 9,
+      },
+    });
+    assert.deepEqual(summary.extractionSampling?.resolved, {
+      seed: 7,
+      temperature: 0,
+    });
+    assert.deepEqual(summary.extractionSampling?.sent, {});
+    assert.equal(summary.extractionSampling?.strippedCallCount, 9);
+  });
+
   test("8.3 a dismissed detail becomes a dismissed question record carrying its reason", () => {
     const questions = createReviewQuestions({
       draft: {

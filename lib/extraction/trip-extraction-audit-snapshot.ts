@@ -273,6 +273,34 @@ export function createExtractionSummary(usage: unknown) {
               : [],
           }
         : null,
+    // What the extraction requests ACTUALLY SENT for sampling (run-2 handoff
+    // §6; AGENTS.md rule 8(b)). This is the third field in a row to be
+    // computed, threaded partway, and then dropped here — `formattedAddress
+    // Count` and `excludedPlanningCostLineCount` were the first two. It is
+    // whitelisted in the SAME change that starts sending the params, because
+    // a change nobody can observe is not finished.
+    extractionSampling: (() => {
+      const sampling = asRecord(openai.extractionSampling);
+
+      if (Object.keys(sampling).length === 0) return null;
+
+      const numericParams = (value: unknown) =>
+        Object.fromEntries(
+          Object.entries(asRecord(value)).flatMap(([key, entry]) =>
+            typeof entry === "number" && Number.isFinite(entry)
+              ? [[key, entry] as const]
+              : []
+          )
+        );
+
+      return {
+        liveCallCount: Number(sampling.liveCallCount) || 0,
+        replayedCallCount: Number(sampling.replayedCallCount) || 0,
+        resolved: numericParams(sampling.resolved),
+        sent: numericParams(sampling.sent),
+        strippedCallCount: Number(sampling.strippedCallCount) || 0,
+      };
+    })(),
     // RW-EVD-001 bounded recovery call telemetry (separate usage lane).
     sourceRecovery: (() => {
       const sourceRecovery = asRecord(openai.sourceRecovery);
