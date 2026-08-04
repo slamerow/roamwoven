@@ -1,65 +1,8 @@
 # Roamwoven Product Contracts
 
-Ledger version: 26
+Ledger version: 24
 
-Ledger date: 2026-08-03 (RW-GRP-001 coverage — COVERAGE ONLY, no contract text
-changed. RW-GRP-001 `PARTIAL` → `KNOWN_GAP` on Eli's explicit decision this
-date, closing the question v25 recorded as OPEN and left to him.
-
-The decision, in his words: two wrong group members on the main path is
-behavior violating the contract, and v24's justification — verbatim, "2 grouped
-stops, both correct, ZERO wrong groups" — is no longer true. Under §How to use
-this ledger, `KNOWN_GAP` asserts exactly that, so `KNOWN_GAP` is the honest
-label.
-
-The condition for returning to `PARTIAL` is recorded WITH the downgrade so it
-cannot be re-litigated a fifth time: **a live run that ships zero wrong
-groups.** Not specification. Not fixture-green. Not a replay — the geocode lane
-is not pinned and the wrong-group path runs through it
-(`docs/assembly-defect-docket-2026-07-31-run-8.1.0.md` §6.3).
-
-Supersession: this supersedes v24's 2026-07-31 upgrade of RW-GRP-001 and the
-v25 header's "COVERAGE IS OPEN AND IS ELI'S CALL"; both are preserved below as
-history. RW-PLC-001 stays `KNOWN_GAP`. No other entry changes.
-
-Recorded with the decision, and binding: **this is the last hand-set coverage
-change for RW-GRP-001.** Once `scripts/scorecard.mjs` runs, this entry's
-coverage is derived from assertions rather than argued from a docket. The
-scorecard turns the approved ground truth into executable assertions labelled
-with the entry each one proves, and reports four states — PASS, FAIL, NOT BUILT
-and NOT CHECKABLE — so that contract text with no implementation, and a field
-that reaches no surface, stop being scored as though they were passes.)
-
-Prior: ledger version 25 (2026-08-02) — (assembly and publishing principles pass — Eli's
-decisions this date, recorded across RW-ORD-001 (NEW), RW-CLS-001, RW-GRP-001,
-RW-PLC-001, RW-REV-001 and RW-PUB-001. Input: Eli's `Roamwoven Assembly and Publishing
-Principles`, reviewed against run 8.1.0's audit
-(`docs/assembly-defect-docket-2026-07-31-run-8.1.0.md`) and against source.
-That standalone principles document is SUPERSEDED IN FULL by this ledger and is
-not to be reintroduced as a second authority.
-
-**The most important finding of the pass: most of what the principles document
-asks for is ALREADY LOCKED CONTRACT that the code does not honor.** Activity
-beats City Note, density-as-soft-trigger-never-classifier, a committed undated
-Activity staying an Activity with a provisional date, and Calls explaining
-Roamwoven-created groupings are all existing contract text, and all four were
-violated by run 8.1.0. The genuinely NEW decisions this date are eleven, listed
-in RW-ORD-001. Everything else in the principles document is enforcement work,
-not new product judgment — and the audit loop of the last twelve runs kept
-diagnosing symptoms rather than checking the code against this ledger.
-
-One correction the principles document itself required: its line "obvious
-same-site grouping does not need a maker-facing Call" contradicted RW-REV-001
-and was WITHDRAWN by Eli 2026-08-02.
-
-Coverage: NO coverage state is changed by this entry. RW-GRP-001 stays `PARTIAL`
-pending Eli's explicit decision on run 8.1.0's evidence — that run produced two
-WRONG group members (Museum of Illusions, Ring Tram Tour), and v24's upgrade to
-`PARTIAL` was justified in these words: "2 grouped stops, both correct, ZERO
-wrong groups." That justification no longer holds. The evidence is recorded in
-the entry; the coverage call is Eli's and is OPEN.)
-
-Prior: ledger version 24 (2026-07-31) — (run-2 work order — COVERAGE ONLY, no contract text
+Ledger date: 2026-07-31 (run-2 work order — COVERAGE ONLY, no contract text
 changed. RW-GRP-001 `KNOWN_GAP` → `PARTIAL` on Eli's explicit decision this
 date, on run-2 evidence: 2 grouped stops, both correct, ZERO wrong groups —
 the first live proof since the collapse that the grouping mechanism fires on
@@ -159,87 +102,6 @@ path is bypassed.
   guidance.
 - Evidence: `AGENTS.md`, this ledger's decision-precedence section.
 - Tests: `tests/product-contracts.test.ts`
-
-## RW-ORD-001 — Assembly stages run in one order and may not undo each other
-
-- Status: `LOCKED`
-- Decision date: `2026-08-02`
-- Supersession: none — this is the first statement of assembly stage ordering.
-  It is the only structurally NEW entry from the 2026-08-02 principles pass;
-  every other decision that date amends an existing entry.
-- Enforcement: `KNOWN_GAP`
-- Contract: Assembly runs in this order — **classify → resolve containment →
-  resolve identity → group → question → publish.** Containment is resolved
-  BEFORE identity and is deliberately separated from grouping: without that
-  split, identity and grouping are circular, because identity cannot run
-  without knowing containment and grouping cannot run without identity.
-
-  **Invariant A — no later stage deletes a record an earlier stage justified.**
-  A later stage may enrich a record, re-parent it, or suppress it as a
-  duplicate of a surviving record. It may not delete the thing another stage
-  found. Where a record is suppressed in favor of a survivor, its useful facts
-  MIGRATE to the survivor's description rather than dying with it; a child in a
-  group keeps its own descriptive text and therefore its own enrichments
-  (Eli, 2026-08-02, extending RW-CLS-001's "a stronger planned sighting gives
-  the entity one Activity home and removes its City Note duplicate" — the
-  duplicate LISTING is removed, the facts are not, and no stub survives in City
-  Notes, because the same information must never appear in two places in the
-  traveler app).
-
-  **Invariant B — containment beats identity.** When one record contains the
-  other, they remain two records in a parent/child relation regardless of how
-  strongly identity signals indicate a merge.
-
-  **A venue is not a container.** The container test is whether the parent has
-  two or more children the traveler would name separately — the same `>=2`
-  floor grouping already uses, so identity and grouping share ONE definition of
-  container rather than maintaining several that drift. A named site container
-  ships as a standalone Activity regardless of how many children this
-  particular parse surfaced; child count decides whether it GROUPS, not whether
-  it EXISTS.
-
-  **Maker decisions never feed back** (Eli, 2026-08-02). A maker's answer, edit,
-  ungrouping or dismissal affects that trip only. It never changes Roamwoven's
-  logic and never changes that account's future builds. No learning loop and no
-  per-account behavioral drift, absent an explicit future decision. Consequences:
-  the quality standard is one global standard rather than something meaning
-  different things per customer, and runs stay reproducible.
-
-  **Decision anchors.** Because `mergeCanonicalPieceInto` calls
-  `refreshCanonicalPieceId` on every merge, canonical piece ids change as
-  assembly proceeds and are not a durable handle. Every maker-facing decision
-  records a stable anchor alongside its piece id — leg key plus date plus
-  normalized title, or a source-anchor reference — emitted in the QA bundle so
-  it is observable rather than a dead field. Re-processing is NOT being built
-  now; this costs a field today and avoids rebuilding identity later. Per the
-  no-feedback rule above, the anchor only has to re-find a record; it never
-  carries decision semantics.
-- Evidence: Run 8.1.0 (2026-07-31, trip `4eaf3c6c`) is the proving case for both
-  invariants and neither held. Invariant A: `collapseAlternativeSlotCards`
-  (`lib/extraction/evidence-clustering.ts:6878`) merged the rescued dated
-  `Prague Castle visit` container INTO `Changing of the Guard`, one of its own
-  sub-stops — audit payload lineage rows 40 (suppressed, `finalRecords: []`) and
-  33 (compiled, absorbing it with reason "same plan described twice on one day").
-  The site's card left the draft entirely; the day shipped ten cards, none of
-  them Prague Castle. Invariant B: every RW-CAN-001 identity signal indicated a
-  merge for that pair — same date, same place, overlapping name tokens, shared
-  source section — and only the containment relation says otherwise. The
-  contrast case in the same run is `U Malířů` / `Lunch at U Malířů`, identical
-  `X at Y` surface shape, correctly merged, because a restaurant is a venue and
-  not a container. `isSiteComponentTitlePair`
-  (`lib/extraction/activity-classifier.ts:126`) is the existing partial patch for
-  the circularity; it recognizes a component only by the `"<X> at <Site>"` title
-  shape and therefore did not fire on `Changing of the Guard`.
-  COVERAGE IS `KNOWN_GAP` AND THE EXISTING FIXTURE IS PART OF THE REASON.
-  `tests/site-container-survives-rejected-grouping.test.ts` does include a
-  `Changing of the Guard` sibling, but gives it NO description, so Pass 1 bails
-  at its `identityTokens(...).length < 4` guard and the lane that actually
-  deleted the card is never reached. The suite stayed green through the defect.
-  That fixture is to be corrected in the first implementation pass and proven in
-  both directions; no test asserts either invariant today.
-- Tests: `tests/site-container-survives-rejected-grouping.test.ts`,
-  `tests/evidence-clustering.test.ts`,
-  `tests/canonical-identity.test.ts`
 
 ## RW-ING-001 — Accepted material cannot be silently ignored
 
@@ -519,11 +381,7 @@ path is bypassed.
   walk per day; a trip city or day-trip town name never groups; expect a
   handful of groups per trip; grouping call claims must state the actual rule
   that fired.
-
-  2026-08-03 supersession (coverage only): the v24 upgrade to `PARTIAL` is
-  superseded by Eli's `KNOWN_GAP` decision this date, recorded at the end of
-  this entry. No contract text above or below changes.
-- Enforcement: `KNOWN_GAP`
+- Enforcement: `PARTIAL`
 - Contract: A continuous source-authored walking route becomes one parent card
   with ordered sub-stops when no stop has an independent booking or fixed time.
   Same-site clusters become one parent visit with sub-stops. In addition,
@@ -562,74 +420,6 @@ path is bypassed.
   covers that one continuous visit. Informational pass details without a planned
   pickup or activation task belong to their owning detail or evidence lineage,
   not a traveler card.
-
-  2026-08-02 additions (Eli-approved) — PROVENANCE, ECHO, AND WHAT DISTANCE MAY
-  DO.
-
-  **Only source bytes are source evidence.** Nothing Roamwoven generated may
-  serve as evidence of what the source says — not a geocoded address, not a
-  coordinate, not a normalized title, not an inferred category. A grouping claim
-  that cites the source must be traceable to the document.
-
-  **Explicit source nesting** exists when the source identifies a named parent
-  and places bounded child content beneath or inside it through hierarchy,
-  containment language ("includes", "stops", "inside", "part of"), a booked tour
-  followed by its itinerary, a route with listed stops, or a visual layout in
-  which children sit beneath a named parent. Proximity, shared page, shared
-  date, shared city, OCR-adjacency and similar coordinates NEVER establish
-  nesting. Nesting is strong evidence, not an automatic command to group: a
-  nested child with its own booking, a materially different time, or an
-  independently experienced character still earns its own card.
-
-  **Source nesting establishes candidacy; distance only corroborates or vetoes.**
-  A non-nested item is never admitted to a group by proximity however close it
-  appears. Only source-nested members may stretch a site's footprint — otherwise
-  an admitted wrong member widens the gate for the next one, which is a ratchet.
-
-  **The echo rule.** A geocode result that returns the container's own
-  coordinate is an echo of the query, not evidence. Reject any result within
-  ~50 m of the container whose name was injected into the lookup.
-
-  **Two kinds of container.** A SITE container asserts spatial containment: its
-  children should be inside it, and a far child indicates a faulty enumeration.
-  A ROUTE or TOUR container asserts sequence: its children are expected to be
-  spread out and distance says nothing about them. Distance may veto for sites
-  and never for routes.
-
-  **A named site container never becomes another site's child** unless the
-  source explicitly nests it. This extends to the hierarchy path the rule that
-  already protects the geo path (added after Buda Castle was absorbed), and it
-  is what protects Belvedere without Roamwoven needing to know what Belvedere
-  is.
-
-  **Coordinates carry what they are licensed for.** A coordinate trusted for
-  DISPLAY is not thereby trusted for MEMBERSHIP. "Tour of Prague Castle"
-  legitimately resolves to its container and stays mappable while being denied
-  as membership evidence.
-
-  **Grouping requires a signal independent of tightness.** Geographic coherence
-  now types a flat list as plan-shaped under RW-CLS-001; it may not then be
-  re-spent as the reason those same items group. Grouping needs one further
-  thing — the source listing them adjacently. One piece of evidence driving two
-  decisions produces correlated errors.
-
-  OPEN, NOT DECIDED (Eli, 2026-08-02): the discovered-walk gate. This contract
-  currently gates a discovered route on a crowded day (~6 visible cards). Eli's
-  direction is that the test should be "are these stops close together AND does
-  it logically make sense to group them", where the second half reduces to four
-  checks — listed together in the source; none independently booked or timed;
-  none is already its own plan (a tour, a ticketed experience, a named site);
-  and the members are the same KIND of thing, which is the check that keeps an
-  errand such as `Laundry` out of a sightseeing outing even when it sits inside
-  the same 700 m. Eli 2026-08-02 also confirmed that January 20 grouping is NOT
-  required. Deferred deliberately: every other decision of this pass RESTRICTS
-  output, while a looser walk gate is the only one that would make Roamwoven
-  invent MORE groups, against the standing rule that a wrong group is worse than
-  a missing one; and discovered walks depend on verified coordinates, which a
-  pinned replay cannot exercise, so shipping this beside the containment work
-  would make the next live run's wrong-group result unattributable. Revisit
-  after one clean run. `CROWDED_DAY_VISIBLE_CARDS` therefore stands, and the
-  standing instruction not to calibrate it is unchanged.
 - Evidence: System-discovered geo grouping is now implemented: the parser
   emits an optional per-activity `area` hint (walkable district), and
   `createDeterministicAreaGroupingDecisions` groups three or more same-day
@@ -853,71 +643,6 @@ path is bypassed.
   CONDITIONAL on the 7.28.0 parse. Run 2's parse emitted the second groupable
   child the proof assumed impossible, which is precisely how these 2 groups
   came to exist, and the general framing had already misled one session.
-  2026-08-02 (run 8.1.0, trip `4eaf3c6c`): **the wrong-group bar broke, and the
-  v24 upgrade's justification no longer holds.** Grouped stops went 2 -> 7, and
-  two of the seven — `Museum of Illusions` and `Ring Tram Tour` — are named
-  BY NAME in `docs/assembly-ground-truth-central-europe.md` as Vienna city-note
-  ideas. The mechanism is verified and is the reason the 2026-08-02 provenance
-  rules above exist. G4.3's retry appended the container title to the query
-  (`"Museum of Illusions, Vienna"` -> `"Museum of Illusions, Schönbrunn
-  Palace"`, 9 retries, all 9 accepted, `retryOutOfCityCount 0`), the geocoder
-  returned the palace, and the resulting address naming Schönbrunn was read by
-  `hierarchyMember` (`evidence-clustering.ts:8436`) as SOURCE hierarchy. The
-  maker-facing Call therefore read "the source lists 7 stops"; the container's
-  own description lists five. `sameSiteClaimText` emits that wording only when
-  `geoChildCount === 0`, so all seven were recorded as source-placed, and
-  because hierarchy members are not contestable (`contestable()` requires
-  `strength === "geo"`), the walk lane could never release them.
-  The discriminator was present in the data throughout: every CORRECT child
-  resolved to its own location (Gloriette 890 m, Palm House 752 m,
-  Orangeriegarten 313 m from the palace) and every WRONG one resolved to the
-  palace centroid `48.1858124,16.3127641` exactly — which is the echo rule
-  above. Museum of Illusions is 4.81 km from the point it was assigned
-  (Wallnerstr. 4, 1010 Wien). The same run put three distinct venues on the
-  Prague Castle centroid (`Prague Castle`, `Changing of the Guard`, `Trdelník
-  for breakfast`), so the MUST-IMPROVE "no two venues sharing a verified
-  coordinate" item also failed.
-  ONE UNOBSERVED LINK, labelled per rule 7(c): `verifiedFormattedAddress`
-  reaches no served surface, so the address TEXT is a HYPOTHESIS while the
-  admitting path is VERIFIED BY ELIMINATION — of `hierarchyMember`'s four paths,
-  the container description does not list either title, neither title contains
-  the container's full title, and neither contains the token `schonbrunn`,
-  leaving only the address path.
-  COVERAGE WAS LEFT OPEN AND WAS ELI'S CALL. It was made on 2026-08-03 and is
-  recorded immediately below; `PARTIAL` did not survive this evidence. The
-  argument for returning to `KNOWN_GAP` was that this contract says a
-  mixed-geography list stays individual cards and a 4.81 km outlier inside a
-  palace visit is that; the argument against was that the cause is now
-  understood and fixed in specification. No coverage state was changed without
-  an explicit decision.
-  2026-08-03 (Eli's explicit decision): coverage `PARTIAL` → `KNOWN_GAP`. Two
-  wrong group members on the MAIN path is behavior violating the contract, and
-  v24's justification — "2 grouped stops, both correct, ZERO wrong groups" — is
-  no longer true, so the label that asserts a violation is the honest one.
-  The argument-against is explicitly rejected on §Coverage-honesty grounds:
-  "fixed in specification" is not coverage, and this ledger has now spent four
-  sessions re-litigating one entry's label. Therefore, recorded WITH the
-  decision:
-  (a) RETURN CONDITION — `PARTIAL` is restored only by a LIVE RUN that ships
-  ZERO wrong groups. Not specification, not fixture-green, and not a replay:
-  the geocode lane is not pinned (`scripts/replay-pinned-parse.mjs:14`) and the
-  wrong-group path runs through `verifiedFormattedAddress`, which only exists
-  when that lane runs (docket 2026-07-31 §6.3). A replay showing a clean
-  Schönbrunn group is silence, not evidence.
-  (b) LAST HAND-SET CHANGE — this is the final coverage state for this entry
-  set by argument. From `scripts/scorecard.mjs` onward, coverage is DERIVED
-  from assertions: the approved ground truth
-  (`docs/assembly-ground-truth-central-europe.md`) compiled into executable
-  checks, each labelled with the entry it proves, scored PASS / FAIL /
-  NOT BUILT / NOT CHECKABLE. The three non-PASS states are separated
-  deliberately, because collapsing them is what let this entry drift — an
-  unimplemented 2026-08-02 decision and an unobservable field were both being
-  counted the same way as working code. NOT CHECKABLE is a defect in its own
-  right and is never permitted to score as a pass.
-  (c) The scorecard also audits THIS LEDGER, not only the code: an entry
-  claiming `ENFORCED` or `PARTIAL` while the scorecard finds no implementation
-  for one of its clauses is reported as a ledger defect, separately from code
-  defects. That check is the one that would have caught this entry early.
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -1150,70 +875,6 @@ path is bypassed.
   fixtures. (4) Costs/budget planning content ("Budget notes: $1200 total")
   is excluded from traveler notes with a recorded disposition — the Costs
   exclusion applies to note TEXT, not only to activity records.
-
-  2026-08-02 additions (Eli-approved) — INTENT IS TYPED PER BLOCK, NOT PER DAY.
-  **Date belongs to the source section; intent belongs to the smallest coherent
-  block.** A dated heading establishes temporal context ONLY; it does not
-  establish commitment. One dated day section may contain a plan block, an idea
-  block, logistics and receipt evidence, and each is classified independently.
-  This extends the existing "a loose ideas list after the itinerary remains City
-  Notes" rule, which covers only a list POSITIONALLY separate from the
-  itinerary, to an idea block sitting INSIDE a dated day section.
-
-  Three layers, in order: (1) COMMITMENT, per item, independent of neighbors — a
-  time, booking, ticket, reservation, confirmation code, or first-person intent
-  language makes it an Activity, and this is never demotable downstream; (2)
-  BLOCK TYPE, inherited by the block's items as their default — plan, ideas,
-  logistics or evidence — with strong item-level evidence overriding the default
-  in BOTH directions (a booked 2:00 PM ticket inside an ideas block is an
-  Activity; "maybe the museum" inside a plan block is not committed); (3)
-  DENSITY, which remains what this contract already says it is — a soft trigger
-  that prompts re-evaluation and never a classifier. An overfull day means layer
-  2 mis-typed a block, and the response is to re-examine the BLOCK, never to
-  rank a day's items and demote the weakest, which would make a card's fate
-  depend on its neighbors and reintroduce run-to-run instability. Where the
-  block is genuinely ambiguous, that earns ONE consolidated Question. The
-  density trigger fires on a shape, not on a count; it is not to be reimplemented
-  as a second tunable threshold constant.
-
-  BLOCK BOUNDARIES ARE DETECTED FROM DURABLE SIGNALS. Layout is the first thing
-  OCR destroys, so boundary signals are ranked by survivability rather than by
-  kind. DURABLE, and primary: explicit language ("other ideas", "options", "if
-  we have time"), and a sustained shift in item shape across multiple peer
-  items. FRAGILE, and corroborating only: indentation, blank lines, hierarchy
-  reset. A blank line without an intent shift is not a boundary. One anomalous
-  item inside an otherwise coherent block is classified individually rather than
-  splitting the block.
-
-  DAY HEADINGS ARE NOT A CLASSIFICATION INPUT (Eli, 2026-08-02): thematic day
-  headings are a convention of the current test corpus, not a general one.
-
-  GEOGRAPHIC COHERENCE TYPES A FLAT LIST. A flat list of peer venue names is
-  plan-shaped when its members cluster tightly and idea-shaped when they scatter
-  across the city; where the day has a committed anchor, distance from that
-  anchor is the second reading. This is the ONE place geography participates in
-  classification, and it is a different job from RW-GRP-001's containment test:
-  here geography corroborates a CLASSIFICATION, there it would establish
-  CONTAINMENT. A wrong answer here misfiles a note; a wrong answer there
-  fabricates a claim about the source. Ordering consequence, to be implemented
-  in this order and not the reverse: classification needs coordinates before it
-  knows what is a note, so City Notes do not CARRY coordinates rather than being
-  never geocoded — geocode during classification and discard the coordinate for
-  whatever lands in Notes. City Notes have no map and no coordinates in the
-  traveler app.
-
-  CITY NOTES ARE KEYED TO A CITY AND ANCHORED ON ITS LEGS (Eli, 2026-08-02),
-  which extends this contract's existing "one City Note per city" rule to a trip
-  that visits a city twice. One set of notes per city, surfaced on EVERY leg for
-  that city — Rome leg 1 and Rome leg 2 show the same notes. Notes are keyed to
-  the city, not owned by a leg; a leg is a display anchor. "City" here means LEG
-  city: a day-trip town has no leg of its own (a day trip is a group of activity
-  cards on one day within a leg, per RW-GRP-001), so its notes belong to the
-  parent city's set. A City Note has no day. Implementation note, because the
-  current attachment path makes this easy to get wrong:
-  `findLegForCanonicalCity` (`lib/extraction/draft-to-structured-trip.ts`)
-  returns the FIRST leg matching a city name, so a leg-owned model would put
-  every dateless Rome note on the January 12 leg and none on the January 24 one.
 - Evidence: 2026-07-17 evening pass: `PLANNED_ACTIVITY_PATTERN` narrowed in
   `lib/trip-card-taxonomy.ts`; `reconcileCardsAgainstCityNotes` runs before
   accessory routing so notes are matched intact; city-note sections +
@@ -1314,31 +975,6 @@ path is bypassed.
   accepts the em dash the live line used ("January 24th Rome—$118").
   ddb1699 negative controls held (HUF prose, priced venue/idea lines).
   Enforced by `tests/note-lane-protections.test.ts`.
-  2026-08-02 (block intent; run 8.1.0 evidence, coordinates from that run's
-  audit payload). The City Note lane is materially under-firing: run 8.1.0
-  shipped 68 active Activities against 3 active City Notes, while the approved
-  ground truth files nine January-19 Vienna entries as city notes on that day
-  alone. The run also raised FIVE `activity_bloat` warnings — the system
-  observing its own misclassification and reporting it as a quality warning
-  instead of resolving it, which is precisely what this contract's
-  density-as-soft-trigger clause exists to prevent.
-  The geographic-coherence rule is verified across three days of the corpus.
-  Jan 16 (plan): Trdelník, KGB museum, Kafka statue, John Lennon Wall, Novy
-  Svet — all Malá Strana, a few hundred metres apart. Jan 19 (ideas): Ferris
-  wheel at the Prater (48.2167,16.3959), Hundertwasser Haus
-  (48.2073,16.3943), Museum of Illusions (Innere Stadt), Leopold
-  (Museumsquartier), St. Charles (Karlsplatz), Mozarthaus (Domgasse) — four
-  districts, 5+ km from that day's Schönbrunn anchor. Jan 20 (plan): Cafe
-  Central, Jewish Museum, St. Stephen's, the Library, Kunstforum — all Innere
-  Stadt, inside ~700 m, which the ground truth independently calls "a short,
-  deliberate list = selected untimed activities." The rule also reproduces the
-  ground truth's existing resolution of St. Stephen's, which appears in Jan
-  19's scattered list and Jan 20's tight one, with the tight one winning.
-  OCR flattening is demonstrated in the same run rather than assumed: the
-  `day_section_source_line_unextracted` diagnostic attributes a German rail
-  ticket's lines (`FAHRSCHEIN`, `Zugbindung`, `01 ERWACHSENER`, `Abfahrt:
-  10:42`) to a Rome LODGING day-section, which is why boundary detection may
-  not rest on layout.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -1508,24 +1144,6 @@ exact live payload shapes.
   proximity; if none exists, it uses the first full day in the matching city,
   then the first city day as a fallback. A date answer is limited to the trip
   window and moves that same canonical Activity.
-
-  2026-08-02 addition (Eli-approved) — **SYNTHESIZED PLACEHOLDER RECORDS ARE
-  ABOLISHED.** There are four traveler-facing homes: Stay, Transport, Activity
-  and City Note. Legs are the asserted spine, not a fifth home. Roamwoven never
-  invents a record so that an orphaned Question has a subject.
-
-  This is an ENFORCEMENT of this contract rather than a change to it: the text
-  above already requires that a source-supported Activity with an unresolved
-  date STAYS an Activity with a provisional date and one bounded Question, and
-  never says a placeholder may be synthesized. It also settles the
-  committed-but-undated case (a booking whose date exists only in material OCR
-  failed on): provisional date plus one bounded Question, exactly as written.
-
-  Under RW-ORD-001 Invariant A the orphan case cannot arise, because the
-  Question's subject is still present. Where a Question's subject was NEVER
-  EXTRACTED — as distinct from deleted — the Question is dropped from the maker's
-  queue and recorded in the audit as a source-coverage finding, because it is
-  evidence of an extraction miss rather than a maker decision.
 - Evidence: A committed undated Activity now receives a provisional matching-city
   date, prefers the first full city day, and carries one bounded date Question
   that moves the same canonical record. The remaining gap is a deterministic
@@ -1622,50 +1240,8 @@ exact live payload shapes.
   source-authored replacements or cancellations. Multiple unresolved fields on
   one subject may share one compact review card, but each control remains a
   separate typed mutation that must succeed independently.
-
-  2026-08-02 additions (Eli-approved). The test: **if the maker does nothing, is
-  the app internally resolved?** No — Question. Yes, and Roamwoven made a
-  meaningful visible judgment — Call. Yes, and the action was routine or
-  invisible — neither; audit only. Explicitly audit-only, never Calls: merging
-  obvious duplicates, repairing a source-backed time, attaching check-in
-  instructions to a Stay, suppressing receipt debris, moving a recommendation
-  list into City Notes, normalizing spelling.
-
-  **A Call is REQUIRED when grouping removes cards from the traveler's top
-  level.** Merging duplicates removes nothing the traveler would have seen
-  twice; grouping folds separate cards under one, and that is a visible
-  judgment. Eli 2026-08-02 WITHDREW the line "obvious same-site grouping does
-  not need a maker-facing Call" from his principles draft as contradicting this
-  contract's existing "First-run Calls primarily explain Roamwoven-created
-  groupings". Schönbrunn requires a Call; so does Prague Castle once it
-  survives. Zero Calls on a clean itinerary is an acceptable outcome; the
-  current test corpus is deliberately messy and should produce several.
-
-  **A Call's text is rendered FROM the membership record, never composed
-  alongside it.** Run 8.1.0's Schönbrunn Call claimed seven source-listed stops
-  against a container description listing five, because the claim string and the
-  membership decision were computed from different state. Rendering both from
-  one source makes that class of false statement structurally impossible rather
-  than something each audit has to catch.
-
-  **Question budget.** Two to four Questions on a good run is the target; more
-  Questions is not better and superfluous Questions degrade the maker
-  experience against the product goal of a finished app in 15-20 minutes.
-  Because the target count is low, COUNT STOPS MEASURING QUALITY: the internal
-  standard must assert that the RIGHT Questions exist, or a run that silently
-  misclassifies everything outscores a correct one. Every classification
-  decision is therefore recorded in the audit even when it raises no Call and no
-  Question, so a silent wrong decision stays discoverable.
 - Evidence: Prompt and regression coverage exists, but the latest live run
   produced source-obvious, duplicated, irrelevant, and mis-targeted Questions.
-  2026-08-02 (run 8.1.0): 12 open Questions shipped, of which 8 are excluded by
-  the rules above — three separately worded Prague Castle ticket Questions on
-  three different subjects (two of them synthesized placeholders), two "which
-  day does this note happen" Questions that City-Note-to-leg attachment makes
-  impossible, and `What is the booking/reference code?`, `How many adults are
-  booked?`, `What is the provider name?`, all answerable from the ticket. The
-  four that survive — the castle ticket, the Vienna planned-or-ideas question,
-  `koscom`, and the baths — are Eli's canonical good-Question set.
 - Tests: `tests/openai-trip-parser-prompt.test.ts`,
   `tests/canonical-regressions.test.ts`, `tests/generated-trip-model.test.ts`
 
@@ -2130,44 +1706,6 @@ exact live payload shapes.
   already published traveler snapshot. Maker changes create a new draft and an
   explicit new published snapshot/version when the maker chooses to publish an
   update.
-
-  2026-08-02 additions (Eli-approved). Roamwoven's INTERNAL quality benchmark and
-  the maker's AUTHORITY TO PUBLISH are separate. A run may fail the internal
-  standard without preventing publication; internally that is a **benchmark
-  failure**, never automatically a publishing prohibition. Semantic detectors can
-  be wrong, and the product does not hold a sophisticated maker hostage over a
-  contested duplicate, category or grouping judgment.
-
-  Quality issues WARN: duplicate or questionable activities, activity bloat,
-  wrong or uncertain grouping, unresolved Questions, missing optional details,
-  map uncertainty, wrong categories, possible wrong-city placement, and general
-  audit P1/P2 findings. Where material warnings remain, a lightweight
-  confirmation ("Publish with twelve unresolved review items?") is permitted;
-  a heuristic never becomes a barrier.
-
-  Only safety or mechanical failures BLOCK: the maker is not authorized; no
-  usable snapshot exists or processing is still running; the snapshot is corrupt
-  or structurally invalid; or Roamwoven has VERIFIED that protected data would
-  become publicly visible and cannot automatically protect or remove it. Privacy
-  is enforced automatically first — protected values move into protected fields
-  or are stripped from public prose — and publication stops only when a safe
-  result cannot be guaranteed, never because a detector raised an uncertain
-  warning.
-
-  Three truthful states: **Ready to publish** (no material known issues),
-  **Review recommended** (known quality issues, publishing allowed), **Safety
-  action required** (no safe or valid snapshot yet). A maker may explicitly
-  resolve OR ignore a review Question; ignoring is a recorded maker decision, not
-  a lingering unresolved system state.
-
-  THREE OF THESE ARE NEW BUILD, not restatement: the third state does not exist
-  today (the 2026-07-25 formula above has no safety state), the confirmation step
-  does not exist, and an explicit maker "ignore" that records a decision does not
-  exist. **The safety block is the first true hard stop in the system** —
-  `assessTripPublishability` currently returns `canPublish: true` on every path
-  but missing records. Per RW-OPS-001 and §Dark-factory, that new blocking path
-  is not push-ready until its route-level outcome is traced and it terminates in
-  one of the four named states.
 - Evidence: Published snapshots are transactionally created and traveler reads
   use the active published snapshot.
   2026-07-21 CEO decision (Eli, run7): publishing NEVER hard-blocks on audit
