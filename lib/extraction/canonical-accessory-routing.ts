@@ -1,6 +1,7 @@
 import type {
   CanonicalEvidenceAction,
   CanonicalEvidencePiece,
+  CanonicalPieceDisposition,
 } from "@/lib/extraction/evidence-clustering";
 import {
   normalizeText,
@@ -19,7 +20,15 @@ type RoutingActions = {
     source: CanonicalEvidencePiece;
     target: CanonicalEvidencePiece;
   }) => void;
-  suppressPiece: (piece: CanonicalEvidencePiece, reason: string) => void;
+  // Task B2: suppressPiece is injected from evidence-clustering.ts's own
+  // suppressCanonicalPiece, so its signature has to track that gate's
+  // signature exactly — this is a real call site of the same primitive,
+  // just reached through a function reference instead of a literal call.
+  suppressPiece: (
+    piece: CanonicalEvidencePiece,
+    reason: string,
+    disposition: CanonicalPieceDisposition
+  ) => void;
 };
 
 function stringValue(record: Record<string, unknown>, key: string) {
@@ -395,9 +404,18 @@ function routeDatedNoteEvidence({
   });
 
   if (dedupedRetained.length === 0 && segments.length > 0) {
+    // Terminal (survey §2 NAMES_DESTINATION_ONLY: "the reason string names
+    // a destination... but no concrete surviving id"). Every segment above
+    // was judged "already represented elsewhere" independently — several
+    // paths (stayMention, uniqueLodgingContext, transportMention,
+    // uniqueMovementContext) drop a segment without ever recording WHICH
+    // piece absorbed it, so there is no reliable single id or list to name
+    // here without restructuring that loop to track it, which is out of
+    // scope for this step (recorded in docs/assembly-findings-inbox.md).
     actions.suppressPiece(
       note,
-      "note evidence routed to canonical stay, activity, or travel records"
+      "note evidence routed to canonical stay, activity, or travel records",
+      { kind: "terminal", code: "NOTE_CONTENT_REDISTRIBUTED_NO_SINGLE_SURVIVOR" }
     );
     return;
   }

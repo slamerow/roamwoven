@@ -57,6 +57,25 @@ const WEAK_RECOMMENDATION_PATTERN =
 const LOOSE_FOOD_SHOPPING_PATTERN =
   /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/;
 
+// A named-site container noun. Moved here from
+// lib/extraction/activity-classifier.ts (Task C2, 2026-08-04 work order:
+// "one definition per concept") because that module already imports FROM
+// this one (classifyDraftActivityCard, hasCommitmentLanguage,
+// hasLooseTipVocabulary, hasStandaloneActivityAnchor) — importing the other
+// way round would have created a cycle, so the shared constant lives on the
+// lower-level side. activity-classifier.ts re-exports it under the same
+// name for its existing callers (lib/extraction/evidence-clustering.ts,
+// which re-exports it again as SAME_SITE_CONTAINER_PATTERN; and
+// lib/extraction/geocode-verification.ts). Before this move,
+// isSameSiteActivityGroup below carried its OWN word list here
+// (`palace|castle|complex|grounds|gardens`) that disagreed with this one
+// (`citadel|fortress|acropolis|abbey|monastery` missing, `gardens` extra) —
+// the same class of divergence that deleted a landmark from a customer's
+// itinerary (see docs/assembly-restructure-work-order-2026-08-04.md, Task
+// A/C).
+export const SITE_CONTAINER_NOUN_PATTERN =
+  /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
+
 type CityTipRecord = {
   categoryId?: string | null;
   description?: string | null;
@@ -120,9 +139,28 @@ export function isSameSiteActivityGroup(input: DraftActivityCardInput) {
   const nearbyOnly = /\b(nearby sights?|nearby sites?|nearby stops?|area sights?|area sites?)\b/.test(
     text
   );
+  // Task C2 (2026-08-04 work order): this used to test its own private
+  // site-noun list (`palace|castle|complex|grounds|gardens`) instead of the
+  // shared SITE_CONTAINER_NOUN_PATTERN — a third independent copy of "is
+  // this a site container?" alongside evidence-clustering.ts's
+  // SAME_SITE_CONTAINER_PATTERN and activity-classifier.ts's own now-moved
+  // copy. Consuming the shared pattern picks up
+  // citadel|fortress|acropolis|abbey|monastery, which this local list
+  // lacked, and drops "gardens" as a standalone container noun: gardens
+  // ("Schönbrunn gardens", "River Palace gardens") are the CHILD/component
+  // side of a site grouping in this codebase's own fixtures
+  // (tests/evidence-clustering.test.ts:1201, :1337), and
+  // SITE_CONTAINER_NOUN_PATTERN is also SAME_SITE_CONTAINER_PATTERN,
+  // consumed at ~15 merge-refusal sites in evidence-clustering.ts — folding
+  // "gardens" into it would make those same component titles match as
+  // containers too, an unverifiable-by-reading change to merge-refusal
+  // behaviour well outside this task's blast radius (standing rule 4). The
+  // palace/castle-plus-gardens combination a few lines below (this
+  // function's own fallback clause) still catches the common "Palace ...
+  // gardens" phrasing, so this narrows rather than removes gardens
+  // handling here.
   const siteCluster =
-    /\bcluster including\b/.test(text) &&
-    /\b(palace|castle|complex|grounds|gardens)\b/.test(text);
+    /\bcluster including\b/.test(text) && SITE_CONTAINER_NOUN_PATTERN.test(text);
   const explicitSameVisit =
     /\b(same site|same-site|same .* visit|same .* complex|inside|within|grounds|campus|estate|complex)\b/.test(
       text
@@ -339,6 +377,23 @@ export function classifyDraftActivityCard(
 // module on the same string).
 export function hasCommitmentLanguage(value: string | null | undefined) {
   return PLANNED_ACTIVITY_PATTERN.test(normalizeText(value));
+}
+
+// Plain-string sibling of hasWeakRecommendationMarker, for callers that
+// build a combined text blob (title + description + section context) rather
+// than a DraftActivityCardInput — the canonical evidence resolver
+// (lib/extraction/canonical-evidence-resolver.ts), which carried a PRIVATE
+// copy of this vocabulary that omitted "far away" (Task C1, 2026-08-04 work
+// order). "(far away)" is a documented product rule — it must silently
+// demote an item to city notes — and the same class of divergence (a
+// resolver-only regex disagreeing with this module on the same string) was
+// found and fixed twice before and never applied here (audit findings B1,
+// B4; see also hasCommitmentLanguage above, the B1 fix for the sibling
+// plan-signal regex).
+export function hasWeakRecommendationLanguage(
+  value: string | null | undefined
+) {
+  return WEAK_RECOMMENDATION_PATTERN.test(normalizeText(value));
 }
 
 export function hasLooseTipVocabulary(value: string | null | undefined) {

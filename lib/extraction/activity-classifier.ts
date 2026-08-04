@@ -24,6 +24,7 @@ import {
   hasCommitmentLanguage,
   hasLooseTipVocabulary,
   hasStandaloneActivityAnchor,
+  SITE_CONTAINER_NOUN_PATTERN,
   type DraftActivityCardInput,
 } from "@/lib/trip-card-taxonomy";
 import { comparableTokens, normalizeText } from "@/lib/extraction/traveler-text";
@@ -32,9 +33,13 @@ export type MentionCommitment = "fixed" | "sequenced" | "none";
 
 // A named-site container noun. Shared with grouping (evidence-clustering
 // re-exports this as SAME_SITE_CONTAINER_PATTERN) so the site↔component
-// relation and same-site grouping can never diverge.
-export const SITE_CONTAINER_NOUN_PATTERN =
-  /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
+// relation and same-site grouping can never diverge. Defined in
+// lib/trip-card-taxonomy.ts (Task C2, 2026-08-04 work order) — this module
+// already imports from that one, so defining it there instead of here
+// avoids an import cycle. Re-exported under the same name so this module's
+// own callers (evidence-clustering.ts, geocode-verification.ts) don't need
+// to change their import path.
+export { SITE_CONTAINER_NOUN_PATTERN };
 
 // --- Own-text evidence ------------------------------------------------------
 

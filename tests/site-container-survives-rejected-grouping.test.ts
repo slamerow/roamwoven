@@ -104,12 +104,23 @@ export default async function run() {
         {
           ...DATED_SECTION,
           date: "2019-01-16",
+          description:
+            "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
           evidenceRole: "atomic_candidate",
           startTime: "12:00",
           title: "Changing of the Guard",
         },
       ]);
 
+      // Regression coverage for Task A (2026-08-04): the sibling above needs
+      // a real description — near-identical to the container's own — or
+      // `collapseAlternativeSlotCards` Pass 1 bails at its minimum-
+      // description-length check before ever reaching the merge decision,
+      // and the guard below goes untested. With a description this close in
+      // wording, Pass 1's near-identical-description test would otherwise
+      // merge the dated "Prague Castle visit" container INTO this sibling
+      // (exactly what happened live), deleting the castle a second time
+      // after `reclassifySourceContainers` had already rescued it.
       const castle = draft.activities.find((activity) =>
         /castle/i.test(activity.title)
       );
