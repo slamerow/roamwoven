@@ -1885,7 +1885,7 @@ function emit(ctx, meta) {
       "docs",
       `assembly-scorecard-${new Date().toISOString().slice(0, 10)}-run-8.1.0-${meta.source}.md`
     );
-  fs.writeFileSync(reportPath, `${text}\n`, "utf8");
+  fs.writeFileSync(reportPath, `${text.trimEnd()}\n`, "utf8");
   console.log(`\nreport written: ${path.relative(rootDir, reportPath)}`);
   process.exitCode = STRICT && counts.FAIL > 0 ? 1 : 0;
 }

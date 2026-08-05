@@ -1,6 +1,6 @@
 # Live-run preflight — assembly phase 1
 
-Date: 2026-08-05  
+Date: 2026-08-05
 Run budget: **one** fresh paid extraction. Publishing and password-mode checks
 reuse that extraction and do not spend another model run.
 

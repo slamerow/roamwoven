@@ -233,4 +233,3 @@ Geocode verification lane: **pinned and replayed**.
 - **NOT BUILT** means no implementation exists. Every declaration here carries a static probe; if the probe had found an implementation the assertion would have been evaluated instead and the stale declaration reported. NOT BUILT is never filtered out of this report.
 - **NOT CHECKABLE** means the mechanism may have run but its output reaches no surface this harness can read. Treat each one as its own defect: it is how three bar items went unscored for weeks.
 - A `PARTIAL` entry with NOT BUILT assertions is not automatically wrong — `PARTIAL` admits an uncovered path — but the ledger must NAME that path in the entry rather than let the label carry it. The finding is raised either way; the judgement is the CEO's.
-
