@@ -400,7 +400,7 @@ function isActiveStatus(record: { status: string }) {
   return record.status !== "ignored";
 }
 
-function createRecordSummaries({
+export function createRecordSummaries({
   includePrivate,
   records,
 }: {

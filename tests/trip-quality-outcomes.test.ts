@@ -58,6 +58,7 @@ function report(
       identityRecoveryStatus: "not_needed",
       observationCount: 0,
       parserArtifactRepairCount: 0,
+      sourceBoundedDisjunctionRepairs: [],
       rejectedObservationCount: 0,
       sourceAnchorObservationCount: 0,
       suppressedStandaloneAnchorCount: 0,

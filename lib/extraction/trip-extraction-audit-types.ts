@@ -230,6 +230,16 @@ export type TripExtractionAuditReport = {
     identityRecoveryStatus: "not_needed" | "repaired";
     observationCount: number;
     parserArtifactRepairCount: number;
+    sourceBoundedDisjunctionRepairs: Array<{
+      afterRoles: [string | null, string | null];
+      beforeRoles: [string | null, string | null];
+      canonicalPieceIds: string[];
+      observationIds: string[];
+      rule: "explicit_local_or_v1";
+      spanEnd: number;
+      spanHash: string;
+      spanStart: number;
+    }>;
     rejectedObservationCount: number;
     sourceAnchorObservationCount: number;
     suppressedStandaloneAnchorCount: number;

@@ -278,6 +278,55 @@ export function createCanonicalizationSummary(usage: unknown) {
     identityRecoveryStatus,
     observationCount,
     parserArtifactRepairCount: Number(evidence.parserArtifactRepairCount) || 0,
+    sourceBoundedDisjunctionRepairs: Array.isArray(
+      evidence.sourceBoundedDisjunctionRepairs
+    )
+      ? evidence.sourceBoundedDisjunctionRepairs.flatMap((value) => {
+          const repair = asRecord(value);
+          const beforeRoles = Array.isArray(repair.beforeRoles)
+            ? repair.beforeRoles
+            : [];
+          const afterRoles = Array.isArray(repair.afterRoles)
+            ? repair.afterRoles
+            : [];
+          if (
+            repair.rule !== "explicit_local_or_v1" ||
+            typeof repair.spanHash !== "string" ||
+            beforeRoles.length !== 2 ||
+            afterRoles.length !== 2
+          ) {
+            return [];
+          }
+          const role = (entry: unknown) =>
+            typeof entry === "string" ? entry : null;
+          return [
+            {
+              afterRoles: [role(afterRoles[0]), role(afterRoles[1])] as [
+                string | null,
+                string | null,
+              ],
+              beforeRoles: [role(beforeRoles[0]), role(beforeRoles[1])] as [
+                string | null,
+                string | null,
+              ],
+              canonicalPieceIds: Array.isArray(repair.canonicalPieceIds)
+                ? repair.canonicalPieceIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              observationIds: Array.isArray(repair.observationIds)
+                ? repair.observationIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              rule: "explicit_local_or_v1" as const,
+              spanEnd: Number(repair.spanEnd) || 0,
+              spanHash: repair.spanHash,
+              spanStart: Number(repair.spanStart) || 0,
+            },
+          ];
+        })
+      : [],
     rejectedObservationCount: Number(evidence.rejectedObservationCount) || 0,
     sourceAnchorObservationCount:
       Number(evidence.sourceAnchorObservationCount) || 0,

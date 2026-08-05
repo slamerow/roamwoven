@@ -80,7 +80,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 13;
+export const EVIDENCE_CLUSTER_VERSION = 14;
 
 export type EvidenceKind =
   | "activity"
@@ -317,6 +317,16 @@ export type EvidenceClusteringResult = {
     dispositionCount: number;
     observationCount: number;
     parserArtifactRepairCount: number;
+    sourceBoundedDisjunctionRepairs: Array<{
+      afterRoles: [string | null, string | null];
+      beforeRoles: [string | null, string | null];
+      canonicalPieceIds: string[];
+      observationIds: string[];
+      rule: "explicit_local_or_v1";
+      spanEnd: number;
+      spanHash: string;
+      spanStart: number;
+    }>;
     rejectedObservationCount: number;
     groupingClaims: GroupingClaimLedgerTelemetry;
     stageWriterTrace: AssemblyStageWriterTraceEntry[];
@@ -12684,6 +12694,41 @@ export function clusterExtractedEvidence({
         .length,
       observationCount: observations.length,
       parserArtifactRepairCount: parserArtifactRepairs.length,
+      sourceBoundedDisjunctionRepairs: parserArtifactRepairs.flatMap(
+        (repair) => {
+          const trace = repair.sourceBoundedTrace;
+          if (!trace) return [];
+          const candidateIds = new Set(
+            trace.candidateIds.filter((value): value is string => Boolean(value))
+          );
+          const observationIds = observations
+            .filter((observation) => {
+              const candidateId = stringValue(
+                observation.payload,
+                "_resolverCandidateId"
+              );
+              return Boolean(candidateId && candidateIds.has(candidateId));
+            })
+            .map((observation) => observation.id);
+          const observationIdSet = new Set(observationIds);
+          return [
+            {
+              afterRoles: trace.afterRoles,
+              beforeRoles: trace.beforeRoles,
+              canonicalPieceIds: pieces
+                .filter((piece) =>
+                  piece.observationIds.some((id) => observationIdSet.has(id))
+                )
+                .map((piece) => piece.id),
+              observationIds,
+              rule: trace.rule,
+              spanEnd: trace.spanEnd,
+              spanHash: trace.spanHash,
+              spanStart: trace.spanStart,
+            },
+          ];
+        }
+      ),
       rejectedObservationCount: new Set(
         pieces
           .filter((piece) => !piece.outputEligible)

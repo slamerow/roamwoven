@@ -1882,6 +1882,64 @@ ASSERTIONS.push(
 
 ASSERTIONS.push(
   {
+    id: "SYNTAX-DISJUNCTION-BOUNDARY",
+    entry: "RW-QA-001",
+    tier: 1,
+    clause:
+      "Parser syntax repair requires one bounded local source span that names both alternatives",
+    claim:
+      "Colosseum/The Yellow and Palm House/Museum of Illusions remain separate entities",
+    run: (ctx) => {
+      const activeItems = ctx.records.items.filter(
+        (item) => item.status !== "ignored"
+      );
+      const fused = activeItems.filter(
+        (item) =>
+          (has(item.title, "colosseum") && has(item.title, "the yellow")) ||
+          (has(item.title, "palm house") &&
+            has(item.title, "museum of illusions"))
+      );
+      const colosseum = activeItems.filter(
+        (item) => item.itemType !== "note" && has(item.title, "colosseum")
+      );
+      const yellowStay = ctx.records.stays.filter(
+        (stay) => stay.status !== "ignored" && has(stay.name ?? stay.title, "the yellow")
+      );
+      const palmHouse = activeItems.filter((item) =>
+        has(item.title, "palm house")
+      );
+      const exactLineageTitles = new Set(
+        (ctx.report.lineage ?? []).map((row) => norm(row.title))
+      );
+      const fusedLineage = (ctx.report.lineage ?? []).filter(
+        (row) =>
+          (has(row.title, "colosseum") && has(row.title, "the yellow")) ||
+          (has(row.title, "palm house") &&
+            has(row.title, "museum of illusions"))
+      );
+      const fourSeparateLineageRows = [
+        "colosseum",
+        "the yellow",
+        "palm house at schonbrunn",
+        "museum of illusions",
+      ].every((title) => exactLineageTitles.has(norm(title)));
+      return {
+        ok:
+          fused.length === 0 &&
+          fusedLineage.length === 0 &&
+          colosseum.length === 1 &&
+          yellowStay.length === 1 &&
+          palmHouse.length === 1 &&
+          fourSeparateLineageRows,
+        field: "records.items/stays + report.lineage exact source entities",
+        detail:
+          `active fused=${fused.length}; fused lineage=${fusedLineage.length}; ` +
+          `Colosseum=${colosseum.length}; Yellow stay=${yellowStay.length}; ` +
+          `Palm House=${palmHouse.length}; four exact source rows=${fourSeparateLineageRows}`,
+      };
+    },
+  },
+  {
     id: "IDENTITY-PINBALL",
     entry: "RW-CAN-001",
     tier: 1,
@@ -2186,7 +2244,11 @@ function contextFromPayload(payload) {
   return ctx;
 }
 
-function contextFromQaBundle(bundle, auditPayload = null) {
+function contextFromQaBundle(
+  bundle,
+  auditPayload = null,
+  { historicalProjection = true } = {}
+) {
   if (!bundle?.records || !bundle?.audit) {
     throw new Error(
       "QA bundle carries no records/audit surface — is this the persisted bundle?"
@@ -2219,7 +2281,9 @@ function contextFromQaBundle(bundle, auditPayload = null) {
   // Historical QA projection v1 did not serve these fields. They are named
   // explicitly so no scorer can reconstruct them from titles, ids, or prose.
   // The current QA projection serves them for every new run.
-  ctx.absent = new Set(["itemSortOrder", "reviewAnswerOptions"]);
+  ctx.absent = historicalProjection
+    ? new Set(["itemSortOrder", "reviewAnswerOptions"])
+    : new Set();
   return ctx;
 }
 
@@ -2312,6 +2376,19 @@ function renderReport({ results, meta }) {
         );
       }
     }
+    lines.push("");
+  }
+  if (meta.persistedStyleParity) {
+    lines.push("## Current replay/persisted-style projection gate");
+    lines.push("");
+    lines.push(
+      `Semantic fingerprint: **${meta.persistedStyleParity.equal ? "PASS" : "FAIL"}**; ` +
+        `ground-truth score states: **${meta.persistedStyleParity.scoreStatesEqual ? "PASS" : "FAIL"}**.`
+    );
+    lines.push(
+      "This compares the route-equivalent replay records with the exact redacted QA-record " +
+        "projection the route would serve now, including review answer options and item order fields."
+    );
     lines.push("");
   }
   if (meta.writerTrace) {
@@ -2549,25 +2626,32 @@ function emit(ctx, meta) {
   console.log(`\nreport written: ${path.relative(rootDir, reportPath)}`);
   process.exitCode =
     (meta.parity && (!meta.parity.equal || !meta.parity.scoreStatesEqual)) ||
+    (meta.persistedStyleParity &&
+      (!meta.persistedStyleParity.equal ||
+        !meta.persistedStyleParity.scoreStatesEqual)) ||
     (meta.writerTrace && !meta.writerTrace.valid) ||
     (STRICT && counts.FAIL > 0)
       ? 1
       : 0;
 }
 
-function createProductionReplayParity({ productionContext, replayContext }) {
+function createProductionReplayParity({
+  productionContext,
+  replayContext,
+  reviewAnswerOptionsAvailable = false,
+}) {
   const fingerprintModule = require2(
     path.join(rootDir, "lib/extraction/assembly-semantic-fingerprint.ts")
   );
   const productionFingerprint = fingerprintModule.createAssemblySemanticFingerprint({
     legacyFingerprints: productionContext.report.fingerprints ?? {},
     records: productionContext.records,
-    reviewAnswerOptionsAvailable: false,
+    reviewAnswerOptionsAvailable,
   });
   const replayFingerprint = fingerprintModule.createAssemblySemanticFingerprint({
     legacyFingerprints: replayContext.report.fingerprints ?? {},
     records: replayContext.records,
-    reviewAnswerOptionsAvailable: false,
+    reviewAnswerOptionsAvailable,
   });
   const semantic = fingerprintModule.diffAssemblySemanticFingerprints(
     productionFingerprint,
@@ -2963,6 +3047,30 @@ if (fromCacheDir) {
   console.log(
     `WRITER TRACE: ${writerTrace.entryCount} stages, ${writerTrace.changedCount} changed state`
   );
+  const qaProjectionModule = require2(
+    path.join(rootDir, "lib/extraction/trip-extraction-qa-bundle.ts")
+  );
+  const projectedRecords = qaProjectionModule.createRecordSummaries({
+    includePrivate: false,
+    records: assembly.records,
+  });
+  const persistedStyleContext = contextFromQaBundle(
+    { audit: {}, records: projectedRecords },
+    { report: assessment.report },
+    { historicalProjection: false }
+  );
+  const persistedStyleParity = createProductionReplayParity({
+    productionContext: persistedStyleContext,
+    replayContext,
+    reviewAnswerOptionsAvailable: true,
+  });
+  console.log(
+    `PERSISTED-STYLE PARITY ${
+      persistedStyleParity.equal && persistedStyleParity.scoreStatesEqual
+        ? "PASS"
+        : "FAIL"
+    }: ${persistedStyleParity.scoreStateDiffs.length} score-state difference(s)`
+  );
 
   // Exit 0 by default, same as the live replay: this is a baseline, and a
   // permanently red gate teaches people to ignore it.
@@ -2973,6 +3081,7 @@ if (fromCacheDir) {
       geocodeRan: true,
       parseKey: cachedParse.parse_key.slice(0, 12),
       parity,
+      persistedStyleParity,
       writerTrace,
       // A distinct `source` (not "replay") is how the report records, in its
       // own meta, that this run came from a cache — no change to

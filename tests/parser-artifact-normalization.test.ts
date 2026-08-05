@@ -3,6 +3,7 @@ import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   normalizeParserStageArtifacts,
 } from "@/lib/extraction/parser-artifact-normalization";
+import { createCanonicalizationSummary } from "@/lib/extraction/trip-extraction-audit-snapshot";
 
 // Wave-2 parser-artifact fixtures from LIVE runs 7.18.0 and 7.18.1
 // (docs/assembly-defect-docket-2026-07-17-run3.md addendum,
@@ -320,6 +321,185 @@ export default async function run() {
         .length,
       1
     );
+    const trace = result.repairs.find(
+      (repair) => repair.kind === "disjunction_split"
+    )?.sourceBoundedTrace;
+    assert.equal(trace?.rule, "explicit_local_or_v1");
+    assert.equal(trace?.beforeRoles[1], null);
+    assert.equal(trace?.afterRoles[1], "context");
+    assert.equal(trace?.spanHash.length, 64);
+    assert.equal(
+      JSON.stringify(trace).includes("Modern Art Museum"),
+      false,
+      "telemetry carries a span hash and range, never source prose"
+    );
+  });
+
+  await test("four production-source explicit alternatives remain bounded and repairable", () => {
+    const cases = [
+      ["Try Onion Soup or Garlic Soup.", "Onion Soup", "Garlic Soup"],
+      [
+        "Have lunch at Pest-Buda Bistro or Cafe Pierrot.",
+        "Pest-Buda Bistro",
+        "Cafe Pierrot",
+      ],
+      [
+        "Castle District: Balthazar or Pest-Buda Bistro, Pest: Zona.",
+        "Balthazar",
+        "Pest-Buda Bistro",
+      ],
+      [
+        "Pest: Pomodoro or Menza, Buda: Zona.",
+        "Pomodoro",
+        "Menza",
+      ],
+    ] as const;
+
+    for (const [sourceText, leftTitle, rightTitle] of cases) {
+      const result = normalizeParserStageArtifacts([
+        stage(
+          "Source-authored alternative",
+          emptyStage({
+            activities: [
+              {
+                category: "food_dining",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: leftTitle,
+              },
+              {
+                category: "food_dining",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: rightTitle,
+              },
+            ],
+          }),
+          sourceText
+        ),
+      ]);
+      const activities = firstStage(result).activities;
+      assert.equal(activities[0]?.title, `${leftTitle} or ${rightTitle}`);
+      assert.equal(activities[1]?.evidenceRole, "context");
+      assert.equal(
+        result.repairs.filter((repair) => repair.kind === "disjunction_split")
+          .length,
+        1
+      );
+    }
+  });
+
+  await test("flattened Rome source cannot fuse Colosseum with The Yellow", () => {
+    const sourceText =
+      "2:00 PM Colosseum 30 minute walk Pantheon Trevi Fountain Spanish Steps to Hostel -> 30 minute walk or 10 minute metro Sleeping: The Yellow Check in 2:30 PM";
+    const result = normalizeParserStageArtifacts([
+      stage(
+        "Flattened Rome PDF text",
+        emptyStage({
+          activities: [
+            {
+              category: "art_culture",
+              date: "2019-01-13",
+              itemType: "activity",
+              title: "Colosseum",
+            },
+            {
+              category: "admin_logistics",
+              date: "2019-01-13",
+              itemType: "activity",
+              title: "The Yellow",
+            },
+          ],
+        }),
+        sourceText
+      ),
+    ]);
+    const activities = firstStage(result).activities;
+    assert.equal(activities[0]?.title, "Colosseum");
+    assert.equal(activities[1]?.title, "The Yellow");
+    assert.equal(result.repairs.some((repair) => repair.kind === "disjunction_split"), false);
+  });
+
+  await test("flattened Vienna source cannot fuse Palm House with Museum of Illusions", () => {
+    const sourceText =
+      "Palm house at Schonbrunn free 6 Apple Strudel Show Panorama Train Buy wine cheap by the glass units are 1/8 or 1/4 liter ochtel versus fiertl Museum of Illusions Mozarthaus";
+    const result = normalizeParserStageArtifacts([
+      stage(
+        "Flattened Vienna PDF text",
+        emptyStage({
+          activities: [
+            {
+              category: "art_culture",
+              date: "2019-01-19",
+              itemType: "activity",
+              title: "Palm House",
+            },
+            {
+              category: "art_culture",
+              date: "2019-01-19",
+              itemType: "activity",
+              title: "Museum of Illusions",
+            },
+          ],
+        }),
+        sourceText
+      ),
+    ]);
+    const activities = firstStage(result).activities;
+    assert.equal(activities[0]?.title, "Palm House");
+    assert.equal(activities[1]?.title, "Museum of Illusions");
+    assert.equal(result.repairs.some((repair) => repair.kind === "disjunction_split"), false);
+  });
+
+  await test("served disjunction telemetry links the bounded rule to observations and pieces", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "Bounded alternative telemetry",
+          emptyStage({
+            activities: [
+              {
+                _resolverCandidateId: "candidate-left",
+                category: "food_dining",
+                city: "Budapest",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "Pest-Buda Bistro",
+              },
+              {
+                _resolverCandidateId: "candidate-right",
+                category: "food_dining",
+                city: "Budapest",
+                date: "2019-01-22",
+                itemType: "activity",
+                title: "Cafe Pierrot",
+              },
+            ],
+            places: [
+              {
+                arriveDate: "2019-01-21",
+                city: "Budapest",
+                leaveDate: "2019-01-24",
+              },
+            ],
+          }),
+          "Have lunch at Pest-Buda Bistro or Cafe Pierrot."
+        ),
+      ],
+      tripOverview: { dateRange: "January 21-24, 2019" },
+    });
+    const telemetry = result.summary.sourceBoundedDisjunctionRepairs;
+    assert.equal(telemetry.length, 1);
+    assert.equal(telemetry[0]?.rule, "explicit_local_or_v1");
+    assert.equal(telemetry[0]?.observationIds.length, 2);
+    assert.ok((telemetry[0]?.canonicalPieceIds.length ?? 0) >= 1);
+    assert.equal(telemetry[0]?.beforeRoles[1], null);
+    assert.equal(telemetry[0]?.afterRoles[1], "context");
+    const served = createCanonicalizationSummary({
+      openai: { evidence: result.summary },
+    });
+    assert.deepEqual(served.sourceBoundedDisjunctionRepairs, telemetry);
   });
 
   await test("an existing or-carrying copy leaves the wave-1.1 assembly fold in charge (lunch disjunction)", () => {

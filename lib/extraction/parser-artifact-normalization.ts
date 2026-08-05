@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 import {
   comparableTokens,
@@ -46,6 +47,15 @@ export type ParserArtifactRepair = {
     | "ticket_page_activity";
   stageLabel: string;
   title: string;
+  sourceBoundedTrace?: {
+    afterRoles: [string | null, string | null];
+    beforeRoles: [string | null, string | null];
+    candidateIds: [string | null, string | null];
+    rule: "explicit_local_or_v1";
+    spanEnd: number;
+    spanHash: string;
+    spanStart: number;
+  };
 };
 
 export type ParserArtifactNormalizationResult = {
@@ -565,23 +575,56 @@ function repairCostLineCard(
 
 // --- Rule 5: split "X or Y" disjunctions ------------------------------------
 
-type DisjunctionSides = { left: string; right: string };
+type DisjunctionSpan = {
+  end: number;
+  left: string;
+  right: string;
+  start: number;
+  text: string;
+};
 
-function disjunctionSidesFromLine(line: string): DisjunctionSides | null {
-  const match = line.match(/^(.*?[a-z].*?)\s+or\s+(?:the\s+)?(.*?[a-z].*)$/i);
+// Long enough for a named restaurant/venue alternative, short enough that an
+// unrelated `or` later in a flattened PDF paragraph cannot reach backward to
+// an earlier card (the production Colosseum/The Yellow and Palm House/Museum
+// of Illusions failures were both outside this local window).
+const MAX_DISJUNCTION_SIDE_CHARS = 72;
+const DISJUNCTION_LEFT_BOUNDARY = /(?:\r?\n|\s{2,}|[.!?;,]|\/\/|[()[\]])/g;
+const DISJUNCTION_RIGHT_BOUNDARY = /(?:\r?\n|\s{2,}|[.!?;,]|\/\/|[()[\]])/;
 
-  if (!match) {
-    return null;
+function disjunctionSpansFromSource(sourceText: string) {
+  const spans: DisjunctionSpan[] = [];
+  const orPattern = /\bor\b/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = orPattern.exec(sourceText))) {
+    const orStart = match.index;
+    const orEnd = orStart + match[0].length;
+    const leftWindowStart = Math.max(0, orStart - MAX_DISJUNCTION_SIDE_CHARS);
+    const leftWindow = sourceText.slice(leftWindowStart, orStart);
+    let leftBoundaryEnd = 0;
+    for (const boundary of leftWindow.matchAll(DISJUNCTION_LEFT_BOUNDARY)) {
+      leftBoundaryEnd = (boundary.index ?? 0) + boundary[0].length;
+    }
+    const rightWindow = sourceText.slice(
+      orEnd,
+      Math.min(sourceText.length, orEnd + MAX_DISJUNCTION_SIDE_CHARS)
+    );
+    const rightBoundary = DISJUNCTION_RIGHT_BOUNDARY.exec(rightWindow);
+    const start = leftWindowStart + leftBoundaryEnd;
+    const end = orEnd + (rightBoundary?.index ?? rightWindow.length);
+    const left = sourceText.slice(start, orStart).trim();
+    const right = sourceText
+      .slice(orEnd, end)
+      .replace(/^\s+the\s+/i, " ")
+      .trim();
+
+    if (tokensOf(left).length === 0 || tokensOf(right).length === 0) {
+      continue;
+    }
+    spans.push({ end, left, right, start, text: sourceText.slice(start, end) });
   }
 
-  const left = match[1].replace(/^.*?\bat\b/i, "").trim() || match[1].trim();
-  const right = match[2].trim();
-
-  if (tokensOf(left).length === 0 || tokensOf(right).length === 0) {
-    return null;
-  }
-
-  return { left, right };
+  return spans;
 }
 
 function sideMatchesTitle(side: string, title: string) {
@@ -603,19 +646,12 @@ function repairSplitDisjunctions(
   stage: EvidenceStageInput,
   repairs: ParserArtifactRepair[]
 ) {
-  const lines = sourceLines(stage);
-
-  if (lines.length === 0) {
+  const sourceText = stage.sourceText ?? "";
+  if (!sourceText.trim()) {
     return;
   }
 
-  for (const line of lines) {
-    const sides = disjunctionSidesFromLine(line);
-
-    if (!sides) {
-      continue;
-    }
-
+  for (const span of disjunctionSpansFromSource(sourceText)) {
     const candidates = activities.filter((activity) => {
       const itemType = stringValue(activity, "itemType");
       return (
@@ -624,16 +660,17 @@ function repairSplitDisjunctions(
         Boolean(stringValue(activity, "title"))
       );
     });
-    const leftCard = candidates.find((activity) =>
-      sideMatchesTitle(sides.left, stringValue(activity, "title") ?? "")
+    const leftMatches = candidates.filter((activity) =>
+      sideMatchesTitle(span.left, stringValue(activity, "title") ?? "")
     );
-    const rightCard = candidates.find(
-      (activity) =>
-        activity !== leftCard &&
-        sideMatchesTitle(sides.right, stringValue(activity, "title") ?? "")
+    const rightMatches = candidates.filter((activity) =>
+      sideMatchesTitle(span.right, stringValue(activity, "title") ?? "")
     );
+    if (leftMatches.length !== 1 || rightMatches.length !== 1) continue;
+    const leftCard = leftMatches[0];
+    const rightCard = rightMatches[0];
 
-    if (!leftCard || !rightCard) {
+    if (leftCard === rightCard) {
       continue;
     }
 
@@ -647,8 +684,8 @@ function repairSplitDisjunctions(
       const text = normalizeComparable(activityText(activity));
       return (
         / or /.test(` ${text} `) &&
-        sideMatchesTitle(sides.left, text) &&
-        sideMatchesTitle(sides.right, text)
+        sideMatchesTitle(span.left, text) &&
+        sideMatchesTitle(span.right, text)
       );
     });
 
@@ -656,9 +693,13 @@ function repairSplitDisjunctions(
       continue;
     }
 
-    const leftTitle = stringValue(leftCard, "title") ?? sides.left;
-    const rightTitle = stringValue(rightCard, "title") ?? sides.right;
+    const leftTitle = stringValue(leftCard, "title") ?? span.left;
+    const rightTitle = stringValue(rightCard, "title") ?? span.right;
     const rightDescription = stringValue(rightCard, "description");
+    const beforeRoles: [string | null, string | null] = [
+      stringValue(leftCard, "evidenceRole"),
+      stringValue(rightCard, "evidenceRole"),
+    ];
 
     leftCard.title = `${leftTitle} or ${rightTitle}`;
     leftCard.description = [
@@ -669,8 +710,24 @@ function repairSplitDisjunctions(
       .join(" ");
     rightCard.evidenceRole = "context";
     repairs.push({
-      detail: `Source line "${line.slice(0, 100)}" explicitly offers one slot with alternatives; the split cards were folded into one "X or Y" card (RW-QUE-001 disjunction rule; synthetic explicit-or control).`,
+      detail:
+        "A bounded local source span explicitly offers one slot with alternatives; the split cards were folded into one X-or-Y card.",
       kind: "disjunction_split",
+      sourceBoundedTrace: {
+        afterRoles: [
+          stringValue(leftCard, "evidenceRole"),
+          stringValue(rightCard, "evidenceRole"),
+        ],
+        beforeRoles,
+        candidateIds: [
+          stringValue(leftCard, "_resolverCandidateId"),
+          stringValue(rightCard, "_resolverCandidateId"),
+        ],
+        rule: "explicit_local_or_v1",
+        spanEnd: span.end,
+        spanHash: createHash("sha256").update(span.text).digest("hex"),
+        spanStart: span.start,
+      },
       stageLabel: stage.label,
       title: leftCard.title as string,
     });
