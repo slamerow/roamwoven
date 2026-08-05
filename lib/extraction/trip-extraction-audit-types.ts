@@ -203,6 +203,24 @@ export type TripExtractionAuditReport = {
       contestedPieceCount: number;
       releasedDecisionCount: number;
     } | null;
+    stageWriterTrace: Array<{
+      afterHash: string;
+      beforeHash: string;
+      changed: boolean;
+      changedPieceCount: number | null;
+      decisionDomain:
+        | "source_normalization"
+        | "pre_classification_mutation"
+        | "classification"
+        | "containment"
+        | "identity"
+        | "grouping"
+        | "review"
+        | "final_projection";
+      ordinal: number;
+      writer: string;
+      writes: string[];
+    }>;
     intentBlocks: {
       blocks: IntentBlockDecision[];
       version: 1;

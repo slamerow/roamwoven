@@ -19,23 +19,16 @@ import {
 } from "@/lib/extraction/extraction-pinning-store";
 import { resolveExtractionSamplingParams } from "@/lib/ai/openai";
 import {
-  assembleCanonicalTripDraft,
   CanonicalAssemblyRecoveryError,
-  materializeCanonicalEvidenceObservations,
   prepareCanonicalEvidencePieces,
 } from "@/lib/extraction/canonical-trip-assembly";
-import { reapplyCanonicalOutputInvariants } from "@/lib/extraction/evidence-clustering";
-import { getSourceTransportAnchorsFromDraft } from "@/lib/extraction/source-transport-anchors";
+import { runCanonicalAssemblyQualityCorridor } from "@/lib/extraction/canonical-assembly-quality-corridor";
 import { attachStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import { persistEvidenceArtifacts } from "@/lib/extraction/evidence-artifacts";
 import {
-  assessTripDraftQuality,
   attachTripQualityAssessment,
   createTripQualityAssessmentSnapshot,
 } from "@/lib/extraction/trip-quality-assessment";
-import {
-  createTripQualityOutcomes,
-} from "@/lib/extraction/trip-quality-outcomes";
 import {
   completeTripProcessingRun,
   createTripProcessingRun,
@@ -69,19 +62,6 @@ export const runtime = "nodejs";
 // 800 s requires Vercel Fluid/Pro; if the build rejects it, the plan is the
 // constraint and extraction must move to a background job before luna ships.
 export const maxDuration = 800;
-
-function hasSeriousQualityFindings(
-  assessment: ReturnType<typeof assessTripDraftQuality>
-) {
-  return Boolean(
-    assessment.p0Diagnostics.length ||
-      assessment.p1Diagnostics.length ||
-      assessment.hardWarnings.length ||
-      assessment.quietWarnings.some(
-        (warning) => warning.code === "activity_bloat"
-      )
-  );
-}
 
 function redirectToData(
   request: NextRequest,
@@ -519,15 +499,6 @@ export async function POST(
       status: "started",
       tripId,
     });
-    const initialPieces = preparedEvidence.pieces;
-    let currentPieces = initialPieces;
-    let assembly = assembleCanonicalTripDraft({
-      draft: result.draft,
-      evidencePieces: currentPieces,
-      fallbackTripName: trip.name,
-      priorRecoveryActions: preparedEvidence.recoveryActions,
-      tripId,
-    });
     failureStage = "quality_assessment";
     await recordTripProcessingEvent({
       details: { maxCanonicalInvariantRetries: 1 },
@@ -536,143 +507,31 @@ export async function POST(
       status: "started",
       tripId,
     });
-    failureStage = "evidence_cluster";
-    const initialObservations = materializeCanonicalEvidenceObservations({
-      draft: assembly.draft,
-      observations: result.evidenceArtifacts.observations,
-      pieces: currentPieces,
-    });
-    const initialRecoveredObservationCount = initialObservations.filter(
-      (observation) =>
-        observation.sourceProvenance === "canonical_assembly_recovery"
-    ).length;
-    failureStage = "quality_assessment";
-    const initialUsage = {
-      ...(asRecord(result.usage) ?? {}),
-      evidence: {
-        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
-        canonicalPieceCount: currentPieces.filter((piece) => piece.outputEligible)
-          .length,
-        dispositionCount: initialObservations.length,
-        recoveredObservationCount: initialRecoveredObservationCount,
+    const corridor = runCanonicalAssemblyQualityCorridor({
+      baseUsage: result.usage,
+      draft: result.draft,
+      fallbackTripName: trip.name,
+      onPhase: (phase) => {
+        failureStage = phase;
       },
-      finalization: assembly.finalization,
-      identityRecovery: assembly.recovery,
-    };
-    const initialAssessment = assessTripDraftQuality({
-      draft: assembly.draft,
-      evidenceArtifacts: {
-        observations: initialObservations,
-        pieces: currentPieces,
-      },
-      records: assembly.records,
-      usage: initialUsage,
+      preparedEvidence,
+      sourceEvidenceArtifacts: result.evidenceArtifacts,
+      tripId,
     });
-    const retryAttempted = hasSeriousQualityFindings(initialAssessment);
-    let retryChanged = false;
-
-    if (retryAttempted) {
-      // Arc F.2 C4: the retry re-sweeps whatever it mutates (T1 — the
-      // sweep is the last text mutation before outputs are composed), so
-      // the corridor's rebuild-from-pieces regenerates from RE-SWEPT
-      // payloads. sensitiveDetails ride from the assembled draft so the
-      // deny list matches cluster time.
-      const draftSensitiveDetails = (() => {
-        const record = asRecord(assembly.draft);
-        const value = record ? record.sensitiveDetails : null;
-        return Array.isArray(value) ? value : [];
-      })();
-      const retry = reapplyCanonicalOutputInvariants({
-        pieces: currentPieces,
-        sensitiveDetails: draftSensitiveDetails,
-        // Arc G.2: the anchors ride on the assembled draft, so the retry
-        // lane repairs transport fields from the same source evidence
-        // cluster time used. No question is minted here — dispositions
-        // and manifests are already stamped, and any defect this pass can
-        // still see was introduced AFTER the repair already ran.
-        sourceTransportAnchors: getSourceTransportAnchorsFromDraft(
-          assembly.draft
-        ),
-      });
-      retryChanged = retry.changed;
-
-      if (retryChanged) {
-        currentPieces = retry.pieces;
-        failureStage = "assembly";
-        // Arc G.2: this lane cannot mint a Question, so a transport value
-        // it had to CLEAR is recorded as a named recovery action instead
-        // of vanishing quietly. Warn loudly, never block.
-        const clearedTransportFields = retry.transportFieldRepairs.filter(
-          (repair) => repair.outcome === "cleared_pending_review"
-        );
-        assembly = assembleCanonicalTripDraft({
-          draft: assembly.draft,
-          evidencePieces: currentPieces,
-          fallbackTripName: trip.name,
-          priorRecoveryActions: [
-            ...preparedEvidence.recoveryActions,
-            "reapplied_canonical_output_invariants",
-            ...clearedTransportFields.map(
-              (repair) =>
-                `cleared_impossible_transport_${repair.field}_without_question:${repair.routeLabel}`
-            ),
-          ],
-          tripId,
-        });
-      }
-    }
-
-    failureStage = "evidence_cluster";
-    const persistedObservations = materializeCanonicalEvidenceObservations({
-      draft: assembly.draft,
-      observations: result.evidenceArtifacts.observations,
+    const {
+      assembly,
+      assessment: qualityAssessment,
+      observations: persistedObservations,
       pieces: currentPieces,
-    });
+      remediationOutcomes,
+      retryAttempted,
+      retryChanged,
+      usage: finalAssemblyUsage,
+    } = corridor;
     const recoveredObservationCount = persistedObservations.filter(
       (observation) =>
         observation.sourceProvenance === "canonical_assembly_recovery"
     ).length;
-    const assemblyUsage = {
-      ...(asRecord(result.usage) ?? {}),
-      evidence: {
-        ...(asRecord(asRecord(result.usage)?.evidence) ?? {}),
-        canonicalPieceCount: currentPieces.filter(
-          (piece) => piece.outputEligible
-        ).length,
-        dispositionCount: persistedObservations.length,
-        recoveredObservationCount,
-      },
-      finalization: assembly.finalization,
-      identityRecovery: assembly.recovery,
-      qualityRemediation: {
-        retryAttempted,
-        retryChanged,
-      },
-    };
-    const qualityAssessment = assessTripDraftQuality({
-      draft: assembly.draft,
-      evidenceArtifacts: {
-        observations: persistedObservations,
-        pieces: currentPieces,
-      },
-      records: assembly.records,
-      usage: assemblyUsage,
-    });
-    const remediationOutcomes = createTripQualityOutcomes({
-      finalPieces: currentPieces,
-      finalReport: qualityAssessment.report,
-      initialPieces,
-      initialReport: initialAssessment.report,
-      records: assembly.records,
-    });
-    const finalAssemblyUsage = {
-      ...assemblyUsage,
-      qualityRemediation: {
-        outcomes: remediationOutcomes,
-        retryAttempted,
-        retryChanged,
-      },
-    };
     extractionUsage = finalAssemblyUsage;
     failureStage = "evidence_cluster";
     const evidenceSummary = await persistEvidenceArtifacts({

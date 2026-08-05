@@ -285,6 +285,25 @@ export type CanonicalEvidencePiece = {
   role: EvidenceRole;
 };
 
+export type AssemblyStageWriterTraceEntry = {
+  afterHash: string;
+  beforeHash: string;
+  changed: boolean;
+  changedPieceCount: number | null;
+  decisionDomain:
+    | "source_normalization"
+    | "pre_classification_mutation"
+    | "classification"
+    | "containment"
+    | "identity"
+    | "grouping"
+    | "review"
+    | "final_projection";
+  ordinal: number;
+  writer: string;
+  writes: string[];
+};
+
 export type EvidenceClusteringResult = {
   draft: unknown;
   observations: EvidenceObservation[];
@@ -300,6 +319,7 @@ export type EvidenceClusteringResult = {
     parserArtifactRepairCount: number;
     rejectedObservationCount: number;
     groupingClaims: GroupingClaimLedgerTelemetry;
+    stageWriterTrace: AssemblyStageWriterTraceEntry[];
     intentBlocks: {
       blocks: IntentBlockDecision[];
       version: 1;
@@ -11931,11 +11951,56 @@ export function clusterExtractedEvidence({
   stages: EvidenceStageInput[];
   tripOverview: unknown;
 }): EvidenceClusteringResult {
+  const stageWriterTrace: AssemblyStageWriterTraceEntry[] = [];
+  const runStageWriter = <T>({
+    after,
+    before,
+    changedPieceCount = () => null,
+    decisionDomain,
+    writer,
+    writes,
+  }: {
+    after: () => string;
+    before: () => string;
+    changedPieceCount?: () => number | null;
+    decisionDomain: AssemblyStageWriterTraceEntry["decisionDomain"];
+    writer: string;
+    writes: string[];
+  }, execute: () => T): T => {
+    const beforeHash = before();
+    const result = execute();
+    const afterHash = after();
+    stageWriterTrace.push({
+      afterHash,
+      beforeHash,
+      changed: beforeHash !== afterHash,
+      changedPieceCount: changedPieceCount(),
+      decisionDomain,
+      ordinal: stageWriterTrace.length + 1,
+      writer,
+      writes,
+    });
+    return result;
+  };
   // Wave-2 parser pass: deterministic repair of known parser artifact
   // families (degenerate times, provider text-bleed, day-title cards,
   // cost-line cards, split disjunctions, ticket-page re-emissions) BEFORE
   // observations are created, with every repair recorded for telemetry.
-  const parserNormalization = normalizeParserStageArtifacts(stages);
+  let normalizedStageHash = stableHash(stages);
+  const parserNormalization = runStageWriter(
+    {
+      after: () => normalizedStageHash,
+      before: () => stableHash(stages),
+      decisionDomain: "source_normalization",
+      writer: "normalizeParserStageArtifacts",
+      writes: ["normalizedStages", "parserArtifactRepairs"],
+    },
+    () => {
+      const normalized = normalizeParserStageArtifacts(stages);
+      normalizedStageHash = stableHash(normalized.stages);
+      return normalized;
+    }
+  );
   const normalizedStages = parserNormalization.stages;
   const parserArtifactRepairs = parserNormalization.repairs;
   const observations: EvidenceObservation[] = [];
@@ -12067,7 +12132,17 @@ export function clusterExtractedEvidence({
     );
   }
 
-  reclassifySourceContainers(observations);
+  let observationHashBefore = stableHash(observations);
+  runStageWriter(
+    {
+      after: () => stableHash(observations),
+      before: () => observationHashBefore,
+      decisionDomain: "source_normalization",
+      writer: "reclassifySourceContainers",
+      writes: ["observations[].kind", "observations[].role"],
+    },
+    () => reclassifySourceContainers(observations)
+  );
 
   for (const anchor of sourceTransportAnchors) {
     ordinal += 1;
@@ -12144,6 +12219,40 @@ export function clusterExtractedEvidence({
     pieces.push(createPiece(observation));
   }
 
+  let pieceHashesBefore = new Map<string, string>();
+  const pieceStateHash = () => stableHash({ missingDetails, observations, pieces });
+  const runPieceWriter = <T>(
+    decisionDomain: AssemblyStageWriterTraceEntry["decisionDomain"],
+    writer: string,
+    writes: string[],
+    execute: () => T
+  ) =>
+    runStageWriter(
+      {
+        after: pieceStateHash,
+        before: () => {
+          pieceHashesBefore = new Map(
+            pieces.map((piece) => [piece.id, stableHash(piece)])
+          );
+          return pieceStateHash();
+        },
+        changedPieceCount: () => {
+          const currentIds = new Set(pieces.map((piece) => piece.id));
+          const changedExisting = pieces.filter(
+            (piece) => pieceHashesBefore.get(piece.id) !== stableHash(piece)
+          ).length;
+          const removed = [...pieceHashesBefore.keys()].filter(
+            (id) => !currentIds.has(id)
+          ).length;
+          return changedExisting + removed;
+        },
+        decisionDomain,
+        writer,
+        writes,
+      },
+      execute
+    );
+
   // Arc F (run 7.23.2 chain 4, tripwire T4): the Costs exclusion is a
   // CANDIDACY rule, not a producer patch. ddb1699 excluded Costs lines
   // from recovery batching and that path held — but the same Costs line
@@ -12155,154 +12264,301 @@ export function clusterExtractedEvidence({
   // note lists. Negative controls stay with the shared predicate: stay
   // costs due on arrival, HUF prose, and priced venue/idea lines are
   // deliberately not planning-cost shapes.
-  for (const piece of pieces) {
-    if (!piece.outputEligible) continue;
-    if (piece.kind !== "activity" && piece.kind !== "note") continue;
-    if (
-      isPlanningCostMaterial({
-        label: stringValue(piece.payload, "sourceSectionLabel"),
-        lines: [
-          stringValue(piece.payload, "evidence"),
-          stringValue(piece.payload, "title"),
-          stringValue(piece.payload, "description"),
-        ],
-      })
-    ) {
-      // Terminal (planning-cost material family, its exact namesake): a
-      // Costs-section line was never a candidate for card content, so
-      // there is no absorbing record — the exclusion is path-independent,
-      // per the comment above.
-      suppressCanonicalPiece(
-        piece,
-        "Costs-section planning line fails canonical candidacy (approved ground truth: Costs is excluded trip content; run 7.23.2 chain 4 — exclusion is path-independent)",
-        { kind: "terminal", code: "PLANNING_COST_SECTION_LINE" }
-      );
+  runPieceWriter(
+    "pre_classification_mutation",
+    "applyPlanningCostCandidacyGate",
+    ["pieces[].outputEligible", "pieces[].disposition"],
+    () => {
+      for (const piece of pieces) {
+        if (!piece.outputEligible) continue;
+        if (piece.kind !== "activity" && piece.kind !== "note") continue;
+        if (
+          isPlanningCostMaterial({
+            label: stringValue(piece.payload, "sourceSectionLabel"),
+            lines: [
+              stringValue(piece.payload, "evidence"),
+              stringValue(piece.payload, "title"),
+              stringValue(piece.payload, "description"),
+            ],
+          })
+        ) {
+          // Terminal (planning-cost material family, its exact namesake): a
+          // Costs-section line was never a candidate for card content, so
+          // there is no absorbing record — the exclusion is path-independent,
+          // per the comment above.
+          suppressCanonicalPiece(
+            piece,
+            "Costs-section planning line fails canonical candidacy (approved ground truth: Costs is excluded trip content; run 7.23.2 chain 4 — exclusion is path-independent)",
+            { kind: "terminal", code: "PLANNING_COST_SECTION_LINE" }
+          );
+        }
+      }
     }
-  }
-  stampOwnTextClassification(pieces, observations);
-  attachCanonicalSourceDecisions(pieces);
-  suppressUnsupportedModelInventions(pieces, observations);
-  attachArrivalOnlyTransportPieces(pieces);
-  routeCanonicalTravelBoundaries(pieces);
-  mergeReclassifiedCanonicalPieces(pieces);
-  attachCanonicalAccessoryDetails(pieces);
-  suppressRedundantTransportParents(pieces);
-  suppressRouteLessTransportFragments(pieces, sourceTransportAnchors);
-  foldUnanchoredConfirmationTwinTransport(pieces, sourceTransportAnchors);
-  pruneNonOvernightPlaces(pieces, observations);
-  routeUnbookedDayTripTransport(pieces);
-  mergeReclassifiedCanonicalPieces(pieces);
-  finalizeCanonicalPlaceFields(pieces);
-  attachGenericStayFragments(pieces);
-  applyCanonicalGuessedStayNames(missingDetails, pieces);
-  applyCanonicalGuessedStayDates(missingDetails, pieces, tripYear);
-  finalizeCanonicalStayFields(pieces);
-  applyStayCandidacyGate(pieces);
-  reconcileCanonicalStayIdentity(pieces, observations);
-  finalizeCanonicalStayFields(pieces);
-  attachGenericActivityAccessories(pieces);
-  attachGenericActivityPlaceholders(pieces);
-  attachRentalCarReturns(pieces);
-  suppressRepresentedTravelAndStayActivities(pieces);
-  applyAccessTaskPolicy(pieces);
-  recoverOutOfRangePieces(pieces);
-  applyExplicitSourceUpdates(pieces);
+  );
+  runPieceWriter("pre_classification_mutation", "stampOwnTextClassification", ["pieces[].payload._ownTextClassification"], () =>
+    stampOwnTextClassification(pieces, observations)
+  );
+  runPieceWriter("pre_classification_mutation", "attachCanonicalSourceDecisions", ["pieces[].payload", "pieces[].actions"], () =>
+    attachCanonicalSourceDecisions(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "suppressUnsupportedModelInventions", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressUnsupportedModelInventions(pieces, observations)
+  );
+  runPieceWriter("pre_classification_mutation", "attachArrivalOnlyTransportPieces", ["pieces[].payload", "pieces[].actions"], () =>
+    attachArrivalOnlyTransportPieces(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "routeCanonicalTravelBoundaries", ["pieces[].kind", "pieces[].payload", "pieces[].actions"], () =>
+    routeCanonicalTravelBoundaries(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "mergeReclassifiedCanonicalPieces:travel", ["pieces[].outputEligible", "pieces[].observationIds", "pieces[].actions"], () =>
+    mergeReclassifiedCanonicalPieces(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachCanonicalAccessoryDetails", ["pieces[].payload", "pieces[].actions"], () =>
+    attachCanonicalAccessoryDetails(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "suppressRedundantTransportParents", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressRedundantTransportParents(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "suppressRouteLessTransportFragments", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressRouteLessTransportFragments(pieces, sourceTransportAnchors)
+  );
+  runPieceWriter("pre_classification_mutation", "foldUnanchoredConfirmationTwinTransport", ["pieces[].outputEligible", "pieces[].observationIds", "pieces[].actions"], () =>
+    foldUnanchoredConfirmationTwinTransport(pieces, sourceTransportAnchors)
+  );
+  runPieceWriter("pre_classification_mutation", "pruneNonOvernightPlaces", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    pruneNonOvernightPlaces(pieces, observations)
+  );
+  runPieceWriter("pre_classification_mutation", "routeUnbookedDayTripTransport", ["pieces[].kind", "pieces[].payload", "pieces[].actions"], () =>
+    routeUnbookedDayTripTransport(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "mergeReclassifiedCanonicalPieces:day_trip", ["pieces[].outputEligible", "pieces[].observationIds", "pieces[].actions"], () =>
+    mergeReclassifiedCanonicalPieces(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "finalizeCanonicalPlaceFields", ["pieces[].payload"], () =>
+    finalizeCanonicalPlaceFields(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachGenericStayFragments", ["pieces[].payload", "pieces[].actions"], () =>
+    attachGenericStayFragments(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "applyCanonicalGuessedStayNames", ["pieces[].payload.name", "missingDetails[]"], () =>
+    applyCanonicalGuessedStayNames(missingDetails, pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "applyCanonicalGuessedStayDates", ["pieces[].payload.checkIn", "pieces[].payload.checkOut", "missingDetails[]"], () =>
+    applyCanonicalGuessedStayDates(missingDetails, pieces, tripYear)
+  );
+  runPieceWriter("pre_classification_mutation", "finalizeCanonicalStayFields:initial", ["pieces[].payload"], () =>
+    finalizeCanonicalStayFields(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "applyStayCandidacyGate", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    applyStayCandidacyGate(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "reconcileCanonicalStayIdentity", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    reconcileCanonicalStayIdentity(pieces, observations)
+  );
+  runPieceWriter("pre_classification_mutation", "finalizeCanonicalStayFields:reconciled", ["pieces[].payload"], () =>
+    finalizeCanonicalStayFields(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachGenericActivityAccessories", ["pieces[].payload", "pieces[].actions"], () =>
+    attachGenericActivityAccessories(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachGenericActivityPlaceholders", ["pieces[].payload", "pieces[].actions"], () =>
+    attachGenericActivityPlaceholders(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachRentalCarReturns", ["pieces[].payload", "pieces[].actions"], () =>
+    attachRentalCarReturns(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "suppressRepresentedTravelAndStayActivities:initial", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressRepresentedTravelAndStayActivities(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "applyAccessTaskPolicy", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    applyAccessTaskPolicy(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "recoverOutOfRangePieces", ["pieces[].payload.date", "pieces[].actions"], () =>
+    recoverOutOfRangePieces(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "applyExplicitSourceUpdates", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    applyExplicitSourceUpdates(pieces)
+  );
   // Card/note reconciliation must see the ORIGINAL note lists before
   // accessory routing strips matched sentences onto activity records —
   // otherwise an uncommitted venue card eats its own note evidence and
   // survives (live-run 7.17.2 Budapest promotions).
-  reconcileCardsAgainstCityNotes(pieces, missingDetails, observations);
-  routeCanonicalAccessoryEvidence({
-    actions: {
+  runPieceWriter("pre_classification_mutation", "reconcileCardsAgainstCityNotes:early", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions", "missingDetails[]"], () =>
+    reconcileCardsAgainstCityNotes(pieces, missingDetails, observations)
+  );
+  runPieceWriter("pre_classification_mutation", "routeCanonicalAccessoryEvidence", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    routeCanonicalAccessoryEvidence({
+      actions: {
+        addAction: addCanonicalAction,
+        mergePiece: mergeCanonicalPieceInto,
+        suppressPiece: suppressCanonicalPiece,
+      },
+      pieces,
+      tripYear,
+    })
+  );
+  runPieceWriter("pre_classification_mutation", "resolveStructuralActivityDates", ["pieces[].payload.date", "pieces[].actions"], () =>
+    resolveStructuralActivityDates({
       addAction: addCanonicalAction,
-      mergePiece: mergeCanonicalPieceInto,
-      suppressPiece: suppressCanonicalPiece,
-    },
-    pieces,
-    tripYear,
-  });
-  resolveStructuralActivityDates({
-    addAction: addCanonicalAction,
-    observations,
-    pieces,
-    tripBounds: tripDateBounds(pieces),
-    tripYear,
-  });
-  assignProvisionalActivityDates({ observations, pieces });
+      observations,
+      pieces,
+      tripBounds: tripDateBounds(pieces),
+      tripYear,
+    })
+  );
+  runPieceWriter("pre_classification_mutation", "assignProvisionalActivityDates", ["pieces[].payload.date", "pieces[].actions"], () =>
+    assignProvisionalActivityDates({ observations, pieces })
+  );
   // Second shadow-suppression pass now that structural + provisional dates
   // are final (audit A11: the first pass runs before dates resolve, so a
   // transport shadow whose date was assigned late — the 7.18.3 FR8331
   // Jan 14 duplicate — was invisible to same-date matching). The pass only
   // suppresses represented duplicates, so re-running it is safe.
-  suppressRepresentedTravelAndStayActivities(pieces);
-  const intentBlocks = applyIntentBlockClassification({
-    missingDetails,
-    observations,
-    pieces,
-  });
-  absorbLocationFragmentCards(pieces);
-  collapseSlotCollisions(pieces);
-  collapseAlternativeSlotCards(pieces);
-  collapseTitleContainmentAliases(pieces, observations);
-  resolveUncommittedRepeatMentions(pieces, observations, missingDetails);
-  reconcileCardsAgainstCityNotes(pieces, missingDetails, observations);
-  demoteIdeaListMentions(pieces, observations, missingDetails);
-  demoteHedgedSingleUncommittedMentions(pieces, missingDetails);
-  const deterministicGrouping = createDeterministicGeoGroupingDecisions({
-    existingDecisions: groupingDecisions,
-    missingDetails,
-    observations,
-    pieces,
-  });
+  runPieceWriter("pre_classification_mutation", "suppressRepresentedTravelAndStayActivities:dated", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressRepresentedTravelAndStayActivities(pieces)
+  );
+  const intentBlocks = runPieceWriter(
+    "classification",
+    "applyIntentBlockClassification",
+    ["pieces[].role", "pieces[].kind", "pieces[].payload", "pieces[].actions", "missingDetails[]"],
+    () => applyIntentBlockClassification({ missingDetails, observations, pieces })
+  );
+  runPieceWriter("containment", "absorbLocationFragmentCards", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    absorbLocationFragmentCards(pieces)
+  );
+  runPieceWriter("identity", "collapseSlotCollisions", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    collapseSlotCollisions(pieces)
+  );
+  runPieceWriter("identity", "collapseAlternativeSlotCards", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    collapseAlternativeSlotCards(pieces)
+  );
+  runPieceWriter("identity", "collapseTitleContainmentAliases", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    collapseTitleContainmentAliases(pieces, observations)
+  );
+  runPieceWriter("identity", "resolveUncommittedRepeatMentions", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions", "missingDetails[]"], () =>
+    resolveUncommittedRepeatMentions(pieces, observations, missingDetails)
+  );
+  runPieceWriter("identity", "reconcileCardsAgainstCityNotes:post_identity", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions", "missingDetails[]"], () =>
+    reconcileCardsAgainstCityNotes(pieces, missingDetails, observations)
+  );
+  runPieceWriter("identity", "demoteIdeaListMentions", ["pieces[].kind", "pieces[].role", "pieces[].payload", "pieces[].actions", "missingDetails[]"], () =>
+    demoteIdeaListMentions(pieces, observations, missingDetails)
+  );
+  runPieceWriter("identity", "demoteHedgedSingleUncommittedMentions", ["pieces[].kind", "pieces[].role", "pieces[].payload", "pieces[].actions", "missingDetails[]"], () =>
+    demoteHedgedSingleUncommittedMentions(pieces, missingDetails)
+  );
+  const deterministicGrouping = runPieceWriter(
+    "grouping",
+    "createDeterministicGeoGroupingDecisions",
+    ["groupingDecisions[]", "groupingClaims"],
+    () => createDeterministicGeoGroupingDecisions({
+      existingDecisions: groupingDecisions,
+      missingDetails,
+      observations,
+      pieces,
+    })
+  );
   const combinedGroupingDecisions = [
     ...groupingDecisions,
     ...deterministicGrouping.decisions,
   ];
-  executeCanonicalGroupingDecisions({
-    decisions: combinedGroupingDecisions,
-    observations,
-    pieces,
-  });
-  enforceCanonicalOutputActivityRoles(pieces);
+  runPieceWriter("grouping", "executeCanonicalGroupingDecisions", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    executeCanonicalGroupingDecisions({
+      decisions: combinedGroupingDecisions,
+      observations,
+      pieces,
+    })
+  );
+  runPieceWriter("grouping", "enforceCanonicalOutputActivityRoles", ["pieces[].kind", "pieces[].role", "pieces[].payload"], () =>
+    enforceCanonicalOutputActivityRoles(pieces)
+  );
   // Question creation runs AFTER grouping so committed group structure is
   // visible: a grouped parent or child can never be mistaken for a
   // researched idea (live-run 7.18.0 castle/KGB question misfire).
-  const researchedListQuestions = createResearchedListQuestions(
-    pieces,
-    missingDetails
+  const researchedListQuestions = runPieceWriter(
+    "review",
+    "createResearchedListQuestions",
+    ["reviewDetails[]"],
+    () => createResearchedListQuestions(pieces, missingDetails)
   );
-  const dayLabelSlotQuestions = createDayLabelSlotQuestions(
-    pieces,
-    observations,
-    [...missingDetails, ...researchedListQuestions]
+  const dayLabelSlotQuestions = runPieceWriter(
+    "review",
+    "createDayLabelSlotQuestions",
+    ["reviewDetails[]"],
+    () => createDayLabelSlotQuestions(
+      pieces,
+      observations,
+      [...missingDetails, ...researchedListQuestions]
+    )
   );
-  suppressIsolatedUntimedGenericMeals(pieces);
-  suppressUnresolvedIsolatedTerms({ observations, pieces });
-  rerouteCrossCityNoteContent(pieces);
-  mergeCanonicalCityNotes(pieces);
-  finalizeCanonicalOutputFields(pieces);
-  reconcileCanonicalConflicts(pieces, observations);
+  runPieceWriter("final_projection", "suppressIsolatedUntimedGenericMeals", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressIsolatedUntimedGenericMeals(pieces)
+  );
+  runPieceWriter("final_projection", "suppressUnresolvedIsolatedTerms", ["pieces[].outputEligible", "pieces[].disposition"], () =>
+    suppressUnresolvedIsolatedTerms({ observations, pieces })
+  );
+  runPieceWriter("final_projection", "rerouteCrossCityNoteContent", ["pieces[].payload", "pieces[].actions"], () =>
+    rerouteCrossCityNoteContent(pieces)
+  );
+  runPieceWriter("final_projection", "mergeCanonicalCityNotes", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
+    mergeCanonicalCityNotes(pieces)
+  );
+  runPieceWriter("final_projection", "finalizeCanonicalOutputFields", ["pieces[].payload"], () =>
+    finalizeCanonicalOutputFields(pieces)
+  );
+  runPieceWriter("final_projection", "reconcileCanonicalConflicts", ["pieces[].payload", "pieces[].conflicts", "pieces[].actions"], () =>
+    reconcileCanonicalConflicts(pieces, observations)
+  );
   // Arc G.2 runs AFTER conflict reconciliation on purpose: that pass
   // rebuilds conflicts from the observations and would recompute
   // `requiresReview` over the repair's head. It runs BEFORE the protected-
   // value sweep so the sweep stays the last text mutation before outputs
   // are composed (the 7.23.0r ordering rule below).
-  const transportFieldRepair = applyCanonicalTransportFieldRepair({
-    anchors: sourceTransportAnchors,
-    pieces,
-  });
+  const transportFieldRepair = runPieceWriter(
+    "final_projection",
+    "applyCanonicalTransportFieldRepair",
+    ["pieces[].payload", "pieces[].conflicts", "transportFieldRepairs[]", "reviewDetails[]"],
+    () => applyCanonicalTransportFieldRepair({
+      anchors: sourceTransportAnchors,
+      pieces,
+    })
+  );
   // Run 7.23.0r ordering fix: the sweep is the LAST text mutation before
   // outputFor — conflict reconciliation selects field values and could
   // otherwise resurrect unscrubbed prose after an earlier sweep.
-  scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails);
-  const canonicalGroupingCalls = createCanonicalGroupingCalls(
-    combinedGroupingDecisions,
-    pieces
+  runPieceWriter("final_projection", "scrubProtectedValuesFromPublicProse", ["pieces[].payload"], () =>
+    scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails)
   );
-  const canonicalDuplicateFoldCalls = createCanonicalDuplicateFoldCalls(pieces);
-  const canonicalSourceUpdateCalls = createCanonicalSourceUpdateCalls(pieces);
-  const canonicalConflictQuestions = createCanonicalConflictQuestions(pieces);
-  const canonicalOwnedQuestions = createCanonicalOwnedQuestions(pieces);
+  const canonicalGroupingCalls = runPieceWriter(
+    "review",
+    "createCanonicalGroupingCalls",
+    ["reviewDetails[]"],
+    () => createCanonicalGroupingCalls(combinedGroupingDecisions, pieces)
+  );
+  const canonicalDuplicateFoldCalls = runPieceWriter(
+    "review",
+    "createCanonicalDuplicateFoldCalls",
+    ["reviewDetails[]"],
+    () => createCanonicalDuplicateFoldCalls(pieces)
+  );
+  const canonicalSourceUpdateCalls = runPieceWriter(
+    "review",
+    "createCanonicalSourceUpdateCalls",
+    ["reviewDetails[]"],
+    () => createCanonicalSourceUpdateCalls(pieces)
+  );
+  const canonicalConflictQuestions = runPieceWriter(
+    "review",
+    "createCanonicalConflictQuestions",
+    ["reviewDetails[]"],
+    () => createCanonicalConflictQuestions(pieces)
+  );
+  const canonicalOwnedQuestions = runPieceWriter(
+    "review",
+    "createCanonicalOwnedQuestions",
+    ["reviewDetails[]"],
+    () => createCanonicalOwnedQuestions(pieces)
+  );
 
   const outputFor = (kind: EvidenceKind) =>
     pieces
@@ -12316,13 +12572,18 @@ export function clusterExtractedEvidence({
   const places = outputFor("place");
   const stays = outputFor("stay");
   const transport = outputFor("transport");
-  const canonicalSpineQuestions = createCanonicalTripSpineReviewDetails({
-    activities,
-    places,
-    stays,
-    transport,
-    tripOverview,
-  });
+  const canonicalSpineQuestions = runPieceWriter(
+    "review",
+    "createCanonicalTripSpineReviewDetails",
+    ["reviewDetails[]"],
+    () => createCanonicalTripSpineReviewDetails({
+      activities,
+      places,
+      stays,
+      transport,
+      tripOverview,
+    })
+  );
   const gatedDetails = [
     ...canonicalGroupingCalls,
     ...canonicalDuplicateFoldCalls,
@@ -12335,13 +12596,20 @@ export function clusterExtractedEvidence({
     ...canonicalSpineQuestions,
     ...missingDetails,
   ];
-  const finalMissingDetails = canonicalizeCanonicalReviewDetails(
-    gatedDetails,
-    pieces,
-    tripOverview,
-    missingDetails
+  const finalMissingDetails = runPieceWriter(
+    "review",
+    "canonicalizeCanonicalReviewDetails",
+    ["reviewDetails[]"],
+    () => canonicalizeCanonicalReviewDetails(
+      gatedDetails,
+      pieces,
+      tripOverview,
+      missingDetails
+    )
   );
-  assignCanonicalEvidenceDispositions({ observations, pieces });
+  runPieceWriter("final_projection", "assignCanonicalEvidenceDispositions", ["observations[].disposition"], () =>
+    assignCanonicalEvidenceDispositions({ observations, pieces })
+  );
   const draft = {
     activities,
     missingDetails: finalMissingDetails,
@@ -12423,6 +12691,7 @@ export function clusterExtractedEvidence({
       ).size,
       groupingClaims: deterministicGrouping.telemetry,
       intentBlocks,
+      stageWriterTrace,
       sourceAnchorObservationCount: sourceTransportAnchors.length,
       suppressedWeakAnchorCount,
       terminalDisposalCountsByCode,

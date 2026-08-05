@@ -161,6 +161,58 @@ export function createCanonicalizationSummary(usage: unknown) {
         releasedDecisionCount: Number(claims.releasedDecisionCount) || 0,
       };
     })(),
+    stageWriterTrace: Array.isArray(evidence.stageWriterTrace)
+      ? evidence.stageWriterTrace.flatMap((entry) => {
+          const trace = asRecord(entry);
+          const decisionDomain = trace.decisionDomain;
+          if (
+            decisionDomain !== "source_normalization" &&
+            decisionDomain !== "pre_classification_mutation" &&
+            decisionDomain !== "classification" &&
+            decisionDomain !== "containment" &&
+            decisionDomain !== "identity" &&
+            decisionDomain !== "grouping" &&
+            decisionDomain !== "review" &&
+            decisionDomain !== "final_projection"
+          ) {
+            return [];
+          }
+          if (
+            typeof trace.beforeHash !== "string" ||
+            typeof trace.afterHash !== "string" ||
+            typeof trace.writer !== "string"
+          ) {
+            return [];
+          }
+          return [
+            {
+              afterHash: trace.afterHash,
+              beforeHash: trace.beforeHash,
+              changed: trace.changed === true,
+              changedPieceCount:
+                typeof trace.changedPieceCount === "number"
+                  ? trace.changedPieceCount
+                  : null,
+              decisionDomain: decisionDomain as
+                | "source_normalization"
+                | "pre_classification_mutation"
+                | "classification"
+                | "containment"
+                | "identity"
+                | "grouping"
+                | "review"
+                | "final_projection",
+              ordinal: Number(trace.ordinal) || 0,
+              writer: trace.writer,
+              writes: Array.isArray(trace.writes)
+                ? trace.writes.filter(
+                    (value): value is string => typeof value === "string"
+                  )
+                : [],
+            },
+          ];
+        })
+      : [],
     intentBlocks: (() => {
       const ledger = asRecord(evidence.intentBlocks);
       const blocks = Array.isArray(ledger.blocks) ? ledger.blocks : [];

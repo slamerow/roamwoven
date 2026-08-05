@@ -3,6 +3,7 @@
 //
 //   node scripts/scorecard.mjs [--dry-run] [--out <path>] [<tripIdOrPrefix>] <parseKeyPrefix>
 //   node scripts/scorecard.mjs --payload <audit-payload.json> [--out <path>]
+//   node scripts/scorecard.mjs --qa-bundle <qa-bundle.json> [--audit-payload <audit-payload.json>] [--out <path>]
 //
 // Defaults to the run-8.1.0 pin:
 //   node scripts/scorecard.mjs 4eaf3c6c-f480-442b-8301-c425a032cb87 a3e0ab66
@@ -105,6 +106,8 @@ const DRY_RUN = rawArgv.includes("--dry-run");
 const STRICT = rawArgv.includes("--strict");
 let outPath = null;
 let payloadPath = null;
+let qaBundlePath = null;
+let qaAuditPayloadPath = null;
 let exportDir = null;
 let fromCacheDir = null;
 const positional = [];
@@ -118,6 +121,16 @@ for (let index = 0; index < rawArgv.length; index += 1) {
   }
   if (value === "--payload") {
     payloadPath = rawArgv[index + 1] ?? null;
+    index += 1;
+    continue;
+  }
+  if (value === "--qa-bundle") {
+    qaBundlePath = rawArgv[index + 1] ?? null;
+    index += 1;
+    continue;
+  }
+  if (value === "--audit-payload") {
+    qaAuditPayloadPath = rawArgv[index + 1] ?? null;
     index += 1;
     continue;
   }
@@ -140,8 +153,22 @@ if (fromCacheDir && exportDir) {
   console.error("--from-cache and --export are mutually exclusive: pick one.");
   process.exit(2);
 }
+if (payloadPath && qaBundlePath) {
+  console.error("--payload and --qa-bundle are mutually exclusive input surfaces.");
+  process.exit(2);
+}
+if (qaAuditPayloadPath && !qaBundlePath) {
+  console.error("--audit-payload is a companion to --qa-bundle.");
+  process.exit(2);
+}
 if (payloadPath && (fromCacheDir || exportDir)) {
-  console.error("--payload scores a saved audit; --from-cache/--export are replay-only.");
+  console.error(
+    "--payload scores saved production; --from-cache/--export are replay-only."
+  );
+  process.exit(2);
+}
+if (qaBundlePath && exportDir) {
+  console.error("--qa-bundle cannot be combined with --export.");
   process.exit(2);
 }
 
@@ -157,7 +184,21 @@ const requestedTrip = positional.length === 2 ? positional[0] : DEFAULT_TRIP;
 
 const GROUND_TRUTH_DOC = "docs/assembly-ground-truth-central-europe.md";
 const CONTRACT_DOC = "docs/product-contracts.md";
-const SCOPE = ["RW-ORD-001", "RW-CLS-001", "RW-GRP-001", "RW-PLC-001"];
+const SCOPE = [
+  "RW-ORD-001",
+  "RW-QA-001",
+  "RW-CAN-001",
+  "RW-GRP-001",
+  "RW-ASM-001",
+  "RW-CLS-001",
+  "RW-EVD-001",
+  "RW-REV-001",
+  "RW-QUE-001",
+  "RW-PRI-001",
+  "RW-AUD-001",
+  "RW-OPS-001",
+  "RW-PLC-001",
+];
 
 // The trip's source dates carry 2019 (docket 2026-07-31 §3, lineage rows 33
 // and 40: `date: 2019-01-16`). The ground truth writes them without a year.
@@ -561,6 +602,30 @@ const ASSERTIONS = [
       "City Notes are keyed to a city and anchored on its legs; a City Note has no day",
     claim: "Every active City Note is dateless, city-keyed, and owns no leg",
     run: (ctx) => {
+      if (ctx.source === "persisted-qa") {
+        const notes = ctx.records.items.filter(
+          (item) => item.status !== "ignored" && item.itemType === "note"
+        );
+        const fingerprintNotes = ctx.report.fingerprints?.activeNotes ?? [];
+        const malformedRecord = notes.filter((item) => item.date || item.legId);
+        const malformedFingerprint = fingerprintNotes.filter((entry) => {
+          const [cityNoteKey, date] = String(entry).split("|");
+          return !cityNoteKey || Boolean(date);
+        });
+        const ok =
+          notes.length === fingerprintNotes.length &&
+          malformedRecord.length === 0 &&
+          malformedFingerprint.length === 0;
+        return {
+          ok,
+          field:
+            "exact records.items[].date/.legId + audit.fingerprints.activeNotes[].cityNoteKey/date",
+          detail: ok
+            ? "every exact persisted note is dateless/legless and its persisted fingerprint carries one city key"
+            : `${notes.length} note row(s), ${fingerprintNotes.length} keyed fingerprint row(s), ` +
+              `${malformedRecord.length + malformedFingerprint.length} malformed`,
+        };
+      }
       const malformed = ctx.records.items.filter(
         (item) =>
           item.status !== "ignored" &&
@@ -596,7 +661,7 @@ const ASSERTIONS = [
     // groups on unverified coordinates production discards once the geocode
     // lane has run anywhere in the trip (2026-08-04 replay: live 7 grouped
     // stops vs replay 14, 10 with no source backing) — payload-only.
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const children = ctx.records.items.filter(
         (item) => item.status !== "ignored" && item.parentItemId
@@ -651,7 +716,7 @@ const ASSERTIONS = [
     // G5.1 serves the source-support verdict per candidate, so this assertion
     // now reads the acceptance boundary instead of guessing entity identity
     // from coordinate equality.
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const geocode = ctx.report.extraction?.geocodeVerification;
       if (!geocode || !Array.isArray(geocode.candidates)) {
@@ -1009,7 +1074,7 @@ const ASSERTIONS = [
     gt: () => citation(126, "Changing of the Guard"),
     // Membership assertion (2026-08-04 replay: live 7 grouped stops vs replay
     // 14) — payload-only. See header.
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const guard = ctx.records.items.find(
         (item) => item.status !== "ignored" && has(item.title, "changing of the guard")
@@ -1174,7 +1239,7 @@ const ASSERTIONS = [
     gt: () => citation(176, "ordered sub-stops"),
     // Membership assertion (2026-08-04 replay: live 7 grouped stops vs replay
     // 14, Schönbrunn alone gaining four unbacked members) — payload-only.
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const parent = ctx.records.items.find(
         (item) => item.status !== "ignored" && has(item.title, "schonbrunn")
@@ -1229,7 +1294,7 @@ const ASSERTIONS = [
     // Folded into the shared `judgeableIn` mechanism so both directions get
     // the same treatment. Live run 8.1.0 shipped both as children (docket
     // §4a); the 2026-08-04 replay is the general-case evidence (7 vs 14).
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const parent = ctx.records.items.find(
         (item) => item.status !== "ignored" && has(item.title, "schonbrunn")
@@ -1403,7 +1468,7 @@ const ASSERTIONS = [
     gt: () => citation(192, "Laundry"),
     // Membership assertion — whether laundry got pulled into a group at all
     // (2026-08-04 replay: live 7 grouped stops vs replay 14) — payload-only.
-    judgeableIn: ["payload", "replay"],
+    judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
       const laundry = ctx.records.items.find(
         (item) => item.status !== "ignored" && has(item.title, "laundry")
@@ -1451,6 +1516,497 @@ const ASSERTIONS = [
     },
   },
 ];
+
+// Complete beta-candidate ground truth. The older table above is retained so
+// historical trend lines remain comparable; this section is the hard gate.
+const activeTopLevelItemsForDate = (ctx, date) =>
+  ctx.records.items.filter(
+    (item) =>
+      item.status !== "ignored" &&
+      item.itemType !== "note" &&
+      !item.parentItemId &&
+      item.date === date
+  );
+
+const matchesAnyTitle = (record, alternatives) =>
+  alternatives.some((alternative) => has(record.title, alternative));
+
+function exactDayAssertion({ date, expected, gtLine, gtPhrase, id }) {
+  return {
+    id,
+    entry: "RW-ASM-001",
+    tier: 2,
+    clause:
+      "Every day section preserves exactly the intended traveler-visible top-level homes",
+    claim: `${date} has the exact intended top-level Activity structure`,
+    gt: () => citation(gtLine, gtPhrase),
+    run: (ctx) => {
+      const actual = activeTopLevelItemsForDate(ctx, date);
+      const matchedIds = new Set();
+      const missing = [];
+      const duplicates = [];
+      for (const expectation of expected) {
+        const matches = actual.filter((item) =>
+          matchesAnyTitle(item, expectation.alternatives)
+        );
+        if (matches.length === 0) missing.push(expectation.label);
+        if (matches.length > 1) duplicates.push(expectation.label);
+        for (const match of matches) matchedIds.add(match.id);
+      }
+      const extras = actual.filter((item) => !matchedIds.has(item.id));
+      const ok =
+        missing.length === 0 &&
+        duplicates.length === 0 &&
+        extras.length === 0 &&
+        actual.length === expected.length;
+      return {
+        ok,
+        field:
+          "records.items[].date/.itemType/.parentItemId/.title (exact top-level set)",
+        detail: ok
+          ? `${expected.length} exact top-level home(s)`
+          : [
+              missing.length ? `missing: ${list(missing)}` : null,
+              duplicates.length ? `duplicated: ${list(duplicates)}` : null,
+              extras.length
+                ? `extra: ${list(extras.map((item) => `"${item.title}"`), 12)}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" | "),
+      };
+    },
+  };
+}
+
+const dayExpectation = (label, ...alternatives) => ({ alternatives, label });
+ASSERTIONS.push(
+  exactDayAssertion({ id: "DAY-0112", date: `${Y}-01-12`, expected: [], gtLine: 85, gtPhrase: "No activities" }),
+  exactDayAssertion({
+    id: "DAY-0113",
+    date: `${Y}-01-13`,
+    expected: [
+      dayExpectation("Colosseum", "colosseum"),
+      dayExpectation("Pantheon", "pantheon"),
+      dayExpectation("Trevi Fountain", "trevi"),
+      dayExpectation("Spanish Steps", "spanish steps"),
+    ],
+    gtLine: 95,
+    gtPhrase: "4 individual",
+  }),
+  exactDayAssertion({
+    id: "DAY-0114",
+    date: `${Y}-01-14`,
+    expected: [
+      dayExpectation("Charles Bridge", "charles bridge"),
+      dayExpectation("Astronomical Clock", "astronomical clock"),
+      dayExpectation("Lucerna Arcade", "lucerna"),
+      dayExpectation("Dancing House", "dancing house"),
+      dayExpectation("Catacombs tour", "catacombs"),
+      dayExpectation("Hemingway Bar", "hemingway"),
+    ],
+    gtLine: 102,
+    gtPhrase: "Charles Bridge",
+  }),
+  exactDayAssertion({
+    id: "DAY-0115",
+    date: `${Y}-01-15`,
+    expected: [
+      dayExpectation("Old Town and Jewish Quarter Hidden Secrets", "hidden secrets"),
+      dayExpectation("Klementinum guided tour", "klementinum"),
+      dayExpectation("Bellevue dinner", "bellevue"),
+    ],
+    gtLine: 115,
+    gtPhrase: "Old Town and Jewish Quarter Hidden Secrets",
+  }),
+  exactDayAssertion({
+    id: "DAY-0116",
+    date: `${Y}-01-16`,
+    expected: [
+      dayExpectation("Trdelnik breakfast", "trdelnik", "trdlnik"),
+      dayExpectation("Prague Castle", "prague castle"),
+      dayExpectation("U Maliru", "u maliru"),
+      dayExpectation("KGB Museum", "kgb"),
+      dayExpectation("Mala Strana and Hradcany walk", "mala strana", "hrad any walk"),
+    ],
+    gtLine: 147,
+    gtPhrase: "5 cards",
+  }),
+  exactDayAssertion({
+    id: "DAY-0117",
+    date: `${Y}-01-17`,
+    expected: [
+      dayExpectation("Pick up rental car", "pick up car", "pick up rental"),
+      dayExpectation("Sedlec Ossuary", "sedlec"),
+      dayExpectation("Church of St. Barbara", "st barbara", "saint barbara"),
+      dayExpectation("Silver mines", "silver mine"),
+      dayExpectation("Koscom watch shop", "koscom"),
+    ],
+    gtLine: 151,
+    gtPhrase: "5 activities",
+  }),
+  exactDayAssertion({
+    id: "DAY-0118",
+    date: `${Y}-01-18`,
+    expected: [
+      dayExpectation("Pick up Vienna Card", "vienna card"),
+      dayExpectation("Albertina", "albertina"),
+    ],
+    gtLine: 167,
+    gtPhrase: "Vienna Card",
+  }),
+  exactDayAssertion({
+    id: "DAY-0119",
+    date: `${Y}-01-19`,
+    expected: [dayExpectation("Schonbrunn Palace visit", "schonbrunn")],
+    gtLine: 176,
+    gtPhrase: "Schönbrunn Palace visit",
+  }),
+  exactDayAssertion({
+    id: "DAY-0120",
+    date: `${Y}-01-20`,
+    expected: [
+      dayExpectation("Cafe Central", "cafe central"),
+      dayExpectation("Jewish Museum", "jewish museum"),
+      dayExpectation("St. Stephen's Cathedral", "stephen"),
+      dayExpectation("Library", "library"),
+      dayExpectation("Bank Austria Kunstforum", "kunstforum"),
+      dayExpectation("Laundry", "laundry"),
+    ],
+    gtLine: 192,
+    gtPhrase: "Laundry",
+  }),
+  exactDayAssertion({ id: "DAY-0121", date: `${Y}-01-21`, expected: [], gtLine: 199, gtPhrase: "Gellert Baths" }),
+  exactDayAssertion({
+    id: "DAY-0122",
+    date: `${Y}-01-22`,
+    expected: [
+      dayExpectation("Fisherman's Bastion", "fisherman"),
+      dayExpectation("Matthias Church", "matthias"),
+      dayExpectation("Castle Hill", "castle hill", "buda castle"),
+      dayExpectation("Szechenyi Chain Bridge", "chain bridge"),
+      dayExpectation("St. Istvan's Basilica", "istvan", "st stephen basilica"),
+      dayExpectation("Vorosmarty Ter", "vorosmarty"),
+      dayExpectation("Shoes on the Danube", "shoes on the danube"),
+      dayExpectation("Parliament", "parliament"),
+      dayExpectation("Great Market Hall", "market hall"),
+      dayExpectation("Borkonyha Wine Kitchen", "borkonyha"),
+    ],
+    gtLine: 209,
+    gtPhrase: "Fisherman",
+  }),
+  exactDayAssertion({
+    id: "DAY-0123",
+    date: `${Y}-01-23`,
+    expected: [
+      dayExpectation("House of Terror Museum", "house of terror"),
+      dayExpectation("New York Cafe", "new york cafe"),
+      dayExpectation("Baths slot", "bath"),
+      dayExpectation("St. Stephen's Basilica tower", "tower"),
+    ],
+    gtLine: 225,
+    gtPhrase: "House of Terror",
+  }),
+  exactDayAssertion({
+    id: "DAY-0124",
+    date: `${Y}-01-24`,
+    expected: [
+      dayExpectation("Watches in Rome", "watches"),
+      dayExpectation("Tour Rome", "tour rome"),
+    ],
+    gtLine: 239,
+    gtPhrase: "Watches in Rome",
+  }),
+  exactDayAssertion({ id: "DAY-0125", date: `${Y}-01-25`, expected: [], gtLine: 248, gtPhrase: "Travel only" })
+);
+
+function cityNoteText(ctx, city) {
+  const fromRecords = ctx.records.items
+    .filter(
+      (item) =>
+        item.status !== "ignored" &&
+        item.itemType === "note" &&
+        has(item.cityNoteKey ?? item.title, city)
+    )
+    .map((item) => `${item.title} ${item.description ?? ""}`);
+  const fromFingerprints = (ctx.report.fingerprints?.activeNotes ?? []).filter(
+    (entry) => has(String(entry).split("|")[0], city)
+  );
+  return [...fromRecords, ...fromFingerprints].join(" ");
+}
+
+function cityNoteAssertion({ city, forbidden = [], required }) {
+  return {
+    id: `NOTES-${city.toUpperCase()}`,
+    entry: "RW-ASM-001",
+    tier: 1,
+    clause: "Every city has one complete, durable, city-keyed note home",
+    claim: `${city} City Notes contain every required idea and no displaced planned item`,
+    run: (ctx) => {
+      const surface = cityNoteText(ctx, city);
+      const missing = required.filter((token) => !has(surface, token));
+      const misplaced = forbidden.filter((token) => has(surface, token));
+      return {
+        ok: Boolean(surface) && missing.length === 0 && misplaced.length === 0,
+        field: "records.items City Note text + report.fingerprints.activeNotes",
+        detail:
+          missing.length === 0 && misplaced.length === 0
+            ? `${required.length} required idea(s) present; no forbidden home`
+            : [
+                missing.length ? `missing: ${list(missing, 14)}` : null,
+                misplaced.length ? `wrongly retained: ${list(misplaced, 14)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" | "),
+      };
+    },
+  };
+}
+
+ASSERTIONS.push(
+  cityNoteAssertion({
+    city: "prague",
+    required: ["communism", "country life", "mistral", "malostranska beseda", "cafe louvre", "garlic", "onion soup", "r2d2", "peklo", "u fleku", "u medvidku", "u pinkasu"],
+    forbidden: ["koscom", "laundry"],
+  }),
+  cityNoteAssertion({
+    city: "vienna",
+    required: ["mumok", "natural history", "ferris wheel", "hundertwasser", "museum of illusions", "mozarthaus", "ring tram", "prater", "leopold", "st charles"],
+    forbidden: ["laundry", "albertina"],
+  }),
+  cityNoteAssertion({
+    city: "budapest",
+    required: ["huf", "gypsy music", "great synagogue", "pinball", "konyv", "mazel tov", "hilton", "ruszwurm", "vaci", "comme chez soi", "smart kitchen", "bors", "szimpla", "dohany", "children s train", "public transport", "pontoon", "hospital in the rock", "balthazar", "pest buda", "pomodoro", "menza", "zona", "aranykaviar", "retro langos", "karavan"],
+    forbidden: ["thermal baths"],
+  })
+);
+
+function persistedGroupedSortOrder(ctx, child) {
+  const row = (ctx.report.fingerprints?.groupedStops ?? []).find((entry) =>
+    has(String(entry).split("|")[3], child.title)
+  );
+  return row ? Number(String(row).split("|")[1]) : child.sortOrder;
+}
+
+function exactGroupAssertion({ id, parentAlternatives, date, children, callPolicy }) {
+  return {
+    id,
+    entry: "RW-GRP-001",
+    tier: 1,
+    clause: "Grouping consumes the frozen containment and identity ledgers exactly once",
+    claim: `${id} has exact ordered membership and the declared Call policy`,
+    run: (ctx) => {
+      const parent = ctx.records.items.find(
+        (item) =>
+          item.status !== "ignored" &&
+          item.date === date &&
+          !item.parentItemId &&
+          matchesAnyTitle(item, parentAlternatives)
+      );
+      if (!parent) {
+        return { ok: false, field: "records.items[].parentItemId/.sortOrder", detail: "parent absent" };
+      }
+      const actual = ctx.records.items
+        .filter((item) => item.status !== "ignored" && item.parentItemId === parent.id)
+        .sort((left, right) => persistedGroupedSortOrder(ctx, left) - persistedGroupedSortOrder(ctx, right));
+      const expectedLabels = children.map((child) => child.label);
+      const actualLabels = actual.map((item) => {
+        const match = children.find((child) => matchesAnyTitle(item, child.alternatives));
+        return match?.label ?? `unexpected:${item.title}`;
+      });
+      const calls = ctx.records.reviewQuestions.filter(
+        (question) =>
+          question.status === "noted" &&
+          (question.subjectId === parent.id || has(question.guessedValue ?? question.evidence, parent.title))
+      );
+      const membershipOk =
+        actualLabels.length === expectedLabels.length &&
+        actualLabels.every((label, index) => label === expectedLabels[index]);
+      const callsOk = callPolicy === "required" ? calls.length === 1 : calls.length === 0;
+      return {
+        ok: membershipOk && callsOk,
+        field: "records.items[].parentItemId + persisted groupedStops sort + review Calls",
+        detail: `children [${actualLabels.join(" -> ")}]; Calls ${calls.length} (expected ${callPolicy})`,
+      };
+    },
+  };
+}
+
+ASSERTIONS.push(
+  exactGroupAssertion({
+    id: "GROUP-TOUR",
+    date: `${Y}-01-15`,
+    parentAlternatives: ["hidden secrets"],
+    children: [
+      dayExpectation("Old Town Square", "old town square"),
+      dayExpectation("Jewish Quarter", "jewish quarter", "josefov"),
+    ],
+    callPolicy: "silent",
+  }),
+  exactGroupAssertion({
+    id: "GROUP-CASTLE",
+    date: `${Y}-01-16`,
+    parentAlternatives: ["prague castle"],
+    children: [
+      dayExpectation("Changing of the Guard", "changing of the guard"),
+      dayExpectation("St. Vitus Cathedral", "st vitus"),
+    ],
+    callPolicy: "required",
+  }),
+  exactGroupAssertion({
+    id: "GROUP-MALA",
+    date: `${Y}-01-16`,
+    parentAlternatives: ["mala strana", "hrad any walk"],
+    children: [
+      dayExpectation("Kafka statue", "kafka"),
+      dayExpectation("John Lennon Wall", "lennon"),
+      dayExpectation("Vinarna Certovka", "certovka"),
+      dayExpectation("Novy svet", "novy svet"),
+    ],
+    callPolicy: "required",
+  }),
+  exactGroupAssertion({
+    id: "GROUP-SCHONBRUNN",
+    date: `${Y}-01-19`,
+    parentAlternatives: ["schonbrunn"],
+    children: [
+      dayExpectation("Gloriette", "gloriette"),
+      dayExpectation("Orangeriegarten", "orangerie"),
+      dayExpectation("Palm House", "palm house"),
+      dayExpectation("Apple Strudel Show", "strudel"),
+      dayExpectation("Panorama Train", "panorama"),
+    ],
+    callPolicy: "required",
+  })
+);
+
+ASSERTIONS.push(
+  {
+    id: "IDENTITY-PINBALL",
+    entry: "RW-CAN-001",
+    tier: 1,
+    clause: "Repeated uncommitted mentions have one City Note home",
+    claim: "Pinball Museum has one Budapest-note home and no Activity card",
+    run: (ctx) => {
+      const cards = ctx.records.items.filter((item) => item.status !== "ignored" && item.itemType !== "note" && has(item.title, "pinball"));
+      return { ok: cards.length === 0 && has(cityNoteText(ctx, "budapest"), "pinball"), field: "records.items + Budapest City Note", detail: `${cards.length} Activity card(s); note=${has(cityNoteText(ctx, "budapest"), "pinball")}` };
+    },
+  },
+  {
+    id: "IDENTITY-MARKET-HALL",
+    entry: "RW-CAN-001",
+    tier: 1,
+    clause: "The stronger planned copy wins and receives every useful fact",
+    claim: "Great Market Hall has exactly one Jan-22 Activity home",
+    run: (ctx) => {
+      const rows = ctx.records.items.filter((item) => item.status !== "ignored" && item.itemType !== "note" && has(item.title, "market hall"));
+      return { ok: rows.length === 1 && rows[0].date === `${Y}-01-22`, field: "records.items[].title/.date", detail: `${rows.length}: ${list(rows.map((item) => `${item.title} ${item.date}`))}` };
+    },
+  },
+  {
+    id: "IDENTITY-BASILICA",
+    entry: "RW-CAN-001",
+    tier: 1,
+    clause: "Venue aliases merge while a separately planned tower visit stays distinct",
+    claim: "One Jan-22 basilica venue and one distinct Jan-23 tower remain",
+    run: (ctx) => {
+      const jan22 = activeTopLevelItemsForDate(ctx, `${Y}-01-22`).filter((item) => has(item.title, "istvan") || has(item.title, "stephen"));
+      const jan23 = activeTopLevelItemsForDate(ctx, `${Y}-01-23`).filter((item) => has(item.title, "tower"));
+      return { ok: jan22.length === 1 && jan23.length === 1, field: "records.items[].title/.date", detail: `Jan 22 basilica=${jan22.length}; Jan 23 tower=${jan23.length}` };
+    },
+  },
+  {
+    id: "DEBRIS-ZERO",
+    entry: "RW-CLS-001",
+    tier: 1,
+    clause: "Admin, accessory, note, and generic label material cannot become Activities",
+    claim: "Known production debris creates no traveler Activity card",
+    run: (ctx) => {
+      const debris = ["explore rome", "30 minute walk", "payment due", "wi fi", "return", "buy wine", "great synagogue", "pinball museum"];
+      const bad = ctx.records.items.filter((item) => item.status !== "ignored" && item.itemType !== "note" && debris.some((token) => has(item.title, token)));
+      const genericEat = ctx.records.items.filter((item) => item.status !== "ignored" && item.itemType !== "note" && norm(item.title) === "eat");
+      return { ok: bad.length + genericEat.length === 0, field: "records.items[].itemType/.title", detail: bad.length + genericEat.length === 0 ? "no known debris Activity" : list([...bad, ...genericEat].map((item) => `"${item.title}"`), 16) };
+    },
+  },
+  {
+    id: "CONSERVATION-DISPOSITIONS",
+    entry: "RW-EVD-001",
+    tier: 1,
+    clause: "Every meaningful observation has exactly one durable final disposition",
+    claim: "The canonicalization report has zero undisposed observations",
+    run: (ctx) => {
+      const count = ctx.report.canonicalization?.undisposedObservationCount;
+      return { ok: count === 0, field: "report.canonicalization.undisposedObservationCount", detail: `${count ?? "missing"}` };
+    },
+  },
+  {
+    id: "PRIVACY-PUBLIC-ZERO",
+    entry: "RW-PRI-001",
+    tier: 1,
+    clause: "No protected-class value survives the final public projection",
+    claim: "Public City Note protected-value count is zero",
+    run: (ctx) => {
+      const fingerprintModule = require2(path.join(rootDir, "lib/extraction/assembly-semantic-fingerprint.ts"));
+      const count = fingerprintModule.countPublicProtectedCityNoteSegments(ctx.records);
+      return { ok: count === 0, field: "final records.items City Note public descriptions", detail: `${count} protected-class segment(s)` };
+    },
+  },
+  {
+    id: "QUESTIONS-EXACT",
+    entry: "RW-QUE-001",
+    tier: 1,
+    clause: "Questions ask only unresolved material maker decisions",
+    claim: "Exactly the Castle ticket, Vienna Friday list, and baths Questions remain",
+    run: (ctx) => {
+      const open = ctx.records.reviewQuestions.filter((question) => question.status === "open");
+      const text = (question) => `${question.prompt ?? ""} ${question.reason ?? ""} ${(question.answerOptions ?? []).map((option) => `${option.label} ${option.value}`).join(" ")}`;
+      const castle = open.filter((question) => has(text(question), "castle") && has(text(question), "ticket"));
+      const vienna = open.filter((question) => has(text(question), "state hall") && has(text(question), "time travel") && has(text(question), "belvedere") && !has(text(question), "albertina"));
+      const baths = open.filter((question) => has(text(question), "gellert") && has(text(question), "szechenyi"));
+      return { ok: open.length === 3 && castle.length === 1 && vienna.length === 1 && baths.length === 1, field: "records.reviewQuestions open prompts/reasons/options", detail: `${open.length} open; Castle=${castle.length}, Vienna=${vienna.length}, baths=${baths.length}` };
+    },
+  },
+  {
+    id: "CALLS-EXACT",
+    entry: "RW-REV-001",
+    tier: 1,
+    clause: "Calls truthfully describe completed visible grouping actions",
+    claim: "Exactly Castle, Mala Strana, and Schonbrunn grouping Calls remain",
+    run: (ctx) => {
+      const calls = ctx.records.reviewQuestions.filter((question) => question.status === "noted");
+      const text = calls.map((question) => `${question.prompt ?? ""} ${question.reason ?? ""} ${question.evidence ?? ""} ${question.guessedValue ?? ""}`).join(" | ");
+      const wanted = ["prague castle", "mala strana", "schonbrunn"];
+      const matched = wanted.filter((token) => has(text, token));
+      const tourCall = calls.some((question) => has(`${question.prompt} ${question.reason} ${question.evidence}`, "hidden secrets"));
+      return { ok: calls.length === 3 && matched.length === 3 && !tourCall, field: "records.reviewQuestions noted prompt/reason/evidence", detail: `${calls.length} Calls; required subjects ${matched.length}/3; tour Call=${tourCall}` };
+    },
+  },
+  {
+    id: "QA-P0-P1-ZERO",
+    entry: "RW-QA-001",
+    tier: 1,
+    clause: "Independent semantic QA reports no unresolved P0/P1 defect on the candidate",
+    claim: "Final quality report has zero P0/P1 diagnostics",
+    run: (ctx) => {
+      const serious = (ctx.report.diagnostics ?? []).filter((diagnostic) => {
+        const severity = String(diagnostic.severity ?? "").toLowerCase();
+        return severity === "p0" || severity === "p1";
+      });
+      return { ok: serious.length === 0, field: "report.diagnostics[].severity", detail: `${serious.length} P0/P1 finding(s): ${list(serious.map((diagnostic) => diagnostic.code), 12)}` };
+    },
+  },
+  {
+    id: "AUD-DETECTOR-ZERO",
+    entry: "RW-AUD-001",
+    tier: 1,
+    clause: "Detector findings require independent source/canonical/final reconciliation",
+    claim: "No unresolved detector incident remains",
+    run: (ctx) => {
+      const incidents = ctx.report.detectorIncidents ?? [];
+      return { ok: incidents.length === 0, field: "report.detectorIncidents[]", detail: `${incidents.length} incident(s)` };
+    },
+  }
+);
 
 // ===========================================================================
 // RUNNER
@@ -1630,6 +2186,43 @@ function contextFromPayload(payload) {
   return ctx;
 }
 
+function contextFromQaBundle(bundle, auditPayload = null) {
+  if (!bundle?.records || !bundle?.audit) {
+    throw new Error(
+      "QA bundle carries no records/audit surface — is this the persisted bundle?"
+    );
+  }
+  const review = bundle.records.review ?? {};
+  const fullReport = auditPayload?.report ?? null;
+  const report = fullReport
+    ? fullReport
+    : {
+        ...bundle.audit,
+        detectorIncidents: bundle.audit.detectorIncidents ?? [],
+        lineage: bundle.audit.lineage?.rows ?? [],
+      };
+  const records = {
+    items: bundle.records.items ?? [],
+    legs: bundle.records.legs ?? [],
+    privateDetails: bundle.records.privateDetails ?? [],
+    reviewQuestions: [
+      ...(review.calls ?? []),
+      ...(review.openQuestions ?? []),
+      ...(review.dismissedQuestions ?? []),
+    ],
+    stays: bundle.records.stays ?? [],
+    transport: bundle.records.transport ?? [],
+    trip: bundle.records.trip ?? {},
+  };
+  const ctx = buildContext({ records, report, pieces: [], assembly: null });
+  ctx.source = "persisted-qa";
+  // Historical QA projection v1 did not serve these fields. They are named
+  // explicitly so no scorer can reconstruct them from titles, ids, or prose.
+  // The current QA projection serves them for every new run.
+  ctx.absent = new Set(["itemSortOrder", "reviewAnswerOptions"]);
+  return ctx;
+}
+
 function buildContext({ records, report, pieces, assembly }) {
   const geocodeRan = report.lineage.some((row) =>
     row.observations.some((observation) => observation.verifiedLatitude != null)
@@ -1687,6 +2280,68 @@ function renderReport({ results, meta }) {
 
   lines.push(`# Assembly scorecard — baseline against pinned parse \`${meta.parseKey}\``);
   lines.push("");
+  if (meta.parity) {
+    lines.push("## Production/replay parity gate");
+    lines.push("");
+    lines.push(
+      `Semantic fingerprint: **${meta.parity.equal ? "PASS" : "FAIL"}** — ` +
+        `production \`${meta.parity.leftHash}\`, replay \`${meta.parity.rightHash}\`.`
+    );
+    lines.push(
+      `Ground-truth score states: **${meta.parity.scoreStatesEqual ? "PASS" : "FAIL"}**.`
+    );
+    lines.push(
+      "Historical field availability: review answer options were not present in the saved QA " +
+        "projection, so both comparable fingerprints deliberately omit them. New QA bundles " +
+        "serve them directly."
+    );
+    if (meta.parity.sections.length > 0) {
+      lines.push("");
+      for (const section of meta.parity.sections) {
+        lines.push(
+          `- ${section.section}: production \`${section.leftHash}\` (${section.leftCount}), ` +
+            `replay \`${section.rightHash}\` (${section.rightCount})`
+        );
+      }
+    }
+    if (meta.parity.scoreStateDiffs.length > 0) {
+      lines.push("");
+      for (const difference of meta.parity.scoreStateDiffs) {
+        lines.push(
+          `- ${difference.id}: production ${difference.production}, replay ${difference.replay}`
+        );
+      }
+    }
+    lines.push("");
+  }
+  if (meta.writerTrace) {
+    lines.push("## Executable assembly writer trace");
+    lines.push("");
+    lines.push(
+      `Assembly input hash: \`${meta.writerTrace.inputHash}\`; assembly code version: ` +
+        `\`${meta.writerTrace.codeVersion}\`; final semantic output hash: ` +
+        `\`${meta.writerTrace.outputHash}\`.`
+    );
+    lines.push(
+      `${meta.writerTrace.entryCount} executed writer stage(s); ` +
+        `${meta.writerTrace.changedCount} changed semantic state. Input mode: ` +
+        `\`${meta.writerTrace.inputMode}\`.`
+    );
+    lines.push(
+      `Trace integrity gate: **${meta.writerTrace.valid ? "PASS" : "FAIL"}**.`
+    );
+    lines.push("");
+    lines.push("| # | Decision domain | Writer | Changed | Pieces changed | Writes |");
+    lines.push("|---:|---|---|:---:|---:|---|");
+    for (const entry of meta.writerTrace.entries) {
+      lines.push(
+        `| ${entry.ordinal} | ${entry.decisionDomain} | \`${entry.writer}\` | ` +
+          `${entry.changed ? "yes" : "no"} | ${entry.changedPieceCount ?? "n/a"} | ` +
+          `${entry.writes.map((field) => `\`${field}\``).join(", ")} |`
+      );
+    }
+    lines.push("");
+  }
   lines.push(
     `Trip \`${meta.tripId}\` — ${meta.tripName}. Generated ${meta.generatedAt} by ` +
       `\`scripts/scorecard.mjs\` in **${meta.source}** mode. Scope: ${SCOPE.join(", ")}.`
@@ -1697,8 +2352,13 @@ function renderReport({ results, meta }) {
       ? "Input: the live run's own audit payload — what actually shipped, geocode lane included. " +
           "`records.legs` and review-question identity fields are not carried by this surface and " +
           "are reported NOT CHECKABLE rather than assumed."
-      : "Input: a re-assembly of the pinned parse with the matching saved geocode provider outputs " +
-          "reattached at the original boundary. Candidate-pool or result-id drift aborts the run."
+      : meta.source === "persisted-qa"
+        ? "Input: the run's exact persisted QA-record projection. No row is reconstructed from " +
+          "lineage. Fields omitted by the historical projection are reported unavailable rather " +
+          "than inferred."
+        : "Input: a route-equivalent re-assembly of the pinned parse with the matching saved " +
+          "geocode provider outputs reattached at the original boundary. Candidate-pool or " +
+          "result-id drift aborts the run."
   );
   lines.push("");
   lines.push(
@@ -1887,7 +2547,57 @@ function emit(ctx, meta) {
     );
   fs.writeFileSync(reportPath, `${text.trimEnd()}\n`, "utf8");
   console.log(`\nreport written: ${path.relative(rootDir, reportPath)}`);
-  process.exitCode = STRICT && counts.FAIL > 0 ? 1 : 0;
+  process.exitCode =
+    (meta.parity && (!meta.parity.equal || !meta.parity.scoreStatesEqual)) ||
+    (meta.writerTrace && !meta.writerTrace.valid) ||
+    (STRICT && counts.FAIL > 0)
+      ? 1
+      : 0;
+}
+
+function createProductionReplayParity({ productionContext, replayContext }) {
+  const fingerprintModule = require2(
+    path.join(rootDir, "lib/extraction/assembly-semantic-fingerprint.ts")
+  );
+  const productionFingerprint = fingerprintModule.createAssemblySemanticFingerprint({
+    legacyFingerprints: productionContext.report.fingerprints ?? {},
+    records: productionContext.records,
+    reviewAnswerOptionsAvailable: false,
+  });
+  const replayFingerprint = fingerprintModule.createAssemblySemanticFingerprint({
+    legacyFingerprints: replayContext.report.fingerprints ?? {},
+    records: replayContext.records,
+    reviewAnswerOptionsAvailable: false,
+  });
+  const semantic = fingerprintModule.diffAssemblySemanticFingerprints(
+    productionFingerprint,
+    replayFingerprint
+  );
+  const parityAssertions = ASSERTIONS.filter((assertion) => !assertion.parityExcluded);
+  const productionStates = new Map(
+    parityAssertions.map((assertion) => [
+      assertion.id,
+      evaluate(assertion, productionContext).state,
+    ])
+  );
+  const replayStates = new Map(
+    parityAssertions.map((assertion) => [
+      assertion.id,
+      evaluate(assertion, replayContext).state,
+    ])
+  );
+  const scoreStateDiffs = parityAssertions.flatMap((assertion) => {
+    const production = productionStates.get(assertion.id);
+    const replay = replayStates.get(assertion.id);
+    return production === replay
+      ? []
+      : [{ id: assertion.id, production, replay }];
+  });
+  return {
+    ...semantic,
+    scoreStateDiffs,
+    scoreStatesEqual: scoreStateDiffs.length === 0,
+  };
 }
 
 function objectValue(value) {
@@ -2061,35 +2771,29 @@ async function runExtractionAndAssembly({
   const assemblyModule = require2(
     path.join(rootDir, "lib/extraction/canonical-trip-assembly.ts")
   );
-  const qualityModule = require2(
-    path.join(rootDir, "lib/extraction/trip-quality-assessment.ts")
+  const corridorModule = require2(
+    path.join(
+      rootDir,
+      "lib/extraction/canonical-assembly-quality-corridor.ts"
+    )
   );
   const preparedEvidence = assemblyModule.prepareCanonicalEvidencePieces(
     result.evidenceArtifacts.pieces
   );
-  const assembly = assemblyModule.assembleCanonicalTripDraft({
+  const corridor = corridorModule.runCanonicalAssemblyQualityCorridor({
+    baseUsage: result.usage,
     draft: result.draft,
-    evidencePieces: preparedEvidence.pieces,
     fallbackTripName: tripName,
-    priorRecoveryActions: preparedEvidence.recoveryActions,
+    preparedEvidence,
+    sourceEvidenceArtifacts: result.evidenceArtifacts,
     tripId,
   });
-  const observations = assemblyModule.materializeCanonicalEvidenceObservations({
-    draft: assembly.draft,
-    observations: result.evidenceArtifacts.observations,
-    pieces: preparedEvidence.pieces,
-  });
-  const assessment = qualityModule.assessTripDraftQuality({
-    draft: assembly.draft,
-    evidenceArtifacts: { observations, pieces: preparedEvidence.pieces },
-    records: assembly.records,
-    usage: {
-      ...(result.usage && typeof result.usage === "object" ? result.usage : {}),
-      finalization: assembly.finalization,
-      identityRecovery: assembly.recovery,
-    },
-  });
-  return { assembly, assessment, preparedEvidence };
+  return {
+    assembly: corridor.assembly,
+    assessment: corridor.assessment,
+    corridor,
+    preparedEvidence,
+  };
 }
 
 // Recomputing the parse key is the guard, not a helper for computing one —
@@ -2127,6 +2831,29 @@ if (payloadPath) {
     source: "payload",
     tripId: payload.trip?.id ?? "(unknown)",
     tripName: payload.trip?.name ?? "(unnamed)",
+  });
+  process.exit(process.exitCode ?? 0);
+}
+
+// --- persisted QA mode: score exact records, never lineage reconstruction --
+if (qaBundlePath && !fromCacheDir) {
+  const bundle = JSON.parse(
+    fs.readFileSync(path.resolve(qaBundlePath), "utf8")
+  );
+  const auditPayload = qaAuditPayloadPath
+    ? JSON.parse(fs.readFileSync(path.resolve(qaAuditPayloadPath), "utf8"))
+    : null;
+  const ctx = contextFromQaBundle(bundle, auditPayload);
+  emit(ctx, {
+    generatedAt: new Date().toISOString().slice(0, 10),
+    geocodeRan: ctx.geocodeRan,
+    parseKey:
+      bundle.audit?.processingEvents?.find(
+        (event) => event?.stage === "quality_assessment"
+      )?.processingRunId ?? "(persisted QA)",
+    source: "persisted-qa",
+    tripId: bundle.records?.trip?.id ?? bundle.trip?.id ?? "(unknown)",
+    tripName: bundle.records?.trip?.name ?? bundle.trip?.name ?? "(unnamed)",
   });
   process.exit(process.exitCode ?? 0);
 }
@@ -2173,19 +2900,80 @@ if (fromCacheDir) {
     tripName: cachedTrip.name,
   });
 
+  const replayContext = buildContext({
+    records: assembly.records,
+    report: assessment.report,
+    pieces: preparedEvidence.pieces,
+    assembly,
+  });
+  let parity = null;
+  if (qaBundlePath) {
+    const bundle = JSON.parse(
+      fs.readFileSync(path.resolve(qaBundlePath), "utf8")
+    );
+    const auditPayload = qaAuditPayloadPath
+      ? JSON.parse(fs.readFileSync(path.resolve(qaAuditPayloadPath), "utf8"))
+      : null;
+    parity = createProductionReplayParity({
+      productionContext: contextFromQaBundle(bundle, auditPayload),
+      replayContext,
+    });
+    console.log(
+      `\nSEMANTIC PARITY ${parity.equal ? "PASS" : "FAIL"}: ` +
+        `production ${parity.leftHash}, replay ${parity.rightHash}`
+    );
+    console.log(
+      `SCORE-STATE PARITY ${parity.scoreStatesEqual ? "PASS" : "FAIL"}: ` +
+        `${parity.scoreStateDiffs.length} differing assertion(s)`
+    );
+  }
+  const traceEntries = assessment.report.canonicalization.stageWriterTrace ?? [];
+  const evidenceModule = require2(
+    path.join(rootDir, "lib/extraction/evidence-clustering.ts")
+  );
+  const semanticModule = require2(
+    path.join(rootDir, "lib/extraction/assembly-semantic-fingerprint.ts")
+  );
+  const replaySemanticFingerprint =
+    semanticModule.createAssemblySemanticFingerprint({
+      legacyFingerprints: assessment.report.fingerprints ?? {},
+      records: assembly.records,
+    });
+  const writerTrace = {
+    changedCount: traceEntries.filter((entry) => entry.changed).length,
+    codeVersion: evidenceModule.EVIDENCE_CLUSTER_VERSION,
+    entries: traceEntries,
+    entryCount: traceEntries.length,
+    inputHash: cachedParse.parse_key,
+    inputMode: "pinned_parse_plus_saved_geocode",
+    outputHash: replaySemanticFingerprint.hash,
+    valid:
+      traceEntries.length > 0 &&
+      traceEntries.every(
+        (entry, index) =>
+          entry.ordinal === index + 1 && entry.beforeHash && entry.afterHash
+      ) &&
+      traceEntries.some(
+        (entry) => entry.writer === "reconcileCardsAgainstCityNotes:early"
+      ) &&
+      traceEntries.some(
+        (entry) => entry.writer === "applyIntentBlockClassification"
+      ),
+  };
+  console.log(
+    `WRITER TRACE: ${writerTrace.entryCount} stages, ${writerTrace.changedCount} changed state`
+  );
+
   // Exit 0 by default, same as the live replay: this is a baseline, and a
   // permanently red gate teaches people to ignore it.
   emit(
-    buildContext({
-      records: assembly.records,
-      report: assessment.report,
-      pieces: preparedEvidence.pieces,
-      assembly,
-    }),
+    replayContext,
     {
       generatedAt: new Date().toISOString().slice(0, 10),
       geocodeRan: true,
       parseKey: cachedParse.parse_key.slice(0, 12),
+      parity,
+      writerTrace,
       // A distinct `source` (not "replay") is how the report records, in its
       // own meta, that this run came from a cache — no change to
       // `renderReport`'s logic needed: `meta.source` already flows straight

@@ -463,6 +463,7 @@ function createRecordSummaries({
       address: redactSensitiveText(item.address, includePrivate),
       canonicalId: item.canonicalId,
       categoryId: item.categoryId,
+      cityNoteKey: item.cityNoteKey ?? null,
       date: item.date,
       description: redactSensitiveText(item.description, includePrivate),
       endTime: item.endTime,
@@ -472,6 +473,7 @@ function createRecordSummaries({
       locationName: item.locationName,
       parentItemId: item.parentItemId,
       reviewRequired: item.reviewRequired,
+      sortOrder: item.sortOrder,
       startTime: item.startTime,
       status: item.status,
       title: item.title,
@@ -590,6 +592,12 @@ function summarizeReviewQuestion(
   includePrivate: boolean
 ) {
   return {
+    answerMax: question.answerMax ?? null,
+    answerMin: question.answerMin ?? null,
+    answerOptions: (question.answerOptions ?? []).map((option) => ({
+      label: redactSensitiveText(option.label, includePrivate),
+      value: redactSensitiveText(option.value, includePrivate),
+    })),
     answerType: question.answerType,
     canonicalId: question.canonicalId,
     decisionAnchor: question.decisionAnchor ?? null,

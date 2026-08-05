@@ -110,6 +110,7 @@ const records: StructuredTripRecords = {
       address: "Public museum address",
       canonicalId: "canonical-item-1",
       categoryId: "art_culture",
+      cityNoteKey: null,
       date: "2019-01-18",
       description: "Schonnbrunn palace and gardens.",
       endTime: null,
@@ -175,6 +176,12 @@ const records: StructuredTripRecords = {
   reviewQuestions: [
     {
       answerType: "confirm",
+      answerMax: "2019-01-21",
+      answerMin: "2019-01-18",
+      answerOptions: [
+        { label: "Use 1:00 PM", value: "13:00" },
+        { label: "Leave untimed", value: "untimed" },
+      ],
       answerValue: null,
       canonicalId: "canonical-question-1",
       createdAt: null,
@@ -390,6 +397,14 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(reviewPageSections.questions, 1);
   assert.equal(reviewPageSections["private-details"], 0);
   assert.equal(bundle.records?.review.openQuestions.length, 1);
+  assert.equal(bundle.records?.items[0]?.cityNoteKey, null);
+  assert.equal(bundle.records?.items[0]?.sortOrder, 1);
+  assert.equal(bundle.records?.review.openQuestions[0]?.answerMin, "2019-01-18");
+  assert.equal(bundle.records?.review.openQuestions[0]?.answerMax, "2019-01-21");
+  assert.deepEqual(bundle.records?.review.openQuestions[0]?.answerOptions, [
+    { label: "Use 1:00 PM", value: "13:00" },
+    { label: "Leave untimed", value: "untimed" },
+  ]);
   assert.deepEqual(bundle.records?.review.openQuestions[0]?.decisionAnchor, {
     date: "2026-09-02",
     legKey: "prague-czechia",
