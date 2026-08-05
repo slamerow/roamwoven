@@ -7,6 +7,7 @@ import { CanonicalIdentityInvariantError } from "@/lib/extraction/canonical-iden
 import {
   canonicalizeCanonicalReviewDetails,
   canonicalPiecePublicPayload,
+  disposeCanonicalPiece,
   EVIDENCE_CLUSTER_VERSION,
   type CanonicalEvidencePiece,
   type EvidenceObservation,
@@ -403,6 +404,21 @@ function repairCanonicalPieceIdentities(
         piece.outputEligible &&
         (sameObservationLineage(keeper.piece, piece) || sameSemanticPayload)
       ) {
+        // Direct outputEligible assignment (Task B6, one of the 5 bypass
+        // sites) — terminal (identity-collision repair family: this is
+        // its namesake, an id collision after deterministic recovery, not
+        // a real-world duplicate merge). `keeper.piece` is the "winner"
+        // this loop already keeps, but the code never transfers `piece`'s
+        // observations/fields onto it the way mergeCanonicalPieceInto
+        // would (no fieldSources/conflicts/actions transfer) — it stays
+        // terminal rather than being silently mislabelled a merge; the
+        // survey and work order Task B4 both flag this as PLAUSIBLY a
+        // merge candidate, recorded in
+        // docs/assembly-findings-inbox.md rather than changed here.
+        disposeCanonicalPiece(piece, {
+          kind: "terminal",
+          code: "PIECE_IDENTITY_COLLISION_REPAIR",
+        });
         piece.outputEligible = false;
         piece.actions.push({
           absorbedTitles: [],

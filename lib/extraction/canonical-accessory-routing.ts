@@ -1,6 +1,7 @@
 import type {
   CanonicalEvidenceAction,
   CanonicalEvidencePiece,
+  CanonicalPieceDisposition,
 } from "@/lib/extraction/evidence-clustering";
 import {
   normalizeText,
@@ -19,7 +20,15 @@ type RoutingActions = {
     source: CanonicalEvidencePiece;
     target: CanonicalEvidencePiece;
   }) => void;
-  suppressPiece: (piece: CanonicalEvidencePiece, reason: string) => void;
+  // Task B2: suppressPiece is injected from evidence-clustering.ts's own
+  // suppressCanonicalPiece, so its signature has to track that gate's
+  // signature exactly — this is a real call site of the same primitive,
+  // just reached through a function reference instead of a literal call.
+  suppressPiece: (
+    piece: CanonicalEvidencePiece,
+    reason: string,
+    disposition: CanonicalPieceDisposition
+  ) => void;
 };
 
 function stringValue(record: Record<string, unknown>, key: string) {
@@ -268,6 +277,31 @@ function removeCrossActivityDescriptionBleed({
   }
 }
 
+function pieceIdentityTrail(piece: CanonicalEvidencePiece) {
+  return new Set([
+    piece.id,
+    ...(Array.isArray(piece.payload._canonicalPriorPieceIds)
+      ? (piece.payload._canonicalPriorPieceIds as unknown[]).filter(
+          (value): value is string => typeof value === "string"
+        )
+      : []),
+  ]);
+}
+
+function dispositionTargetsPiece(
+  disposition: CanonicalPieceDisposition | undefined,
+  targetIds: Set<string>
+) {
+  if (!disposition) return false;
+  if (disposition.kind === "survivor") {
+    return targetIds.has(disposition.survivorId);
+  }
+  if (disposition.kind === "survivors") {
+    return disposition.survivorIds.some((id) => targetIds.has(id));
+  }
+  return false;
+}
+
 function routeDatedNoteEvidence({
   actions,
   note,
@@ -303,12 +337,25 @@ function routeDatedNoteEvidence({
       cityCompatible(piece, city) &&
       activityDateCompatible(piece, date)
   );
+  const noteIdentityIds = pieceIdentityTrail(note);
+  // Records previously folded into this note are content the note now owns.
+  // A later accessory pass may forward one to a real matching activity, but
+  // it may not delete it merely because the SAME mixed list also names other
+  // records that already survive elsewhere (RW-ORD-001 Invariant A).
+  const noteOwnedActivities = pieces.filter(
+    (piece) =>
+      piece.kind === "activity" &&
+      !piece.outputEligible &&
+      dispositionTargetsPiece(piece.disposition, noteIdentityIds)
+  );
+  const absorbingPieceIds = new Set<string>();
   const segments = splitEvidenceSegments(note.payload.description);
   const retained = segments.flatMap((segment) => {
     const text = normalizeText(segment);
-    const stayMention = compatibleStays.some((stay) =>
+    const matchingStays = compatibleStays.filter((stay) =>
       exactRecordMention(segment, [stay.payload.name, stay.payload.address])
     );
+    const stayMention = matchingStays.length > 0;
     const uniqueLodgingContext =
       compatibleStays.length === 1 &&
       /\b(?:sleep|sleeping|stay|lodging|hostel|hotel|check in|check-in|room|address)\b/.test(
@@ -318,13 +365,14 @@ function routeDatedNoteEvidence({
       exactRecordMention(segment, [activity.payload.title, activity.payload.address])
     );
     const activityMention = matchingActivities.length > 0;
-    const transportMention = compatibleTransport.some((transport) =>
+    const matchingTransport = compatibleTransport.filter((transport) =>
       exactRecordMention(segment, [
         transport.payload.title,
         transport.payload.departure,
         transport.payload.arrival,
       ])
     );
+    const transportMention = matchingTransport.length > 0;
     const uniqueMovementContext =
       compatibleTransport.length === 1 &&
       /\b(?:arrival|arrive|departure|depart|flight|fly|train|transfer)\b/.test(text);
@@ -380,14 +428,61 @@ function routeDatedNoteEvidence({
     // evidence (bookings, times, addresses), never the recommendation.
     const recommendationProse = hasLooseTipVocabulary(segment);
 
-    return !recommendationProse &&
+    const routesAway =
+      !recommendationProse &&
       (stayMention ||
         uniqueLodgingContext ||
         activityMention ||
         transportMention ||
-        uniqueMovementContext)
-      ? []
-      : [segment];
+        uniqueMovementContext);
+    if (!routesAway) return [segment];
+
+    for (const target of [
+      ...(stayMention ? matchingStays : []),
+      ...(uniqueLodgingContext ? compatibleStays : []),
+      ...matchingActivities,
+      ...(transportMention ? matchingTransport : []),
+      ...(uniqueMovementContext ? compatibleTransport : []),
+    ]) {
+      absorbingPieceIds.add(target.id);
+    }
+
+    const preservedNoteOwnedContent: string[] = [];
+    for (const owned of noteOwnedActivities) {
+      const ownedTitle = stringValue(owned.payload, "title");
+      if (!ownedTitle || !exactRecordMention(segment, [ownedTitle])) continue;
+
+      const survivingMatches = matchingActivities.filter((activity) => {
+        const activityTitle = stringValue(activity.payload, "title");
+        return Boolean(
+          activityTitle &&
+            exactRecordMention(ownedTitle, [activityTitle]) &&
+            exactRecordMention(activityTitle, [ownedTitle])
+        );
+      });
+      if (survivingMatches.length === 1) {
+        const survivor = survivingMatches[0];
+        absorbingPieceIds.add(survivor.id);
+        actions.addAction(survivor, {
+          absorbedTitles: [ownedTitle],
+          observationIds: [...owned.observationIds],
+          reason:
+            "forwarded a note-owned duplicate to the surviving canonical activity before removing mixed note evidence",
+          type: "attached",
+        });
+        continue;
+      }
+
+      const ownedDescription = stringValue(owned.payload, "description");
+      preservedNoteOwnedContent.push(
+        ownedDescription &&
+          !normalizeText(ownedDescription).includes(normalizeText(ownedTitle))
+          ? `${ownedTitle}: ${ownedDescription}`
+          : ownedDescription ?? ownedTitle
+      );
+    }
+
+    return preservedNoteOwnedContent;
   });
   const dedupedRetained = retained.filter((segment, index) => {
     const normalized = normalizeText(segment);
@@ -395,9 +490,22 @@ function routeDatedNoteEvidence({
   });
 
   if (dedupedRetained.length === 0 && segments.length > 0) {
+    const survivorIds = [...absorbingPieceIds];
     actions.suppressPiece(
       note,
-      "note evidence routed to canonical stay, activity, or travel records"
+      "note evidence routed to canonical stay, activity, or travel records",
+      survivorIds.length === 1
+        ? { kind: "survivor", survivorId: survivorIds[0] }
+        : survivorIds.length > 1
+        ? { kind: "survivors", survivorIds }
+        : {
+            // Defensive fallback: every routesAway branch above names its
+            // absorber, so this is unreachable without a new routing family.
+            // Keep the closed terminal code as an observable tripwire rather
+            // than inventing a destination.
+            kind: "terminal",
+            code: "NOTE_CONTENT_REDISTRIBUTED_NO_SINGLE_SURVIVOR",
+          }
     );
     return;
   }

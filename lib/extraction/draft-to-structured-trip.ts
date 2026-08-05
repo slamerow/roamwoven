@@ -34,6 +34,12 @@ import {
   getTripCategoryLabel,
   TRIP_CATEGORY_IDS,
 } from "@/lib/trip-categories";
+import { cityNoteKeyForLeg } from "@/lib/city-note-identity";
+import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  attachReviewQuestionDecisionAnchors,
+  isTripDecisionAnchor,
+} from "@/lib/review-decision-anchor";
 
 function canonicalRecordId({
   item,
@@ -372,6 +378,87 @@ function findLegForCanonicalCity(
   );
 }
 
+function uniqueCityNoteLeg(legs: TripLegRecord[]) {
+  const byKey = new Map<string, TripLegRecord>();
+
+  for (const leg of legs) {
+    const key = cityNoteKeyForLeg(leg);
+    if (key && !byKey.has(key)) byKey.set(key, leg);
+  }
+
+  return byKey.size === 1 ? [...byKey.values()][0] ?? null : null;
+}
+
+function findCityNoteLegForDate(legs: TripLegRecord[], date: string | null) {
+  const direct = findLegForDate(legs, date);
+  if (direct || !date) return direct;
+
+  // A final/open-ended leg and a leg's departure day are valid display
+  // anchors even though the general activity lookup is half-open. Choose the
+  // most recently started leg; a caller first verifies that the date is in the
+  // trip window, so a stray historical date cannot attach here.
+  return (
+    [...legs]
+      .filter((leg) => leg.arriveDate && leg.arriveDate <= date)
+      .sort((left, right) => {
+        const byArrival = (right.arriveDate ?? "").localeCompare(
+          left.arriveDate ?? ""
+        );
+        return byArrival || right.sortOrder - left.sortOrder;
+      })[0] ?? null
+  );
+}
+
+function findCityNoteLeg({
+  activity,
+  date,
+  dateIsInTripRange,
+  legs,
+  title,
+}: {
+  activity: DraftObject;
+  date: string | null;
+  dateIsInTripRange: boolean;
+  legs: TripLegRecord[];
+  title: string;
+}) {
+  const explicitCity = normalizeText(getString(activity, "city"));
+  const cityMatches = explicitCity
+    ? legs.filter((leg) => normalizeText(leg.city) === explicitCity)
+    : [];
+  const datedLeg = dateIsInTripRange
+    ? findCityNoteLegForDate(legs, date)
+    : null;
+
+  if (cityMatches.length > 0) {
+    const oneCity = uniqueCityNoteLeg(cityMatches);
+    if (oneCity) return oneCity;
+
+    // Same city name in different countries: the source date may select one
+    // canonical leg-city, but name equality alone may not.
+    if (datedLeg && cityMatches.some((leg) => leg.id === datedLeg.id)) {
+      return datedLeg;
+    }
+    return null;
+  }
+
+  // An explicit day-trip town has no leg. Its in-range source date identifies
+  // the parent leg; the date is discarded after deriving the city key.
+  if (datedLeg) return datedLeg;
+
+  const normalizedTitle = ` ${normalizeText(title)} `;
+  const titleMatches = legs.filter((leg) => {
+    const city = normalizeText(leg.city);
+    return city && normalizedTitle.includes(` ${city} `);
+  });
+  const titleCity = uniqueCityNoteLeg(titleMatches);
+  if (titleCity) return titleCity;
+
+  // A single-city trip is unambiguous even when the source note says only
+  // "Local tips". Multi-city trips fail closed instead of choosing leg 1.
+  return uniqueCityNoteLeg(legs);
+}
+
 function createStayRecords({
   draft,
   legs,
@@ -471,6 +558,7 @@ function createTransportRecords({
       departureLocation: departure,
       departureTime: getString(transport, "departureTime"),
       description,
+      descriptionVisibility: "traveler_password",
       fromLegId: null,
       id: canonicalRecordId({
         item: transport,
@@ -530,34 +618,38 @@ function createItemRecords({
     const candidateLeg =
       findLegForDate(legs, date) ??
       findLegForCanonicalCity(legs, getString(activity, "city"));
-    const finalDate = date;
-    const leg = candidateLeg;
+    const noteLeg =
+      itemType === "note"
+        ? findCityNoteLeg({
+            activity,
+            date,
+            dateIsInTripRange: !outsideTripRange(date),
+            legs,
+            title,
+          })
+        : null;
+    const cityNoteKey = noteLeg ? cityNoteKeyForLeg(noteLeg) : null;
+    const finalDate = itemType === "note" ? null : date;
+    const leg = itemType === "note" ? null : candidateLeg;
     const categoryId = exactCanonicalCategoryId(activity);
     const parentCanonicalId = getString(activity, "_canonicalParentPieceId");
-    // Arc G.1: notes are no longer structurally unflaggable.
-    //
-    // `itemType === "note" ? false : ...` meant a note could carry any
-    // date at all — including the 2018 dates that re-dated the whole trip
-    // in run 7.26.1 — and still project as a clean draft record nobody
-    // ever looked at. An UNDATED note is the normal city-note shape and
-    // stays clean. A note carrying a date that anchors to no leg is the
-    // defect shape, and it now shows up in review.
-    //
-    // Non-note behavior is deliberately unchanged here: dated-but-
-    // unanchored ACTIVITIES are a demotion-lane question, and the demotion
-    // lane is out of Arc G's scope.
+    // Notes use their source city/date only to derive a canonical city key.
+    // The persisted note owns neither a leg nor a day. An unplaceable note or
+    // a source date outside the trip window remains review-visible instead of
+    // borrowing the first leg. Non-note behavior is deliberately unchanged.
     const flagged =
       itemType === "note"
-        ? recoveryRequired || outsideTripRange(finalDate)
+        ? recoveryRequired || outsideTripRange(date) || !cityNoteKey
         : recoveryRequired || !finalDate;
 
     return {
       address: getString(activity, "address"),
       canonicalId: requiredCanonicalId(activity, `activity[${index}]`),
       categoryId,
+      cityNoteKey,
       date: finalDate,
       description,
-      endTime,
+      endTime: itemType === "note" ? null : endTime,
       id: canonicalRecordId({
         item: activity,
         kind: "item",
@@ -574,7 +666,7 @@ function createItemRecords({
       reviewRequired: flagged,
       sortOrder: index,
       sourceConfidence: "medium",
-      startTime,
+      startTime: itemType === "note" ? null : startTime,
       status: flagged ? "needs_review" : "draft",
       summary: null,
       title,
@@ -903,8 +995,16 @@ function assertCanonicalProjectionInvariant({
   canonicalPairs("activities", records.items).forEach(
     ({ index, record, source }) => {
       expect(`activity[${index}].title`, getString(source, "title"), record.title);
-      expect(`activity[${index}].date`, getString(source, "date"), record.date);
-      expect(`activity[${index}].itemType`, getString(source, "itemType"), record.itemType);
+      const sourceItemType = getString(source, "itemType");
+      // A source note's date is classification/placement evidence, not
+      // traveler semantics. RW-CLS-001 deliberately projects it away after
+      // deriving `cityNoteKey`; other item types remain byte-for-byte.
+      expect(
+        `activity[${index}].date`,
+        sourceItemType === "note" ? null : getString(source, "date"),
+        record.date
+      );
+      expect(`activity[${index}].itemType`, sourceItemType, record.itemType);
       expect(`activity[${index}].category`, getString(source, "category"), record.categoryId);
       expect(
         `activity[${index}].description`,
@@ -917,6 +1017,28 @@ function assertCanonicalProjectionInvariant({
         parentCanonicalId ? `${records.trip.id}-item-${parentCanonicalId}` : null,
         record.parentItemId
       );
+
+      if (record.itemType === "note") {
+        if (record.legId) {
+          violations.push(
+            `activity[${index}] City Note owns leg ${record.legId}`
+          );
+        }
+        if (
+          record.cityNoteKey &&
+          !records.legs.some(
+            (leg) => cityNoteKeyForLeg(leg) === record.cityNoteKey
+          )
+        ) {
+          violations.push(
+            `activity[${index}] City Note key ${record.cityNoteKey} has no leg anchor`
+          );
+        }
+      } else if (record.cityNoteKey) {
+        violations.push(
+          `activity[${index}] non-note carries City Note key ${record.cityNoteKey}`
+        );
+      }
     }
   );
 
@@ -983,6 +1105,12 @@ function assertCanonicalProjectionInvariant({
         `review ${question.id} targets missing canonical identity ${question.subjectCanonicalId}`
       );
     }
+    if (
+      (question.status === "open" || question.status === "noted") &&
+      !isTripDecisionAnchor(question.decisionAnchor)
+    ) {
+      violations.push(`review ${question.id} has no stable decision anchor`);
+    }
   });
 
   if (violations.length > 0) {
@@ -1030,7 +1158,7 @@ export function createStructuredTripRecordsFromDraft({
   });
   const weatherHooks = createWeatherHooks({ days, legs, tripId });
 
-  const records: StructuredTripRecords = {
+  const projectedRecords: StructuredTripRecords = {
     categories,
     days,
     items,
@@ -1051,6 +1179,7 @@ export function createStructuredTripRecordsFromDraft({
     trip,
     weatherHooks,
   };
+  const records = attachReviewQuestionDecisionAnchors(projectedRecords);
 
   assertCanonicalProjectionInvariant({ draft: finalizedDraft, records });
 

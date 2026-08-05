@@ -8,6 +8,40 @@ export function normalizeText(value: string | null | undefined) {
     .trim() ?? "";
 }
 
+// Bounded spelling-drift primitive for identity/containment checks. This is
+// deliberately NOT a general fuzzy matcher: it accepts exactly one insertion,
+// deletion, or substitution and leaves callers responsible for the stronger
+// structural evidence that makes that edit meaningful.
+export function differsByOneEdit(left: string, right: string) {
+  if (left === right || Math.abs(left.length - right.length) > 1) return false;
+
+  if (left.length === right.length) {
+    let differences = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) differences += 1;
+      if (differences > 1) return false;
+    }
+    return differences === 1;
+  }
+
+  const shorter = left.length < right.length ? left : right;
+  const longer = shorter === left ? right : left;
+  let shortIndex = 0;
+  let longIndex = 0;
+  let edits = 0;
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1;
+      longIndex += 1;
+      continue;
+    }
+    edits += 1;
+    longIndex += 1;
+    if (edits > 1) return false;
+  }
+  return true;
+}
+
 // Shared comparable fold (remediation Phase 1, audit finding B5): the
 // NFKD-based fold previously copy-pasted into parser-artifact-normalization,
 // source-coverage, and extraction-qa. One implementation, one tokenization \u2014

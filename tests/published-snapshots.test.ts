@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  createPublishedPrivateDetails,
   createPublishedTripSnapshotPayload,
   publishTripSnapshot,
 } from "@/lib/published-snapshots";
@@ -150,7 +151,8 @@ export default async function run() {
       date: "2031-04-01",
       departureLocation: "JFK",
       departureTime: "08:00",
-      description: "Confirmation: TRAVEL-SECRET.",
+      description:
+        "PRIVATE TRAVEL MEMO: Seat 12A and a quiet-car reminder without a code.",
       fromLegId: null,
       id: "transport-1",
       legId: null,
@@ -185,8 +187,26 @@ export default async function run() {
 
     const payload = createPublishedTripSnapshotPayload(records);
     const text = JSON.stringify(payload);
+    const travelCard = payload.travelerApp.cards.find(
+      (card) => card.id === "transport-1"
+    );
+    const protectedDescription = createPublishedPrivateDetails(records).find(
+      (detail) => detail.id === "transport-1:description"
+    );
 
     assert.doesNotMatch(text, /1 Public Hotel Way|HOTEL-SECRET|TRAVEL-SECRET/);
+    assert.doesNotMatch(text, /PRIVATE TRAVEL MEMO|quiet-car reminder/);
+    assert.equal(travelCard?.itemType, "transport");
+    assert.match(travelCard?.title ?? "", /JFK to VIE/);
+    assert.match(travelCard?.description ?? "", /Example Air/);
+    assert.match(travelCard?.description ?? "", /JFK/);
+    assert.match(travelCard?.description ?? "", /VIE/);
+    assert.ok(travelCard?.privateDetailIds.includes("transport-1:description"));
+    assert.equal(
+      protectedDescription?.value,
+      "PRIVATE TRAVEL MEMO: Seat 12A and a quiet-car reminder without a code."
+    );
+    assert.equal(protectedDescription?.visibility, "traveler_password");
   });
 
   await test("activity confirmations stay public while universal access secrets do not", () => {
@@ -251,6 +271,44 @@ export default async function run() {
     assert.match(access?.description ?? "", /Protected detail/i);
   });
 
+  await test("a legacy travel description matching its public provider stays protected without blocking publish", () => {
+    const records = createMinimalRecords();
+    records.transport = [{
+      arrivalLocation: "VIE",
+      arrivalTime: "12:00",
+      bookingUrl: null,
+      bookingUrlVisibility: "public",
+      canonicalId: "canonical-transport-legacy",
+      confirmationLabel: null,
+      confirmationVisibility: "public",
+      date: "2031-04-01",
+      departureLocation: "JFK",
+      departureTime: "08:00",
+      description: "Example Air",
+      fromLegId: null,
+      id: "transport-legacy",
+      legId: null,
+      privateDetailIds: [],
+      provider: "Example Air",
+      reviewRequired: false,
+      routeLabel: "JFK to VIE",
+      sourceConfidence: "high",
+      status: "draft",
+      toLegId: null,
+      transportType: "flight",
+      tripId: "trip-1",
+    }];
+
+    const payload = createPublishedTripSnapshotPayload(records);
+    const protectedDescription = createPublishedPrivateDetails(records).find(
+      (detail) => detail.id === "transport-legacy:description"
+    );
+
+    assert.equal(payload.travelerApp.cards[0]?.itemType, "transport");
+    assert.equal(protectedDescription?.value, "Example Air");
+    assert.equal(protectedDescription?.visibility, "traveler_password");
+  });
+
   await test("publishTripSnapshot commits snapshot and private details through the transactional RPC", async () => {
     const mock = mockPublishDependencies({
       data: {
@@ -297,6 +355,68 @@ export default async function run() {
           visibility: "traveler_password",
         },
       ]);
+    } finally {
+      mock.restore();
+    }
+  });
+
+  await test("publishTripSnapshot transactionally stores a protected transport description", async () => {
+    const records = createMinimalRecords();
+    records.transport = [{
+      arrivalLocation: "VIE",
+      arrivalTime: "12:00",
+      bookingUrl: null,
+      bookingUrlVisibility: "public",
+      canonicalId: "canonical-transport-1",
+      confirmationLabel: null,
+      confirmationVisibility: "public",
+      date: "2031-04-01",
+      departureLocation: "JFK",
+      departureTime: "08:00",
+      description: "Seat 12A in the quiet car.",
+      fromLegId: null,
+      id: "transport-1",
+      legId: null,
+      privateDetailIds: [],
+      provider: "Example Air",
+      reviewRequired: false,
+      routeLabel: "JFK to VIE",
+      sourceConfidence: "high",
+      status: "draft",
+      toLegId: null,
+      transportType: "flight",
+      tripId: "trip-1",
+    }];
+    const mock = mockPublishDependencies({
+      data: {
+        created_at: "2026-08-05T00:00:00.000Z",
+        id: "snapshot-travel-description",
+        share_token: "share-token-travel-description",
+        snapshot_json: createPublishedTripSnapshotPayload(records),
+        trip_id: "trip-1",
+        version: 1,
+      },
+    });
+
+    try {
+      await publishTripSnapshot({ records, tripId: "trip-1" });
+      const privateDetails = mock.calls[0]?.params.p_private_details as Array<{
+        id: string;
+        value: string;
+        visibility: string;
+      }>;
+      assert.deepEqual(
+        privateDetails.find((detail) => detail.id === "transport-1:description"),
+        {
+          id: "transport-1:description",
+          label: "Travel details",
+          reason: "Travel-card descriptions stay behind the trip password.",
+          subjectId: "transport-1",
+          subjectType: "transport",
+          value: "Seat 12A in the quiet car.",
+          visibility: "traveler_password",
+        }
+      );
     } finally {
       mock.restore();
     }

@@ -9,6 +9,7 @@ import {
   type StructuredReviewEditField,
 } from "@/lib/generated-trip-review";
 import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
+import { firstCityNoteLeg } from "@/lib/city-note-identity";
 import {
   getSoftTransportCompletenessIssues,
   getSourceBackedRequiredTransportIssues,
@@ -698,12 +699,10 @@ function createSummaryCityNotes(
   records: StructuredTripRecords,
   activeItems: StructuredTripRecords["items"]
 ): GeneratedTripSummaryCityNote[] {
-  const legById = new Map(records.legs.map((leg) => [leg.id, leg]));
-
   return activeItems
     .filter((item) => item.itemType === "note")
     .map((item) => {
-      const leg = item.legId ? legById.get(item.legId) : null;
+      const leg = firstCityNoteLeg(records.legs, item);
       const meta = leg
         ? [leg.displayName, leg.country].filter(Boolean).join(", ")
         : "City note";
@@ -910,7 +909,7 @@ function createSummaryDays(
 }
 
 function createSummaryWarnings({
-  days,
+  days: _days,
   records,
 }: {
   days: GeneratedTripSummaryDay[];
@@ -926,25 +925,11 @@ function createSummaryWarnings({
   const activeTransport = records.transport.filter((item) =>
     isActiveStatus(item.status)
   );
-  const bloatWarnings = days
-    .filter((day) => {
-      const sourceDay = records.days.find((item) => item.id === day.id);
-      const activityCount = day.entries.filter(
-        (entry) => entry.kind === "activity" || entry.kind === "review"
-      ).length;
-
-      return activityCount >= 7 && sourceDay?.status !== "confirmed";
-    })
-    .map((day) => ({
-      code: "activity_bloat" as const,
-      detail:
-        "This day still has 7 or more visible activity cards after assembly. Consider grouping a true route, moving loose ideas to city tips, or removing duplicates.",
-      id: `${day.id}-activity-bloat`,
-      severity: "quiet" as const,
-      subjectId: day.id,
-      subjectType: "day" as const,
-      title: `${day.label} has a lot of visible cards`,
-    }));
+  // RW-CLS-001: density is an internal re-evaluation trigger in the intent-
+  // block classifier, never a maker-facing defect by itself. Keep the
+  // `activity_bloat` warning code in the public type so historical snapshots
+  // remain readable, but new summaries do not manufacture one from a >=7
+  // threshold. A dense coherent plan is valid trip content.
   const criticalTransportWarnings = records.transport
     .filter((item) => isActiveStatus(item.status))
     .filter((item) => item.status !== "confirmed")
@@ -1092,7 +1077,6 @@ function createSummaryWarnings({
     ...duplicateTitleWarnings,
     ...stayCollisionWarnings,
     ...transportCollisionWarnings,
-    ...bloatWarnings,
   ];
 }
 

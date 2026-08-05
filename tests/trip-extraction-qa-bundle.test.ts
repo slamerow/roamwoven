@@ -178,6 +178,14 @@ const records: StructuredTripRecords = {
       answerValue: null,
       canonicalId: "canonical-question-1",
       createdAt: null,
+      decisionAnchor: {
+        date: "2026-09-02",
+        legKey: "prague-czechia",
+        normalizedTitle: "should u maliru use 1 00 pm",
+        sourceAnchorRef: "review:7f9c2a10",
+        subjectType: "review_question",
+        version: 1,
+      },
       evidence: "The source says Lunch: U Maliru 1:00 PM.",
       guessedValue: "1:00 PM",
       id: "question-1",
@@ -352,6 +360,14 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(bundle.records?.stays[0]?.address, "[redacted stay address]");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "[redacted confirmation]");
   assert.equal(bundle.records?.transport[0]?.departureTime, "09:20");
+  assert.equal(
+    bundle.records?.transport[0]?.description,
+    "[redacted protected travel description]"
+  );
+  assert.equal(
+    bundle.records?.transport[0]?.descriptionVisibility,
+    "traveler_password"
+  );
   assert.equal(bundle.records?.counts.actionRequiredReviewItems, 1);
   assert.equal(bundle.records?.counts.reviewRequiredRecords, 1);
   assert.equal(
@@ -374,6 +390,14 @@ test("QA bundle redacts private values and raw material text by default", () => 
   assert.equal(reviewPageSections.questions, 1);
   assert.equal(reviewPageSections["private-details"], 0);
   assert.equal(bundle.records?.review.openQuestions.length, 1);
+  assert.deepEqual(bundle.records?.review.openQuestions[0]?.decisionAnchor, {
+    date: "2026-09-02",
+    legKey: "prague-czechia",
+    normalizedTitle: "should u maliru use 1 00 pm",
+    sourceAnchorRef: "review:7f9c2a10",
+    subjectType: "review_question",
+    version: 1,
+  });
   assert.equal(bundle.records?.review.calls.length, 1);
   assert.equal(bundle.records?.counts.dismissedQuestions, 1);
   assert.equal(bundle.records?.review.dismissedQuestions.length, 1);
@@ -418,5 +442,10 @@ test("QA bundle can include private debug previews when explicitly requested", (
   assert.equal(bundle.records?.privateDetails[0]?.value, "2468");
   assert.equal(bundle.records?.stays[0]?.address, "Private apartment address");
   assert.equal(bundle.records?.stays[0]?.confirmationLabel, "ABC123");
+  assert.equal(bundle.records?.transport[0]?.description, "RegioJet RJ 1033.");
+  assert.equal(
+    bundle.records?.transport[0]?.descriptionVisibility,
+    "traveler_password"
+  );
   assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "door code 2468");
 });

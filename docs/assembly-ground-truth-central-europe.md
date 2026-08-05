@@ -175,10 +175,10 @@ day with nothing groupable ships as 9 cards. Jan 16 lands at 5 cards.
 
 - ⊕ Schönbrunn Palace visit — ordered sub-stops: Gloriette, Orangeriegarten, Palm House, Apple
   Strudel Show, Panorama Train. One parent card.
-- **Δ** ▫ Museum: Mumok *or* Natural History — one untimed card, alternatives in the
-  description. Disjunction rule: an explicit "or" between items = a committed slot with an
-  unresolved choice → one card, choice in description, no question, no blocker (mirrors the
-  Prague Castle ticket treatment).
+- **Δ (CEO ruling, 2026-08-05)** Mumok Museum and Natural History Museum are separate
+  source lines with no `or`, booking, time, sequence, or other commitment marker. Preserve both
+  as separate ideas inside the Vienna city note — no Activity, no Question, and no fabricated
+  choice between them.
 - Everything else on the day (Ferris wheel, Hundertwasser Haus, Museum of Illusions, Mozarthaus,
   Ring Tram Tour, Prater, Leopold Museum, St. Charles Church, St. Stephen's Cathedral) →
   **Vienna city notes** (ideas) — no booking, time, or sequence. Opening hours/prices attach to

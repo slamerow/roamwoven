@@ -194,7 +194,8 @@ The walk lane fires only on crowded days
 `evidence-clustering.ts:8322`). Missed demotion is inflating that signal:
 
 - **Jan 19 - 12 observed cards, GT says 2.** Ten of the twelve are Schonbrunn
-  sub-stops, the Mumok-or-NHM disjunction, or Vienna city notes. The day only
+  sub-stops or Vienna city-note ideas, including the separate Mumok and Natural
+  History lines (2026-08-05 source correction). The day only
   looks crowded because demotion never ran. GT wants NO walk group here -
   Schonbrunn is containment, not a walk.
 - **Jan 22 - 12 observed, GT says 10 individual cards and NO grouping.** This is

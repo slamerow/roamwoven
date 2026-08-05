@@ -287,10 +287,10 @@ export default async function run() {
     );
   });
 
-  await test("a split disjunction folds into one X-or-Y card (Mumok or Natural History)", () => {
+  await test("an explicit split disjunction folds into one X-or-Y card", () => {
     const sourceText = [
       "Saturday, January 19th",
-      "12:00 Mumok or Natural history museum",
+      "12:00 Modern Art Museum or Design Museum",
     ].join("\n");
     const result = normalizeParserStageArtifacts([
       stage("Saturday, January 19th", emptyStage({
@@ -299,21 +299,21 @@ export default async function run() {
             category: "art_culture",
             date: "2019-01-19",
             itemType: "activity",
-            title: "Mumok",
+            title: "Modern Art Museum",
           },
           {
             category: "art_culture",
             date: "2019-01-19",
             itemType: "activity",
-            title: "Natural History Museum",
+            title: "Design Museum",
           },
         ],
       }), sourceText),
     ]);
     const activities = firstStage(result).activities;
 
-    assert.equal(activities[0].title, "Mumok or Natural History Museum");
-    assert.match(String(activities[0].description), /Natural History Museum/);
+    assert.equal(activities[0].title, "Modern Art Museum or Design Museum");
+    assert.match(String(activities[0].description), /Design Museum/);
     assert.equal(activities[1].evidenceRole, "context");
     assert.equal(
       result.repairs.filter((repair) => repair.kind === "disjunction_split")

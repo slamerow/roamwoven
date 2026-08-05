@@ -11,6 +11,13 @@ const ALLOWED_ENFORCEMENT = new Set([
   "KNOWN_GAP",
   "NOT_APPLICABLE",
 ]);
+// Every backticked `tests/...` path anywhere in an entry, not only the ones
+// under `- Tests:`. Entries cite test files in their Evidence prose too
+// ("Enforced by `tests/entity-winner.test.ts`"), and a citation to a file that
+// does not exist is the same defect wherever it sits: the ledger claiming
+// coverage that cannot be run. The scorecard's ledger-defect class, enforced
+// here as a unit test.
+const CITED_TEST_FILE = /`(tests\/[A-Za-z0-9._/-]+\.test\.(?:ts|mjs))`/g;
 
 function contractSections(source: string) {
   const matches = [...source.matchAll(CONTRACT_HEADING)];
@@ -28,13 +35,31 @@ function field(section: string, name: string) {
   return section.match(new RegExp("^- " + name + ": `([^`]+)`$", "m"))?.[1];
 }
 
+function citedTestFiles(section: string) {
+  return [...section.matchAll(CITED_TEST_FILE)].map((match) => match[1] ?? "");
+}
+
 export default function run() {
   const source = fs.readFileSync(CONTRACT_PATH, "utf8");
+  const parserSource = fs.readFileSync(
+    path.join(process.cwd(), "lib", "extraction", "openai-trip-parser.ts"),
+    "utf8"
+  );
   const sections = contractSections(source);
   const ids = sections.map((section) => section.id);
 
   assert.ok(sections.length >= 10, "expected the initial contract ledger");
   assert.equal(new Set(ids).size, ids.length, "contract IDs must be unique");
+  assert.doesNotMatch(
+    parserSource,
+    /Mumok\s+or\s+(?:the\s+)?Natural History/i,
+    "the parser prompt must not reintroduce the source-disproved museum choice"
+  );
+  assert.match(
+    parserSource,
+    /Never infer 'or' from adjacent source lines, proximity, or venue knowledge/,
+    "the parser prompt must state the source-only disjunction boundary"
+  );
 
   for (const section of sections) {
     const status = field(section.body, "Status");
@@ -54,10 +79,29 @@ export default function run() {
     } else {
       assert.notEqual(enforcement, "NOT_APPLICABLE");
     }
+
+    // A contract entry may not cite coverage that does not exist. Before this
+    // check the ledger could name a test file that had been renamed or never
+    // written, and the entry still read as covered — the same "absent is not
+    // zero" failure the dockets keep finding in telemetry, applied to the
+    // ledger's own evidence.
+    const cited = citedTestFiles(section.body);
+    assert.ok(
+      cited.length > 0,
+      `${section.id} must cite at least one test file`
+    );
+
+    for (const testFile of new Set(cited)) {
+      assert.ok(
+        fs.existsSync(path.join(process.cwd(), testFile)),
+        `${section.id} cites ${testFile}, which does not exist`
+      );
+    }
   }
 
   for (const required of [
     "RW-GOV-001",
+    "RW-ORD-001",
     "RW-ING-001",
     "RW-ING-002",
     "RW-QA-001",

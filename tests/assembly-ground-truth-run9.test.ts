@@ -220,6 +220,29 @@ export default async function run() {
         ),
       "the palace is the visit's parent"
     );
+
+    // Invariant A: the reference note is a MIXED list. Its Schönbrunn plan
+    // members are represented by surviving cards, but Ferris wheel and The
+    // Prater were explicitly folded into the note as their single home. The
+    // accessory router may remove the represented entries; it may not delete
+    // the whole segment and strand the note-owned entries with it.
+    const viennaNote = draft.activities.find(
+      (item) => item.itemType === "note" && /vienna/i.test(String(item.title))
+    );
+    assert.ok(viennaNote, "the Vienna City Note must survive the mixed list");
+    assert.match(String(viennaNote.description ?? ""), /ferris wheel/i);
+    assert.match(String(viennaNote.description ?? ""), /the prater/i);
+    assert.doesNotMatch(
+      String(viennaNote.description ?? ""),
+      /schönbrunn palace|gloriette|orangeriegarten|palm house/i,
+      "already-represented plan members must not duplicate into City Notes"
+    );
+    assert.equal(
+      result.summary.terminalDisposalCountsByCode
+        .NOTE_CONTENT_REDISTRIBUTED_NO_SINGLE_SURVIVOR,
+      0,
+      "a mixed note with note-owned content is not a terminal disposal"
+    );
   });
 
   await test("run9 fold guard: a heading-committed entity never folds into its note copy, a hedged copy still does", () => {

@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation";
 import { TravelerAppShell } from "@/components/traveler-app-shell";
-import { getPublishedTripSnapshotByToken } from "@/lib/published-snapshots";
+import {
+  getPublishedTripAccessStateByToken,
+  getPublishedTripPrivateDetailsByToken,
+} from "@/lib/published-snapshots";
+import { resolvePublishedTravelerAccessMode } from "@/lib/published-traveler-access";
 import { getAsiaDemoTravelerAppViewModel } from "@/lib/traveler-view-model";
 
 export default async function TravelerAppPage({
@@ -14,16 +18,29 @@ export default async function TravelerAppPage({
     return <TravelerAppShell shareToken="demo" trip={getAsiaDemoTravelerAppViewModel()} />;
   }
 
-  const snapshot = await getPublishedTripSnapshotByToken(token);
+  const accessState = await getPublishedTripAccessStateByToken(token);
 
-  if (!snapshot) {
+  if (!accessState) {
+    notFound();
+  }
+
+  const travelerAccess = await resolvePublishedTravelerAccessMode({
+    loadPrivateDetails: () => getPublishedTripPrivateDetailsByToken(token),
+    passwordEnabled: accessState.passwordEnabled,
+  });
+
+  // The second token validation inside the private-detail read closes the
+  // publication-revocation race between access-state and detail loading.
+  if (!travelerAccess) {
     notFound();
   }
 
   return (
     <TravelerAppShell
+      initialProtectedDetails={travelerAccess.initialProtectedDetails}
+      initialUnlocked={travelerAccess.initialUnlocked}
       shareToken={token}
-      trip={snapshot.snapshotJson.travelerApp}
+      trip={accessState.snapshot.snapshotJson.travelerApp}
     />
   );
 }

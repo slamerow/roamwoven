@@ -897,10 +897,9 @@ export function createAuditDiagnostics({
   // Run 7.23.2 chain 2: the phantom stay "Eli J Kamerow" was structurally
   // INVISIBLE to this detector because it scanned records.items only. The
   // walk now covers every record kind's public fields — items, stays
-  // (name, publicLocationLabel), and transport (description) — matching
-  // the output gate's field coverage exactly, so scrub and detector judge
-  // the same surface (the chain-1 asymmetry was field coverage, not
-  // shapes).
+  // (name, publicLocationLabel), and the structured transport face. Under
+  // RW-PRI-001 Δ4 a transport description is protected in full and is not
+  // part of the public audit surface.
   const identityLeakEntries = [
     ...records.items
       .filter((item) => item.status !== "ignored")
@@ -931,7 +930,12 @@ export function createAuditDiagnostics({
       .map((row) => ({
         id: row.id,
         label: `${row.date ?? "undated"} - ${row.routeLabel}`,
-        prose: [row.description]
+        prose: [
+          row.routeLabel,
+          row.departureLocation,
+          row.arrivalLocation,
+          row.provider,
+        ]
           .filter(
             (value): value is string =>
               typeof value === "string" && value.length > 0
@@ -962,19 +966,12 @@ export function createAuditDiagnostics({
   }
 
   // Run 7.23.2 chain 3: protected-code-shaped tokens in PROTECTED-CLASS
-  // prose (transport descriptions, stay name/label) — judged by the same
-  // predicates the output gate's prose-side code pass uses, so the bar
-  // "zero code-shape tokens in any public field" is verifiable from the
-  // bundle. Activity booking references stay public (Delta-2 ruling), so
-  // ordinary item prose is deliberately NOT scanned here.
+  // PUBLIC prose. Transport descriptions left this surface under Δ4; they
+  // are one password-gated container regardless of their contents. Stay
+  // name/label remains public and is still checked. Activity booking
+  // references stay public (Delta-2 ruling), so ordinary item prose is
+  // deliberately NOT scanned here.
   const codeShapeLeakEntries = [
-    ...records.transport
-      .filter((row) => row.status !== "ignored")
-      .map((row) => ({
-        id: row.id,
-        label: `${row.date ?? "undated"} - ${row.routeLabel}`,
-        tokens: findProtectedCodeShapedTokens(row.description ?? ""),
-      })),
     ...records.stays
       .filter((stay) => stay.status !== "ignored")
       .map((stay) => ({
@@ -1000,7 +997,7 @@ export function createAuditDiagnostics({
       ),
       code: "protected_code_shape_in_public_prose",
       detail:
-        "Transport or stay public prose carries protected-code-shaped tokens (long digit runs or mixed letter+digit locators). Stay and inter-city travel booking identifiers are protected class (RW-PRI-001): the prose-side code pass should have swept them even when no protected slot captured the value.",
+        "Stay public prose carries protected-code-shaped tokens (long digit runs or mixed letter+digit locators). Stay booking identifiers are protected class (RW-PRI-001): the prose-side code pass should have swept them even when no protected slot captured the value.",
       // Token COUNT only, never the token value — the diagnostic must be
       // safe in redacted bundles.
       evidence: codeShapeLeakEntries
@@ -1010,7 +1007,7 @@ export function createAuditDiagnostics({
             `${entry.label} [${entry.tokens.length} code-shaped token${entry.tokens.length === 1 ? "" : "s"}]`
         ),
       severity: "p0",
-      title: "Protected-code-shaped tokens shipped in transport/stay prose",
+      title: "Protected-code-shaped tokens shipped in stay prose",
     });
   }
 

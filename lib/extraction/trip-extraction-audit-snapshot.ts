@@ -161,6 +161,55 @@ export function createCanonicalizationSummary(usage: unknown) {
         releasedDecisionCount: Number(claims.releasedDecisionCount) || 0,
       };
     })(),
+    intentBlocks: (() => {
+      const ledger = asRecord(evidence.intentBlocks);
+      const blocks = Array.isArray(ledger.blocks) ? ledger.blocks : [];
+      return {
+        blocks: blocks.flatMap((value) => {
+          const block = asRecord(value);
+          const type = block.type;
+          if (
+            type !== "plan" &&
+            type !== "ideas" &&
+            type !== "logistics" &&
+            type !== "evidence" &&
+            type !== "ambiguous"
+          ) {
+            return [];
+          }
+          return [
+            {
+              blockId:
+                typeof block.blockId === "string" ? block.blockId : "",
+              date: typeof block.date === "string" ? block.date : "",
+              memberIds: Array.isArray(block.memberIds)
+                ? block.memberIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              memberTitles: Array.isArray(block.memberTitles)
+                ? block.memberTitles.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              observationIds: Array.isArray(block.observationIds)
+                ? block.observationIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              reason: typeof block.reason === "string" ? block.reason : "",
+              type: type as
+                | "plan"
+                | "ideas"
+                | "logistics"
+                | "evidence"
+                | "ambiguous",
+            },
+          ];
+        }),
+        version: 1 as const,
+      };
+    })(),
     identityRepairCount: Array.isArray(identityRecovery.actions)
       ? identityRecovery.actions.length
       : 0,
@@ -350,6 +399,18 @@ export function createExtractionSummary(usage: unknown) {
                   return typeof record.query === "string"
                     ? [
                         {
+                          candidateId:
+                            typeof record.candidateId === "string"
+                              ? record.candidateId
+                              : null,
+                          containerSourceSupported:
+                            typeof record.containerSourceSupported === "boolean"
+                              ? record.containerSourceSupported
+                              : null,
+                          containerTitle:
+                            typeof record.containerTitle === "string"
+                              ? record.containerTitle
+                              : null,
                           granularity:
                             typeof record.granularity === "string"
                               ? record.granularity
@@ -388,6 +449,8 @@ export function createExtractionSummary(usage: unknown) {
             retryAcceptedCount: Number(geocode.retryAcceptedCount) || 0,
             retryCount: Number(geocode.retryCount) || 0,
             retryOutOfCityCount: Number(geocode.retryOutOfCityCount) || 0,
+            retryUnlistedContainerCount:
+              Number(geocode.retryUnlistedContainerCount) || 0,
             retrySkippedOverBudgetCount:
               Number(geocode.retrySkippedOverBudgetCount) || 0,
             skippedOverBudgetCount:

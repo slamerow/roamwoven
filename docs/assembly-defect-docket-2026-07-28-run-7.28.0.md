@@ -494,8 +494,9 @@ asking a redundant question — it ships a decision the traveler never made.
 - **Unrelated venues fused into one title**: `"House of Terror Museum or Retró
   Lángos Büfé"` — a museum and a lángos stand. GT has House of Terror as a
   Jan-23 activity and Retró Lángos Büfé as a Budapest city note. The disjunction
-  rule exists for genuine either/or choices (Mumok *or* Natural History), not
-  for arbitrary pairs.
+  rule exists for genuine source-authored either/or choices (for example,
+  `Lunch at X or Y`), not for arbitrary pairs. The old Mumok/Natural History
+  example was superseded by the 2026-08-05 source correction: no `or` exists.
 - **`Great Synagogue / Jewish History` categorised `food_dining`.**
 - **The rental car split across two cards** — `"Car selection"`
   (`admin_logistics`, `needs_review`) and `"Pick up car"` (`arrival_departure`)

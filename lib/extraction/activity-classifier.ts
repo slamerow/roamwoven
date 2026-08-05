@@ -24,6 +24,7 @@ import {
   hasCommitmentLanguage,
   hasLooseTipVocabulary,
   hasStandaloneActivityAnchor,
+  SITE_CONTAINER_NOUN_PATTERN,
   type DraftActivityCardInput,
 } from "@/lib/trip-card-taxonomy";
 import { comparableTokens, normalizeText } from "@/lib/extraction/traveler-text";
@@ -32,9 +33,13 @@ export type MentionCommitment = "fixed" | "sequenced" | "none";
 
 // A named-site container noun. Shared with grouping (evidence-clustering
 // re-exports this as SAME_SITE_CONTAINER_PATTERN) so the site↔component
-// relation and same-site grouping can never diverge.
-export const SITE_CONTAINER_NOUN_PATTERN =
-  /\b(?:castle|palace|complex|grounds|citadel|fortress|acropolis|abbey|monastery)\b/i;
+// relation and same-site grouping can never diverge. Defined in
+// lib/trip-card-taxonomy.ts (Task C2, 2026-08-04 work order) — this module
+// already imports from that one, so defining it there instead of here
+// avoids an import cycle. Re-exported under the same name so this module's
+// own callers (evidence-clustering.ts, geocode-verification.ts) don't need
+// to change their import path.
+export { SITE_CONTAINER_NOUN_PATTERN };
 
 // --- Own-text evidence ------------------------------------------------------
 
@@ -273,6 +278,354 @@ export function classifyIdeaListSections(entries: IdeaListEntry[]) {
   }
 
   return demote;
+}
+
+// --- Coherent intent blocks (RW-CLS-001, 2026-08-05) ----------------------
+
+export type IntentBlockType =
+  | "plan"
+  | "ideas"
+  | "logistics"
+  | "evidence"
+  | "ambiguous";
+
+export type IntentBlockEntry = {
+  approxLatitude: number | null;
+  approxLongitude: number | null;
+  // True when intervening source observations change from candidate cards to
+  // context/note material. A date heading alone is never a boundary or an
+  // intent signal.
+  boundaryBefore: boolean;
+  category: string | null;
+  date: string;
+  hasExplicitChoice: boolean;
+  hasFixedEvidence: boolean;
+  hasHedgeMarker: boolean;
+  hasIdeaSignal: boolean;
+  hasResearchEvidence: boolean;
+  // Source-supported site containment, not geographic proximity by itself.
+  hasSourceSupportedPlan: boolean;
+  // A recommendation-category majority is meaningful only inside an actual
+  // source section. Parser arrays with no labels keep the benefit of doubt.
+  hasSourceStructure: boolean;
+  id: string;
+  itemType: string | null;
+  observationIds: string[];
+  sourceKey: string;
+  sourceOrder: number;
+  title: string;
+  verifiedLatitude: number | null;
+  verifiedLongitude: number | null;
+};
+
+export type IntentBlockDecision = {
+  blockId: string;
+  date: string;
+  memberIds: string[];
+  memberTitles: string[];
+  observationIds: string[];
+  reason: string;
+  type: IntentBlockType;
+};
+
+export type IntentBlockClassification = {
+  blocks: IntentBlockDecision[];
+  entryTypes: Map<string, IntentBlockType>;
+};
+
+const INTENT_BLOCK_RADIUS_KM = 2;
+const DENSITY_REEVALUATION_FLOOR = 7;
+const LOGISTICS_PATTERN = /admin|logistics|errand|laundry/i;
+const EVIDENCE_PATTERN = /accessory|evidence|receipt|ticket_detail/i;
+
+function finiteIntentCoordinate(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function coordinateForIntent(
+  entry: IntentBlockEntry,
+  geocodeVerificationRan: boolean
+) {
+  const verifiedLat = finiteIntentCoordinate(entry.verifiedLatitude);
+  const verifiedLng = finiteIntentCoordinate(entry.verifiedLongitude);
+  if (verifiedLat !== null && verifiedLng !== null) {
+    return { lat: verifiedLat, lng: verifiedLng };
+  }
+  // Once verification ran anywhere in the trip, production's locked policy
+  // refuses parser coordinates. Classification follows the same rule: a
+  // missing verified result means "no geographic evidence", not permission to
+  // fall back to plausible-looking model numbers.
+  if (geocodeVerificationRan) return null;
+  const approxLat = finiteIntentCoordinate(entry.approxLatitude);
+  const approxLng = finiteIntentCoordinate(entry.approxLongitude);
+  return approxLat !== null && approxLng !== null
+    ? { lat: approxLat, lng: approxLng }
+    : null;
+}
+
+function intentDistanceKm(
+  left: { lat: number; lng: number },
+  right: { lat: number; lng: number }
+) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const lat1 = radians(left.lat);
+  const lat2 = radians(right.lat);
+  const deltaLat = radians(right.lat - left.lat);
+  const deltaLng = radians(right.lng - left.lng);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function sourceSegments(entries: IntentBlockEntry[]) {
+  const groups = new Map<string, IntentBlockEntry[]>();
+  for (const entry of entries) {
+    const key = `${entry.date}|${entry.sourceKey}`;
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+  }
+
+  const segments: IntentBlockEntry[][] = [];
+  for (const group of groups.values()) {
+    group.sort(
+      (left, right) =>
+        left.sourceOrder - right.sourceOrder || left.id.localeCompare(right.id)
+    );
+    let current: IntentBlockEntry[] = [];
+    for (const entry of group) {
+      if (entry.boundaryBefore && current.length > 0) {
+        segments.push(current);
+        current = [];
+      }
+      current.push(entry);
+    }
+    if (current.length > 0) segments.push(current);
+  }
+  return segments;
+}
+
+// Geography identifies where a source-contiguous run stops being coherent;
+// it never establishes intent. Connected components avoid one bad adjacent
+// lookup cutting a legitimate run in two. A single isolated point beside a
+// 3+ member component is treated as the expected anomalous lookup, not as a
+// new block (work-order production guard).
+function geographicComponents(
+  entries: IntentBlockEntry[],
+  geocodeVerificationRan: boolean
+) {
+  if (entries.length < 2) return [entries];
+  const coordinates = entries.map((entry) =>
+    coordinateForIntent(entry, geocodeVerificationRan)
+  );
+  const positioned = coordinates
+    .map((coordinate, index) => (coordinate ? index : -1))
+    .filter((index) => index >= 0);
+  if (positioned.length < 2) return [entries];
+
+  const parent = entries.map((_, index) => index);
+  const find = (index: number): number => {
+    if (parent[index] !== index) parent[index] = find(parent[index]);
+    return parent[index];
+  };
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+  for (let left = 0; left < positioned.length; left += 1) {
+    for (let right = left + 1; right < positioned.length; right += 1) {
+      const leftIndex = positioned[left];
+      const rightIndex = positioned[right];
+      if (
+        intentDistanceKm(
+          coordinates[leftIndex] as { lat: number; lng: number },
+          coordinates[rightIndex] as { lat: number; lng: number }
+        ) <= INTENT_BLOCK_RADIUS_KM
+      ) {
+        union(leftIndex, rightIndex);
+      }
+    }
+  }
+
+  const rootByPositionedIndex = new Map<number, number>();
+  for (const index of positioned) rootByPositionedIndex.set(index, find(index));
+  // Missing verified coordinates inherit the nearest source neighbor's
+  // component. This preserves source coherence without converting missing
+  // geography into positive geographic evidence.
+  for (let index = 0; index < entries.length; index += 1) {
+    if (coordinates[index]) continue;
+    const nearest = positioned.reduce(
+      (best, candidate) =>
+        best === null || Math.abs(candidate - index) < Math.abs(best - index)
+          ? candidate
+          : best,
+      null as number | null
+    );
+    if (nearest !== null) rootByPositionedIndex.set(index, find(nearest));
+  }
+
+  const components = new Map<number, IntentBlockEntry[]>();
+  for (let index = 0; index < entries.length; index += 1) {
+    const root = rootByPositionedIndex.get(index) ?? index;
+    const component = components.get(root);
+    if (component) component.push(entries[index]);
+    else components.set(root, [entries[index]]);
+  }
+  const split = [...components.values()].sort(
+    (left, right) => left[0].sourceOrder - right[0].sourceOrder
+  );
+  const singletons = split.filter((component) => component.length === 1);
+  const large = split.filter((component) => component.length >= 3);
+  if (split.length === 2 && singletons.length === 1 && large.length === 1) {
+    return [[...entries]];
+  }
+  return split;
+}
+
+function strongIntent(entry: IntentBlockEntry): IntentBlockType | null {
+  const roleText = `${entry.itemType ?? ""} ${entry.category ?? ""}`;
+  if (LOGISTICS_PATTERN.test(roleText)) return "logistics";
+  if (EVIDENCE_PATTERN.test(roleText)) return "evidence";
+  if (
+    entry.hasFixedEvidence ||
+    entry.hasSourceSupportedPlan ||
+    entry.hasExplicitChoice
+  ) {
+    return "plan";
+  }
+  if (entry.hasHedgeMarker || entry.hasIdeaSignal) return "ideas";
+  return null;
+}
+
+function recommendationMajority(entries: IntentBlockEntry[]) {
+  const candidates = entries.filter(
+    (entry) => strongIntent(entry) !== "logistics" && strongIntent(entry) !== "evidence"
+  );
+  if (candidates.length < 3) return false;
+  if (!candidates.every((entry) => entry.hasSourceStructure)) return false;
+  const recommendationCount = candidates.filter((entry) =>
+    RECOMMENDATION_CATEGORY_PATTERN.test(entry.category ?? "")
+  ).length;
+  return recommendationCount * 2 >= candidates.length;
+}
+
+export function classifyIntentBlocks(
+  entries: IntentBlockEntry[],
+  {
+    geocodeVerificationRan,
+  }: {
+    geocodeVerificationRan: boolean;
+  }
+): IntentBlockClassification {
+  const entryTypes = new Map<string, IntentBlockType>();
+  const blocks: IntentBlockDecision[] = [];
+  const datedCandidates = entries.filter((entry) => Boolean(entry.date));
+  const strongPlanDates = new Set(
+    datedCandidates
+      .filter((entry) => strongIntent(entry) === "plan")
+      .map((entry) => entry.date)
+  );
+  const candidateCountByDate = new Map<string, number>();
+  for (const entry of datedCandidates) {
+    const strong = strongIntent(entry);
+    if (strong === "logistics" || strong === "evidence") continue;
+    candidateCountByDate.set(
+      entry.date,
+      (candidateCountByDate.get(entry.date) ?? 0) + 1
+    );
+  }
+
+  const components = sourceSegments(datedCandidates).flatMap((segment) =>
+    geographicComponents(segment, geocodeVerificationRan)
+  );
+  components.sort(
+    (left, right) =>
+      left[0].date.localeCompare(right[0].date) ||
+      left[0].sourceOrder - right[0].sourceOrder ||
+      left[0].id.localeCompare(right[0].id)
+  );
+
+  components.forEach((component, componentIndex) => {
+    const strongById = new Map(
+      component.map((entry) => [entry.id, strongIntent(entry)])
+    );
+    // Fixed/sequence evidence and an explicit source choice can commit their
+    // coherent peers. Site containment is intentionally item-scoped: verified
+    // proximity alone may split blocks but may never turn an unrelated nearby
+    // venue into part of the plan (the geocoder echo failure this arc pins).
+    const hasPropagatingPlanAnchor = component.some(
+      (entry) => entry.hasFixedEvidence || entry.hasExplicitChoice
+    );
+    const hasIdeaAnchor = component.some(
+      (entry) => strongById.get(entry.id) === "ideas"
+    );
+    const researchCount = component.filter(
+      (entry) => entry.hasResearchEvidence
+    ).length;
+    const date = component[0].date;
+    let neutralType: IntentBlockType;
+    let neutralReason: string;
+    if (hasPropagatingPlanAnchor) {
+      neutralType = "plan";
+      neutralReason =
+        "source-contiguous block inherits fixed, sequenced, explicit-choice, or source-supported site-plan evidence";
+    } else if (hasIdeaAnchor || recommendationMajority(component)) {
+      neutralType = "ideas";
+      neutralReason =
+        "source-contiguous block carries hedge, recommendation, category-list, or city-reference evidence";
+    } else if (researchCount >= 2) {
+      neutralType = "ambiguous";
+      neutralReason =
+        "multiple researched alternatives carry no source-supported selection; preserve pending one consolidated decision";
+    } else if (
+      strongPlanDates.has(date) &&
+      (candidateCountByDate.get(date) ?? 0) >= DENSITY_REEVALUATION_FLOOR
+    ) {
+      neutralType = "ideas";
+      neutralReason =
+        "density re-evaluation found a separate uncommitted block beside a source-supported plan block";
+    } else {
+      neutralType = "ambiguous";
+      neutralReason =
+        "source evidence does not distinguish selected plan from ideas; preserve rather than infer";
+    }
+
+    const finalByType = new Map<IntentBlockType, IntentBlockEntry[]>();
+    for (const entry of component) {
+      const finalType = strongById.get(entry.id) ?? neutralType;
+      entryTypes.set(entry.id, finalType);
+      const group = finalByType.get(finalType);
+      if (group) group.push(entry);
+      else finalByType.set(finalType, [entry]);
+    }
+    for (const [type, members] of finalByType) {
+      const reason =
+        type === "logistics"
+          ? "item carries source-supported logistics/admin role"
+          : type === "evidence"
+            ? "item carries accessory/evidence role"
+            : type === "plan" && members.some((entry) => strongIntent(entry) === "plan")
+              ? "block contains fixed, sequenced, explicit-choice, or source-supported site-plan evidence"
+              : type === "ideas" && members.some((entry) => strongIntent(entry) === "ideas")
+                ? "item or block carries explicit hedge/idea evidence"
+                : neutralReason;
+      blocks.push({
+        blockId: `intent-${date}-${componentIndex + 1}-${type}`,
+        date,
+        memberIds: members.map((entry) => entry.id),
+        memberTitles: members.map((entry) => entry.title),
+        observationIds: Array.from(
+          new Set(members.flatMap((entry) => entry.observationIds))
+        ),
+        reason,
+        type,
+      });
+    }
+  });
+
+  return { blocks, entryTypes };
 }
 
 // --- Recovered-line classification (PB-9) -----------------------------------

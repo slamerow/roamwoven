@@ -186,17 +186,17 @@ export default async function run() {
                 ),
                 title: "Panorama Train",
               }),
-              // Negative control on the same day: a real Vienna museum
-              // 4 km away with a Vienna address. It must never join.
+              // Negative control on the same day: one explicit-or museum slot
+              // several kilometres away. It must never join.
               activity({
                 date: "2019-01-19",
-                description: "Mumok or the Natural History Museum.",
+                description: "Modern Art Museum or Design Museum.",
                 extra: geocoded(
                   48.203,
                   16.359,
-                  "Museumsplatz 1, 1070 Wien, Austria"
+                  "Museum district, Vienna, Austria"
                 ),
-                title: "Mumok or Natural History Museum",
+                title: "Modern Art Museum or Design Museum",
               }),
             ],
             places: [

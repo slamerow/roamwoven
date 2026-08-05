@@ -3,9 +3,13 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 import {
   classifyAddressSensitivity,
-  classifySensitiveText,
   shouldProtectPublicItemText,
 } from "@/lib/trip-privacy-policy";
+import {
+  createTransportDescriptionPrivateDetails,
+  getTransportDescriptionVisibility,
+  transportDescriptionDetailId,
+} from "@/lib/travel-card-privacy";
 import type {
   StructuredTripRecords,
   TripPrivateDetailRecord,
@@ -38,6 +42,16 @@ export type PublishedTripSnapshot = {
   snapshotJson: PublishedTripSnapshotPayload;
   tripId: string;
   version: number;
+};
+
+export type PublishedTravelerPrivateDetail = {
+  detailId: string;
+  label: string;
+  reason: string | null;
+  subjectId: string;
+  subjectType: string;
+  value: string;
+  visibility: string;
 };
 
 export class PublicSnapshotPrivacyError extends Error {
@@ -170,17 +184,20 @@ function redactSensitiveItem(
 function redactSensitiveTransport(
   transport: TripTransportRecord
 ): TripTransportRecord {
-  const hasSensitiveDescription = Boolean(
-    classifySensitiveText(transport.description)
-  );
+  const descriptionDetailId = transportDescriptionDetailId(transport.id);
+  const privateDetailIds = new Set(transport.privateDetailIds);
+
+  if (transport.description?.trim()) {
+    privateDetailIds.add(descriptionDetailId);
+  }
 
   return {
     ...transport,
     bookingUrl: null,
     confirmationLabel: null,
-    description: hasSensitiveDescription
-      ? "Protected travel detail. Enter the trip password to view it."
-      : transport.description,
+    description: null,
+    descriptionVisibility: getTransportDescriptionVisibility(transport),
+    privateDetailIds: Array.from(privateDetailIds),
   };
 }
 
@@ -196,11 +213,24 @@ function redactSensitiveStay(stay: TripStayRecord): TripStayRecord {
 export function createPublishedPrivateDetails(
   records: StructuredTripRecords
 ): TripPrivateDetailRecord[] {
-  return records.privateDetails.filter(
-    (detail) =>
-      detail.visibility === "traveler_password" ||
-      detail.visibility === "maker_only"
+  const detailsById = new Map(
+    records.privateDetails
+      .filter(
+        (detail) =>
+          detail.visibility === "traveler_password" ||
+          detail.visibility === "maker_only"
+      )
+      .map((detail) => [detail.id, detail])
   );
+
+  // The transport description is the source of truth for this derived slot.
+  // Overwriting a stale same-id detail prevents the public card and unlock
+  // payload from describing different versions of the trip.
+  for (const detail of createTransportDescriptionPrivateDetails(records.transport)) {
+    detailsById.set(detail.id, detail);
+  }
+
+  return Array.from(detailsById.values());
 }
 
 export function createPublicSnapshotRecords(

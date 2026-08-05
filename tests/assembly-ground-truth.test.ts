@@ -113,11 +113,34 @@ const evaluators: Record<string, CheckEvaluator> = {
     assert.equal(rentalActivity.date, "2019-01-17");
     assert.equal(rentalActivity.startTime, "09:00");
   },
-  "three-questions": (records) => {
+  "three-material-questions": (records) => {
     const open = records.reviewQuestions.filter(
       (question) => question.status === "open"
     );
-    assert.equal(open.length, 3, "exactly 3 open review questions");
+    assert.equal(open.length, 3, "exactly 3 intended material questions");
+    assert.equal(
+      open.filter(
+        (question) =>
+          /prague castle/i.test(question.prompt) &&
+          /ticket|tour option/i.test(question.prompt)
+      ).length,
+      1,
+      "one Prague Castle ticket decision"
+    );
+    assert.equal(
+      open.filter(
+        (question) =>
+          /planned.*ideas|planned for (?:this|the) day/i.test(question.prompt) &&
+          /state hall|time travel|belvedere/i.test(question.evidence ?? "")
+      ).length,
+      1,
+      "one Vienna researched-list decision"
+    );
+    assert.equal(
+      open.filter((question) => /bath/i.test(question.prompt)).length,
+      1,
+      "one Budapest baths decision"
+    );
   },
   "communism-city-note": (records) => {
     assert.equal(
@@ -171,10 +194,30 @@ const evaluators: Record<string, CheckEvaluator> = {
     assert.ok(parent, "group parent card exists");
     assert.equal(parent.date, "2019-01-16");
   },
-  "museum-disjunction": (records) => {
-    const cards = activityCards(records, /mumok/i);
-    assert.equal(cards.length, 1, "one flexible museum card");
-    assert.match(cards[0].title, /or/i, "card keeps the unresolved choice");
+  "museum-source-separate-notes": (records) => {
+    const cards = records.items.filter(
+      (item) =>
+        item.itemType !== "note" &&
+        (/mumok/i.test(item.title) || /natural history/i.test(item.title))
+    );
+    const noteText = records.items
+      .filter((item) => item.itemType === "note")
+      .map((item) => `${item.title} ${item.description ?? ""}`)
+      .join("\n");
+    const questions = records.reviewQuestions.filter(
+      (question) =>
+        question.status === "open" &&
+        (/mumok/i.test(question.prompt) || /natural history/i.test(question.prompt))
+    );
+
+    assert.equal(cards.length, 0, "neither uncommitted museum idea is an Activity");
+    assert.match(noteText, /mumok museum/i, "Mumok survives in City Notes");
+    assert.match(
+      noteText,
+      /natural history museum/i,
+      "Natural History Museum survives separately in City Notes"
+    );
+    assert.equal(questions.length, 0, "the source does not present a choice to resolve");
   },
   "trdelnik-activity": (records) => {
     const cards = activityCards(records, /trdelnik/i);

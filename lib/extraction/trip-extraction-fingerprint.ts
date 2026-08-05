@@ -1,16 +1,19 @@
 import { createHash } from "crypto";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import { normalizeText } from "@/lib/extraction/traveler-text";
+import { getTransportDescriptionVisibility } from "@/lib/travel-card-privacy";
 
 export type TripExtractionFingerprints = {
   activeActivities: string[];
   activeNotes: string[];
   calls: string[];
+  decisionAnchors: string[];
   groupedStops: string[];
   counts: {
     activeActivities: number;
     activeNotes: number;
     calls: number;
+    decisionAnchors: number;
     groupedStops: number;
     openQuestions: number;
     stays: number;
@@ -22,6 +25,7 @@ export type TripExtractionFingerprints = {
     activeActivities: string;
     activeNotes: string;
     calls: string;
+    decisionAnchors: string;
     groupedStops: string;
     openQuestions: string;
     stays: string;
@@ -29,7 +33,7 @@ export type TripExtractionFingerprints = {
   };
   stays: string[];
   transport: string[];
-  version: 2;
+  version: 4;
 };
 
 function clean(value: string | null | undefined) {
@@ -119,6 +123,7 @@ export function createTripExtractionFingerprints(
       .filter((item) => item.status !== "ignored" && item.itemType === "note")
       .map((item) =>
         joinKey([
+          item.cityNoteKey,
           item.date,
           item.title,
           item.categoryId,
@@ -154,6 +159,27 @@ export function createTripExtractionFingerprints(
         ])
       )
   );
+  const decisionAnchors = sortKeys(
+    records.reviewQuestions
+      .filter(
+        (question) =>
+          question.status === "open" || question.status === "noted"
+      )
+      .map((question) =>
+        joinKey([
+          question.status,
+          question.canonicalId,
+          question.decisionAnchor
+            ? String(question.decisionAnchor.version)
+            : null,
+          question.decisionAnchor?.subjectType,
+          question.decisionAnchor?.legKey,
+          question.decisionAnchor?.date,
+          question.decisionAnchor?.normalizedTitle,
+          question.decisionAnchor?.sourceAnchorRef,
+        ])
+      )
+  );
   const stays = sortKeys(
     records.stays
       .filter((stay) => stay.status !== "ignored")
@@ -183,6 +209,7 @@ export function createTripExtractionFingerprints(
           item.arrivalLocation,
           item.provider,
           item.confirmationLabel,
+          getTransportDescriptionVisibility(item),
           item.status,
         ])
       )
@@ -191,6 +218,7 @@ export function createTripExtractionFingerprints(
     activeActivities,
     activeNotes,
     calls,
+    decisionAnchors,
     groupedStops,
     openQuestions,
     stays,
@@ -203,6 +231,7 @@ export function createTripExtractionFingerprints(
       activeActivities: activeActivities.length,
       activeNotes: activeNotes.length,
       calls: calls.length,
+      decisionAnchors: decisionAnchors.length,
       groupedStops: groupedStops.length,
       openQuestions: openQuestions.length,
       stays: stays.length,
@@ -213,11 +242,12 @@ export function createTripExtractionFingerprints(
       activeActivities: hashValue(activeActivities),
       activeNotes: hashValue(activeNotes),
       calls: hashValue(calls),
+      decisionAnchors: hashValue(decisionAnchors),
       groupedStops: hashValue(groupedStops),
       openQuestions: hashValue(openQuestions),
       stays: hashValue(stays),
       transport: hashValue(transport),
     },
-    version: 2,
+    version: 4,
   };
 }

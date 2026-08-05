@@ -6,6 +6,7 @@ import type {
   EvidenceRole,
   EvidenceSource,
 } from "@/lib/extraction/evidence-clustering";
+import type { IntentBlockDecision } from "@/lib/extraction/activity-classifier";
 import type { TripExtractionFingerprints } from "@/lib/extraction/trip-extraction-fingerprint";
 
 export type DraftObject = Record<string, unknown>;
@@ -78,6 +79,7 @@ export type AuditFinalRecordSummary = {
   address: string | null;
   arrivalLocation: string | null;
   canonicalId: string;
+  cityNoteKey: string | null;
   confirmationLabel: string | null;
   category: string | null;
   date: string | null;
@@ -85,6 +87,7 @@ export type AuditFinalRecordSummary = {
   description: string | null;
   endTime: string | null;
   id: string;
+  legId: string | null;
   provider: string | null;
   recordType: "item" | "stay" | "transport";
   startTime: string | null;
@@ -200,6 +203,10 @@ export type TripExtractionAuditReport = {
       contestedPieceCount: number;
       releasedDecisionCount: number;
     } | null;
+    intentBlocks: {
+      blocks: IntentBlockDecision[];
+      version: 1;
+    };
     identityRepairCount: number;
     identityRecoveryInitialViolations: string[];
     identityRecoveryStatus: "not_needed" | "repaired";
@@ -267,6 +274,9 @@ export type TripExtractionAuditReport = {
       // why" is a permanent condition, and shipping G4.1/G4.2/G4.3 in one
       // run is unattributable under AGENTS.md rule 1.
       candidates: Array<{
+        candidateId: string | null;
+        containerSourceSupported: boolean | null;
+        containerTitle: string | null;
         granularity: string | null;
         outcome: string;
         query: string;
@@ -288,6 +298,7 @@ export type TripExtractionAuditReport = {
       retryAcceptedCount: number;
       retryCount: number;
       retryOutOfCityCount: number;
+      retryUnlistedContainerCount: number;
       retrySkippedOverBudgetCount: number;
       skippedOverBudgetCount: number;
     } | null;

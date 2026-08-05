@@ -44,6 +44,7 @@ const samplePhotos = [
 
 type TravelerAppShellProps = {
   displayName?: string;
+  initialProtectedDetails?: ProtectedTravelerDetail[];
   initialUnlocked?: boolean;
   mode?: "standalone" | "preview";
   shareToken?: string;
@@ -66,6 +67,14 @@ type TravelerDay = TravelerAppViewModel["days"][number];
 type TravelerLeg = TravelerAppViewModel["legs"][number];
 type ActiveTab = TravelerTabId;
 type OverlayKind = "unlock" | TravelerToolId;
+
+export function indexProtectedTravelerDetails(
+  details: ProtectedTravelerDetail[]
+) {
+  return Object.fromEntries(
+    details.map((detail) => [detail.detailId, detail])
+  );
+}
 
 const travelerToolIcons: Record<TravelerToolId, typeof Sparkles> = {
   map: MapIcon,
@@ -1004,6 +1013,7 @@ function ActivityDetail({
 
 export function TravelerAppShell({
   displayName,
+  initialProtectedDetails = [],
   initialUnlocked = false,
   mode = "standalone",
   shareToken,
@@ -1017,7 +1027,7 @@ export function TravelerAppShell({
   const [overlay, setOverlay] = useState<OverlayKind | null>(null);
   const [protectedDetailsById, setProtectedDetailsById] = useState<
     Record<string, ProtectedTravelerDetail>
-  >({});
+  >(() => indexProtectedTravelerDetails(initialProtectedDetails));
   const [selectedItem, setSelectedItem] = useState<TravelerItem | null>(null);
   const [selectedLeg, setSelectedLeg] = useState<TravelerLeg | null>(null);
   const todayDay = trip.days[0];
@@ -1080,11 +1090,7 @@ export function TravelerAppShell({
       return;
     }
 
-    setProtectedDetailsById(
-      Object.fromEntries(
-        (body.details ?? []).map((detail) => [detail.detailId, detail])
-      )
-    );
+    setProtectedDetailsById(indexProtectedTravelerDetails(body.details ?? []));
     setUnlocked(true);
     setActiveTab("today");
     setOverlay(null);
@@ -1209,6 +1215,12 @@ export function TravelerAppShell({
                 ? "Traveler mode shows lodging details, access notes, and booking references when you need them."
                 : `${formatCount(sensitiveCount, "detail")} can stay behind the trip password until traveler mode is unlocked.`}
             </p>
+            {unlocked ? (
+              <ProtectedDetailBlock
+                details={Object.values(protectedDetailsById)}
+                unlocked
+              />
+            ) : null}
           </section>
         </section>
 

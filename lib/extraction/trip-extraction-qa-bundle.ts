@@ -25,6 +25,7 @@ import {
   getStructuredReviewCount,
   getStructuredReviewSections,
 } from "@/lib/generated-trip-review";
+import { getTransportDescriptionVisibility } from "@/lib/travel-card-privacy";
 import { listTripUploads, type TripUpload } from "@/lib/uploads";
 
 const DEFAULT_TEXT_LIMIT = 700;
@@ -566,7 +567,13 @@ function createRecordSummaries({
       date: transport.date,
       departureLocation: transport.departureLocation,
       departureTime: transport.departureTime,
-      description: redactSensitiveText(transport.description, includePrivate),
+      description: redactVisibilityValue({
+        includePrivate,
+        label: "protected travel description",
+        value: transport.description,
+        visibility: getTransportDescriptionVisibility(transport),
+      }),
+      descriptionVisibility: getTransportDescriptionVisibility(transport),
       id: transport.id,
       provider: transport.provider,
       reviewRequired: transport.reviewRequired,
@@ -585,6 +592,7 @@ function summarizeReviewQuestion(
   return {
     answerType: question.answerType,
     canonicalId: question.canonicalId,
+    decisionAnchor: question.decisionAnchor ?? null,
     evidence: redactSensitiveText(question.evidence, includePrivate),
     guessedValue: redactSensitiveText(question.guessedValue, includePrivate),
     id: question.id,
@@ -642,8 +650,10 @@ function createAuditSummary({
         ),
         finalRecords: row.finalRecords.map((record) => ({
           canonicalId: record.canonicalId,
+          cityNoteKey: record.cityNoteKey,
           date: record.date,
           id: record.id,
+          legId: record.legId,
           recordType: record.recordType,
           status: record.status,
           title: record.title,

@@ -51,6 +51,7 @@ function report(
       dispositionCount: 0,
       // G4.4: structured telemetry, absent on a synthetic report.
       groupingClaims: null,
+      intentBlocks: { blocks: [], version: 1 },
       identityRepairCount: 0,
       identityRecoveryInitialViolations: [],
       identityRecoveryStatus: "not_needed",

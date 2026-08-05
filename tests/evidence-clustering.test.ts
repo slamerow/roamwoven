@@ -146,6 +146,70 @@ export default async function run() {
     assert.match(String(piece?.payload.description), /Reservation for two guests/);
   });
 
+  await test("one-character spelling drift from the same source becomes one canonical activity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "first parse",
+          emptyStage({
+            activities: [
+              activity({
+                description: "Trdlnik for breakfast.",
+                sourceFilename: "trip.pdf",
+                title: "Trdlnik for breakfast",
+              }),
+            ],
+          })
+        ),
+        stage(
+          "second parse",
+          emptyStage({
+            activities: [
+              activity({
+                description: "Breakfast trdelník in Lesser Town.",
+                sourceFilename: "trip.pdf",
+                title: "Trdelník for breakfast",
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: {},
+    });
+    const activities = (result.draft as { activities: Array<{ title: string }> })
+      .activities;
+    const activityPieces = result.pieces.filter(
+      (candidate) => candidate.kind === "activity" && candidate.outputEligible
+    );
+
+    assert.equal(activities.length, 1);
+    assert.equal(activityPieces.length, 1);
+    assert.equal(activityPieces[0].observationIds.length, 2);
+    assert.equal(activities[0].title, "Trdelník for breakfast");
+  });
+
+  await test("short similar place names from one source remain separate activities", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "one plan",
+          emptyStage({
+            activities: [
+              activity({ sourceFilename: "trip.pdf", title: "Gallery East" }),
+              activity({ sourceFilename: "trip.pdf", title: "Gallery West" }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: {},
+    });
+    const activities = (result.draft as { activities: unknown[] }).activities;
+
+    assert.equal(activities.length, 2);
+  });
+
   await test("distinct same-site stops remain separate pieces for assembly grouping", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
@@ -1610,7 +1674,7 @@ export default async function run() {
     );
   });
 
-  await test("missing named source evidence becomes review-required content", () => {
+  await test("missing named source evidence becomes a source-coverage finding, never a placeholder", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -1635,12 +1699,88 @@ export default async function run() {
       ],
       tripOverview: { dateRange: "January 12-25, 2019" },
     });
-    const recovered = (result.draft as {
+    const draft = result.draft as {
       activities: Array<Record<string, unknown>>;
-    }).activities.find((item) => item.title === "Hospital in the Rock");
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const finding = draft.missingDetails.find(
+      (detail) => detail.relatedTitle === "Hospital in the Rock"
+    );
 
-    assert.ok(recovered);
-    assert.equal(recovered?._recoveryRequired, true);
+    assert.equal(
+      draft.activities.some((item) => item.title === "Hospital in the Rock"),
+      false
+    );
+    assert.equal(
+      draft.activities.some((item) => item.itemType === "placeholder"),
+      false
+    );
+    assert.equal(finding?._canonicalReviewDisposition, "dismissed");
+    assert.match(String(finding?._canonicalQuestionGate), /source coverage/i);
+    assert.equal(finding?.relatedCanonicalPieceId, null);
+    assert.equal(finding?.subjectType, "trip");
+  });
+
+  await test("source-backed review evidence binds to a real late canonical subject without synthesizing a card", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "castle visit",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-17",
+                sourceFilename: "castle-visit.txt",
+                title: "Prague Castle visit",
+              }),
+              activity({
+                date: "2019-01-17",
+                description: "A cathedral stop inside Prague Castle.",
+                sourceFilename: "castle-visit.txt",
+                title: "St. Vitus Cathedral",
+              }),
+            ],
+            missingDetails: [
+              {
+                answerType: "select",
+                confidence: "low",
+                evidence: "The itinerary lists Prague Castle.",
+                guessedValue: null,
+                prompt: "Which ticket should be listed for Prague Castle?",
+                reason: "The source lists the venue but not the ticket choice.",
+                relatedTitle: "Prague Castle",
+                subjectType: "item",
+                targetField: "ticket",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const question = draft.missingDetails.find(
+      (detail) => /which ticket.*prague castle/i.test(String(detail.prompt))
+    );
+
+    assert.equal(
+      draft.activities.filter((item) => item.title === "Prague Castle visit").length,
+      1
+    );
+    assert.equal(
+      draft.activities.some((item) => item.itemType === "placeholder"),
+      false
+    );
+    assert.ok(
+      question,
+      `expected a bound Prague Castle ticket question, got ${JSON.stringify(draft.missingDetails)}`
+    );
+    assert.equal(question?._canonicalReviewDisposition, "question");
+    assert.equal(typeof question?.relatedCanonicalPieceId, "string");
   });
 
   await test("canonical evidence preserves private source text for the public projection", () => {

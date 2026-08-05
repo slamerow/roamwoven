@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import {
+  classifyIntentBlocks,
   classifyIdeaListSections,
   classifyOwnTextEvidence,
   classifyRecoveredLineRole,
   isSiteComponentTitlePair,
   resolveMentionCommitment,
   type IdeaListEntry,
+  type IntentBlockEntry,
 } from "@/lib/extraction/activity-classifier";
 
 // Unit checks for the unified activity-vs-city-note / commitment classifier
@@ -36,7 +38,163 @@ function entry(overrides: Partial<IdeaListEntry> & { id: string }): IdeaListEntr
   };
 }
 
+function blockEntry(
+  overrides: Partial<IntentBlockEntry> & { id: string; sourceOrder: number }
+): IntentBlockEntry {
+  const { id, sourceOrder, ...rest } = overrides;
+  return {
+    approxLatitude: null,
+    approxLongitude: null,
+    boundaryBefore: false,
+    category: "art_culture",
+    date: "2019-01-19",
+    hasExplicitChoice: false,
+    hasFixedEvidence: false,
+    hasHedgeMarker: false,
+    hasIdeaSignal: false,
+    hasResearchEvidence: false,
+    hasSourceSupportedPlan: false,
+    hasSourceStructure: true,
+    id,
+    itemType: "activity",
+    observationIds: [`obs-${id}`],
+    sourceKey: "source-day-jan-19",
+    sourceOrder,
+    title: id,
+    verifiedLatitude: null,
+    verifiedLongitude: null,
+    ...rest,
+  };
+}
+
 export default async function run() {
+  await test("intent blocks: one dated section can hold a site plan, scattered ideas, and an unresolved researched choice", () => {
+    const entries = [
+      blockEntry({
+        hasSourceSupportedPlan: true,
+        id: "site",
+        sourceOrder: 1,
+        verifiedLatitude: 48.1858,
+        verifiedLongitude: 16.3128,
+      }),
+      blockEntry({
+        hasSourceSupportedPlan: true,
+        id: "site-child-a",
+        sourceOrder: 2,
+        verifiedLatitude: 48.1842,
+        verifiedLongitude: 16.3029,
+      }),
+      blockEntry({
+        hasSourceSupportedPlan: true,
+        id: "site-child-b",
+        sourceOrder: 3,
+        verifiedLatitude: 48.1783,
+        verifiedLongitude: 16.3087,
+      }),
+      blockEntry({
+        hasResearchEvidence: true,
+        id: "far-option-a",
+        sourceOrder: 4,
+        verifiedLatitude: 48.2167,
+        verifiedLongitude: 16.3959,
+      }),
+      blockEntry({
+        id: "far-option-b",
+        sourceOrder: 5,
+        verifiedLatitude: 48.2073,
+        verifiedLongitude: 16.3943,
+      }),
+      blockEntry({
+        hasResearchEvidence: true,
+        id: "researched-choice-a",
+        sourceOrder: 6,
+        verifiedLatitude: 48.2038,
+        verifiedLongitude: 16.3578,
+      }),
+      blockEntry({
+        hasResearchEvidence: true,
+        id: "researched-choice-b",
+        sourceOrder: 7,
+        verifiedLatitude: 48.2052,
+        verifiedLongitude: 16.3598,
+      }),
+      blockEntry({
+        boundaryBefore: true,
+        id: "city-reference-a",
+        sourceOrder: 20,
+        verifiedLatitude: 48.2082,
+        verifiedLongitude: 16.375,
+      }),
+      blockEntry({
+        id: "city-reference-b",
+        sourceOrder: 21,
+        verifiedLatitude: 48.2026,
+        verifiedLongitude: 16.3591,
+      }),
+    ];
+
+    const result = classifyIntentBlocks(entries, {
+      geocodeVerificationRan: true,
+    });
+    assert.equal(result.entryTypes.get("site"), "plan");
+    assert.equal(result.entryTypes.get("site-child-a"), "plan");
+    assert.equal(result.entryTypes.get("far-option-a"), "ideas");
+    assert.equal(result.entryTypes.get("far-option-b"), "ideas");
+    assert.equal(result.entryTypes.get("researched-choice-a"), "ambiguous");
+    assert.equal(result.entryTypes.get("researched-choice-b"), "ambiguous");
+    assert.equal(result.entryTypes.get("city-reference-a"), "ideas");
+    assert.equal(result.entryTypes.get("city-reference-b"), "ideas");
+    assert.ok(result.blocks.every((block) => block.observationIds.length > 0));
+  });
+
+  await test("intent blocks: a fixed meal slot anchors its short source-contiguous peer block; logistics still overrides", () => {
+    const entries = [
+      blockEntry({ date: "2019-01-20", hasFixedEvidence: true, id: "breakfast", sourceOrder: 1 }),
+      blockEntry({ date: "2019-01-20", id: "museum", sourceOrder: 2 }),
+      blockEntry({ date: "2019-01-20", id: "cathedral", sourceOrder: 3 }),
+      blockEntry({ date: "2019-01-20", id: "library", sourceOrder: 4 }),
+      blockEntry({ date: "2019-01-20", id: "kunstforum", sourceOrder: 5 }),
+      blockEntry({
+        category: "admin_logistics",
+        date: "2019-01-20",
+        id: "laundry",
+        itemType: "admin",
+        sourceOrder: 6,
+      }),
+    ];
+    const result = classifyIntentBlocks(entries, {
+      geocodeVerificationRan: true,
+    });
+    for (const id of ["breakfast", "museum", "cathedral", "library", "kunstforum"]) {
+      assert.equal(result.entryTypes.get(id), "plan", id);
+    }
+    assert.equal(result.entryTypes.get("laundry"), "logistics");
+  });
+
+  await test("intent blocks: parser coordinates cannot split a block after verification ran, and one verified outlier cannot split it alone", () => {
+    const parserOnly = [
+      blockEntry({ approxLatitude: 48.1, approxLongitude: 16.1, hasFixedEvidence: true, id: "a", sourceOrder: 1 }),
+      blockEntry({ approxLatitude: 49.1, approxLongitude: 17.1, id: "b", sourceOrder: 2 }),
+      blockEntry({ approxLatitude: 50.1, approxLongitude: 18.1, id: "c", sourceOrder: 3 }),
+    ];
+    const ignoredParser = classifyIntentBlocks(parserOnly, {
+      geocodeVerificationRan: true,
+    });
+    assert.equal(ignoredParser.entryTypes.get("b"), "plan");
+    assert.equal(ignoredParser.entryTypes.get("c"), "plan");
+
+    const oneOutlier = [
+      blockEntry({ hasFixedEvidence: true, id: "p1", sourceOrder: 1, verifiedLatitude: 50.08, verifiedLongitude: 14.40 }),
+      blockEntry({ id: "p2", sourceOrder: 2, verifiedLatitude: 50.081, verifiedLongitude: 14.401 }),
+      blockEntry({ id: "bad", sourceOrder: 3, verifiedLatitude: 48.2, verifiedLongitude: 16.3 }),
+      blockEntry({ id: "p3", sourceOrder: 4, verifiedLatitude: 50.082, verifiedLongitude: 14.402 }),
+    ];
+    const guarded = classifyIntentBlocks(oneOutlier, {
+      geocodeVerificationRan: true,
+    });
+    assert.equal(guarded.entryTypes.get("bad"), "plan");
+  });
+
   await test("own-text evidence: 'if you want' is a hedge; time/booking/first-person are fixed commitment", () => {
     const hedged = classifyOwnTextEvidence([
       {

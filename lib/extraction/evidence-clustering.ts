@@ -33,6 +33,7 @@ import {
   canonicalTransportType,
 } from "@/lib/extraction/canonical-field-policy";
 import {
+  differsByOneEdit,
   normalizeTripClockTime,
   normalizeText,
   normalizeTripDate,
@@ -52,16 +53,21 @@ import {
 } from "@/lib/extraction/identity-prose";
 import { applyReviewIdentityGate } from "@/lib/extraction/review-identity-gate";
 import {
+  classifyIntentBlocks,
   classifyIdeaListSections,
   classifyOwnTextEvidence,
+  DAY_PLAN_LABEL_PATTERN,
   isSiteComponentTitlePair,
   resolveMentionCommitment,
   SITE_CONTAINER_NOUN_PATTERN,
   type IdeaListEntry,
+  type IntentBlockDecision,
+  type IntentBlockEntry,
   type MentionCommitment,
 } from "@/lib/extraction/activity-classifier";
 import {
   classifyDraftActivityCard,
+  hasLooseTipVocabulary,
 } from "@/lib/trip-card-taxonomy";
 import {
   isRentalCarPickupCandidate,
@@ -194,10 +200,80 @@ export type CanonicalEvidenceConflict = {
   values: string[];
 };
 
+// Task B1 (restructure work order 2026-08-04, "the removal gate"). Every
+// place that can remove a record must resolve to one of these three shapes.
+// Before this type existed, `mergeCanonicalPieceInto` (26 call sites)
+// always named a destination while `suppressCanonicalPiece` (23 call
+// sites) named none at all — that asymmetry is what let three City Note
+// records ship short with nothing downstream able to notice. The product
+// owner's ruling (2026-08-04) is that there is no "forbidden" removal, only
+// an unlabelled one: deleting a record outright is always allowed, as long
+// as it says so.
+export type CanonicalPieceDisposition =
+  | { kind: "survivor"; survivorId: string }
+  // A few sites suppress against a SET of equally-valid candidates instead
+  // of one chosen winner (survey §2, "several suppress against a set of
+  // candidates"). The existing code never picked a single winner among them
+  // either — recording the whole set is the behaviour-neutral choice; if
+  // the gate forced a single id here it would be inventing a decision the
+  // pipeline never made, which is a behaviour change, not a labelling one.
+  | { kind: "survivors"; survivorIds: string[] }
+  // The 13 sites the survey audited as genuinely terminal, plus a small
+  // number of conditional branches inside otherwise-MIXED sites that reduce
+  // to "no survivor was found this time" (see call sites below and
+  // docs/assembly-findings-inbox.md for the two/three that still need
+  // restructuring so the removal itself is conditioned on the lookup).
+  // `code` is closed — see CanonicalTerminalDisposalCode — specifically so
+  // a free-text reason string can never again stand in for "we don't know
+  // where this went."
+  | { kind: "terminal"; code: CanonicalTerminalDisposalCode };
+
+// Named for what each disposal MEANS, not for the pass that fires it —
+// several call sites across different functions share a code because the
+// underlying judgement is the same one
+// (docs/assembly-restructure-survey-2026-08-04.md §2, "13 are a policy
+// decision, not a code change"). Grouped by the families the survey named.
+// The array (not just the type) is exported so the summary counter below
+// can be seeded with every code at zero — an absent key would read as "this
+// code doesn't exist" rather than "this code fired zero times" (AGENTS.md
+// rule 8(b): absent reads as zero, so the field must actually be present).
+export const CANONICAL_TERMINAL_DISPOSAL_CODES = [
+  // -- planning-cost material --
+  "PLANNING_COST_SECTION_LINE",
+  "RECOVERY_ONLY_COST_DERIVED_PLACE",
+  // -- explicit cancellation --
+  "EXPLICIT_SOURCE_CANCELLATION",
+  // -- candidacy floor not met --
+  "TRANSPORT_CANDIDACY_FLOOR_NOT_MET",
+  "ROUTE_LESS_TRANSPORT_FRAGMENT_NO_HOST",
+  "HOME_DEPARTURE_OR_RETURN_NOT_A_LEG",
+  "SAME_DAY_DESTINATION_NOT_A_LEG",
+  "STAY_CANDIDACY_NO_NIGHT_EVIDENCE",
+  "STAY_CANDIDACY_PERSON_NAME_SHAPED",
+  "ISOLATED_UNTIMED_GENERIC_MEAL",
+  "ACCESS_MATERIAL_NO_OWNING_STAY",
+  "PRIVATE_STAY_ACCESS_NO_COMPATIBLE_STAY",
+  // -- unsupported model invention --
+  "UNSUPPORTED_MODEL_INVENTION",
+  // -- no source support --
+  "ISOLATED_TERM_NO_SOURCE_SUPPORT",
+  "NOTE_CONTENT_REDISTRIBUTED_NO_SINGLE_SURVIVOR",
+  // -- structural/overview artifact --
+  "GENERIC_DAY_OVERVIEW",
+  "STAY_NAME_DOCUMENT_ARTIFACT",
+  // -- identity-collision repair --
+  "PIECE_IDENTITY_COLLISION_REPAIR",
+  "PUBLIC_TITLE_IDENTITY_VALUE",
+] as const;
+
+export type CanonicalTerminalDisposalCode =
+  (typeof CANONICAL_TERMINAL_DISPOSAL_CODES)[number];
+
 export type CanonicalEvidencePiece = {
   actions: CanonicalEvidenceAction[];
   confidence: "high" | "medium";
   conflicts: CanonicalEvidenceConflict[];
+  disposition?: CanonicalPieceDisposition;
   fieldSources: Record<string, string[]>;
   fieldWinnerRanks: Record<string, number>;
   id: string;
@@ -224,8 +300,22 @@ export type EvidenceClusteringResult = {
     parserArtifactRepairCount: number;
     rejectedObservationCount: number;
     groupingClaims: GroupingClaimLedgerTelemetry;
+    intentBlocks: {
+      blocks: IntentBlockDecision[];
+      version: 1;
+    };
     sourceAnchorObservationCount: number;
     suppressedWeakAnchorCount: number;
+    // Task B ("Tell it fired"): a disposal count by reason code, on the
+    // served audit surface rather than only computable from `usage`. Per
+    // AGENTS.md rule 8(b) an absent field reads as zero, so a field that
+    // exists but a code that never fires is indistinguishable from "this
+    // code doesn't exist" without this being present and total. Counts are
+    // read from final piece state (`piece.disposition`), not accumulated
+    // as passes run, so a piece disposed more than once (should not
+    // happen — see suppressCanonicalPiece) is never double-counted.
+    terminalDisposalCountsByCode: Record<CanonicalTerminalDisposalCode, number>;
+    survivorDisposalCount: number;
     transportFieldRepairCount: number;
     transportFieldRepairQuestionCount: number;
   };
@@ -705,6 +795,63 @@ function distinctiveSingleIdentity(tokens: string[]) {
   );
 }
 
+// Two parser passes over the SAME document can disagree by one missing or
+// substituted character in a proper name (live run 8.1: `Trdlnik` versus
+// `Trdelnik`). Treat that as source-level spelling drift only when the whole
+// occurrence agrees: same dated city, same source file, same token shape,
+// and no conflicting booking identity. The long-token + shared-edge guards
+// keep short neighboring venues (for example Gallery East/West) distinct.
+function sameSourceSingleEditActivityAlias(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  leftTokens: string[],
+  rightTokens: string[]
+) {
+  const leftDate = stringValue(left, "date");
+  const rightDate = stringValue(right, "date");
+  const leftCity = normalizedComparable(left.city);
+  const rightCity = normalizedComparable(right.city);
+  const leftSource = normalizedComparable(left.sourceFilename);
+  const rightSource = normalizedComparable(right.sourceFilename);
+  const leftConfirmation = confirmationFrom(left);
+  const rightConfirmation = confirmationFrom(right);
+
+  if (
+    !leftDate ||
+    !rightDate ||
+    !tripDatesMatch(leftDate, rightDate) ||
+    !leftCity ||
+    leftCity !== rightCity ||
+    !leftSource ||
+    leftSource !== rightSource ||
+    (leftConfirmation &&
+      rightConfirmation &&
+      leftConfirmation !== rightConfirmation) ||
+    leftTokens.length === 0 ||
+    leftTokens.length !== rightTokens.length
+  ) {
+    return false;
+  }
+
+  let fuzzyPairs = 0;
+  for (let index = 0; index < leftTokens.length; index += 1) {
+    const leftToken = leftTokens[index];
+    const rightToken = rightTokens[index];
+    if (leftToken === rightToken) continue;
+    if (
+      Math.min(leftToken.length, rightToken.length) < 7 ||
+      leftToken.slice(0, 2) !== rightToken.slice(0, 2) ||
+      leftToken.slice(-2) !== rightToken.slice(-2) ||
+      !differsByOneEdit(leftToken, rightToken)
+    ) {
+      return false;
+    }
+    fuzzyPairs += 1;
+  }
+
+  return fuzzyPairs === 1;
+}
+
 function overlapCount(left: string[], right: string[]) {
   const rightSet = new Set(right);
   return new Set(left.filter((token) => rightSet.has(token))).size;
@@ -822,6 +969,12 @@ function activityMatchReason(
     return leftTime || rightTime
       ? "same named and timed plan"
       : "same named plan";
+  }
+
+  if (
+    sameSourceSingleEditActivityAlias(left, right, leftTitle, rightTitle)
+  ) {
+    return "same dated source occurrence with one-character spelling drift";
   }
 
   if (
@@ -1740,6 +1893,18 @@ function suppressRedundantTransportParents(pieces: CanonicalEvidencePiece[]) {
     );
 
     if (candidates.length > 0) {
+      // List disposition (Task B5, "several suppress against a set of
+      // candidates"): the existing rule never picked ONE specific segment
+      // this generic parent is represented by — any candidate matching
+      // date+type+confirmation/reason qualifies, and more than one
+      // routinely does (a same-day round trip on the same provider, for
+      // example). Naming a single survivorId here would invent a choice
+      // the pipeline never made; the gate records the whole candidate set
+      // instead so the audit shows every plausible absorber.
+      disposeCanonicalPiece(piece, {
+        kind: "survivors",
+        survivorIds: candidates.map((candidate) => candidate.id),
+      });
       piece.outputEligible = false;
       piece.mergeReasons = Array.from(
         new Set([
@@ -1791,11 +1956,6 @@ function gateOffContractQuestions(
     record._canonicalReviewDisposition = "dismissed";
     record._canonicalQuestionGate = reason;
   };
-
-  // Arc E (live-run 7.23.0): before any dismissal, forward subjects whose
-  // piece id was refreshed by a merge — the entity survived, only its id
-  // changed; the question follows it.
-  rekeyReviewSubjectsThroughPriorIds(details, pieces);
 
   // Dead-target sweep (run7 hotfix, live trip e0f1db42): a question whose
   // subject piece is no longer output-eligible (e.g. a transport fragment
@@ -2079,9 +2239,14 @@ function suppressRouteLessTransportFragments(
       )
     );
     if (anchored) continue;
+    // Terminal (survey §2, "13 genuinely terminal"): a row with no route
+    // and no anchor never had a candidate segment to fold into — it is
+    // booking material, not evidence of a movement, so there is nothing to
+    // name as a survivor.
     suppressCanonicalPiece(
       piece,
-      "transport candidacy floor: no departure or arrival location and no matching source anchor — booking material, not a travel row (run 7.24.1 chain A)"
+      "transport candidacy floor: no departure or arrival location and no matching source anchor — booking material, not a travel row (run 7.24.1 chain A)",
+      { kind: "terminal", code: "TRANSPORT_CANDIDACY_FLOOR_NOT_MET" }
     );
   }
 
@@ -2106,6 +2271,9 @@ function suppressRouteLessTransportFragments(
         normalizedComparable(stringValue(candidate.payload, "provider") ?? "") === prov
     );
     if (twin) {
+      // Direct outputEligible assignment (one of Task B's 5 bypass sites),
+      // but the survivor is right here in scope — mechanical to gate.
+      disposeCanonicalPiece(piece, { kind: "survivor", survivorId: twin.id });
       piece.outputEligible = false;
       addCanonicalAction(piece, {
         absorbedTitles: [stringValue(twin.payload, "title") ?? ""],
@@ -2152,6 +2320,22 @@ function suppressRouteLessTransportFragments(
         )
     );
 
+    // NOT restructured here on purpose (work order Task B5): this removal
+    // runs unconditionally and `host` is only looked up afterward to decide
+    // the label — the same shape as applyAccessTaskPolicy's two branches
+    // below. Making the removal conditional on finding `host` is a
+    // behaviour change (a piece that has no host today would then survive
+    // as an activity/note instead of being dropped) and is explicitly
+    // out of scope for this step; recorded in
+    // docs/assembly-findings-inbox.md. The disposition below is the most
+    // accurate label available under the CURRENT (unconditional) control
+    // flow — it reads the same `host` the reason string already branches on.
+    disposeCanonicalPiece(
+      piece,
+      host
+        ? { kind: "survivor", survivorId: host.id }
+        : { kind: "terminal", code: "ROUTE_LESS_TRANSPORT_FRAGMENT_NO_HOST" }
+    );
     piece.outputEligible = false;
     // Identity-manifest hygiene (run7 hotfix): the fragment's observations
     // stay on the fragment piece — moving observation ids between pieces
@@ -2203,10 +2387,33 @@ function createPiece(
   };
 }
 
+// Task B2 (restructure work order 2026-08-04): the single gate every
+// removal goes through, whether it arrives via suppressCanonicalPiece,
+// mergeCanonicalPieceInto, or one of the 5 direct `outputEligible = false`
+// sites. It deliberately does NOT touch outputEligible, actions, or
+// mergeReasons — each call site keeps setting those exactly as it already
+// did (this step is behaviour-neutral by contract; only the disposition is
+// new). Recording nothing here for a removal is the bug this gate exists
+// to make impossible: three City Note records shipped short with no
+// disposition anywhere and nothing noticed.
+// Exported: canonical-trip-assembly.ts's id-collision repair
+// (Task B6, one of the 5 direct `outputEligible = false` sites) lives
+// outside this file and does not go through suppressCanonicalPiece or
+// mergeCanonicalPieceInto, so it needs the gate itself, not just the
+// primitives built on it.
+export function disposeCanonicalPiece(
+  piece: CanonicalEvidencePiece,
+  disposition: CanonicalPieceDisposition
+) {
+  piece.disposition = disposition;
+}
+
 function suppressCanonicalPiece(
   piece: CanonicalEvidencePiece,
-  reason: string
+  reason: string,
+  disposition: CanonicalPieceDisposition
 ) {
+  disposeCanonicalPiece(piece, disposition);
   piece.outputEligible = false;
   piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
   addCanonicalAction(piece, {
@@ -2344,7 +2551,16 @@ function mergeCanonicalPieceInto({
   if (!preserveTargetIdentity) {
     refreshCanonicalPieceId(target);
   }
-  suppressCanonicalPiece(source, reason);
+  // A merge always names its destination by construction (`target`) — this
+  // is the mechanical case B3 describes, not a judgement call. Read
+  // target.id AFTER the possible refresh above so the disposition points at
+  // the id the target actually carries once this merge lands, matching how
+  // `_representedByPieceId`-style snapshots already work elsewhere in this
+  // file (survey §4: identity churn is a pre-existing, out-of-scope issue).
+  suppressCanonicalPiece(source, reason, {
+    kind: "survivor",
+    survivorId: target.id,
+  });
 }
 
 function travelBoundaryRecord(piece: CanonicalEvidencePiece) {
@@ -2997,7 +3213,8 @@ function suppressRepresentedTravelAndStayActivities(
           stringValue(prepTransport.payload, "title") ?? "its Travel row";
         suppressCanonicalPiece(
           activity,
-          "airport-prep line attaches to its travel card as a prep note, never a separate activity (RW-TRV-001)"
+          "airport-prep line attaches to its travel card as a prep note, never a separate activity (RW-TRV-001)",
+          { kind: "survivor", survivorId: prepTransport.id }
         );
         continue;
       }
@@ -3057,9 +3274,17 @@ function suppressRepresentedTravelAndStayActivities(
       // 2026-07-17: "Fly to Rome"/"Flight to Rome" on the Jan 12 two-segment
       // day, and the Delta 1043 AM/PM twin).
       if (matches.length >= 1) {
+        // List disposition (Task B5): unlike the crossDateMatch branch
+        // below, this rule never narrows `matches` to one row before
+        // suppressing — the comment above explicitly treats MULTIPLE
+        // matches as stronger evidence, not a tie to break. Recording all
+        // of `matches` is the behaviour-neutral read of that comment;
+        // picking matches[0] would silently prefer one real segment over
+        // an equally-matching one the pipeline never distinguished.
         suppressCanonicalPiece(
           activity,
-          "traveler movement represented by canonical transport"
+          "traveler movement represented by canonical transport",
+          { kind: "survivors", survivorIds: matches.map((transport) => transport.id) }
         );
         continue;
       }
@@ -3126,7 +3351,8 @@ function suppressRepresentedTravelAndStayActivities(
           stringValue(crossDateMatch.payload, "title") ?? "its Travel row";
         suppressCanonicalPiece(
           activity,
-          "traveler movement represented by canonical transport: ticket content re-emitted on the wrong day"
+          "traveler movement represented by canonical transport: ticket content re-emitted on the wrong day",
+          { kind: "survivor", survivorId: crossDateMatch.id }
         );
         continue;
       }
@@ -3177,7 +3403,8 @@ function suppressRepresentedTravelAndStayActivities(
       if (owningStay) {
         suppressCanonicalPiece(
           activity,
-          "lodging already represented by canonical stay record"
+          "lodging already represented by canonical stay record",
+          { kind: "survivor", survivorId: owningStay.id }
         );
         continue;
       }
@@ -3311,7 +3538,8 @@ function suppressRepresentedTravelAndStayActivities(
       }
       suppressCanonicalPiece(
         activity,
-        "routine check-in or bag-drop evidence attached to stay"
+        "routine check-in or bag-drop evidence attached to stay",
+        { kind: "survivor", survivorId: owner.id }
       );
     }
   }
@@ -3412,7 +3640,8 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
       }
       suppressCanonicalPiece(
         activity,
-        "stay arrival/access instructions attached to stay record"
+        "stay arrival/access instructions attached to stay record",
+        { kind: "survivor", survivorId: namedStay.id }
       );
       continue;
     }
@@ -3469,9 +3698,19 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
           type: "recovered",
         });
       }
+      // NOT restructured here on purpose (work order Task B5's ~3615 note
+      // applies to this branch too — see docs/assembly-findings-inbox.md):
+      // the activity is suppressed unconditionally below regardless of
+      // whether `cityStay` was found; `cityStay` only conditions whether
+      // the stay actually recorded the absorption above. The disposition
+      // mirrors that exact condition (`absorbedByCityStay`) rather than
+      // inventing a stricter gate.
       suppressCanonicalPiece(
         activity,
-        "access instructions are stay material, not a traveler activity"
+        "access instructions are stay material, not a traveler activity",
+        cityStay && instructions
+          ? { kind: "survivor", survivorId: cityStay.id }
+          : { kind: "terminal", code: "ACCESS_MATERIAL_NO_OWNING_STAY" }
       );
       continue;
     }
@@ -3611,12 +3850,21 @@ function applyAccessTaskPolicy(pieces: CanonicalEvidencePiece[]) {
         /\b(?:meet|office|reception|host|elsewhere|remote)\b/.test(text)
     );
 
+    // NOT restructured here on purpose (work order Task B5, the ~3615
+    // site): the removal already IS conditioned on `matchingPrivateStay`
+    // for the label but the terminal branch (no matching stay at all)
+    // still runs the same suppress call the survivor branch does — see
+    // docs/assembly-findings-inbox.md. The disposition below reads the
+    // same `matchingPrivateStay` the reason string already branches on.
     if (!matchingPrivateStay || !explicitSeparateAction) {
       suppressCanonicalPiece(
         activity,
         matchingPrivateStay
           ? "routine access instructions attached to private stay"
-          : "access instructions had no compatible private stay"
+          : "access instructions had no compatible private stay",
+        matchingPrivateStay
+          ? { kind: "survivor", survivorId: matchingPrivateStay.id }
+          : { kind: "terminal", code: "PRIVATE_STAY_ACCESS_NO_COMPATIBLE_STAY" }
       );
     }
   }
@@ -3806,9 +4054,14 @@ function pruneNonOvernightPlaces(
         (observation) => !observationHasLegCorroboration(observation)
       );
     if (recoveryOnly) {
+      // Terminal (planning-cost material family): the comment above traces
+      // this to Costs-section per-night price lines minting phantom legs —
+      // there is no real spine or day-heading record for this piece to be
+      // absorbed by, by construction.
       suppressCanonicalPiece(
         place,
-        "recovery-only place evidence never mints a trip leg: spine or day-heading corroboration required"
+        "recovery-only place evidence never mints a trip leg: spine or day-heading corroboration required",
+        { kind: "terminal", code: "RECOVERY_ONLY_COST_DERIVED_PLACE" }
       );
       return;
     }
@@ -3899,11 +4152,22 @@ function pruneNonOvernightPlaces(
     );
 
     if (departureHome || returnHome || sameDayOnly) {
+      // Terminal (candidacy floor not met): a place that is the traveler's
+      // own home or a same-day stop was never a candidate to BE a trip leg
+      // — there is no leg record for it to be represented by, it simply
+      // fails the "asserts where the traveler sleeps" test above.
       suppressCanonicalPiece(
         place,
         departureHome || returnHome
           ? "home departure or return is not an overnight trip leg"
-          : "same-day destination is an activity, not an overnight trip leg"
+          : "same-day destination is an activity, not an overnight trip leg",
+        {
+          kind: "terminal",
+          code:
+            departureHome || returnHome
+              ? "HOME_DEPARTURE_OR_RETURN_NOT_A_LEG"
+              : "SAME_DAY_DESTINATION_NOT_A_LEG",
+        }
       );
     }
   });
@@ -4650,9 +4914,15 @@ function scrubProtectedValuesFromPublicProse(
     const finalTitle = stringValue(piece.payload, "title");
     const titleSignal = finalTitle ? findIdentityProseSignal(finalTitle) : null;
     if (titleSignal) {
+      // Terminal (identity-collision repair family, read broadly: an
+      // identity VALUE colliding with public trip content, same as the
+      // piece-id collision at canonical-trip-assembly.ts). There is no
+      // scrubbed husk to keep and nothing else to name as a survivor —
+      // that is the whole point of "no scrubbed husks" above.
       suppressCanonicalPiece(
         piece,
-        `identity-shaped value (${titleSignal}) in public title: record suppressed at the output boundary (RW-PRI-001 — identity is never trip content; no scrubbed husks)`
+        `identity-shaped value (${titleSignal}) in public title: record suppressed at the output boundary (RW-PRI-001 — identity is never trip content; no scrubbed husks)`,
+        { kind: "terminal", code: "PUBLIC_TITLE_IDENTITY_VALUE" }
       );
     }
   }
@@ -4775,10 +5045,13 @@ function applyStayCandidacyGate(pieces: CanonicalEvidencePiece[]) {
     if (isDocumentArtifactShapedStayName(stay.payload.name)) {
       // Suppressed artifacts keep feeding the protected-value deny list
       // (T2's keep-property — collectProtectedValueDenyList reads stays
-      // regardless of outputEligible).
+      // regardless of outputEligible). Terminal (structural/overview
+      // artifact family): a source-document title is not lodging evidence
+      // for any OTHER stay to absorb.
       suppressCanonicalPiece(
         stay,
-        "stay candidacy: document-artifact-shaped name (itinerary/by-day/filename shape) is source-document booking material, never a lodging record (run 7.24.1 chain B)"
+        "stay candidacy: document-artifact-shaped name (itinerary/by-day/filename shape) is source-document booking material, never a lodging record (run 7.24.1 chain B)",
+        { kind: "terminal", code: "STAY_NAME_DOCUMENT_ARTIFACT" }
       );
       continue;
     }
@@ -4787,11 +5060,23 @@ function applyStayCandidacyGate(pieces: CanonicalEvidencePiece[]) {
       stringValue(stay.payload, "checkOut") ??
       stringValue(stay.payload, "firstNightDate");
     if (nightEvidence) continue;
+    // Terminal (candidacy floor not met): two distinct diagnoses share this
+    // gate — a person's name misread as a stay, and a genuine stay record
+    // with no night evidence at all — kept as separate codes because they
+    // are different fact patterns for the scorecard to distinguish, even
+    // though neither has an absorbing record.
+    const personNameShaped = isPersonNameShapedStayName(stay.payload.name);
     suppressCanonicalPiece(
       stay,
-      isPersonNameShapedStayName(stay.payload.name)
+      personNameShaped
         ? "stay candidacy: person-name-shaped, dateless stay is booking material, never a stay record (RW-TRV-001 night rule; run 7.23.2 phantom shape)"
-        : "stay candidacy: no night evidence (no check-in, check-out, or first-night date); suppressed with disposition (RW-TRV-001 night rule)"
+        : "stay candidacy: no night evidence (no check-in, check-out, or first-night date); suppressed with disposition (RW-TRV-001 night rule)",
+      {
+        kind: "terminal",
+        code: personNameShaped
+          ? "STAY_CANDIDACY_PERSON_NAME_SHAPED"
+          : "STAY_CANDIDACY_NO_NIGHT_EVIDENCE",
+      }
     );
   }
 }
@@ -5217,7 +5502,15 @@ function sanitizeCanonicalCardDescription(value: string | null) {
   if (!value) return value;
 
   const segments = value
-    .split(PROSE_SEGMENT_SPLIT)
+    // City Notes are assembled as one newline-delimited line per universal
+    // section. Treat those newlines as real prose boundaries before the
+    // privacy/identity scrub: otherwise an identity value in a later section
+    // can make the sanitizer discard an unrelated earlier section too (run
+    // 8.1.0: a phone number under Getting Around deleted R2D2 from Sights &
+    // Culture). Each line still passes through the identical fail-closed
+    // segmentCarriesIdentityValues gate below.
+    .split(/(?:\r?\n)+/)
+    .flatMap((part) => part.split(PROSE_SEGMENT_SPLIT))
     .map((segment) => segment.trim())
     .filter(Boolean);
   const seen = new Set<string>();
@@ -5720,7 +6013,18 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
 
   // Notes must find a leg home (live-run 7.21.0, run7: recovered "Eat" and
   // "Buy wine" Vienna notes shipped as leg-less standalone cards — their
-  // dates were cleared, so the place-range fallback never fired). The
+  // dates were cleared, so the place-range fallback never fired). That fix
+  // (headingDate below) only covers a DAY-shaped heading ("Saturday,
+  // January 19th"). A topical heading ("Explore Vienna", an idea-list
+  // section) is not date-shaped, normalizeTripDate returns null for it, and
+  // a demoted piece with no city name in its own title/description (R2D2:
+  // "far away", never says "Prague") had no path left to a city at all —
+  // the B7 defect (2026-08-04: R2D2, and the Jan-19 Vienna idea list —
+  // Ferris wheel, St. Stephen's, Apple Strudel Show, Schönbrunn visit —
+  // routed nowhere and lost). Fixed at the source:
+  // demoteCanonicalPieceToCityNote now stamps `city` from the piece's OWN
+  // date, before nulling it, so this loop's `explicitCity` branch below
+  // catches these instead of ever reaching this fallback chain. The
   // note's own day heading ("Saturday, January 19th") still carries the
   // day; parse it with the shared date parser, defaulting the year from
   // the trip's place ranges.
@@ -5768,9 +6072,7 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       )?.city ??
       null;
 
-    if (!city) {
-      continue;
-    }
+    if (!city) continue;
 
     note.payload.city = city;
     const key = normalizeText(city);
@@ -5902,28 +6204,46 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       const label =
         stringValue(note.payload, "_canonicalNoteCollectionLabel") ?? null;
       const category = stringValue(note.payload, "category");
-      const candidates =
-        note.payload._canonicalNoteEntry === true
-          ? [stringValue(note.payload, "title")]
-          : [
-              ...(sanitizeCityNoteText(
-                note.payload.description ?? note.payload.title
-              ) as string | null ?? "")
-                .split(PROSE_SEGMENT_SPLIT)
-                .map((segment) => segment.trim()),
-            ];
-      for (const candidate of candidates) {
-        if (!candidate || candidate.length < 4) continue;
+      const isNoteEntry = note.payload._canonicalNoteEntry === true;
+      const descriptionCandidates = isNoteEntry
+        ? [stringValue(note.payload, "title")]
+        : [
+            ...(sanitizeCityNoteText(
+              note.payload.description ?? note.payload.title
+            ) as string | null ?? "")
+              .split(PROSE_SEGMENT_SPLIT)
+              .map((segment) => segment.trim()),
+          ];
+      // B7.1 (2026-08-04, R2D2 defect): a note "landing" means one of its
+      // candidates matched something the check already treats as covered —
+      // already in the rendered text, already carrying an explicit
+      // cost/access/booking disposition, or freshly restored below. A note
+      // whose candidates ALL fail to land (none of the three) walks away
+      // with neither content nor a disposition — that is the exact silent-
+      // loss shape this integrity check exists to catch (comment above,
+      // "every routed note's content must land ... or carry an explicit
+      // exclusion disposition"), just one step upstream of what the
+      // original 7.18.0 fix covered: that fix caught content that rendered
+      // but then went missing from the FINAL text; this closes the case
+      // where a note's own description-derived candidates never produce
+      // anything the classifier below ever sees at all.
+      let landed = false;
+      const tryCandidate = (candidate: string | null) => {
+        if (!candidate || candidate.length < 4) return;
         const normalized = normalizedComparable(candidate);
-        if (!normalized || normalized.length < 4) continue;
-        if (renderedNow().includes(normalized)) continue;
+        if (!normalized || normalized.length < 4) return;
+        if (renderedNow().includes(normalized)) {
+          landed = true;
+          return;
+        }
         if (
           excludedNormalized.some(
             (excluded) =>
               excluded.includes(normalized) || normalized.includes(excluded)
           )
         ) {
-          continue;
+          landed = true;
+          return;
         }
         // Run8 P0 (7.21.1b) + Arc F.2 C4: restored content passes the SAME
         // safety classifier the initial render enforces — never costs,
@@ -5931,15 +6251,15 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
         // boilerplate — plus the legacy lockbox/safe-box shapes, and never
         // material whose own source city disagrees with this collection's
         // city.
-        if (classifyCityNoteSegmentSafety(candidate) !== "content") continue;
-        if (/\block\s*box|\bsafe box\b|\bstep \d\b/i.test(candidate)) continue;
+        if (classifyCityNoteSegmentSafety(candidate) !== "content") return;
+        if (/\block\s*box|\bsafe box\b|\bstep \d\b/i.test(candidate)) return;
         const noteCity = normalizedComparable(
           stringValue(note.payload, "city") ?? ""
         );
         const targetCity = normalizedComparable(
           stringValue(target.payload, "city") ?? ""
         );
-        if (noteCity && targetCity && noteCity !== targetCity) continue;
+        if (noteCity && targetCity && noteCity !== targetCity) return;
         const section = classifyCityNoteSection({
           category,
           label,
@@ -5951,6 +6271,18 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
           ? `${description}\n${line}`
           : line;
         restored.push(candidate);
+        landed = true;
+      };
+      for (const candidate of descriptionCandidates) tryCandidate(candidate);
+      // The title is the one field every demoted piece always carries,
+      // independent of whatever happened to its description on the way
+      // here — so it is the last-resort candidate, tried through the
+      // IDENTICAL gate above (never a parallel check), and only when the
+      // description-derived candidates landed nothing. A note-entry piece
+      // already used its title as the (sole) description candidate above,
+      // so retrying it would just repeat the same failing check.
+      if (!landed && !isNoteEntry) {
+        tryCandidate(stringValue(note.payload, "title"));
       }
     }
     if (restored.length > 0) {
@@ -6241,9 +6573,13 @@ function suppressIsolatedUntimedGenericMeals(pieces: CanonicalEvidencePiece[]) {
       continue;
     }
 
+    // Terminal (candidacy floor not met): a bare "Lunch" with no time,
+    // confirmation, or group context never had a venue for anything else
+    // to represent.
     suppressCanonicalPiece(
       piece,
-      "isolated untimed generic meal has no traveler-meaningful venue or valid group context"
+      "isolated untimed generic meal has no traveler-meaningful venue or valid group context",
+      { kind: "terminal", code: "ISOLATED_UNTIMED_GENERIC_MEAL" }
     );
   }
 }
@@ -6291,9 +6627,13 @@ function suppressUnresolvedIsolatedTerms({
       continue;
     }
 
+    // Terminal (no source support family): unknown-structure, 3-word-or-
+    // fewer terms with no other field never had a canonical record to be
+    // matched against.
     suppressCanonicalPiece(
       piece,
-      "needs_identity_enrichment: isolated term has no source-supported planning context"
+      "needs_identity_enrichment: isolated term has no source-supported planning context",
+      { kind: "terminal", code: "ISOLATED_TERM_NO_SOURCE_SUPPORT" }
     );
   }
 }
@@ -6411,6 +6751,14 @@ function applyExplicitSourceUpdates(pieces: CanonicalEvidencePiece[]) {
 
     if (cancellation && !replacement) {
       const reason = "explicit source cancellation supersedes the earlier itinerary record";
+      // Direct outputEligible assignment (one of Task B's 5 bypass sites).
+      // Terminal (explicit cancellation family): the source says the plan
+      // will not happen — there is no surviving record for a cancelled
+      // plan to be represented by.
+      disposeCanonicalPiece(piece, {
+        kind: "terminal",
+        code: "EXPLICIT_SOURCE_CANCELLATION",
+      });
       piece.outputEligible = false;
       piece.mergeReasons = Array.from(new Set([...piece.mergeReasons, reason]));
       addCanonicalAction(piece, {
@@ -6626,9 +6974,13 @@ function enforceCanonicalOutputActivityRoles(
     const classification = classifyDraftActivityCard(activityInput(piece.payload));
 
     if (classification.isOverviewActivity) {
+      // Terminal (structural/overview artifact family — this is the
+      // canonical example of it): a "Day 3 in Prague" heading is source
+      // structure, not evidence of a traveler-visible thing to absorb it.
       suppressCanonicalPiece(
         piece,
-        "generic day overview is source context, not a traveler card"
+        "generic day overview is source context, not a traveler card",
+        { kind: "terminal", code: "GENERIC_DAY_OVERVIEW" }
       );
       continue;
     }
@@ -6767,9 +7119,13 @@ function suppressUnsupportedModelInventions(
     }
 
     if (judged > 0 && unsupported === judged) {
+      // Terminal (unsupported model invention family): every observation
+      // behind this piece failed the source-support stamp, so by
+      // definition no OTHER record is the real thing this was meant to be.
       suppressCanonicalPiece(
         piece,
-        "no source support: distinctive title words absent from the producing chunk text (model invention)"
+        "no source support: distinctive title words absent from the producing chunk text (model invention)",
+        { kind: "terminal", code: "UNSUPPORTED_MODEL_INVENTION" }
       );
     }
   }
@@ -6899,6 +7255,26 @@ function collapseAlternativeSlotCards(pieces: CanonicalEvidencePiece[]) {
         ) {
           continue;
         }
+        // A dated site container is never this pass's "same plan described
+        // twice" duplicate of a same-day sibling — recognising a component
+        // only by the "<X> at <Site>" title shape (isSiteComponentTitlePair,
+        // above) missed "Changing of the Guard", which has no "at <site>"
+        // tail, and this pass merged the dated "Prague Castle visit"
+        // container INTO it, deleting the castle's own card (defect docket
+        // 2026-08-04). Same shared vocabulary the other two collapse passes
+        // use (SAME_SITE_CONTAINER_PATTERN, ~L8141) — an undated container
+        // is not this defect and is left to the description-overlap check
+        // below, per rule that an undated survivor is the defect, not the
+        // fix (see the reclassifySourceContainers rescue, ~L9354).
+        const leftIsDatedContainer =
+          SAME_SITE_CONTAINER_PATTERN.test(
+            stringValue(left.payload, "title") ?? ""
+          ) && Boolean(stringValue(left.payload, "date"));
+        const rightIsDatedContainer =
+          SAME_SITE_CONTAINER_PATTERN.test(
+            stringValue(right.payload, "title") ?? ""
+          ) && Boolean(stringValue(right.payload, "date"));
+        if (leftIsDatedContainer || rightIsDatedContainer) continue;
         const leftTime = timeFrom(left.payload);
         const rightTime = timeFrom(right.payload);
         if (leftTime && rightTime && leftTime !== rightTime) continue;
@@ -7356,10 +7732,34 @@ function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
   return tokens.length >= 2 || (titleTokenCount === 1 && tokens.length === 1);
 }
 
+// B7 city-note integrity gap, live-run defect 2026-08-04 (R2D2; the Jan-19
+// Vienna idea list: St. Stephen's Cathedral, Ferris wheel, Apple Strudel
+// Show, Schönbrunn visit). mergeCanonicalCityNotes resolves a note's city
+// from an explicit `city` field, from a place name appearing in the note's
+// OWN text, or — the fallback that matters here — from the note's own
+// `date` falling inside a place's arrive/leave range. This function has
+// always nulled `date` a few lines below, which was fine as long as the
+// piece already carried an explicit city. A piece demoted with neither an
+// explicit city nor its city's name in its own title/description (R2D2:
+// "(far away)", no "Prague" anywhere in the text it owns) then resolves NO
+// city at all once its date is gone, never joins any group in
+// mergeCanonicalCityNotes, and ships nowhere: the doubt-marker/idea-list
+// demotion action is recorded (so lineage shows it was "routed"), but the
+// content itself reaches neither a card nor the note. One call site
+// (createResearchedListQuestions) had already patched around exactly this
+// by stamping `piece.payload.city` before calling in; folding that
+// preservation into the shared function itself — instead of leaving it as
+// a lone local patch — is the fix, per the work order's "extend the check
+// that exists, don't grow a second one."
 function demoteCanonicalPieceToCityNote(
   piece: CanonicalEvidencePiece,
-  reason: string
+  reason: string,
+  pieces: CanonicalEvidencePiece[]
 ) {
+  if (!stringValue(piece.payload, "city")) {
+    const city = rawCityForDate(pieces, stringValue(piece.payload, "date"));
+    if (city) piece.payload.city = city;
+  }
   piece.kind = "note";
   piece.payload.itemType = "note";
   piece.payload.date = null;
@@ -7373,7 +7773,12 @@ function demoteCanonicalPieceToCityNote(
   });
 }
 
-function canonicalCityForDate(pieces: CanonicalEvidencePiece[]) {
+// Shared by canonicalCityForDate, canonicalCitiesForDate, and
+// demoteCanonicalPieceToCityNote's city-preservation fix above (Task B7,
+// 2026-08-04) — one range scan instead of three independently maintained
+// copies (the anti-pattern named in docs/assembly-findings-inbox.md's Task
+// C entries).
+function placeDateRanges(pieces: CanonicalEvidencePiece[]) {
   const ranges: Array<{ arrive: string; city: string; leave: string }> = [];
   for (const piece of pieces) {
     if (piece.kind !== "place") continue;
@@ -7382,6 +7787,23 @@ function canonicalCityForDate(pieces: CanonicalEvidencePiece[]) {
     const leave = stringValue(piece.payload, "leaveDate");
     if (city && arrive && leave) ranges.push({ arrive, city, leave });
   }
+  return ranges;
+}
+
+// Case-PRESERVING date-range city lookup. canonicalCityForDate below
+// normalizes its result for comparison/grouping-key use; a value stamped
+// straight onto a note's own display title ("Vienna Notes & Tips") needs
+// the place's original casing, not normalizedComparable's folded form.
+function rawCityForDate(pieces: CanonicalEvidencePiece[], date: string | null) {
+  if (!date) return null;
+  const match = placeDateRanges(pieces).find(
+    (range) => date >= range.arrive && date <= range.leave
+  );
+  return match ? match.city : null;
+}
+
+function canonicalCityForDate(pieces: CanonicalEvidencePiece[]) {
+  const ranges = placeDateRanges(pieces);
   return (date: string | null) => {
     if (!date) return "";
     const match = ranges.find(
@@ -7392,14 +7814,7 @@ function canonicalCityForDate(pieces: CanonicalEvidencePiece[]) {
 }
 
 function canonicalCitiesForDate(pieces: CanonicalEvidencePiece[]) {
-  const ranges: Array<{ arrive: string; city: string; leave: string }> = [];
-  for (const piece of pieces) {
-    if (piece.kind !== "place") continue;
-    const city = stringValue(piece.payload, "city");
-    const arrive = stringValue(piece.payload, "arriveDate");
-    const leave = stringValue(piece.payload, "leaveDate");
-    if (city && arrive && leave) ranges.push({ arrive, city, leave });
-  }
+  const ranges = placeDateRanges(pieces);
   return (date: string | null) => {
     const cities = new Set<string>();
     if (!date) return cities;
@@ -7472,6 +7887,9 @@ function isDeliberateDayPlanMention(
   piece: CanonicalEvidencePiece,
   observationById: Map<string, EvidenceObservation>
 ) {
+  const blockType = stringValue(piece.payload, "_intentBlockType");
+  if (blockType === "plan") return true;
+  if (blockType === "ideas") return false;
   const labels = pieceObservationLabels(piece, observationById);
   if (!labels.some((label) => DAY_PLAN_SECTION_LABEL_PATTERN.test(label))) {
     return false;
@@ -7755,7 +8173,8 @@ function resolveUncommittedRepeatMentions(
     }
     demoteCanonicalPieceToCityNote(
       kept,
-      "repeated but never committed anywhere in the source: one city note, no cards, no question"
+      "repeated but never committed anywhere in the source: one city note, no cards, no question",
+      pieces
     );
   }
 
@@ -7776,7 +8195,8 @@ function resolveUncommittedRepeatMentions(
 
     demoteCanonicalPieceToCityNote(
       piece,
-      "repeated across days but never committed anywhere in the source: one city note, no cards, no question"
+      "repeated across days but never committed anywhere in the source: one city note, no cards, no question",
+      pieces
     );
   }
 
@@ -7838,16 +8258,26 @@ function resolveUncommittedRepeatMentions(
       ) {
         for (const match of matches) {
           if (!match.piece.outputEligible) continue;
+          // The winner is the outer `piece` in every iteration of this
+          // loop — a concrete, singular survivor even though it removes
+          // several note-copy losers.
           suppressCanonicalPiece(
             match.piece,
-            "planned day-plan visit wins over its loose city-note copy in the same leg"
+            "planned day-plan visit wins over its loose city-note copy in the same leg",
+            { kind: "survivor", survivorId: piece.id }
           );
         }
         continue;
       }
+      // List disposition (Task B5): `matches` can hold more than one note
+      // copy for this title/leg, and the existing rule never singled one
+      // out as THE home — any of them is. Recording the whole set is the
+      // behaviour-neutral read, same reasoning as the transport `matches`
+      // site above.
       suppressCanonicalPiece(
         piece,
-        "repeated but never committed: the city-note copy is this entity's single home"
+        "repeated but never committed: the city-note copy is this entity's single home",
+        { kind: "survivors", survivorIds: matches.map((match) => match.piece.id) }
       );
       continue;
     }
@@ -7855,7 +8285,8 @@ function resolveUncommittedRepeatMentions(
       if (!match.piece.outputEligible) continue;
       suppressCanonicalPiece(
         match.piece,
-        "planned activity wins over its loose city-note copy in the same leg"
+        "planned activity wins over its loose city-note copy in the same leg",
+        { kind: "survivor", survivorId: piece.id }
       );
     }
   }
@@ -7968,7 +8399,8 @@ function reconcileCardsAgainstCityNotes(
         // demotes — an uncommitted repeat never ships as a dated card.
         demoteCanonicalPieceToCityNote(
           piece,
-          "repeated but never committed: demoted to the city notes"
+          "repeated but never committed: demoted to the city notes",
+          pieces
         );
       }
       continue;
@@ -8039,6 +8471,10 @@ function demoteIdeaListMentions(
   const entries: Array<{ entry: IdeaListEntry; piece: CanonicalEvidencePiece }> = [];
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
+    // The coherent-block pass runs before identity and is authoritative. This
+    // legacy section classifier remains for old direct callers/fixtures, but
+    // it may not flatten a dated section back over a served block decision.
+    if (stringValue(piece.payload, "_intentBlockType")) continue;
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title) continue;
     if (titleMatchesQuestionSubject(questionSubjects, title)) continue;
@@ -8083,9 +8519,203 @@ function demoteIdeaListMentions(
     if (!demoted.has(entry.id)) continue;
     demoteCanonicalPieceToCityNote(
       piece,
-      "dated idea list: the section commits nothing, so its entries stay city notes (RW-CLS-001, unified classifier)"
+      "dated idea list: the section commits nothing, so its entries stay city notes (RW-CLS-001, unified classifier)",
+      pieces
     );
   }
+}
+
+function intentSourceKey(observation: EvidenceObservation) {
+  return [
+    observation.sourceUploadId ?? observation.sourceFilename ?? "(source)",
+    observation.sourceLabel,
+  ].join("|");
+}
+
+function finitePayloadNumber(
+  record: Record<string, unknown>,
+  key: string
+) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// RW-CLS-001 block typing. This is intentionally the first intent-changing
+// pass after dates settle and before slot/title/repeat identity. It turns the
+// source's smallest coherent blocks into durable decisions; later passes may
+// follow an entity id but may not reclassify a whole day over this result.
+function applyIntentBlockClassification({
+  missingDetails,
+  observations,
+  pieces,
+}: {
+  missingDetails: unknown[];
+  observations: EvidenceObservation[];
+  pieces: CanonicalEvidencePiece[];
+}) {
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
+  const timedCounts = timedActivityCountsByDate(pieces);
+  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const geocodeVerificationRan = observations.some(
+    (observation) =>
+      finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
+      finitePayloadNumber(observation.payload, "verifiedLongitude") !== null
+  );
+  const pieceById = new Map<string, CanonicalEvidencePiece>();
+  const entries: IntentBlockEntry[] = [];
+
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const date = stringValue(piece.payload, "date");
+    const title = stringValue(piece.payload, "title");
+    if (!date || !title) continue;
+    const ownObservations = piece.observationIds
+      .map((id) => observationById.get(id))
+      .filter((observation): observation is EvidenceObservation =>
+        Boolean(observation)
+      );
+    const primary = ownObservations
+      .filter(
+        (observation) =>
+          observation.kind === "activity" &&
+          stringValue(observation.payload, "date") === date
+      )
+      .sort((left, right) => left.ordinal - right.ordinal)[0];
+    if (!primary) continue;
+    const verifiedObservation = ownObservations.find(
+      (observation) =>
+        finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
+        finitePayloadNumber(observation.payload, "verifiedLongitude") !== null
+    );
+    const labels = ownObservations.flatMap((observation) => [
+      observation.sourceStructure.sectionLabel ?? "",
+      ...observation.sourceStructure.headingPath,
+    ]);
+    const ownEvidenceText = ownObservations
+      .map((observation) => stringValue(observation.payload, "evidence") ?? "")
+      .join(" ");
+    const ownText = ownObservations
+      .flatMap((observation) => [
+        stringValue(observation.payload, "title") ?? "",
+        stringValue(observation.payload, "description") ?? "",
+        stringValue(observation.payload, "evidence") ?? "",
+      ])
+      .join(" ");
+    const structuralLabels = labels.filter(Boolean);
+    const notesBlobSignal =
+      structuralLabels.length > 0 &&
+      ownObservations.every(
+        (observation) =>
+          observation.sourceStructure.sectionType !== "dated_itinerary"
+      ) &&
+      structuralLabels.every(
+        (label) => !DAY_PLAN_LABEL_PATTERN.test(label)
+      );
+    const classification = classifyDraftActivityCard(activityInput(piece.payload));
+    const researchedText = [
+      activityText(piece.payload),
+      stringValue(piece.payload, "evidence") ?? "",
+    ].join(" ");
+
+    entries.push({
+      approxLatitude: finitePayloadNumber(piece.payload, "approxLatitude"),
+      approxLongitude: finitePayloadNumber(piece.payload, "approxLongitude"),
+      boundaryBefore: false,
+      category: stringValue(piece.payload, "category"),
+      date,
+      // Explicit choice must appear in the observation's evidence field — a
+      // model-invented "or" in its rewritten title is not source support.
+      hasExplicitChoice: /\bor\b/i.test(
+        ownEvidenceText.trim() ? ownEvidenceText : ownText
+      ),
+      hasFixedEvidence:
+        mentionCommitment(piece, timedCounts) !== "none",
+      hasHedgeMarker: pieceHasHedgeMarker(piece),
+      hasIdeaSignal:
+        notesBlobSignal || hasLooseTipVocabulary(ownText),
+      hasResearchEvidence:
+        PRICE_MARKER_PATTERN.test(researchedText) ||
+        classification.hasAvailabilityMarker,
+      hasSourceSupportedPlan:
+        SITE_CONTAINER_NOUN_PATTERN.test(title) ||
+        pieceIsSameSiteGroupingStructure(piece, pieces),
+      hasSourceStructure: structuralLabels.length > 0,
+      id: piece.id,
+      itemType: stringValue(piece.payload, "itemType"),
+      observationIds: [...piece.observationIds],
+      sourceKey: intentSourceKey(primary),
+      sourceOrder: primary.ordinal,
+      title,
+      verifiedLatitude: verifiedObservation
+        ? finitePayloadNumber(verifiedObservation.payload, "verifiedLatitude")
+        : null,
+      verifiedLongitude: verifiedObservation
+        ? finitePayloadNumber(verifiedObservation.payload, "verifiedLongitude")
+        : null,
+    });
+    pieceById.set(piece.id, piece);
+  }
+
+  // A boundary is evidence only when the source bytes between two candidate
+  // entries contain context/note material. Ordinal gaps alone can be parser
+  // omissions and are never enough.
+  const entryGroups = new Map<string, IntentBlockEntry[]>();
+  for (const entry of entries) {
+    const key = `${entry.date}|${entry.sourceKey}`;
+    const group = entryGroups.get(key);
+    if (group) group.push(entry);
+    else entryGroups.set(key, [entry]);
+  }
+  for (const group of entryGroups.values()) {
+    group.sort((left, right) => left.sourceOrder - right.sourceOrder);
+    for (let index = 1; index < group.length; index += 1) {
+      const previous = group[index - 1];
+      const current = group[index];
+      current.boundaryBefore = observations.some(
+        (observation) =>
+          observation.ordinal > previous.sourceOrder &&
+          observation.ordinal < current.sourceOrder &&
+          stringValue(observation.payload, "date") === current.date &&
+          intentSourceKey(observation) === current.sourceKey &&
+          (observation.kind === "context" ||
+            observation.kind === "note" ||
+            observation.role === "context" ||
+            observation.role === "city_note_candidate")
+      );
+    }
+  }
+
+  const result = classifyIntentBlocks(entries, { geocodeVerificationRan });
+  const blockByMember = new Map<string, IntentBlockDecision>();
+  for (const block of result.blocks) {
+    for (const memberId of block.memberIds) blockByMember.set(memberId, block);
+  }
+  for (const [pieceId, type] of result.entryTypes) {
+    const piece = pieceById.get(pieceId);
+    const block = blockByMember.get(pieceId);
+    if (!piece || !block) continue;
+    piece.payload._intentBlockId = block.blockId;
+    piece.payload._intentBlockType = type;
+    if (type !== "ideas") continue;
+    const normalizedTitle = normalizedComparable(
+      stringValue(piece.payload, "title")
+    );
+    if (normalizedTitle && titleMatchesQuestionSubject(questionSubjects, normalizedTitle)) {
+      continue;
+    }
+    demoteCanonicalPieceToCityNote(
+      piece,
+      `intent block ${block.blockId}: ${block.reason}`,
+      pieces
+    );
+  }
+
+  return {
+    blocks: result.blocks,
+    version: 1 as const,
+  };
 }
 
 function demoteHedgedSingleUncommittedMentions(
@@ -8104,7 +8734,8 @@ function demoteHedgedSingleUncommittedMentions(
 
     demoteCanonicalPieceToCityNote(
       piece,
-      "source doubt marker (maybe / if time / far away): demoted to city note without a question"
+      "source doubt marker (maybe / if time / far away): demoted to city note without a question",
+      pieces
     );
   }
 }
@@ -8993,7 +9624,6 @@ function createResearchedListQuestions(
 ) {
   const timedCounts = timedActivityCountsByDate(pieces);
   const questionSubjects = reviewSubjectTitles(missingDetails);
-  const cityForDate = canonicalCityForDate(pieces);
   const byDate = new Map<string, CanonicalEvidencePiece[]>();
 
   const questionSubjectPieceIds = new Set(
@@ -9087,15 +9717,15 @@ function createResearchedListQuestions(
       title: stringValue(piece.payload, "title"),
     }));
     for (const piece of group) {
-      // Preserve the city so the demoted idea joins its city-note collection
-      // (demotion clears the date, which is how notes usually find a city).
-      const city =
-        stringValue(piece.payload, "city") ||
-        cityForDate(stringValue(piece.payload, "date"));
-      if (city) piece.payload.city = city;
+      // City preservation before the date-null used to be patched in
+      // locally here (normalizedComparable'd, so it also mis-cased the
+      // stamped city — e.g. "vienna" instead of "Vienna" on the final note
+      // title). demoteCanonicalPieceToCityNote now does this itself, with
+      // proper display casing, for every call site (B7 fix, 2026-08-04).
       demoteCanonicalPieceToCityNote(
         piece,
-        "held as a city idea pending the maker's planned-or-ideas answer"
+        "held as a city idea pending the maker's planned-or-ideas answer",
+        pieces
       );
     }
 
@@ -9749,7 +10379,8 @@ function pieceForMissingDetail(
   });
   if (addressMatches.length === 1) return addressMatches[0];
 
-  const relatedTitle = identityTokens(detail.relatedTitle);
+  const relatedTitleValue = stringValue(detail, "relatedTitle");
+  const relatedTitle = identityTokens(relatedTitleValue);
   const subjectType = normalizedComparable(detail.subjectType);
   const expectedKind =
     subjectType === "item" ? "activity" :
@@ -9759,6 +10390,41 @@ function pieceForMissingDetail(
 
   if (relatedTitle.length === 0) {
     return null;
+  }
+
+  // Exact canonical identity wins before token-overlap ranking. In the
+  // pinned 8.1.0 parse, "Prague Castle visit" tied with several castle
+  // sub-stops once descriptions were included, even though one surviving
+  // card carried the review detail's exact title. Treating that as an
+  // orphan manufactured a placeholder instead of binding the real card.
+  const exactTitleMatches = pieces.filter(
+    (piece) =>
+      piece.outputEligible &&
+      (!expectedKind || piece.kind === expectedKind) &&
+      normalizedComparable(piece.payload.title) ===
+        normalizedComparable(relatedTitleValue)
+  );
+  if (exactTitleMatches.length === 1) return exactTitleMatches[0];
+
+  // A source review detail may omit a harmless suffix (the live pair is
+  // "Prague Castle" → "Prague Castle visit"). Resolve that only when one
+  // eligible title contains every subject token. Description mentions do
+  // not participate: a castle sub-stop may mention its parent without
+  // becoming the ticket Question's subject.
+  const titleContainmentMatches = pieces.filter((piece) => {
+    if (
+      !piece.outputEligible ||
+      (expectedKind && piece.kind !== expectedKind)
+    ) {
+      return false;
+    }
+    const titleTokens = identityTokens(
+      [piece.payload.title, piece.payload.name].filter(Boolean).join(" ")
+    );
+    return overlapCount(relatedTitle, titleTokens) === relatedTitle.length;
+  });
+  if (titleContainmentMatches.length === 1) {
+    return titleContainmentMatches[0];
   }
 
   const candidates = pieces
@@ -9796,113 +10462,6 @@ function pieceForMissingDetail(
   }
 
   return best.piece;
-}
-
-function recoverMissingNamedEvidence({
-  details,
-  observations,
-  pieces,
-  startingOrdinal,
-}: {
-  details: unknown[];
-  observations: EvidenceObservation[];
-  pieces: CanonicalEvidencePiece[];
-  startingOrdinal: number;
-}) {
-  let ordinal = startingOrdinal;
-
-  for (const value of details) {
-    const detail = asRecord(value);
-    const relatedTitle = stringValue(detail, "relatedTitle");
-    const subjectType = normalizedComparable(detail.subjectType);
-    const relatedDate = normalizeTripDate(relatedTitle, null);
-    const nonEntityTitle = Boolean(
-      relatedTitle &&
-      ((relatedDate &&
-        /^(?:\d{1,2}[.]\d{1,2}[.]\d{4}|(?:19|20)\d{2}-\d{1,2}-\d{1,2})(?:\s+(?:details?|information|note|notes))?$/i.test(
-          relatedTitle.trim()
-        )) || /^(?:booking|details?|information|note|notes|reservation)$/i.test(
-          relatedTitle.trim()
-        ))
-    );
-
-    if (
-      !relatedTitle ||
-      nonEntityTitle ||
-      subjectType !== "item" ||
-      pieceForMissingDetail(detail, pieces)
-    ) {
-      continue;
-    }
-
-    const evidence = stringValue(detail, "evidence");
-    const reason = stringValue(detail, "reason");
-    const sourceBacked = /\b(source|document|itinerary|pdf|lists?|says?|states?|shows?)\b/.test(
-      normalizeText([evidence, reason].filter(Boolean).join(" "))
-    );
-
-    if (!sourceBacked) {
-      continue;
-    }
-
-    ordinal += 1;
-    const observation = createObservation({
-      kind: "activity",
-      ordinal,
-      payload: {
-        _recoveryRequired: true,
-        address: null,
-        category: "art_culture",
-        city: null,
-        date: null,
-        description:
-          evidence ??
-          "This named source item needs placement review.",
-        endTime: null,
-        evidenceRole: "atomic_candidate",
-        itemType: "placeholder",
-        sourceFilename: "canonical recovery",
-        sourceHeadingPath: [],
-        sourceSectionLabel: null,
-        sourceSectionType: "unknown",
-        startTime: null,
-        title: relatedTitle,
-      },
-      role: "atomic_candidate",
-      source: "model_chunk",
-      sourceFilename: null,
-      sourceLabel: "missing named evidence recovery",
-      sourceProvenance: "source review question",
-      sourceStructure: {
-        headingPath: [],
-        sectionLabel: null,
-        sectionType: "unknown",
-      },
-      sourceUploadId: null,
-    });
-    const piece = createPiece(observation);
-    const existingPiece = pieces.find(
-      (candidate) =>
-        candidate.kind === piece.kind &&
-        candidate.observationIds.includes(observation.id)
-    );
-
-    if (existingPiece) {
-      detail.relatedCanonicalPieceId = existingPiece.id;
-      continue;
-    }
-
-    addCanonicalAction(piece, {
-      absorbedTitles: [relatedTitle],
-      observationIds: [observation.id],
-      reason:
-        "Named source evidence had no surviving canonical target, so Roamwoven preserved a review-required card.",
-      type: "recovered",
-    });
-    detail.relatedCanonicalPieceId = piece.id;
-    pushUniqueObservation(observations, observation);
-    pieces.push(piece);
-  }
 }
 
 function unresolvedMissingDetails({
@@ -11013,14 +11572,65 @@ function applyFinalReviewReconciliation(
   });
 }
 
+function isUnboundNamedSourceCoverageFinding(
+  detail: Record<string, unknown>,
+  piece: CanonicalEvidencePiece | null,
+  isOriginalRecoveryCandidate: boolean
+) {
+  if (
+    !isOriginalRecoveryCandidate ||
+    piece ||
+    stringValue(detail, "relatedCanonicalPieceId") ||
+    normalizedComparable(detail.subjectType) !== "item"
+  ) {
+    return false;
+  }
+
+  const relatedTitle = stringValue(detail, "relatedTitle");
+  if (!relatedTitle) return false;
+
+  const relatedDate = normalizeTripDate(relatedTitle, null);
+  const nonEntityTitle =
+    Boolean(relatedDate) &&
+      /^(?:\d{1,2}[.]\d{1,2}[.]\d{4}|(?:19|20)\d{2}-\d{1,2}-\d{1,2})(?:\s+(?:details?|information|note|notes))?$/i.test(
+        relatedTitle.trim()
+      ) ||
+    /^(?:booking|details?|information|note|notes|reservation)$/i.test(
+      relatedTitle.trim()
+    );
+  if (nonEntityTitle) return false;
+
+  const evidence = stringValue(detail, "evidence");
+  const reason = stringValue(detail, "reason");
+  return /\b(source|document|itinerary|pdf|lists?|says?|states?|shows?)\b/.test(
+    normalizeText([evidence, reason].filter(Boolean).join(" "))
+  );
+}
+
 export function canonicalizeCanonicalReviewDetails(
   details: unknown[],
   pieces: CanonicalEvidencePiece[],
-  tripOverview: unknown = {}
+  tripOverview: unknown = {},
+  sourceCoverageCandidates: unknown[] = []
 ) {
+  // Review policy must run on FINAL canonical identity. Parser details cannot
+  // carry the internal disposition field, and merge-rekeying must happen
+  // before subject resolution, so both initial assembly and rebuilds enter the
+  // same deterministic path here.
+  rekeyReviewSubjectsThroughPriorIds(details, pieces);
+  const sourceCoverageCandidateSet = new Set(sourceCoverageCandidates);
   const subjectResolved: Record<string, unknown>[] = details.map((value) => {
     const detail = asRecord(value);
     const piece = pieceForMissingDetail(detail, pieces);
+    // RW-PLC-001: a named source item that is still absent after final
+    // subject resolution is a source-coverage finding, never a synthesized
+    // traveler card. This check deliberately runs here, after every
+    // canonical piece has had a chance to survive and bind the review item.
+    const sourceCoverageFinding = isUnboundNamedSourceCoverageFinding(
+      detail,
+      piece,
+      sourceCoverageCandidateSet.has(value)
+    );
     const reviewText = normalizeText(reviewDetailText(detail));
     const internalTrace =
       /\b(source anchor|source anchors|source-anchor|source backed repair|repaired from source|repaired using source|audit diagnostic|lineage|ocr|qa bundle|duplicate suppression|routine assembly)\b/.test(
@@ -11028,6 +11638,8 @@ export function canonicalizeCanonicalReviewDetails(
       );
     const disposition =
       internalTrace
+        ? "dismissed"
+        : sourceCoverageFinding
         ? "dismissed"
         : // An explicit dismissal (question gate v2, run7) survives
           // canonicalization — the resolverDecisionId fallback below used
@@ -11090,10 +11702,9 @@ export function canonicalizeCanonicalReviewDetails(
     //    so the gate cannot be bypassed by the retry/rebuild lane;
     //  - it runs AFTER `pieceForMissingDetail` above, so scrubbing
     //    `relatedTitle` can never disturb subject binding;
-    //  - it is deliberately NOT added to `gateOffContractQuestions` (:1746),
-    //    whose filter reads a field this function assigns one line later —
-    //    that gate is dead for parser-minted details and F.3 only makes the
-    //    gap honest in tests rather than rewiring it (an Arc G change).
+    //  - identity scrubbing must happen before the general Question gate below
+    //    so subject binding never depends on scrubbed prose and the dedicated
+    //    identity dismissal reason remains authoritative.
     // Dismissal is in place: the record and its reason stay auditable and the
     // projection still emits a matching review record, so the compile
     // invariant at draft-to-structured-trip.ts:846 holds. Nothing here can
@@ -11133,6 +11744,12 @@ export function canonicalizeCanonicalReviewDetails(
             _canonicalQuestionGate:
               "subject entity no longer exists after assembly; a review item cannot outlive its subject",
           }
+        : sourceCoverageFinding
+        ? {
+            _canonicalQuestionGate:
+              "source coverage: named item was never extracted into a canonical subject; no placeholder was synthesized",
+            _canonicalSourceCoverageFinding: "named_item_not_extracted",
+          }
         : identityDismissed
         ? { _canonicalQuestionGate: identityGate.dismissalReason }
         : {}),
@@ -11154,14 +11771,20 @@ export function canonicalizeCanonicalReviewDetails(
         identityGate.scrubbed.evidence !== undefined
           ? identityGate.scrubbed.evidence
           : markerScrubbedEvidence,
-      relatedCanonicalPieceId: unresolvedSubject ? null : relatedId,
-      subjectType: unresolvedSubject
+      relatedCanonicalPieceId:
+        unresolvedSubject || sourceCoverageFinding ? null : relatedId,
+      subjectType: unresolvedSubject || sourceCoverageFinding
         ? "trip"
         : piece
         ? canonicalReviewSubjectType(piece)
         : detail.subjectType ?? "trip",
     };
   });
+  // Question gate v2 runs only after every parser-shaped detail has a
+  // canonical subject and disposition. Dismissals remain in `subjectResolved`
+  // with `_canonicalQuestionGate`, so later reconciliation cannot turn a
+  // correct maker-facing verdict into an unauditable disappearance.
+  gateOffContractQuestions(subjectResolved, pieces);
   // Phase-2 ordering fix (audit finding A3): the legacy filters used to run
   // BEFORE subject resolution, so a question whose subject was rewritten
   // afterwards escaped every subject-keyed check. Filters now see FINAL
@@ -11545,9 +12168,14 @@ export function clusterExtractedEvidence({
         ],
       })
     ) {
+      // Terminal (planning-cost material family, its exact namesake): a
+      // Costs-section line was never a candidate for card content, so
+      // there is no absorbing record — the exclusion is path-independent,
+      // per the comment above.
       suppressCanonicalPiece(
         piece,
-        "Costs-section planning line fails canonical candidacy (approved ground truth: Costs is excluded trip content; run 7.23.2 chain 4 — exclusion is path-independent)"
+        "Costs-section planning line fails canonical candidacy (approved ground truth: Costs is excluded trip content; run 7.23.2 chain 4 — exclusion is path-independent)",
+        { kind: "terminal", code: "PLANNING_COST_SECTION_LINE" }
       );
     }
   }
@@ -11578,12 +12206,6 @@ export function clusterExtractedEvidence({
   suppressRepresentedTravelAndStayActivities(pieces);
   applyAccessTaskPolicy(pieces);
   recoverOutOfRangePieces(pieces);
-  recoverMissingNamedEvidence({
-    details: missingDetails,
-    observations,
-    pieces,
-    startingOrdinal: ordinal,
-  });
   applyExplicitSourceUpdates(pieces);
   // Card/note reconciliation must see the ORIGINAL note lists before
   // accessory routing strips matched sentences onto activity records —
@@ -11613,6 +12235,11 @@ export function clusterExtractedEvidence({
   // Jan 14 duplicate — was invisible to same-date matching). The pass only
   // suppresses represented duplicates, so re-running it is safe.
   suppressRepresentedTravelAndStayActivities(pieces);
+  const intentBlocks = applyIntentBlockClassification({
+    missingDetails,
+    observations,
+    pieces,
+  });
   absorbLocationFragmentCards(pieces);
   collapseSlotCollisions(pieces);
   collapseAlternativeSlotCards(pieces);
@@ -11696,11 +12323,6 @@ export function clusterExtractedEvidence({
     transport,
     tripOverview,
   });
-  // Question gate v2 runs BEFORE canonicalization and disposition
-  // assignment (run7 hotfix: mutating dispositions after those passes
-  // desynchronizes the identity/disposition manifests the finalization
-  // invariants verify — live trip e0f1db42 failed assembly on exactly
-  // that).
   const gatedDetails = [
     ...canonicalGroupingCalls,
     ...canonicalDuplicateFoldCalls,
@@ -11713,11 +12335,11 @@ export function clusterExtractedEvidence({
     ...canonicalSpineQuestions,
     ...missingDetails,
   ];
-  gateOffContractQuestions(gatedDetails, pieces);
   const finalMissingDetails = canonicalizeCanonicalReviewDetails(
     gatedDetails,
     pieces,
-    tripOverview
+    tripOverview,
+    missingDetails
   );
   assignCanonicalEvidenceDispositions({ observations, pieces });
   const draft = {
@@ -11752,6 +12374,27 @@ export function clusterExtractedEvidence({
     },
   };
 
+  // Task B ("Tell it fired"): counted from FINAL piece state, not
+  // accumulated as `disposeCanonicalPiece` runs — a piece is only ever
+  // meant to be disposed once (later passes gate on `!piece.outputEligible
+  // continue`), so reading the terminal state avoids double-counting if
+  // that ever stops being true, and it means this count can never drift
+  // from what `piece.disposition` actually says on the returned `pieces`.
+  // Seeded with every code at zero (see CANONICAL_TERMINAL_DISPOSAL_CODES)
+  // so a code that fired zero times is still visible as zero, not absent.
+  const terminalDisposalCountsByCode = Object.fromEntries(
+    CANONICAL_TERMINAL_DISPOSAL_CODES.map((code) => [code, 0])
+  ) as Record<CanonicalTerminalDisposalCode, number>;
+  let survivorDisposalCount = 0;
+  for (const piece of pieces) {
+    if (!piece.disposition) continue;
+    if (piece.disposition.kind === "terminal") {
+      terminalDisposalCountsByCode[piece.disposition.code] += 1;
+    } else {
+      survivorDisposalCount += 1;
+    }
+  }
+
   return {
     draft,
     observations,
@@ -11779,8 +12422,11 @@ export function clusterExtractedEvidence({
           .flatMap((piece) => piece.observationIds)
       ).size,
       groupingClaims: deterministicGrouping.telemetry,
+      intentBlocks,
       sourceAnchorObservationCount: sourceTransportAnchors.length,
       suppressedWeakAnchorCount,
+      terminalDisposalCountsByCode,
+      survivorDisposalCount,
       transportFieldRepairCount: transportFieldRepair.repairs.length,
       transportFieldRepairQuestionCount: transportFieldRepair.questions.length,
     },

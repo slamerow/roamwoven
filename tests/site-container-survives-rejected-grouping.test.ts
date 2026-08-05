@@ -104,12 +104,23 @@ export default async function run() {
         {
           ...DATED_SECTION,
           date: "2019-01-16",
+          description:
+            "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
           evidenceRole: "atomic_candidate",
           startTime: "12:00",
           title: "Changing of the Guard",
         },
       ]);
 
+      // Regression coverage for Task A (2026-08-04): the sibling above needs
+      // a real description — near-identical to the container's own — or
+      // `collapseAlternativeSlotCards` Pass 1 bails at its minimum-
+      // description-length check before ever reaching the merge decision,
+      // and the guard below goes untested. With a description this close in
+      // wording, Pass 1's near-identical-description test would otherwise
+      // merge the dated "Prague Castle visit" container INTO this sibling
+      // (exactly what happened live), deleting the castle a second time
+      // after `reclassifySourceContainers` had already rescued it.
       const castle = draft.activities.find((activity) =>
         /castle/i.test(activity.title)
       );
@@ -178,33 +189,16 @@ export default async function run() {
     }
   );
 
-  // The other half of Eli's 2026-07-28 ruling — "survives as a DATED CARD
-  // *and* raises the question" — is NOT closed by this change, and this test
-  // exists to say so honestly rather than let a green suite imply otherwise
-  // (§Coverage honesty; same posture as
-  // `tests/question-gate-production-shape.test.ts`, which pins the F.3
-  // question-gate KNOWN_GAP).
-  //
-  // VERIFIED 2026-07-31 by running this exact shape: with the container dated
-  // again, RW-QUE-001's one-venue-one-decision consolidation is REACHED — the
-  // `if (!rootDate) continue` bail that blocked it in run 2 no longer fires —
-  // but it still does not consolidate, for a DIFFERENT and pre-existing
-  // reason: the two sub-stop questions come out of subject resolution with
-  // `relatedCanonicalPieceId: null`, and the consolidation keys on that id.
-  // The container's own question keeps its subject; the children lose theirs.
-  //
-  // So run 2's THREE castle questions were two independent defects stacked,
-  // not one. Task 2 fixed the card and unblocked the date bail. Sub-stop
-  // subject resolution is the remaining half and is deliberately NOT fixed
-  // here: it is its own change, it belongs with the F.3 convergence work
-  // RW-QUE-001 already tracks, and shipping it unexamined alongside a
-  // classification change would be a second variable in one run (rule 1(d)).
-  //
-  // This assertion pins CURRENT production truth. It is expected to FAIL when
-  // sub-stop subject resolution is fixed — that failure is the signal to
-  // flip it to `1`, not a regression.
+  // The other half of Eli's 2026-07-28 ruling — one venue complex, one
+  // decision — remains open in this rejected-grouping shape. The 2026-08-05
+  // placeholder abolition fixed the old null-subject mechanism: exact-title
+  // binding now gives every sub-stop Question a real canonical subject and
+  // reduces the three variants to two. Without a grouping parent, however,
+  // the final child subject is still not related to the castle container, so
+  // consolidation cannot reach the locked target of one. That relation work
+  // is outside the placement change and stays pinned honestly here.
   await test(
-    "KNOWN_GAP pin: the castle ticket decision still fragments, now on sub-stop subject resolution",
+    "KNOWN_GAP pin: the castle ticket decision still has one uncollapsed child after subject resolution",
     () => {
       const draft = cluster(
         [
@@ -272,8 +266,8 @@ export default async function run() {
       );
       assert.equal(
         ticketQuestions.length,
-        3,
-        "CURRENT TRUTH, not the target. RW-QUE-001 wants ONE. When sub-stop subject resolution is fixed this becomes 1 and this assertion must be updated, not deleted."
+        2,
+        "CURRENT TRUTH, not the target. RW-QUE-001 wants ONE; the remaining child needs a source-backed parent relation before consolidation."
       );
       assert.equal(
         ticketQuestions.filter(
@@ -281,8 +275,8 @@ export default async function run() {
             (detail as { relatedCanonicalPieceId?: string | null })
               .relatedCanonicalPieceId == null
         ).length,
-        2,
-        "and the reason is subject resolution: the two sub-stop questions carry no canonical subject, so the consolidation cannot key on them"
+        0,
+        "exact-title resolution must keep every surviving Question bound to a real canonical subject"
       );
     }
   );

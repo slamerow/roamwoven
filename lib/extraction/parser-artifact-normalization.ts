@@ -669,7 +669,7 @@ function repairSplitDisjunctions(
       .join(" ");
     rightCard.evidenceRole = "context";
     repairs.push({
-      detail: `Source line "${line.slice(0, 100)}" offers one slot with alternatives; the split cards were folded into one "X or Y" card (RW-QUE-001 disjunction rule; live-run 7.18.0: Mumok + Natural History as two cards).`,
+      detail: `Source line "${line.slice(0, 100)}" explicitly offers one slot with alternatives; the split cards were folded into one "X or Y" card (RW-QUE-001 disjunction rule; synthetic explicit-or control).`,
       kind: "disjunction_split",
       stageLabel: stage.label,
       title: leftCard.title as string,

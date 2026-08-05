@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import type {
   ReviewDecisionSubjectType,
 } from "@/lib/generated-trip-decisions";
+import { getAppliedTripRecords } from "@/lib/applied-trip-records";
+import type { TripDecisionRelatedAnchor } from "@/lib/generated-trip-model";
+import { createReviewDecisionAnchor } from "@/lib/review-decision-anchor";
 import { saveTripReviewDecision } from "@/lib/review-decisions";
 import { getMakerTrip } from "@/lib/trips";
 
@@ -182,6 +185,56 @@ export async function POST(
       return respond({ error: "decision-invalid" });
     }
 
+    const { records } = await getAppliedTripRecords({
+      fallbackTripName: trip.name,
+      tripId,
+    });
+    if (!records) {
+      return respond({ error: "decision-invalid" });
+    }
+    const decisionMetadata = ({
+      id,
+      related = [],
+      type,
+    }: {
+      id: string;
+      related?: Array<{
+        id: string;
+        role: TripDecisionRelatedAnchor["role"];
+        type: ReviewDecisionSubjectType;
+      }>;
+      type: ReviewDecisionSubjectType;
+    }) => {
+      const decisionAnchor = createReviewDecisionAnchor(records, type, id);
+      if (!decisionAnchor) {
+        throw new Error("Decision subject has no stable anchor.");
+      }
+
+      const relatedDecisionAnchors = related.map((entry) => {
+        const anchor = createReviewDecisionAnchor(
+          records,
+          entry.type,
+          entry.id
+        );
+        if (!anchor) {
+          throw new Error("Related decision subject has no stable anchor.");
+        }
+        return {
+          anchor,
+          role: entry.role,
+          subjectId: entry.id,
+          subjectType: entry.type,
+        } as TripDecisionRelatedAnchor;
+      });
+
+      return {
+        decisionAnchor,
+        ...(relatedDecisionAnchors.length > 0
+          ? { relatedDecisionAnchors }
+          : {}),
+      };
+    };
+
     const subjectIds = String(formData.get("subjectIds") ?? "")
       .split(",")
       .map((value) => value.trim())
@@ -191,10 +244,22 @@ export async function POST(
       subjectIds.length > 0 &&
       (action === "confirm" || action === "protect" || action === "delete")
     ) {
+      // Resolve every anchor before starting any write. Array.map stops at the
+      // first throw, but mapping saveTripReviewDecision directly would already
+      // have launched promises for earlier subjects and could partially apply
+      // a stale bulk action.
+      const anchoredSubjects = subjectIds.map((currentSubjectId) => ({
+        currentSubjectId,
+        metadata: decisionMetadata({
+          id: currentSubjectId,
+          type: subjectType,
+        }),
+      }));
       await Promise.all(
-        subjectIds.map((currentSubjectId) =>
+        anchoredSubjects.map(({ currentSubjectId, metadata }) =>
           saveTripReviewDecision({
             action,
+            ...metadata,
             note,
             subjectId: currentSubjectId,
             subjectType,
@@ -217,6 +282,7 @@ export async function POST(
       await saveTripReviewDecision({
         action,
         answerValue,
+        ...decisionMetadata({ id: subjectId, type: subjectType }),
         note,
         subjectId,
         subjectType,
@@ -232,6 +298,7 @@ export async function POST(
       await saveTripReviewDecision({
         action,
         changes,
+        ...decisionMetadata({ id: subjectId, type: subjectType }),
         note,
         subjectId,
         subjectType,
@@ -247,6 +314,11 @@ export async function POST(
 
       await saveTripReviewDecision({
         action,
+        ...decisionMetadata({
+          id: targetId,
+          related: [{ id: sourceId, role: "source", type: "item" }],
+          type: "item",
+        }),
         note,
         sourceIds: [sourceId],
         subjectId: targetId,
@@ -263,6 +335,13 @@ export async function POST(
 
       await saveTripReviewDecision({
         action,
+        ...decisionMetadata({
+          id: subjectId,
+          related: targetLegId
+            ? [{ id: targetLegId, role: "target_leg", type: "leg" }]
+            : [],
+          type: subjectType,
+        }),
         note,
         subjectId,
         subjectType,
@@ -272,6 +351,7 @@ export async function POST(
     } else {
       await saveTripReviewDecision({
         action,
+        ...decisionMetadata({ id: subjectId, type: subjectType }),
         note,
         subjectId,
         subjectType,

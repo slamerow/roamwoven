@@ -112,6 +112,33 @@ export default function run() {
     assert.deepEqual(summary.identityRecoveryInitialViolations, []);
   });
 
+  test("RW-CLS-001 intent-block decisions survive the audit-snapshot whitelist", () => {
+    const summary = createCanonicalizationSummary({
+      evidence: {
+        intentBlocks: {
+          blocks: [
+            {
+              blockId: "intent-2019-01-20-1-plan",
+              date: "2019-01-20",
+              memberIds: ["piece-cafe", "piece-library"],
+              memberTitles: ["Cafe Central breakfast", "Library"],
+              observationIds: ["obs-cafe", "obs-library"],
+              reason: "fixed meal slot anchors its source-contiguous peers",
+              type: "plan",
+            },
+          ],
+          version: 1,
+        },
+      },
+    });
+    assert.equal(summary.intentBlocks.version, 1);
+    assert.equal(summary.intentBlocks.blocks.length, 1);
+    assert.deepEqual(summary.intentBlocks.blocks[0].observationIds, [
+      "obs-cafe",
+      "obs-library",
+    ]);
+  });
+
   test("8.2 excludedPlanningCostLineCount survives the audit-snapshot whitelist", () => {
     const summary = createExtractionSummary({
       sourceRecovery: {
@@ -125,6 +152,53 @@ export default function run() {
       },
     });
     assert.equal(summary.sourceRecovery?.excludedPlanningCostLineCount, 11);
+  });
+
+  test("G5.1 container-retry source support survives the audit-snapshot whitelist", () => {
+    const summary = createExtractionSummary({
+      geocodeVerification: {
+        budget: 150,
+        candidateCount: 1,
+        candidates: [
+          {
+            candidateId: "stage-4-item-2",
+            containerSourceSupported: false,
+            containerTitle: "River Palace",
+            granularity: "locality",
+            outcome: "rejected_locality",
+            query: "Gallery West, Sample City",
+            rank: 1,
+            retried: false,
+            retryQuery: null,
+          },
+        ],
+        failedCount: 0,
+        formattedAddressCount: 0,
+        localityRejectedCount: 1,
+        lookupCount: 1,
+        outcome: "completed",
+        resolvedCount: 0,
+        retryAcceptedCount: 0,
+        retryCount: 0,
+        retryOutOfCityCount: 0,
+        retrySkippedOverBudgetCount: 0,
+        retryUnlistedContainerCount: 1,
+        skippedOverBudgetCount: 0,
+      },
+    });
+
+    assert.equal(summary.geocodeVerification?.retryUnlistedContainerCount, 1);
+    assert.deepEqual(summary.geocodeVerification?.candidates[0], {
+      candidateId: "stage-4-item-2",
+      containerSourceSupported: false,
+      containerTitle: "River Palace",
+      granularity: "locality",
+      outcome: "rejected_locality",
+      query: "Gallery West, Sample City",
+      rank: 1,
+      retried: false,
+      retryQuery: null,
+    });
   });
 
   // Run-2 handoff §6 — the same whitelist-drop defect class, third instance.

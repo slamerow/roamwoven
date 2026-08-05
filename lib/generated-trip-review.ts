@@ -4,6 +4,7 @@ import type {
   TripRecordStatus,
 } from "@/lib/generated-trip-model";
 import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
+import { firstCityNoteLeg } from "@/lib/city-note-identity";
 import { getTripCategoryLabel } from "@/lib/trip-categories";
 
 export type StructuredReviewTone = "question" | "sensitive" | "warning";
@@ -496,7 +497,6 @@ export function formatStructuredDiscoverySummary(
 export function getStructuredReviewSections(
   records: StructuredTripRecords
 ): StructuredReviewSection[] {
-  const legById = new Map(records.legs.map((leg) => [leg.id, leg]));
   const categoryById = new Map(
     records.categories.map((category) => [category.id, category])
   );
@@ -595,7 +595,7 @@ export function getStructuredReviewSections(
       id: "city-tips",
       items: [],
       summaryItems: cityTipItems.map((item) => {
-        const leg = item.legId ? legById.get(item.legId) : null;
+        const leg = firstCityNoteLeg(records.legs, item);
         const category = categoryById.get(item.categoryId);
 
         return [

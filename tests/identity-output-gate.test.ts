@@ -212,7 +212,7 @@ export default async function run() {
     assert.ok(regiojet, "the RegioJet row itself is never suppressed");
   });
 
-  test("detector parity: identity and code-shape P0s now see stays and transport", () => {
+  test("detector parity after Δ4: transport face stays public while its description is protected", () => {
     const stay: TripStayRecord = {
       accessDetailsVisibility: "traveler_password",
       address: null,
@@ -256,7 +256,9 @@ export default async function run() {
       id: "transport-leak",
       legId: null,
       privateDetailIds: [],
-      provider: "OBB",
+      // Provider is part of the public structured face under Δ4, so the
+      // identity detector must still cover it even though description does not.
+      provider: "Dispatch contact rail@example.com",
       reviewRequired: false,
       routeLabel: "Vienna to Budapest",
       sourceConfidence: "high",
@@ -293,14 +295,14 @@ export default async function run() {
     );
     assert.ok(identity, "stay-name identity leak raises the P0");
     assert.match(identity?.evidence.join(" ") ?? "", /stay /);
+    assert.match(identity?.evidence.join(" ") ?? "", /Vienna to Budapest/);
     const codeShape = diagnostics.find(
       (diagnostic) => diagnostic.code === "protected_code_shape_in_public_prose"
     );
-    assert.ok(codeShape, "transport code-shape leak raises the P0");
     assert.equal(
-      /2159/.test(codeShape?.evidence.join(" ") ?? ""),
-      false,
-      "the diagnostic never quotes the token value (redaction-safe)"
+      codeShape,
+      undefined,
+      "a code inside the protected transport description is not a public leak"
     );
 
     // Known-good control (RW-AUD-001 metamorphic discipline): clean rows
@@ -314,6 +316,7 @@ export default async function run() {
           {
             ...transport,
             description: "Railjet via Bratislava, seats 61-62.",
+            provider: "OBB",
           },
         ],
       },

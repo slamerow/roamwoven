@@ -161,8 +161,9 @@ shapes); typecheck + build clean; ledger v13.
   survives — fixture-guarded so the castle cannot be re-killed. LANDED.
 - Cost cards ("Vienna lodging note / $72"): prompt cost-line rule +
   deterministic demotion of pure lodging/price fragments. LANDED.
-- Disjunction singletons (Mumok + Natural History): prompt disjunction rule
-  + deterministic fold of split alternatives into one "X or Y" card when the
+- Disjunction singletons (historical Mumok/Natural History premise superseded
+  2026-08-05): prompt disjunction rule + deterministic fold of split
+  alternatives into one "X or Y" card only when the
   source line carries the disjunction and no or-copy exists; when an
   or-carrying copy exists the wave-1.1 assembly collapse stays in charge.
   LANDED.

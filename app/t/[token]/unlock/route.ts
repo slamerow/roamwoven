@@ -37,7 +37,13 @@ export async function POST(
   });
 
   if (verification === "disabled") {
-    return NextResponse.json({ details: [], unlocked: true });
+    const details = await getPublishedTripPrivateDetailsByToken(token);
+
+    if (!details) {
+      return NextResponse.json({ error: "not-found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ details, unlocked: true });
   }
 
   if (verification === "missing_hash") {

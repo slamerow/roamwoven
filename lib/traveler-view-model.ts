@@ -9,6 +9,7 @@ import type {
   TripSourceConfidence,
   TripStayRecord,
   TripSummaryRecord,
+  TripTransportRecord,
   TripWeatherHookRecord,
 } from "@/lib/generated-trip-model";
 import {
@@ -22,7 +23,9 @@ import {
   getTripCategoryLabel,
 } from "@/lib/trip-categories";
 import { isLegCityTipRecord } from "@/lib/trip-card-taxonomy";
+import { cityNoteLegsForRecord } from "@/lib/city-note-identity";
 import { normalizeText } from "@/lib/extraction/traveler-text";
+import { transportDescriptionDetailId } from "@/lib/travel-card-privacy";
 
 type SeedLeg = {
   arriveDate?: string;
@@ -378,6 +381,7 @@ function createItemRecords(tripId: string): TripItemRecord[] {
     address: item.address ?? null,
     canonicalId: item.id,
     categoryId: normalizeCategoryKey(item.category),
+    cityNoteKey: null,
     date: item.date ?? null,
     description: item.description ?? null,
     endTime: item.endTime ?? null,
@@ -628,6 +632,44 @@ function isActiveItem(item: TripItemRecord) {
   return item.status !== "ignored";
 }
 
+function isActiveTransport(transport: TripTransportRecord) {
+  return transport.status !== "ignored";
+}
+
+function transportTypeLabel(transportType: TripTransportRecord["transportType"]) {
+  const labels: Record<TripTransportRecord["transportType"], string> = {
+    bus: "Bus",
+    drive: "Drive",
+    ferry: "Ferry",
+    flight: "Flight",
+    other: "Travel",
+    rental_car: "Rental car",
+    train: "Train",
+    transfer: "Transfer",
+  };
+
+  return labels[transportType];
+}
+
+function createTransportFaceDescription(transport: TripTransportRecord) {
+  const departure = [
+    transport.departureLocation,
+    formatTime(transport.departureTime),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const arrival = [transport.arrivalLocation, formatTime(transport.arrivalTime)]
+    .filter(Boolean)
+    .join(" ");
+  const route = departure && arrival
+    ? `${departure} → ${arrival}`
+    : departure || arrival;
+
+  return [transport.provider, transportTypeLabel(transport.transportType), route]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function isLegLevelTip(item: TripItemRecord) {
   return isLegCityTipRecord(item);
 }
@@ -642,9 +684,23 @@ export function createTravelerAppViewModel(
 
   for (const detail of records.privateDetails) {
     const key = `${detail.subjectType}:${detail.subjectId}`;
-    const ids = privateDetailIdsBySubject.get(key) ?? [];
-    ids.push(detail.id);
-    privateDetailIdsBySubject.set(key, ids);
+    const ids = new Set(privateDetailIdsBySubject.get(key) ?? []);
+    ids.add(detail.id);
+    privateDetailIdsBySubject.set(key, Array.from(ids));
+  }
+
+  for (const transport of records.transport) {
+    const key = `transport:${transport.id}`;
+    const ids = new Set([
+      ...(privateDetailIdsBySubject.get(key) ?? []),
+      ...transport.privateDetailIds,
+    ]);
+
+    if (transport.description?.trim()) {
+      ids.add(transportDescriptionDetailId(transport.id));
+    }
+
+    privateDetailIdsBySubject.set(key, Array.from(ids));
   }
 
   const activeItems = records.items.filter(isActiveItem);
@@ -663,16 +719,8 @@ export function createTravelerAppViewModel(
   const tipsByLegId = new Map<string, TravelerLegTipView[]>();
 
   for (const item of tipItems) {
-    if (!item.legId) {
-      continue;
-    }
-
     const category = categoryById.get(item.categoryId);
-    const sourceLeg = records.legs.find((leg) => leg.id === item.legId);
-    const sourceCity = normalizeText(sourceLeg?.city);
-    const targetLegs = sourceCity
-      ? records.legs.filter((leg) => normalizeText(leg.city) === sourceCity)
-      : [sourceLeg].filter((leg): leg is TripLegRecord => Boolean(leg));
+    const targetLegs = cityNoteLegsForRecord(records.legs, item);
 
     for (const leg of targetLegs) {
       const tips = tipsByLegId.get(leg.id) ?? [];
@@ -687,7 +735,7 @@ export function createTravelerAppViewModel(
     }
   }
 
-  const cards: TravelerCardView[] = cardItems.map((item) => {
+  const itemCards: TravelerCardView[] = cardItems.map((item) => {
     const category = categoryById.get(item.categoryId);
 
     return {
@@ -718,6 +766,30 @@ export function createTravelerAppViewModel(
       url: item.url,
     };
   });
+  const transportCards: TravelerCardView[] = records.transport
+    .filter(isActiveTransport)
+    .map((transport) => ({
+      address: null,
+      categoryId: "arrival_departure",
+      categoryLabel:
+        categoryById.get("arrival_departure")?.label ??
+        getTripCategoryLabel("arrival_departure"),
+      date: transport.date,
+      description: createTransportFaceDescription(transport),
+      endTime: transport.arrivalTime,
+      id: transport.id,
+      itemType: "transport",
+      legId: transport.legId ?? transport.toLegId ?? transport.fromLegId,
+      locationName: transport.arrivalLocation,
+      privateDetailIds:
+        privateDetailIdsBySubject.get(`transport:${transport.id}`) ?? [],
+      startTime: transport.departureTime,
+      stops: [],
+      time: formatTime(transport.departureTime),
+      title: transport.routeLabel,
+      url: null,
+    }));
+  const cards = [...itemCards, ...transportCards];
 
   const dayViews = records.days.map((day) => {
     const dayCards = cards.filter((card) => card.date === day.date);
@@ -736,15 +808,55 @@ export function createTravelerAppViewModel(
     };
   });
 
-  const categoryViews = records.categories
-    .map((category) => ({
-      count: cards.filter((card) => card.categoryId === category.id).length,
-      description: category.description,
-      emoji: category.emoji,
-      id: category.id,
-      label: category.label,
-    }))
+  const categoryIds = Array.from(
+    new Set([
+      ...records.categories.map((category) => category.id),
+      ...cards.map((card) => card.categoryId),
+    ])
+  );
+  const categoryViews = categoryIds
+    .map((categoryId) => {
+      const category = categoryById.get(categoryId);
+
+      return {
+        count: cards.filter((card) => card.categoryId === categoryId).length,
+        description: category?.description ?? null,
+        emoji: category?.emoji ?? getTripCategoryEmoji(categoryId),
+        id: categoryId,
+        label: category?.label ?? getTripCategoryLabel(categoryId),
+      };
+    })
     .filter((category) => category.count > 0);
+
+  const privacyDetailsById = new Map(
+    records.privateDetails.map((detail) => [
+      detail.id,
+      {
+        id: detail.id,
+        label: detail.label,
+        subjectId: detail.subjectId,
+        subjectType: detail.subjectType,
+      },
+    ])
+  );
+
+  for (const transport of records.transport.filter(isActiveTransport)) {
+    const detailId = transportDescriptionDetailId(transport.id);
+
+    if (
+      privateDetailIdsBySubject
+        .get(`transport:${transport.id}`)
+        ?.includes(detailId)
+    ) {
+      privacyDetailsById.set(detailId, {
+        id: detailId,
+        label: "Travel details",
+        subjectId: transport.id,
+        subjectType: "transport",
+      });
+    }
+  }
+  const privacyDetails = Array.from(privacyDetailsById.values());
 
   return {
     cards,
@@ -794,13 +906,8 @@ export function createTravelerAppViewModel(
     })),
     photos: [],
     privacy: {
-      privateDetailCount: records.privateDetails.length,
-      privateDetails: records.privateDetails.map((detail) => ({
-        id: detail.id,
-        label: detail.label,
-        subjectId: detail.subjectId,
-        subjectType: detail.subjectType,
-      })),
+      privateDetailCount: privacyDetails.length,
+      privateDetails: privacyDetails,
     },
     trip: {
       dateRange: formatTripDateRange(records.trip.startDate, records.trip.endDate),

@@ -1,5 +1,5 @@
 /**
- * Central Europe ground-truth fixture (answer key v2, approved 2026-07-17).
+ * Central Europe ground-truth fixture (answer key v3, approved 2026-08-05).
  *
  * Source of truth: docs/assembly-ground-truth-central-europe.md
  *
@@ -525,25 +525,13 @@ export function createCentralEuropeGroundTruthDraft() {
         startTime: null,
         title: "Panorama Train pass",
       },
-      // Jan 19 disjunction: one committed slot, unresolved choice.
-      {
-        address: null,
-        category: "art_culture",
-        date: "2019-01-19",
-        description: "Mumok or Natural History Museum.",
-        endTime: null,
-        itemType: "activity",
-        sourceFilename,
-        startTime: null,
-        title: "Mumok or Natural History Museum",
-      },
       // Jan 19 idea pile → Vienna city notes (no booking/time/sequence).
       {
         address: null,
         category: "nightlife_entertainment",
         date: "2019-01-19",
         description:
-          "Vienna ideas: Ferris wheel, Hundertwasser Haus, Museum of Illusions, Mozarthaus, Ring Tram Tour, Prater, Leopold Museum, St. Charles Church, St. Stephen's Cathedral south tower 3.50 EUR.",
+          "Vienna ideas: Ferris wheel, Hundertwasser Haus, Mumok Museum, Natural History Museum, Museum of Illusions, Mozarthaus, Ring Tram Tour, Prater, Leopold Museum, St. Charles Church, St. Stephen's Cathedral south tower 3.50 EUR.",
         endTime: null,
         itemType: "note",
         sourceFilename,
@@ -1148,14 +1136,14 @@ export const groundTruthChecks: GroundTruthCheck[] = [
   { contract: "RW-TRV-001", id: "stay-night-coverage", label: "Rome 1 stay spans Jan 13-14; no fabricated Jan 12 stay", status: "enforced" },
   { contract: "RW-TRV-001", id: "eight-travel-cards", label: "8 per-segment travel cards, connections never merged", status: "enforced" },
   { contract: "RW-TRV-001", id: "rental-car-is-activity", label: "Same-day rental car is a timed activity, not transport", status: "enforced" },
-  { contract: "RW-REV-001", id: "three-questions", label: "Exactly 3 open review questions", status: "enforced" },
+  { contract: "RW-REV-001", id: "three-material-questions", label: "Exactly the 3 intended material Questions are open", status: "enforced" },
   { contract: "RW-CLS-001", id: "communism-city-note", label: "Museum of Communism: no activity card (never committed)", status: "enforced" },
   { contract: "RW-CLS-001", id: "r2d2-demoted", label: "R2D2 '(far away)' doubt marker: no activity card", status: "enforced" },
   { contract: "RW-CLS-001", id: "pinball-city-note", label: "Pinball Museum twice uncommitted: no activity card", status: "enforced" },
   { contract: "RW-CAN-001", id: "market-hall-dedup", label: "Great Market Hall: one card, on Jan 22", status: "enforced" },
   { contract: "RW-ASM-001", id: "borkonyha-single-home", label: "Borkonyha: one activity card only", status: "enforced" },
   { contract: "RW-GRP-001", id: "mala-strana-group", label: "Kafka/Lennon/Certovka/Novy Svet grouped under one parent", status: "enforced" },
-  { contract: "RW-QUE-001", id: "museum-disjunction", label: "'Mumok or Natural History' stays one flexible card", status: "enforced" },
+  { contract: "RW-CLS-001", id: "museum-source-separate-notes", label: "Mumok and Natural History remain separate Vienna City Note ideas", status: "enforced" },
   { contract: "RW-CLS-001", id: "trdelnik-activity", label: "Trdelnik breakfast is an untimed activity card", status: "enforced" },
   { contract: "RW-EVD-001", id: "koscom-activity", label: "Koscom is an activity on Jan 17 from source sequencing", status: "enforced" },
   { contract: "RW-CLS-001", id: "tour-rome-activity", label: "'Tour Rome in afternoon/evening' is an activity card", status: "enforced" },

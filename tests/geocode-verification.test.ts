@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  createGeocodeVerificationReplayCache,
   runGeocodeVerification,
+  runWithGeocodeVerificationReplay,
   selectGeocodeCandidates,
+  type GeocodeVerificationReplaySeed,
 } from "@/lib/extraction/geocode-verification";
 import { getGeocodeVerificationConfig } from "@/lib/env";
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
@@ -151,6 +154,195 @@ export default async function run() {
     assert.equal(result.usage.outcome, "disabled");
     assert.equal(result.usage.lookupCount, 0);
     assert.equal(called, 0);
+  });
+
+  await test("pinned geocode replay reattaches the saved provider result at the original boundary without a network call", async () => {
+    const card: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Schönbrunn Palace",
+    };
+    const seed: GeocodeVerificationReplaySeed = {
+      attachments: [
+        {
+          candidateId: "stage-1-item-1",
+          formattedAddress: "Schönbrunner Schloßstraße 47, 1130 Wien, Austria",
+          lat: 48.1858124,
+          lng: 16.3127641,
+          provider: "geocode",
+          query: "Schönbrunn Palace, Vienna",
+        },
+      ],
+      usage: {
+        budget: 150,
+        candidates: [
+          {
+            candidateId: "stage-1-item-1",
+            containerSourceSupported: null,
+            containerTitle: null,
+            granularity: "venue",
+            outcome: "resolved",
+            query: "Schönbrunn Palace, Vienna",
+            rank: 0,
+            retried: false,
+            retryQuery: null,
+          },
+        ],
+        candidateCount: 1,
+        endpointHost: "maps.googleapis.com",
+        error: null,
+        failedCount: 0,
+        formattedAddressCount: 1,
+        localityRejectedCount: 0,
+        lookupConcurrency: 8,
+        lookupCount: 1,
+        outcome: "completed",
+        resolvedCount: 1,
+        retryAcceptedCount: 0,
+        retryCount: 0,
+        retryOutOfCityCount: 0,
+        retryUnlistedContainerCount: 0,
+        retrySkippedOverBudgetCount: 0,
+        skippedOverBudgetCount: 0,
+        version: 1,
+      },
+      version: 1,
+    };
+    const replay = createGeocodeVerificationReplayCache(seed);
+    let called = 0;
+    const result = await runWithGeocodeVerificationReplay(replay, () =>
+      runGeocodeVerification({
+        config: { ...CONFIG, apiKey: null },
+        fetchImpl: (async () => {
+          called += 1;
+          throw new Error("pinned replay must not call the provider");
+        }) as unknown as typeof fetch,
+        stages: [stageWith([card])],
+      })
+    );
+
+    assert.equal(called, 0);
+    assert.equal(result.usage.outcome, "completed");
+    assert.equal(replay.actualCandidateCount, 1);
+    assert.equal(replay.expectedCandidateCount, 1);
+    assert.equal(replay.hits, 1);
+    assert.deepEqual(replay.unmatchedCandidateIds, []);
+    assert.equal(card.verifiedLatitude, 48.1858124);
+    assert.equal(card.verifiedLongitude, 16.3127641);
+    assert.equal(
+      card.verifiedFormattedAddress,
+      "Schönbrunner Schloßstraße 47, 1130 Wien, Austria"
+    );
+    assert.deepEqual(card._geoVerification, {
+      provider: "geocode",
+      query: "Schönbrunn Palace, Vienna",
+    });
+  });
+
+  await test("G5.2: replay matches but rejects a saved unlisted container retry under the current policy", async () => {
+    const palace: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      description: "Schönbrunn Palace visit with Gloriette.",
+      itemType: "activity",
+      title: "Schönbrunn Palace",
+    };
+    const museum: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Museum of Illusions",
+    };
+    const seed: GeocodeVerificationReplaySeed = {
+      attachments: [
+        {
+          candidateId: "stage-1-item-1",
+          formattedAddress: "Schönbrunner Schloßstraße 47, Wien",
+          lat: 48.1858124,
+          lng: 16.3127641,
+          provider: "geocode",
+          query: "Schönbrunn Palace, Vienna",
+        },
+        {
+          candidateId: "stage-1-item-2",
+          formattedAddress: "Schönbrunner Schloßstraße 47, Wien",
+          lat: 48.1858124,
+          lng: 16.3127641,
+          provider: "geocode",
+          query: "Museum of Illusions, Schönbrunn Palace",
+        },
+      ],
+      usage: {
+        budget: 10,
+        candidates: [
+          {
+            candidateId: "stage-1-item-1",
+            containerSourceSupported: null,
+            containerTitle: null,
+            granularity: "venue",
+            outcome: "resolved",
+            query: "Schönbrunn Palace, Vienna",
+            rank: 0,
+            retried: false,
+            retryQuery: null,
+          },
+          {
+            candidateId: "stage-1-item-2",
+            containerSourceSupported: true,
+            containerTitle: "Schönbrunn Palace",
+            granularity: "venue",
+            outcome: "resolved",
+            query: "Museum of Illusions, Vienna",
+            rank: 1,
+            retried: true,
+            retryQuery: "Museum of Illusions, Schönbrunn Palace",
+          },
+        ],
+        candidateCount: 2,
+        endpointHost: "maps.googleapis.com",
+        error: null,
+        failedCount: 0,
+        formattedAddressCount: 2,
+        localityRejectedCount: 1,
+        lookupConcurrency: 8,
+        lookupCount: 3,
+        outcome: "completed",
+        resolvedCount: 2,
+        retryAcceptedCount: 1,
+        retryCount: 1,
+        retryOutOfCityCount: 0,
+        retrySkippedOverBudgetCount: 0,
+        retryUnlistedContainerCount: 0,
+        skippedOverBudgetCount: 0,
+        version: 1,
+      },
+      version: 1,
+    };
+    const replay = createGeocodeVerificationReplayCache(seed);
+    let called = 0;
+    const result = await runWithGeocodeVerificationReplay(replay, () =>
+      runGeocodeVerification({
+        config: { ...CONFIG, apiKey: null },
+        fetchImpl: (async () => {
+          called += 1;
+          throw new Error("pinned replay must not call the provider");
+        }) as unknown as typeof fetch,
+        stages: [stageWith([palace, museum])],
+      })
+    );
+
+    assert.equal(called, 0);
+    assert.equal(replay.hits, 1, "only the currently accepted result attaches");
+    assert.deepEqual(replay.policyRejectedCandidateIds, ["stage-1-item-2"]);
+    assert.deepEqual(replay.unmatchedCandidateIds, []);
+    assert.equal(palace._geoVerified, true);
+    assert.equal(museum._geoVerified, undefined);
+    assert.equal(result.usage.resolvedCount, 1);
+    assert.equal(result.usage.retryCount, 0);
+    assert.equal(result.usage.retryAcceptedCount, 0);
+    assert.equal(result.usage.retryUnlistedContainerCount, 1);
+    assert.equal(result.usage.candidates[1].containerSourceSupported, false);
   });
 
   await test("verified coordinates attach with provenance; intent/date/city/title fields never change", async () => {
@@ -512,8 +704,17 @@ export default async function run() {
     const castle: Record<string, unknown> = {
       city: "Prague",
       date: "2019-01-16",
+      description: "Prague Castle.",
       itemType: "activity",
       title: "Prague Castle",
+    };
+    const castleProposal: Record<string, unknown> = {
+      city: "Prague",
+      date: "2019-01-16",
+      description: "Prague Castle visit with Changing of the Guard.",
+      evidenceRole: "grouping_proposal",
+      itemType: "activity",
+      title: "Prague Castle visit",
     };
     const guard: Record<string, unknown> = {
       city: "Prague",
@@ -535,7 +736,7 @@ export default async function run() {
         }
         return PRAGUE_CENTROID;
       }),
-      stages: [stageWith([castle, guard])],
+      stages: [stageWith([castleProposal, castle, guard])],
     });
 
     assert.equal(result.usage.outcome, "completed");
@@ -558,6 +759,122 @@ export default async function run() {
       queries.filter((query) => query === "Prague Castle, Prague Castle").length,
       0
     );
+    assert.equal(
+      queries.some((query) => query.startsWith("Prague Castle visit")),
+      false,
+      "the proposal supplies source containment but is never geocoded"
+    );
+  });
+
+  await test("G5.1: a source-unlisted venue never borrows the day's container for a retry", async () => {
+    const palace: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      description: "Schönbrunn Palace visit with Gloriette and Panorama Train.",
+      itemType: "activity",
+      title: "Schönbrunn Palace",
+    };
+    const museum: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Museum of Illusions",
+    };
+    const queries: string[] = [];
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) => {
+        queries.push(query);
+        if (query === "Schönbrunn Palace, Vienna") {
+          return { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] };
+        }
+        if (query === "Museum of Illusions, Schönbrunn Palace") {
+          return { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] };
+        }
+        return PRAGUE_CENTROID;
+      }),
+      stages: [stageWith([palace, museum])],
+    });
+
+    assert.equal(
+      queries.includes("Museum of Illusions, Schönbrunn Palace"),
+      false,
+      "the source never put this venue inside the palace"
+    );
+    assert.equal(result.usage.retryCount, 0);
+    assert.equal(
+      (result.usage as unknown as Record<string, unknown>)
+        .retryUnlistedContainerCount,
+      1
+    );
+    assert.equal(museum._geoVerified, undefined);
+    const row = result.usage.candidates.find((candidate) =>
+      candidate.query.startsWith("Museum of Illusions")
+    ) as unknown as Record<string, unknown>;
+    assert.equal(row.containerTitle, "Schönbrunn Palace");
+    assert.equal(row.containerSourceSupported, false);
+  });
+
+  await test("G5.1: one long-token source typo still permits a supported container retry", async () => {
+    const palace: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      description: "Schönbrunn Palace visit with Apple Strudel Show and Panorama Train.",
+      itemType: "activity",
+      title: "Schönbrunn Palace",
+    };
+    const show: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Apple Studel Show",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) =>
+        query === "Schönbrunn Palace, Vienna"
+          ? { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] }
+          : query === "Apple Studel Show, Schönbrunn Palace"
+            ? { lat: 50.0911, lng: 14.4004, types: ["tourist_attraction"] }
+            : PRAGUE_CENTROID
+      ),
+      stages: [stageWith([palace, show])],
+    });
+
+    assert.equal(result.usage.retryCount, 1);
+    assert.equal(show._geoVerified, true);
+    const row = result.usage.candidates.find((candidate) =>
+      candidate.query.startsWith("Apple Studel Show")
+    ) as unknown as Record<string, unknown>;
+    assert.equal(row.containerSourceSupported, true);
+  });
+
+  await test("G5.1: short neighboring names do not gain fuzzy container containment", async () => {
+    const palace: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      description: "Palace visit with Gallery East.",
+      itemType: "activity",
+      title: "River Palace",
+    };
+    const west: Record<string, unknown> = {
+      city: "Vienna",
+      date: "2019-01-19",
+      itemType: "activity",
+      title: "Gallery West",
+    };
+    const result = await runGeocodeVerification({
+      config: CONFIG,
+      fetchImpl: respondWith((query) =>
+        query === "River Palace, Vienna"
+          ? { lat: 50.0910966, lng: 14.4016165, types: ["tourist_attraction"] }
+          : PRAGUE_CENTROID
+      ),
+      stages: [stageWith([palace, west])],
+    });
+
+    assert.equal(result.usage.retryCount, 0);
+    assert.equal(west._geoVerified, undefined);
   });
 
   await test("G4.3: a retry that lands outside the day's city bounds is REFUSED — a wrong coordinate is worse than none", async () => {
@@ -567,6 +884,7 @@ export default async function run() {
     const castle: Record<string, unknown> = {
       city: "Prague",
       date: "2019-01-16",
+      description: "Prague Castle visit with Peklo.",
       itemType: "activity",
       title: "Prague Castle",
     };
@@ -603,6 +921,7 @@ export default async function run() {
     const castle: Record<string, unknown> = {
       city: "Prague",
       date: "2019-01-16",
+      description: "Prague Castle visit with Changing of the Guard.",
       itemType: "activity",
       title: "Prague Castle",
     };
@@ -642,6 +961,7 @@ export default async function run() {
     const castle: Record<string, unknown> = {
       city: "Prague",
       date: "2019-01-16",
+      description: "Prague Castle visit with Changing of the Guard.",
       itemType: "activity",
       title: "Prague Castle",
     };
@@ -694,6 +1014,7 @@ export default async function run() {
     const castle: Record<string, unknown> = {
       city: "Prague",
       date: "2019-01-16",
+      description: "Prague Castle visit with Changing of the Guard.",
       itemType: "activity",
       title: "Prague Castle",
     };
@@ -736,6 +1057,10 @@ export default async function run() {
       {
         city: "Prague",
         date: "2019-01-16",
+        description: Array.from(
+          { length: 9 },
+          (_, index) => `Courtyard stop ${index}`
+        ).join(", "),
         itemType: "activity",
         title: "Prague Castle",
       },

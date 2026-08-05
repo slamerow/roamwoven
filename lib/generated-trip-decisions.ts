@@ -1,5 +1,7 @@
 import type {
   StructuredTripRecords,
+  TripDecisionAnchor,
+  TripDecisionRelatedAnchor,
   TripDayRecord,
   TripItemRecord,
   TripLegRecord,
@@ -9,6 +11,12 @@ import type {
   TripStayRecord,
   TripTransportRecord,
 } from "@/lib/generated-trip-model";
+import {
+  cityNoteKeyForLeg,
+  cityNoteKeyForRecord,
+  firstCityNoteLeg,
+} from "@/lib/city-note-identity";
+import { resolveReviewDecisionSubjectId } from "@/lib/review-decision-anchor";
 
 export type ReviewDecisionSubjectType =
   | "day"
@@ -31,8 +39,10 @@ export type ReviewDecisionAction =
 type ReviewDecisionBase = {
   action: ReviewDecisionAction;
   createdAt: string | null;
+  decisionAnchor?: TripDecisionAnchor | null;
   id: string;
   note?: string | null;
+  relatedDecisionAnchors?: TripDecisionRelatedAnchor[];
   subjectId: string;
   subjectType: ReviewDecisionSubjectType;
   tripId: string;
@@ -392,23 +402,26 @@ function applyMoveToCityTip(
 
   const leg =
     records.legs.find((item) => item.id === decision.targetLegId) ??
-    records.legs.find((item) => item.id === source.legId) ??
+    firstCityNoteLeg(records.legs, source) ??
     null;
 
   if (!leg) {
     return applyToRecord(records, "item", source.id, {
       item: (item) => ({
         ...item,
+        cityNoteKey: null,
         date: null,
         endTime: null,
         itemType: "note",
-        reviewRequired: false,
+        legId: null,
+        reviewRequired: true,
         startTime: null,
-        status: "confirmed",
+        status: "needs_review",
       }),
     });
   }
 
+  const cityNoteKey = cityNoteKeyForLeg(leg);
   const section = cityTipSectionForItem(source);
   const entry = [source.title, source.description]
     .filter(Boolean)
@@ -417,7 +430,7 @@ function applyMoveToCityTip(
   const existingTip = records.items.find(
     (item) =>
       item.id !== source.id &&
-      item.legId === leg.id &&
+      cityNoteKeyForRecord(records.legs, item) === cityNoteKey &&
       item.itemType === "note" &&
       item.status !== "ignored" &&
       /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?)\b/i.test(
@@ -430,11 +443,12 @@ function applyMoveToCityTip(
       item: (item) => ({
         ...item,
         categoryId: categoryIdForCityTipSection(section),
+        cityNoteKey,
         date: null,
         description: appendCityTipEntry(null, section, entry),
         endTime: null,
         itemType: "note",
-        legId: leg.id,
+        legId: null,
         locationName: null,
         reviewRequired: false,
         startTime: null,
@@ -450,7 +464,9 @@ function applyMoveToCityTip(
       if (item.id === existingTip.id) {
         return {
           ...item,
+          cityNoteKey,
           description: appendCityTipEntry(item.description, section, entry),
+          legId: null,
           reviewRequired: false,
           status: "confirmed" as const,
         };
@@ -921,31 +937,100 @@ export function applyReviewDecision(
   records: StructuredTripRecords,
   decision: TripReviewDecision
 ): StructuredTripRecords {
-  if (decision.action === "confirm") {
-    return applyConfirm(records, decision);
+  const resolvedSubjectId = resolveReviewDecisionSubjectId(
+    records,
+    decision.subjectType,
+    decision.subjectId,
+    decision.decisionAnchor
+  );
+  if (!resolvedSubjectId) return records;
+
+  let resolvedDecision: TripReviewDecision = {
+    ...decision,
+    subjectId: resolvedSubjectId,
+  };
+  const relatedAnchor = (
+    role: TripDecisionRelatedAnchor["role"],
+    subjectId: string
+  ) =>
+    decision.relatedDecisionAnchors?.find(
+      (entry) => entry.role === role && entry.subjectId === subjectId
+    )?.anchor;
+
+  if (resolvedDecision.action === "combine") {
+    const targetId = resolveReviewDecisionSubjectId(
+      records,
+      "item",
+      resolvedDecision.targetId,
+      resolvedDecision.targetId === decision.subjectId
+        ? decision.decisionAnchor
+        : relatedAnchor("target", resolvedDecision.targetId)
+    );
+    if (!targetId) return records;
+    const resolvedSourceIds = resolvedDecision.sourceIds.map((sourceId) =>
+      resolveReviewDecisionSubjectId(
+        records,
+        "item",
+        sourceId,
+        relatedAnchor("source", sourceId)
+      )
+    );
+    // A compound decision is atomic. Dropping one absent or ambiguous source
+    // and applying the rest would turn a fail-soft anchor miss into a partial
+    // maker mutation. Converging two source ids on one record, or resolving a
+    // source to the target itself, is equally unsafe.
+    if (
+      resolvedSourceIds.some((sourceId) => !sourceId) ||
+      new Set(resolvedSourceIds).size !== resolvedSourceIds.length ||
+      resolvedSourceIds.includes(targetId)
+    ) {
+      return records;
+    }
+    resolvedDecision = {
+      ...resolvedDecision,
+      sourceIds: resolvedSourceIds as string[],
+      subjectId: targetId,
+      targetId,
+    };
+    if (resolvedDecision.sourceIds.length === 0) return records;
   }
 
-  if (decision.action === "edit") {
-    return applyEdit(records, decision);
+  if (resolvedDecision.action === "move_to_city_tip" && resolvedDecision.targetLegId) {
+    const targetLegId = resolveReviewDecisionSubjectId(
+      records,
+      "leg",
+      resolvedDecision.targetLegId,
+      relatedAnchor("target_leg", resolvedDecision.targetLegId)
+    );
+    if (!targetLegId) return records;
+    resolvedDecision = { ...resolvedDecision, targetLegId };
   }
 
-  if (decision.action === "protect") {
-    return applyProtect(records, decision);
+  if (resolvedDecision.action === "confirm") {
+    return applyConfirm(records, resolvedDecision);
   }
 
-  if (decision.action === "delete") {
-    return applyDelete(records, decision);
+  if (resolvedDecision.action === "edit") {
+    return applyEdit(records, resolvedDecision);
   }
 
-  if (decision.action === "combine") {
-    return applyCombine(records, decision);
+  if (resolvedDecision.action === "protect") {
+    return applyProtect(records, resolvedDecision);
   }
 
-  if (decision.action === "move_to_city_tip") {
-    return applyMoveToCityTip(records, decision);
+  if (resolvedDecision.action === "delete") {
+    return applyDelete(records, resolvedDecision);
   }
 
-  return applyAnswerQuestion(records, decision);
+  if (resolvedDecision.action === "combine") {
+    return applyCombine(records, resolvedDecision);
+  }
+
+  if (resolvedDecision.action === "move_to_city_tip") {
+    return applyMoveToCityTip(records, resolvedDecision);
+  }
+
+  return applyAnswerQuestion(records, resolvedDecision);
 }
 
 export function applyReviewDecisions(

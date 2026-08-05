@@ -23,6 +23,7 @@ import {
   normalizeTripReviewDecisionRow,
   serializeTripReviewDecision,
 } from "@/lib/review-decisions";
+import { createReviewDecisionAnchor } from "@/lib/review-decision-anchor";
 import {
   createPublishedPrivateDetails,
   createPublishedTripSnapshotPayload,
@@ -697,7 +698,8 @@ test("summary can move an activity into city tips", () => {
 
   assert.equal(moved?.itemType, "note");
   assert.equal(moved?.date, null);
-  assert.equal(moved?.legId, records.legs[0]?.id);
+  assert.equal(moved?.legId, null);
+  assert.equal(moved?.cityNoteKey, "city:vienna:austria");
   assert.equal(moved?.title, "Vienna Notes & Tips");
   assert.match(moved?.description ?? "", /Cafe Central/i);
   assert.equal(summary.counts.activities, 0);
@@ -708,6 +710,68 @@ test("summary can move an activity into city tips", () => {
     false
   );
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Vienna Notes & Tips");
+});
+
+test("moving an activity on a return leg merges into the city-owned note", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          city: "Rome",
+          date: null,
+          description: "Food: Existing Rome cafe ideas.",
+          itemType: "note",
+          title: "Rome Notes & Tips",
+        },
+        {
+          category: "food_dining",
+          date: "2026-09-10",
+          description: "Try Roscioli if there is time.",
+          itemType: "activity",
+          title: "Roscioli",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        { arriveDate: "2026-09-01", city: "Rome", country: "Italy", leaveDate: "2026-09-03" },
+        { arriveDate: "2026-09-10", city: "Rome", country: "Italy", leaveDate: "2026-09-12" },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Italy" },
+    },
+    fallbackTripName: "Italy",
+    tripId: "trip-return-leg-city-tip",
+  });
+  const source = records.items.find((item) => item.title === "Roscioli");
+  const existing = records.items.find((item) => item.itemType === "note");
+  assert.ok(source);
+  assert.ok(existing);
+
+  const updated = applyReviewDecision(records, {
+    action: "move_to_city_tip",
+    createdAt: "2026-08-05T12:00:00.000Z",
+    id: "decision-return-leg-city-tip",
+    subjectId: source.id,
+    subjectType: "item",
+    targetLegId: records.legs[1]?.id,
+    tripId: records.trip.id,
+  });
+  const activeNotes = updated.items.filter(
+    (item) => item.itemType === "note" && item.status !== "ignored"
+  );
+  const merged = updated.items.find((item) => item.id === existing.id);
+  const moved = updated.items.find((item) => item.id === source.id);
+  const viewModel = createTravelerAppViewModel(updated);
+
+  assert.equal(activeNotes.length, 1);
+  assert.equal(merged?.cityNoteKey, "city:rome:italy");
+  assert.equal(merged?.legId, null);
+  assert.match(merged?.description ?? "", /Roscioli/i);
+  assert.equal(moved?.status, "ignored");
+  assert.equal(viewModel.legs[0]?.tips[0]?.id, existing.id);
+  assert.equal(viewModel.legs[1]?.tips[0]?.id, existing.id);
 });
 
 test("Asia seed compiles into structured records and traveler view model", () => {
@@ -853,6 +917,7 @@ test("draft parser output compiles into structured records", () => {
         date: "2026-09-01",
         departure: "New York",
         departureTime: "18:30",
+        description: "Seat 12A. Keep the printed ticket handy.",
         provider: "Example Air",
         sourceFilename: "central-europe.pdf",
         title: "Fly to Prague",
@@ -880,6 +945,7 @@ test("draft parser output compiles into structured records", () => {
   assert.equal(records.stays[0]?.legId, records.legs[0]?.id);
   assert.equal(records.transport[0]?.transportType, "flight");
   assert.equal(records.transport[0]?.confirmationVisibility, "traveler_password");
+  assert.equal(records.transport[0]?.descriptionVisibility, "traveler_password");
   assert.equal(records.items.length, 2);
   assert.equal(records.items[1]?.itemType, "activity");
   assert.equal(records.items[1]?.categoryId, "food_dining");
@@ -912,7 +978,36 @@ test("draft parser output compiles into structured records", () => {
   );
   assert.ok(records.days.length >= 2, "expected days from records");
   assert.equal(viewModel.trip.title, "Central Europe");
-  assert.equal(viewModel.cards.length, 2);
+  assert.equal(viewModel.cards.length, 3);
+  const travelCard = viewModel.cards.find(
+    (card) => card.id === records.transport[0]?.id
+  );
+  assert.equal(travelCard?.itemType, "transport");
+  assert.match(travelCard?.description ?? "", /Example Air/);
+  assert.match(travelCard?.description ?? "", /New York/);
+  assert.match(travelCard?.description ?? "", /Prague/);
+  assert.doesNotMatch(travelCard?.description ?? "", /printed ticket/i);
+  assert.equal(viewModel.trip.itemCount, 3);
+  assert.equal(
+    viewModel.categories.find(
+      (category) => category.id === "arrival_departure"
+    )?.count,
+    1
+  );
+  assert.ok(
+    travelCard?.privateDetailIds.includes(
+      `${records.transport[0]?.id}:description`
+    )
+  );
+  assert.ok(
+    viewModel.privacy.privateDetails.some(
+      (detail) => detail.id === `${records.transport[0]?.id}:description`
+    )
+  );
+  assert.equal(
+    viewModel.privacy.privateDetailCount,
+    viewModel.privacy.privateDetails.length
+  );
 });
 
 test("trip dates start with first actual travel day before first lodging leg", () => {
@@ -1059,7 +1154,8 @@ test("city notes and tips attach to legs without becoming activity cards", () =>
 
   assert.equal(tip?.itemType, "note");
   assert.equal(tip?.date, null);
-  assert.equal(tip?.legId, records.legs[0]?.id);
+  assert.equal(tip?.legId, null);
+  assert.equal(tip?.cityNoteKey, "city:prague:czechia");
   assert.equal(tip?.reviewRequired, false);
   assert.equal(viewModel.cards.some((card) => card.title === "Prague Notes & Tips"), false);
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Prague Notes & Tips");
@@ -1116,12 +1212,172 @@ test("one city-notes collection is referenced by repeated legs in the same city"
     tripId: "trip-repeat-rome-notes",
   });
   const viewModel = createTravelerAppViewModel(records);
+  const note = records.items.find((item) => item.itemType === "note");
 
   assert.equal(records.items.filter((item) => item.itemType === "note").length, 1);
+  assert.equal(note?.date, null);
+  assert.equal(note?.legId, null);
+  assert.equal(note?.cityNoteKey, "city:rome:italy");
   assert.equal(viewModel.legs.length, 2);
   assert.equal(viewModel.legs[0]?.tips[0]?.title, "Rome Notes & Tips");
   assert.equal(viewModel.legs[1]?.tips[0]?.title, "Rome Notes & Tips");
   assert.equal(viewModel.legs[0]?.tips[0]?.id, viewModel.legs[1]?.tips[0]?.id);
+});
+
+test("legacy leg-owned City Notes remain readable across repeated city legs", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "food_dining",
+          city: "Rome",
+          date: null,
+          description: "Legacy Rome food ideas.",
+          itemType: "note",
+          title: "Rome Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        { arriveDate: "2026-09-01", city: "Rome", country: "Italy", leaveDate: "2026-09-03" },
+        { arriveDate: "2026-09-10", city: "Rome", country: "Italy", leaveDate: "2026-09-11" },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Italy" },
+    },
+    fallbackTripName: "Italy",
+    tripId: "trip-legacy-rome-notes",
+  });
+  const note = records.items[0];
+  assert.ok(note);
+
+  // Simulate a structured snapshot written before `cityNoteKey` existed.
+  delete note.cityNoteKey;
+  note.legId = records.legs[0]?.id ?? null;
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(viewModel.legs[0]?.tips[0]?.id, note.id);
+  assert.equal(viewModel.legs[1]?.tips[0]?.id, note.id);
+});
+
+test("a day-trip town note uses its dated parent leg only to derive city identity", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "local_tips",
+          city: "Potsdam",
+          date: "2026-09-02",
+          description: "Potsdam day-trip notes and ideas.",
+          itemType: "note",
+          title: "Potsdam Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Berlin",
+          country: "Germany",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Berlin" },
+    },
+    fallbackTripName: "Berlin",
+    tripId: "trip-day-trip-note",
+  });
+  const note = records.items[0];
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(note?.date, null);
+  assert.equal(note?.legId, null);
+  assert.equal(note?.cityNoteKey, "city:berlin:germany");
+  assert.equal(note?.reviewRequired, false);
+  assert.equal(viewModel.legs[0]?.tips[0]?.id, note?.id);
+});
+
+test("same-named cities in different countries do not share a City Note", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "local_tips",
+          city: "Springfield",
+          date: "2026-09-02",
+          description: "Local ideas for the first Springfield.",
+          itemType: "note",
+          title: "Springfield Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Springfield",
+          country: "United States",
+          leaveDate: "2026-09-04",
+        },
+        {
+          arriveDate: "2026-09-10",
+          city: "Springfield",
+          country: "Canada",
+          leaveDate: "2026-09-12",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Two Springfields" },
+    },
+    fallbackTripName: "Two Springfields",
+    tripId: "trip-same-city-name",
+  });
+  const note = records.items[0];
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(note?.date, null);
+  assert.equal(note?.legId, null);
+  assert.equal(note?.cityNoteKey, "city:springfield:united-states");
+  assert.equal(viewModel.legs[0]?.tips[0]?.id, note?.id);
+  assert.equal(viewModel.legs[1]?.tips.length, 0);
+});
+
+test("an unplaceable City Note is retained for review without arbitrary ownership", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "local_tips",
+          date: null,
+          description: "Loose local advice with no city context.",
+          itemType: "note",
+          title: "Local Notes & Tips",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        { arriveDate: "2026-09-01", city: "Rome", country: "Italy", leaveDate: "2026-09-04" },
+        { arriveDate: "2026-09-05", city: "Paris", country: "France", leaveDate: "2026-09-08" },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Europe" },
+    },
+    fallbackTripName: "Europe",
+    tripId: "trip-unplaced-note",
+  });
+  const note = records.items[0];
+  const viewModel = createTravelerAppViewModel(records);
+
+  assert.equal(note?.date, null);
+  assert.equal(note?.legId, null);
+  assert.equal(note?.cityNoteKey, null);
+  assert.equal(note?.reviewRequired, true);
+  assert.equal(note?.status, "needs_review");
+  assert.equal(viewModel.legs.every((leg) => leg.tips.length === 0), true);
 });
 
 
@@ -1487,7 +1743,7 @@ test("summary orders timed transport before invisible day-part activity sorting"
   );
 });
 
-test("summary flags days with seven or more visible activities", () => {
+test("density alone never raises a maker warning for seven coherent activities", () => {
   const records = createStructuredTripRecordsFromDraft({
     draft: {
       activities: Array.from({ length: 7 }, (_value, index) => ({
@@ -1517,23 +1773,11 @@ test("summary flags days with seven or more visible activities", () => {
     tripId: "trip-bloat-warning",
   });
   const summary = createGeneratedTripSummaryView(records);
-  const warning = summary.warnings.find((warning) =>
-    /has a lot of visible cards/.test(warning.title)
+  const warning = summary.warnings.find(
+    (warning) => warning.code === "activity_bloat"
   );
-  assert.ok(warning);
-  assert.equal(warning.severity, "quiet");
+  assert.equal(warning, undefined);
   assert.equal(summary.isSemanticallyClean, true);
-  const resolved = applyReviewDecision(records, {
-    action: "confirm",
-    createdAt: "2026-06-18T12:00:00.000Z",
-    id: "decision-confirm-bloat-warning",
-    subjectId: warning.subjectId,
-    subjectType: warning.subjectType,
-    tripId: "trip-bloat-warning",
-  });
-  const resolvedSummary = createGeneratedTripSummaryView(resolved);
-
-  assert.equal(resolvedSummary.warnings.length, 0);
 });
 
 test("summary marks surviving stay and transport duplicate collisions for review", () => {
@@ -2937,6 +3181,172 @@ test("review decisions update structured records", () => {
   );
 });
 
+test("a stable decision anchor re-finds one refreshed item and refuses ambiguity", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          city: "Prague",
+          date: "2026-09-02",
+          itemType: "activity",
+          title: "Prague Castle",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Prague" },
+    },
+    fallbackTripName: "Prague",
+    tripId: "trip-anchor-rebind",
+  });
+  const original = records.items[0];
+  assert.ok(original);
+  const decisionAnchor = createReviewDecisionAnchor(records, "item", original.id);
+  assert.ok(decisionAnchor);
+
+  const refreshedId = `${original.id}-refreshed`;
+  const refreshed = {
+    ...records,
+    items: records.items.map((item) =>
+      item.id === original.id ? { ...item, id: refreshedId } : item
+    ),
+  };
+  const rebound = applyReviewDecision(refreshed, {
+    action: "delete",
+    createdAt: "2026-08-05T13:00:00.000Z",
+    decisionAnchor,
+    id: "decision-anchor-rebind",
+    subjectId: original.id,
+    subjectType: "item",
+    tripId: records.trip.id,
+  });
+  assert.equal(
+    rebound.items.find((item) => item.id === refreshedId)?.status,
+    "ignored"
+  );
+
+  const ambiguous = {
+    ...records,
+    items: [
+      { ...original, id: `${original.id}-a` },
+      { ...original, id: `${original.id}-b` },
+    ],
+  };
+  const refused = applyReviewDecision(ambiguous, {
+    action: "delete",
+    createdAt: "2026-08-05T13:01:00.000Z",
+    decisionAnchor,
+    id: "decision-anchor-ambiguous",
+    subjectId: original.id,
+    subjectType: "item",
+    tripId: records.trip.id,
+  });
+  assert.equal(refused.items.every((item) => item.status !== "ignored"), true);
+});
+
+test("an anchored compound decision is atomic when one source is ambiguous", () => {
+  const records = createStructuredTripRecordsFromDraft({
+    draft: {
+      activities: [
+        {
+          category: "art_culture",
+          city: "Prague",
+          date: "2026-09-02",
+          itemType: "activity",
+          title: "Prague Castle",
+        },
+        {
+          category: "art_culture",
+          city: "Prague",
+          date: "2026-09-02",
+          itemType: "activity",
+          title: "Castle ticket note",
+        },
+        {
+          category: "art_culture",
+          city: "Prague",
+          date: "2026-09-02",
+          itemType: "activity",
+          title: "Castle tour note",
+        },
+      ],
+      missingDetails: [],
+      places: [
+        {
+          arriveDate: "2026-09-01",
+          city: "Prague",
+          country: "Czechia",
+          leaveDate: "2026-09-04",
+        },
+      ],
+      stays: [],
+      transport: [],
+      tripOverview: { title: "Prague" },
+    },
+    fallbackTripName: "Prague",
+    tripId: "trip-anchor-atomic-combine",
+  });
+  const [target, directSource, ambiguousSource] = records.items;
+  assert.ok(target);
+  assert.ok(directSource);
+  assert.ok(ambiguousSource);
+  const targetAnchor = createReviewDecisionAnchor(records, "item", target.id);
+  const sourceAnchor = createReviewDecisionAnchor(
+    records,
+    "item",
+    ambiguousSource.id
+  );
+  assert.ok(targetAnchor);
+  assert.ok(sourceAnchor);
+
+  const rebuilt = {
+    ...records,
+    items: records.items.flatMap((item) =>
+      item.id === ambiguousSource.id
+        ? [
+            { ...item, id: `${item.id}-a` },
+            { ...item, id: `${item.id}-b` },
+          ]
+        : [item]
+    ),
+  };
+  const refused = applyReviewDecision(rebuilt, {
+    action: "combine",
+    createdAt: "2026-08-05T13:02:00.000Z",
+    decisionAnchor: targetAnchor,
+    id: "decision-anchor-atomic-combine",
+    relatedDecisionAnchors: [
+      {
+        anchor: sourceAnchor,
+        role: "source",
+        subjectId: ambiguousSource.id,
+        subjectType: "item",
+      },
+    ],
+    sourceIds: [directSource.id, ambiguousSource.id],
+    subjectId: target.id,
+    subjectType: "item",
+    targetId: target.id,
+    tripId: records.trip.id,
+  });
+
+  assert.equal(refused, rebuilt);
+  assert.equal(
+    refused.items.every((item) => item.status !== "ignored"),
+    true
+  );
+});
+
 test("answering a targeted question updates the structured record", () => {
   const draft = {
     activities: [
@@ -3506,6 +3916,16 @@ test("model-supplied source todo questions stay open and do not duplicate fallba
   assert.equal(records.reviewQuestions[0]?.status, "open");
   assert.equal(records.reviewQuestions[0]?.subjectId, castle.id);
   assert.equal(records.reviewQuestions[0]?.targetField, "ticketType");
+  const decisionAnchor = records.reviewQuestions[0]?.decisionAnchor;
+  assert.equal(decisionAnchor?.date, "2019-01-16");
+  assert.equal(decisionAnchor?.legKey, "prague-czechia");
+  assert.equal(
+    decisionAnchor?.normalizedTitle,
+    "have you chosen which prague castle ticket to get"
+  );
+  assert.match(decisionAnchor?.sourceAnchorRef ?? "", /^review:[a-f0-9]{8}$/);
+  assert.equal(decisionAnchor?.subjectType, "review_question");
+  assert.equal(decisionAnchor?.version, 1);
 });
 
 test("review decisions serialize through the persistence payload contract", () => {
@@ -3574,6 +3994,14 @@ test("review decisions serialize through the persistence payload contract", () =
   const moveSerialized = serializeTripReviewDecision({
     action: "move_to_city_tip",
     createdAt: null,
+    decisionAnchor: {
+      date: "2019-01-19",
+      legKey: "vienna-austria",
+      normalizedTitle: "museum of illusions",
+      sourceAnchorRef: null,
+      subjectType: "item",
+      version: 1,
+    },
     id: "decision-2",
     subjectId: "item-3",
     subjectType: "item",
@@ -3587,6 +4015,14 @@ test("review decisions serialize through the persistence payload contract", () =
     id: "decision-2",
     note: null,
     payload_json: {
+      decisionAnchor: {
+        date: "2019-01-19",
+        legKey: "vienna-austria",
+        normalizedTitle: "museum of illusions",
+        sourceAnchorRef: null,
+        subjectType: "item",
+        version: 1,
+      },
       targetLegId: "leg-vienna",
     },
     subject_id: "item-3",
@@ -3608,6 +4044,14 @@ test("review decisions serialize through the persistence payload contract", () =
     {
       action: "move_to_city_tip",
       createdAt: "2026-06-18T13:00:00.000Z",
+      decisionAnchor: {
+        date: "2019-01-19",
+        legKey: "vienna-austria",
+        normalizedTitle: "museum of illusions",
+        sourceAnchorRef: null,
+        subjectType: "item",
+        version: 1,
+      },
       id: "decision-2",
       note: null,
       subjectId: "item-3",

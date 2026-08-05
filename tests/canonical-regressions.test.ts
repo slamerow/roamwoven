@@ -41,7 +41,11 @@ function cluster(stage: Record<string, unknown>) {
       itemType?: string;
       title: string;
     }>;
-    missingDetails: Array<{ prompt?: string }>;
+    missingDetails: Array<{
+      _canonicalQuestionGate?: string;
+      _canonicalReviewDisposition?: string;
+      prompt?: string;
+    }>;
     places: Array<{ city: string }>;
     stays: Array<{ checkIn?: string; checkOut?: string; name: string }>;
     transport: Array<{ title: string }>;
@@ -407,7 +411,7 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
-  await test("canonical date review keeps uncertainty but removes a resolved planner call", () => {
+  await test("canonical date review keeps uncertainty and audits a resolved planner ask", () => {
     const activity = {
       date: "2019-01-13",
       itemType: "activity",
@@ -446,7 +450,15 @@ export default async function run() {
     }));
 
     assert.equal(ambiguous.missingDetails.length, 1);
-    assert.equal(resolved.missingDetails.length, 0);
+    assert.equal(resolved.missingDetails.length, 1);
+    assert.equal(
+      resolved.missingDetails[0]?._canonicalReviewDisposition,
+      "dismissed"
+    );
+    assert.match(
+      String(resolved.missingDetails[0]?._canonicalQuestionGate ?? ""),
+      /auto-applied guessed date/i
+    );
   });
 
   await test("fixed privacy policy cannot become a maker-facing question", () => {
@@ -477,7 +489,15 @@ export default async function run() {
       }],
     }));
 
-    assert.equal(draft.missingDetails.length, 0);
+    assert.equal(draft.missingDetails.length, 1);
+    assert.equal(
+      draft.missingDetails[0]?._canonicalReviewDisposition,
+      "dismissed"
+    );
+    assert.match(
+      String(draft.missingDetails[0]?._canonicalQuestionGate ?? ""),
+      /automatic and final/i
+    );
   });
 
   await test("optional provider and named-activity gaps stay out of review", () => {

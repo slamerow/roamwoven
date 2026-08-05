@@ -107,6 +107,12 @@ export type TripTransportRecord = {
   departureLocation: string | null;
   departureTime: string | null;
   description: string | null;
+  /**
+   * Travel-card prose is one protected container (RW-PRI-001 Δ4). Optional
+   * only so snapshots created before the field existed remain readable; the
+   * effective value for a missing field is still traveler_password.
+   */
+  descriptionVisibility?: "traveler_password";
   fromLegId: string | null;
   id: string;
   legId: string | null;
@@ -133,6 +139,11 @@ export type TripItemRecord = {
   address: string | null;
   canonicalId: string;
   categoryId: string;
+  /**
+   * Durable owner for a City Note. New note records use this instead of a
+   * date or leg owner; optional so pre-city-key snapshots remain readable.
+   */
+  cityNoteKey?: string | null;
   date: string | null;
   description: string | null;
   endTime: string | null;
@@ -222,6 +233,36 @@ export type TripWeatherHookRecord = {
   tripId: string;
 };
 
+export type TripDecisionAnchorSubjectType =
+  | "day"
+  | "item"
+  | "leg"
+  | "private_detail"
+  | "review_question"
+  | "stay"
+  | "transport"
+  | "trip";
+
+/**
+ * Trip-local identity metadata for maker decisions. It locates a subject; it
+ * never carries the answer or changes assembly behavior.
+ */
+export type TripDecisionAnchor = {
+  date: string | null;
+  legKey: string | null;
+  normalizedTitle: string;
+  sourceAnchorRef: string | null;
+  subjectType: TripDecisionAnchorSubjectType;
+  version: 1;
+};
+
+export type TripDecisionRelatedAnchor = {
+  anchor: TripDecisionAnchor;
+  role: "source" | "target" | "target_leg";
+  subjectId: string;
+  subjectType: Exclude<TripDecisionAnchorSubjectType, "trip">;
+};
+
 export type TripReviewQuestionRecord = {
   answerMax?: string | null;
   answerMin?: string | null;
@@ -253,6 +294,7 @@ export type TripReviewQuestionRecord = {
   answerValue: string | null;
   canonicalId: string;
   createdAt: string | null;
+  decisionAnchor?: TripDecisionAnchor | null;
   /**
    * Why a dismissed question was dismissed (the assembly gate/sweep trace,
    * e.g. "subject entity no longer exists after assembly"). Run 7.23.2

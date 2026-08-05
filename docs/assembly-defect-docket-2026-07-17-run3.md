@@ -188,9 +188,10 @@ Classification: **assembly/audit**.
   "Old Town Square" is STILL a standalone card beside the tour — sub-stop
   absorption missed for the second straight run. **Assembly.**
 - Mumok / Natural History (Jan 19): TWO cards with opening-hours contamination
-  as endTimes (19:00 / 08:30). Key: ONE disjunction card "Mumok or Natural
-  History," alternatives in description. **Parser** (split + time
-  contamination) **+ assembly** (no or-detection backstop).
+  as endTimes (19:00 / 08:30). **Historical key superseded 2026-08-05:** the
+  source contains separate lines and no `or`; the current key is two separate
+  Vienna City Note ideas, not a disjunction or Activity. The opening-hours
+  contamination finding remains historical evidence about that run.
 - Idea promotions still active (key: city notes): Ferris wheel, Hundertwasser
   Haus (Jan 19); Great Synagogue, Pinball Museum, Ruszwurm, Gellert Baths (Jan
   21 — the question exists AND the card is committed); Children's train,

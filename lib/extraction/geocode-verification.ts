@@ -1,6 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 import { SITE_CONTAINER_NOUN_PATTERN } from "@/lib/extraction/activity-classifier";
-import { comparableTokens } from "@/lib/extraction/traveler-text";
+import {
+  comparableTokens,
+  differsByOneEdit,
+} from "@/lib/extraction/traveler-text";
 
 // Geocoding verification lane (Arc B; standing CEO decision recorded
 // 2026-07-17/18 after four runs of unusable model-emitted coordinates).
@@ -91,6 +95,9 @@ export type GeocodeCandidateOutcome =
   | "not_attempted";
 
 export type GeocodeCandidateTelemetry = {
+  candidateId: string;
+  containerSourceSupported: boolean | null;
+  containerTitle: string | null;
   granularity: GeocodeGranularity | null;
   outcome: GeocodeCandidateOutcome;
   query: string;
@@ -127,6 +134,9 @@ export type GeocodeVerificationUsage = {
   retryAcceptedCount: number;
   retryCount: number;
   retryOutOfCityCount: number;
+  // G5.1: a locality lookup wanted to borrow the day's single container,
+  // but the container's own description did not name this candidate.
+  retryUnlistedContainerCount: number;
   // G4.3 + D3: retries the lane wanted but could not afford, because
   // retries count against the same hard cap. Non-zero here means the CAP,
   // not the guard, is what bounded recovery.
@@ -135,7 +145,76 @@ export type GeocodeVerificationUsage = {
   version: 1;
 };
 
+// Scorecard/replay support. Model calls were already pinned, but production's
+// verified geocode results were not, so the offline harness deliberately ran a
+// different assembly policy on parser coordinates. A replay seed carries only
+// the provider output already persisted on the saved run; it never changes the
+// production lane and never makes a network request. Async-local scope keeps
+// concurrent server requests isolated, matching extraction-pinning.ts.
+export type PinnedGeocodeAttachment = {
+  candidateId: string;
+  formattedAddress: string | null;
+  lat: number;
+  lng: number;
+  provider: string;
+  query: string;
+};
+
+export type GeocodeVerificationReplaySeed = {
+  attachments: PinnedGeocodeAttachment[];
+  usage: GeocodeVerificationUsage;
+  version: 1;
+};
+
+export type GeocodeVerificationReplayCache = {
+  actualCandidateCount: number;
+  entries: Map<string, PinnedGeocodeAttachment>;
+  expectedCandidateCount: number;
+  hits: number;
+  policyRejectedCandidateIds: string[];
+  unmatchedCandidateIds: string[];
+  usage: GeocodeVerificationUsage;
+};
+
+const geocodeReplayStorage =
+  new AsyncLocalStorage<GeocodeVerificationReplayCache>();
+
+function cloneGeocodeUsage(usage: GeocodeVerificationUsage) {
+  return JSON.parse(JSON.stringify(usage)) as GeocodeVerificationUsage;
+}
+
+export function createGeocodeVerificationReplayCache(
+  seed: GeocodeVerificationReplaySeed
+): GeocodeVerificationReplayCache {
+  return {
+    actualCandidateCount: 0,
+    entries: new Map(
+      seed.attachments.map((attachment) => [
+        attachment.candidateId,
+        attachment,
+      ])
+    ),
+    expectedCandidateCount: seed.usage.candidateCount,
+    hits: 0,
+    policyRejectedCandidateIds: [],
+    unmatchedCandidateIds: [],
+    usage: cloneGeocodeUsage(seed.usage),
+  };
+}
+
+export function runWithGeocodeVerificationReplay<T>(
+  cache: GeocodeVerificationReplayCache,
+  fn: () => Promise<T>
+): Promise<T> {
+  return geocodeReplayStorage.run(cache, fn);
+}
+
 export type GeocodeCandidate = {
+  // Stable within one parse and identical to the resolver id assigned in
+  // canonical-evidence-resolver.ts. It exists here before the resolver runs,
+  // derived from the same stage/item indexes, so a saved geocode result can be
+  // replayed at the original boundary instead of patched onto final pieces.
+  candidateId: string;
   // G4.3 context. `city` is the day's city (the record's own, else the one
   // its day-mates agree on). `containerTitle` is the single named-site
   // container on this candidate's day — null when the day has none, has
@@ -143,6 +222,10 @@ export type GeocodeCandidate = {
   // this candidate IS that container.
   city: string | null;
   containerTitle: string | null;
+  // Null means there is no single container context. False means a container
+  // exists but its own description does not list this candidate, so G5.1
+  // forbids using that container to manufacture a venue lookup.
+  containerSourceSupported: boolean | null;
   date: string | null;
   query: string;
   record: Record<string, unknown>;
@@ -173,6 +256,94 @@ function hasPreciseParserCoordinates(record: Record<string, unknown>) {
   return coordinateDecimalCount(lat) >= 3 || coordinateDecimalCount(lng) >= 3;
 }
 
+const CONTAINER_CONTAINMENT_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "at",
+  "explore",
+  "for",
+  "in",
+  "inside",
+  "of",
+  "the",
+  "visit",
+  "with",
+  "within",
+]);
+
+function containmentTokens(value: string) {
+  return comparableTokens(value).filter(
+    (token) => !CONTAINER_CONTAINMENT_STOPWORDS.has(token)
+  );
+}
+
+function containerDescriptionNamesCandidate(
+  descriptions: string[],
+  candidateTitle: string
+) {
+  const candidateTokens = containmentTokens(candidateTitle);
+  if (candidateTokens.length === 0) return false;
+
+  for (const description of descriptions) {
+    const sourceTokens = containmentTokens(description);
+    const used = new Set<number>();
+    let exactMatches = 0;
+    let fuzzyMatches = 0;
+    let failed = false;
+
+    for (const candidateToken of candidateTokens) {
+      const exactIndex = sourceTokens.findIndex(
+        (sourceToken, index) =>
+          !used.has(index) && sourceToken === candidateToken
+      );
+      if (exactIndex >= 0) {
+        used.add(exactIndex);
+        exactMatches += 1;
+        continue;
+      }
+
+      const fuzzyIndex = sourceTokens.findIndex(
+        (sourceToken, index) =>
+          !used.has(index) &&
+          Math.min(sourceToken.length, candidateToken.length) >= 6 &&
+          sourceToken.slice(0, 2) === candidateToken.slice(0, 2) &&
+          sourceToken.slice(-2) === candidateToken.slice(-2) &&
+          differsByOneEdit(sourceToken, candidateToken)
+      );
+      if (fuzzyIndex < 0 || fuzzyMatches > 0) {
+        failed = true;
+        break;
+      }
+      used.add(fuzzyIndex);
+      fuzzyMatches += 1;
+    }
+
+    if (
+      !failed &&
+      (fuzzyMatches === 0 ||
+        (candidateTokens.length >= 2 && exactMatches >= 1))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function containerTitlesNameSameSite(left: string, right: string) {
+  const leftTokens = containmentTokens(left);
+  const rightTokens = containmentTokens(right);
+  const leftSet = new Set(leftTokens);
+  const rightSet = new Set(rightTokens);
+  return (
+    leftTokens.length > 0 &&
+    rightTokens.length > 0 &&
+    (leftTokens.every((token) => rightSet.has(token)) ||
+      rightTokens.every((token) => leftSet.has(token)))
+  );
+}
+
 // Deterministic candidate selection under the budget: (1) named-site
 // containers (the ship-bar groups — castle, Schönbrunn), (2) activities on
 // crowded days (6+ same-day cards — the discovered-walk pool), (3) the
@@ -182,22 +353,55 @@ function hasPreciseParserCoordinates(record: Record<string, unknown>) {
 export function selectGeocodeCandidates(
   stages: EvidenceStageInput[]
 ): GeocodeCandidate[] {
-  const records: Array<{ record: Record<string, unknown>; date: string | null }> = [];
-  for (const stageInput of stages) {
+  const sourceContainersByDate = new Map<
+    string,
+    Array<{ description: string; title: string }>
+  >();
+  const records: Array<{
+    candidateId: string;
+    date: string | null;
+    record: Record<string, unknown>;
+  }> = [];
+  for (let stageIndex = 0; stageIndex < stages.length; stageIndex += 1) {
+    const stageInput = stages[stageIndex];
     const stage =
       stageInput.stage && typeof stageInput.stage === "object"
         ? (stageInput.stage as Record<string, unknown>)
         : {};
     const activities = Array.isArray(stage.activities) ? stage.activities : [];
-    for (const item of activities) {
+    for (let itemIndex = 0; itemIndex < activities.length; itemIndex += 1) {
+      const item = activities[itemIndex];
       if (!item || typeof item !== "object" || Array.isArray(item)) continue;
       const record = item as Record<string, unknown>;
+      const sourceTitle = stringField(record, "title");
+      const sourceDate = stringField(record, "date");
+      const sourceDescription = stringField(record, "description");
+      // Grouping-proposal containers are not geocode CANDIDATES, but their
+      // own descriptions are the source relationship ledger G5.1 must read.
+      // Run 8.1's atomic `Schönbrunn Palace` row only described itself; the
+      // sibling `Explore Schönbrunn Palace` proposal carried the five listed
+      // stops. Dropping non-atomic rows here made every true retry look
+      // unlisted.
+      if (
+        sourceTitle &&
+        sourceDate &&
+        sourceDescription &&
+        SITE_CONTAINER_NOUN_PATTERN.test(sourceTitle)
+      ) {
+        const containers = sourceContainersByDate.get(sourceDate) ?? [];
+        containers.push({ description: sourceDescription, title: sourceTitle });
+        sourceContainersByDate.set(sourceDate, containers);
+      }
       if (stringField(record, "itemType") === "note") continue;
       if (typeof record.evidenceRole === "string" && record.evidenceRole !== "atomic_candidate" && record.evidenceRole) {
         continue;
       }
       if (!stringField(record, "title")) continue;
-      records.push({ date: stringField(record, "date"), record });
+      records.push({
+        candidateId: `stage-${stageIndex + 1}-item-${itemIndex + 1}`,
+        date: stringField(record, "date"),
+        record,
+      });
     }
   }
 
@@ -303,13 +507,25 @@ export function selectGeocodeCandidates(
       dayContainers.length === 1 && dayContainers[0] !== title
         ? dayContainers[0]
         : null;
+    const containerSourceSupported = containerTitle
+      ? containerDescriptionNamesCandidate(
+          (sourceContainersByDate.get(entry.date ?? "") ?? [])
+            .filter((container) =>
+              containerTitlesNameSameSite(container.title, containerTitle)
+            )
+            .map((container) => container.description),
+          title
+        )
+      : null;
     const dayCities = entry.date
       ? Array.from(cityNamesByDate.get(entry.date) ?? [])
       : [];
     const dayCity = city ?? (dayCities.length === 1 ? dayCities[0] : null);
     candidates.push({
+      candidateId: entry.candidateId,
       city: dayCity,
       containerTitle,
+      containerSourceSupported,
       date: entry.date,
       query: city ? `${title}, ${city}` : title,
       rank,
@@ -533,10 +749,88 @@ export async function runGeocodeVerification({
     retryAcceptedCount: 0,
     retryCount: 0,
     retryOutOfCityCount: 0,
+    retryUnlistedContainerCount: 0,
     retrySkippedOverBudgetCount: 0,
     skippedOverBudgetCount: 0,
     version: 1,
   };
+
+  const replay = geocodeReplayStorage.getStore();
+  if (replay) {
+    const candidates = selectGeocodeCandidates(stages);
+    replay.actualCandidateCount = candidates.length;
+    const matched = new Set<string>();
+    const accepted = new Set<string>();
+    const queryMismatches = new Set<string>();
+    replay.policyRejectedCandidateIds = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const row = replay.usage.candidates[index];
+      if (row) {
+        if (row.query !== candidate.query || row.rank !== candidate.rank) {
+          queryMismatches.add(candidate.candidateId);
+        }
+        row.candidateId = candidate.candidateId;
+        row.containerTitle = candidate.containerTitle;
+        row.containerSourceSupported = candidate.containerSourceSupported;
+      }
+      const attachment = replay.entries.get(candidate.candidateId);
+      if (!attachment) continue;
+      matched.add(candidate.candidateId);
+      const usedUnlistedContainerRetry = Boolean(
+        candidate.containerTitle &&
+          candidate.containerSourceSupported === false &&
+          attachment.query !== candidate.query &&
+          foldName(attachment.query).includes(foldName(candidate.containerTitle))
+      );
+      if (usedUnlistedContainerRetry) {
+        replay.policyRejectedCandidateIds.push(candidate.candidateId);
+        replay.usage.retryUnlistedContainerCount =
+          (replay.usage.retryUnlistedContainerCount ?? 0) + 1;
+        replay.usage.retryAcceptedCount = Math.max(
+          0,
+          replay.usage.retryAcceptedCount - 1
+        );
+        replay.usage.retryCount = Math.max(0, replay.usage.retryCount - 1);
+        replay.usage.lookupCount = Math.max(0, replay.usage.lookupCount - 1);
+        replay.usage.resolvedCount = Math.max(0, replay.usage.resolvedCount - 1);
+        if (attachment.formattedAddress) {
+          replay.usage.formattedAddressCount = Math.max(
+            0,
+            replay.usage.formattedAddressCount - 1
+          );
+        }
+        if (row) {
+          row.granularity = "locality";
+          row.outcome = "rejected_locality";
+          row.retried = false;
+          row.retryQuery = null;
+        }
+        continue;
+      }
+      candidate.record.verifiedLatitude = attachment.lat;
+      candidate.record.verifiedLongitude = attachment.lng;
+      if (attachment.formattedAddress) {
+        candidate.record.verifiedFormattedAddress = attachment.formattedAddress;
+      }
+      candidate.record._geoVerified = true;
+      candidate.record._geoVerification = {
+        provider: attachment.provider,
+        query: attachment.query,
+      };
+      accepted.add(candidate.candidateId);
+    }
+    replay.hits = accepted.size;
+    replay.unmatchedCandidateIds = Array.from(
+      new Set([
+        ...queryMismatches,
+        ...[...replay.entries.keys()].filter(
+          (candidateId) => !matched.has(candidateId)
+        ),
+      ])
+    );
+    return { usage: cloneGeocodeUsage(replay.usage) };
+  }
 
   if (!config.apiKey) {
     return { usage };
@@ -563,6 +857,9 @@ export async function runGeocodeVerification({
   const budgetCut = withinBudget.length;
   candidates.forEach((candidate, index) => {
     const row: GeocodeCandidateTelemetry = {
+      candidateId: candidate.candidateId,
+      containerSourceSupported: candidate.containerSourceSupported,
+      containerTitle: candidate.containerTitle,
       granularity: null,
       outcome: index < budgetCut ? "not_attempted" : "skipped_over_budget",
       query: candidate.query,
@@ -638,7 +935,11 @@ export async function runGeocodeVerification({
   const retryQueryFor = (candidate: GeocodeCandidate) => {
     const alreadyInQuery = (value: string) =>
       foldName(candidate.query).includes(foldName(value));
-    if (candidate.containerTitle && !alreadyInQuery(candidate.containerTitle)) {
+    if (
+      candidate.containerTitle &&
+      candidate.containerSourceSupported === true &&
+      !alreadyInQuery(candidate.containerTitle)
+    ) {
       return `${candidate.title}, ${candidate.containerTitle}`;
     }
     if (candidate.city && !alreadyInQuery(candidate.city)) {
@@ -714,6 +1015,13 @@ export async function runGeocodeVerification({
     // the branch that stops the Prague centroid being stamped verified.
     usage.localityRejectedCount += 1;
     if (row) row.outcome = "rejected_locality";
+    if (
+      candidate.containerTitle &&
+      candidate.containerSourceSupported === false &&
+      !foldName(candidate.query).includes(foldName(candidate.containerTitle))
+    ) {
+      usage.retryUnlistedContainerCount += 1;
+    }
     const retryQuery = retryQueryFor(candidate);
     if (!retryQuery) return;
     if (retryBudget <= 0) {

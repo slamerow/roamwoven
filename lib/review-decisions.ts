@@ -14,6 +14,12 @@ import {
   type TripReviewDecision,
 } from "@/lib/generated-trip-decisions";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
+import type {
+  TripDecisionRelatedAnchor,
+} from "@/lib/generated-trip-model";
+import {
+  parseTripDecisionAnchor,
+} from "@/lib/review-decision-anchor";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type WithoutServerFields<T extends TripReviewDecision> = Omit<
@@ -130,18 +136,29 @@ export function serializeTripReviewDecision(
     subject_type: decision.subjectType,
     trip_id: decision.tripId,
   };
+  const anchorPayload = {
+    ...(decision.decisionAnchor
+      ? { decisionAnchor: decision.decisionAnchor }
+      : {}),
+    ...(decision.relatedDecisionAnchors?.length
+      ? { relatedDecisionAnchors: decision.relatedDecisionAnchors }
+      : {}),
+  };
 
   if (decision.action === "edit") {
     return {
       ...base,
-      payload_json: { changes: decision.changes },
+      payload_json: { ...anchorPayload, changes: decision.changes },
     };
   }
 
   if (decision.action === "protect") {
     return {
       ...base,
-      payload_json: { visibility: decision.visibility ?? "traveler_password" },
+      payload_json: {
+        ...anchorPayload,
+        visibility: decision.visibility ?? "traveler_password",
+      },
     };
   }
 
@@ -149,6 +166,7 @@ export function serializeTripReviewDecision(
     return {
       ...base,
       payload_json: {
+        ...anchorPayload,
         mergedChanges: decision.mergedChanges ?? null,
         sourceIds: decision.sourceIds,
         targetId: decision.targetId,
@@ -160,6 +178,7 @@ export function serializeTripReviewDecision(
     return {
       ...base,
       payload_json: {
+        ...anchorPayload,
         targetLegId: decision.targetLegId ?? null,
       },
     };
@@ -169,6 +188,7 @@ export function serializeTripReviewDecision(
     return {
       ...base,
       payload_json: {
+        ...anchorPayload,
         answerValue: decision.answerValue,
         resolvedAction: decision.resolvedAction ?? null,
       },
@@ -177,7 +197,7 @@ export function serializeTripReviewDecision(
 
   return {
     ...base,
-    payload_json: {},
+    payload_json: anchorPayload,
   };
 }
 
@@ -189,10 +209,38 @@ export function normalizeTripReviewDecisionRow(
   }
 
   const payload = isRecord(row.payload_json) ? row.payload_json : {};
+  const decisionAnchor = parseTripDecisionAnchor(payload.decisionAnchor);
+  const relatedDecisionAnchors = Array.isArray(payload.relatedDecisionAnchors)
+    ? payload.relatedDecisionAnchors.flatMap((value) => {
+        if (!isRecord(value)) return [];
+        const anchor = parseTripDecisionAnchor(value.anchor);
+        const role = value.role;
+        const subjectId = value.subjectId;
+        const subjectType = value.subjectType;
+        if (
+          !anchor ||
+          (role !== "source" && role !== "target" && role !== "target_leg") ||
+          typeof subjectId !== "string" ||
+          typeof subjectType !== "string" ||
+          subjectType === "trip" ||
+          !isSubjectType(subjectType)
+        ) {
+          return [];
+        }
+        return [{
+          anchor,
+          role,
+          subjectId,
+          subjectType,
+        } as TripDecisionRelatedAnchor];
+      })
+    : [];
   const base = {
     createdAt: row.created_at,
+    ...(decisionAnchor ? { decisionAnchor } : {}),
     id: row.id,
     note: row.note,
+    ...(relatedDecisionAnchors.length > 0 ? { relatedDecisionAnchors } : {}),
     subjectId: row.subject_id,
     subjectType: row.subject_type,
     tripId: row.trip_id,
