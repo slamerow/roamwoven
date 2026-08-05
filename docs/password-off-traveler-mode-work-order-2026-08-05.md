@@ -1,5 +1,15 @@
 # Work order — password-off traveler mode (2026-08-05)
 
+Status update 2026-08-06: backend behavior and route coverage remain intact,
+but the maker-facing password configuration UI does not exist. Eli deferred
+that UI and password-mode browser QA until after extraction and assembly are
+stable. Their absence does not fail the current fresh-run audit. The later UI
+component is bounded to protected/blurred travel-card descriptions and the
+photo-mode interface/affordances. The authoritative fresh-run audit is now
+complete and assembly is not beta-ready, so this work order remains deferred
+until `docs/assembly-beta-candidate-work-order-2026-08-06.md` and subsequent
+cross-itinerary validation close.
+
 ## Decision and problem
 
 Eli's 2026-08-05 ruling closes RW-PRI-001 Δ4's final product question:

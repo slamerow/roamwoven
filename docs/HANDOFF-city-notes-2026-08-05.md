@@ -2,6 +2,52 @@
 
 ## Resolution and current stopping point
 
+**2026-08-06 authoritative live-run audit:** `main` revision `2e056d6` was
+deployed and the one authorized fresh production extraction completed into
+Review without a rerun loop. Trip `6e200576-b6d5-4a6d-afd3-7beaec001f1c`, run
+`314c87b9-e014-4811-9d0f-bda60a263ac2`, draft snapshot
+`8d57e788-0bf7-4dd3-8648-85a8753c4e59`, extraction pin
+`d786e9e4a20d11b2476bc60951b07d45b6fe418881a40e788dc2d9282b882c94`.
+Maker result:
+`https://roamwoven.com/maker/trips/6e200576-b6d5-4a6d-afd3-7beaec001f1c/data?extraction=completed-with-review`.
+The one-run budget is consumed. Do not trigger another extraction.
+
+The infrastructure path was healthy: about 225.8 seconds, unchanged
+`gpt-5.4-mini`, 30/30 primary chunks, zero rescues or primary failures, and a
+complete saved geocode provider snapshot. Source recovery DID run once: 45
+lines were batched, 29 recovered, and 56 meaningful residual lines remained
+uncovered. The audit preserved the processing row/events, raw model calls,
+audit payload, exact persisted QA bundle, replacement pin, source materials,
+and geocode snapshot before any code change.
+
+**Verdict: not beta-ready.** The persisted spine is good—5 legs over 14 days,
+5 stays, and 8 transport rows—but only 3/14 day sections have no identified
+assembly defect, 0/3 City Notes are clean, and only 1/4 required group
+structures is complete. Six Questions shipped against the exact ground-truth
+target of three. Two grouping Calls shipped; the target is three (Prague
+Castle, Malá Strana, Schönbrunn), and Schönbrunn's claim is false relative to
+its membership record. A protected-class booking/customer-detail shape reached
+public Prague City Note prose.
+
+Raw-call inspection corrected the initial attribution. The model emitted
+Colosseum, The Yellow, Palm House, and Museum of Illusions as separate records;
+`repairSplitDisjunctions` fabricated `Colosseum or The Yellow` and `Palm House
+or Museum of Illusions` from a flattened OCR paragraph. The model also emitted
+`30-minute walk` as note/accessory detail, `Payment due` as admin/accessory,
+and `Return` as admin; downstream candidacy promoted them. Pinball's two loose
+dates originate in raw calls but identity failed to give them one City Note
+home. R2D2, Great Market Hall, House of Terror, New York Cafe, Gloriette,
+Panorama Train, Leopold Museum, and Hospital in the Rock all demonstrate final
+carrier/conservation failures. Laundry survives only in the wrong home.
+
+The corrected next pass is locked in
+`docs/assembly-beta-candidate-work-order-2026-08-06.md`. It is assembly-only,
+starts with measurement parity, and obeys RW-ORD-001 exactly: classify →
+containment ledger → identity → group → review → final projection. Password
+configuration UI, password-mode browser QA, publishing UX, photos, model/prompt
+changes, and another live extraction are out of scope. Existing backend privacy
+protections remain in force.
+
 The pinned root cause was in final output sanitization, not demotion or City
 Note grouping. The Prague collection initially contained `Sights & Culture:
 R2D2 (far away)`. `sanitizeCanonicalCardDescription` split on sentence
@@ -139,8 +185,11 @@ miss; strict replay now refuses to call that old pin current. The full 84-file
 suite / 43 Node cases, production-shaped negative controls, typecheck,
 optimized production build, scorecard table/citations, and diff hygiene pass.
 The bounded paid prompt smoke and one authorized fresh production extraction
-must create the new pin before strict replay, publish, and browser observation
-can close the live-coverage labels.
+completed. The replacement pin, persisted record bundle, and exact
+provider/geocode artifacts are preserved; the production and replay outputs
+were scored separately. The fresh run closes the evidence question and proves
+the current assembly is not beta-ready. Password configuration UI and
+password-mode publish/browser observation remain a separate deferred component.
 The one-run procedure, capacity arithmetic, failure costs, and rollback are
 locked in `docs/live-run-preflight-2026-08-05.md`.
 

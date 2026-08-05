@@ -1,8 +1,49 @@
 # Roamwoven Product Contracts
 
-Ledger version: 28
+Ledger version: 30
 
-Ledger date: 2026-08-05 (Three decisions/coverage corrections from Eli's beta
+Ledger date: 2026-08-06 (Fresh production assembly audit — COVERAGE/EVIDENCE
+ONLY; no contract text or enforcement label changed. Deployed commit `2e056d6`
+completed the one authorized extraction for trip
+`6e200576-b6d5-4a6d-afd3-7beaec001f1c`, processing run
+`314c87b9-e014-4811-9d0f-bda60a263ac2`, pin
+`d786e9e4a20d11b2476bc60951b07d45b6fe418881a40e788dc2d9282b882c94`.
+The infrastructure path was healthy, but persisted assembly is not beta-ready:
+only 3/14 day sections have no identified defect, 0/3 City Notes are clean,
+1/4 required group structures is complete, six Questions shipped against a
+target of three, and two Calls shipped against a target of three with one false
+membership claim. A protected-class booking/customer-detail shape also reached
+public City Note prose.
+
+Raw calls prove two shipped disjunctions were created by deterministic parser
+normalization rather than the model; note/admin/accessory records were promoted
+downstream; card/note winner selection and survivor chains lost source content;
+identity missed Pinball and basilica cases; and review/quality did not close
+confirmed defects. The `FAIL 0 · PASS 31` pinned fixture confidence therefore
+does not describe the fresh persisted output. Production records are authority
+where replay diverges. RW-ORD-001 and RW-GRP-001 remain `KNOWN_GAP`; the other
+existing enforcement labels remain unchanged under coverage honesty. The
+corrected offline pass is
+`docs/assembly-beta-candidate-work-order-2026-08-06.md`; no second extraction,
+model/prompt change, password UI work, or other product expansion is authorized
+by this entry.)
+
+Prior: ledger version 29 (2026-08-06) — (Sequencing and UI-scope decision from Eli while the
+fresh production extraction was processing. The current run is judged on
+extraction and assembly. Roamwoven does not yet expose maker-facing controls
+for turning the traveler password on or off, and that missing UI does not fail
+this run or the assembly beta gate. Password configuration UI and password-mode
+browser QA are deferred until after extraction and assembly are nailed.
+
+No privacy behavior is loosened by the deferral. The implemented fail-closed
+storage, public projection, private-row join, unlock route, and prose sweep stay
+in force. The later password component is deliberately bounded: blur/protect
+travel-card descriptions and change the photo-mode UI/affordances. It is not a
+whole-app access redesign. Coverage mapping: RW-TRV-001 and RW-PRI-001 remain
+`PARTIAL` with the missing maker UI and browser proof named; RW-GRP-001 and
+RW-ORD-001 still depend on the fresh run now in progress.)
+
+Prior: ledger version 28 (2026-08-05) — (Three decisions/coverage corrections from Eli's beta
 assembly pass. First, password configuration is optional: password OFF means
 every share-link holder starts in fully unlocked traveler mode and receives all
 `traveler_password` details; password ON creates the locked follower state
@@ -300,7 +341,12 @@ path is bypassed.
   starting any write, so one stale subject cannot partially apply the earlier
   subjects. Pinned scorecard `ORD-4` validates status, version, subject type,
   and source-reference form and is PASS with 8/8 anchors valid. Enforcement
-  remains `KNOWN_GAP` only because replay evidence is not a fresh live run.
+  remains `KNOWN_GAP`. The 2026-08-06 fresh run supplied the missing live
+  evidence and confirmed the violation rather than closing it: mutating
+  card/note reconciliation still runs before block classification, and multiple
+  pieces name a survivor without any final record carrying the source fact.
+  The next pass separates non-mutating containment from identity and grouping
+  per `docs/assembly-beta-candidate-work-order-2026-08-06.md`.
 - Tests: `tests/site-container-survives-rejected-grouping.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-identity.test.ts`,
@@ -387,6 +433,12 @@ path is bypassed.
   The audit layer never edits semantic output. Unrepaired findings remain an
   explicit conservative review state rather than being hidden or killing an
   otherwise usable run.
+  2026-08-06 fresh-run evidence: quality assessment found two P1 and five P2
+  diagnostics, retried, changed the fingerprint, and still persisted both P1
+  output defects with `conservative_fallback_preserved_for_review`. Six open
+  Questions shipped instead of the three material decisions. The run stayed
+  usable, satisfying fail-soft availability, but the repair/fallback loop did
+  not meet the internal assembly quality standard.
 - Tests: `tests/trip-quality-gate.test.ts`,
   `tests/trip-publish-policy.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/extraction-route-recovery.test.ts`,
@@ -1032,6 +1084,12 @@ path is bypassed.
   condition requires a fresh live run with zero wrong groups. The replay now
   exercises the current acceptance policy exactly, but it is not new live
   provider coverage and does not supersede that explicit condition.
+  2026-08-06 fresh-run evidence: every shipped child was source-supported, but
+  only Prague Castle was complete. Schönbrunn retained two of five required
+  children, the Jan-15 tour and Malá Strana groups were absent, and the
+  Schönbrunn Call described source membership not present in the parent state.
+  Thus the narrow zero-wrong-member condition was observed, while executable
+  completeness/truth assertions still fail and coverage remains `KNOWN_GAP`.
 
 ## RW-ASM-001 — One primary traveler-visible home per semantic entity
 
@@ -1109,6 +1167,11 @@ path is bypassed.
   number-shaped providers). Enforced by
   `tests/assembly-ground-truth-run6.test.ts` and
   `tests/parser-artifact-normalization.test.ts`.
+  2026-08-06 fresh-run evidence: `30-minute walk`, `Payment due`, `Wi-Fi`, and
+  `Return` ship as standalone Activities despite raw note/admin/accessory
+  roles; Laundry loses its dated Activity home; and Great Market Hall, House of
+  Terror, New York Cafe, and Hospital in the Rock are suppressed without a
+  durable intended carrier. One-home coverage remains `PARTIAL`.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`, `tests/generated-trip-model.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
@@ -1118,7 +1181,11 @@ path is bypassed.
 ## RW-TRV-001 — Travel cards are per-segment and cover every night
 
 - Status: `LOCKED`
-- Decision date: `2026-07-17`
+- Decision date: `2026-08-06`
+- Supersession: the 2026-08-06 sequencing ruling keeps the travel-card privacy
+  shape but defers maker password controls and password-mode browser QA until
+  after the extraction/assembly pass. Their absence is not a failure of the
+  current live run.
 - Enforcement: `PARTIAL`
 - Contract: A travel card is a subset of activity cards covering one individual
   flight, train, ferry, or bus segment that makes an inter-city transfer and
@@ -1129,8 +1196,10 @@ path is bypassed.
   A travel card's DESCRIPTION is a protected container unlocked by ONE
   password entry, while the card face is composed from structured route/time
   fields and stays public. This serving path is implemented and route-tested;
-  fresh production publish/browser proof is still pending, so enforcement
-  remains `PARTIAL` and the prose-side code sweep stays load-bearing.) A same-day round trip that returns to the same stay — such as a
+  maker UI and fresh production publish/browser proof are explicitly deferred,
+  so enforcement remains `PARTIAL` and the prose-side code sweep stays
+  load-bearing. Those deferred items are not part of the current assembly
+  gate.) A same-day round trip that returns to the same stay — such as a
   rental car picked up and returned at one location — is a timed Activity, not
   a travel card. Airport-prep lines ("leave for airport", "wake for flight")
   attach to their travel card as prep notes, never as separate activities.
@@ -1496,6 +1565,12 @@ path is bypassed.
   now PASS and the overall replay is **FAIL 1 · NOT CHECKABLE 0 · NOT BUILT 1
   · PASS 29**. Enforced by `tests/generated-trip-model.test.ts` and documented
   in `docs/city-keyed-notes-work-order-2026-08-05.md`.
+  2026-08-06 fresh-run evidence: the block classifier's saved decisions did not
+  prevent earlier card/note suppression or later candidacy drift. Accessory and
+  admin fragments became Activities, selected Albertina/Laundry/Koscom content
+  landed in the wrong home, and loose recommendation content became dated
+  cards. The classifier remains `PARTIAL`; fixture-green does not cover the
+  production ordering and contradiction shapes.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
   `tests/canonical-evidence-resolver.test.ts`,
@@ -1643,6 +1718,12 @@ exact live payload shapes.
   heading clears instead of shipping (the Cesky-Krumlov-as-Rome-day
   shape), and recovered note-ish lines classify as city-note candidates
   before entering assembly.
+  2026-08-06 fresh-run evidence: the primary parse completed 30/30 chunks with
+  zero rescues, but source recovery did run once over 45 lines, recovered 29,
+  and left 56 meaningful residual lines uncovered. All 352 observations have a
+  persisted disposition, yet disposition accounting did not guarantee a final
+  semantic carrier; the next pass adds carrier-level conservation rather than
+  treating a survivor id as proof.
 - Tests: `tests/canonical-factory-boundary.test.ts`,
   `tests/canonical-regressions.test.ts`,
   `tests/evidence-clustering.test.ts`,
@@ -1841,6 +1922,11 @@ exact live payload shapes.
   Budapest baths), rather than allowing any three Questions to satisfy a count.
   Exact and unique title-containment subject binding keeps the castle decision
   on its real canonical card without synthesizing a subject.
+  2026-08-06 fresh-run evidence: all served review items are anchored, but
+  semantics still fail. Six Questions shipped versus the exact three above.
+  The required grouping Calls are Prague Castle, Malá Strana, and Schönbrunn;
+  production shipped Castle and Schönbrunn, omitted Malá Strana, and rendered
+  the Schönbrunn claim from state inconsistent with its membership record.
 - Tests: `tests/openai-trip-parser-prompt.test.ts`,
   `tests/canonical-regressions.test.ts`, `tests/generated-trip-model.test.ts`
 
@@ -1974,8 +2060,14 @@ exact live payload shapes.
 ## RW-PRI-001 — Privacy defaults are automatic and final-projection safe
 
 - Status: `LOCKED`
-- Decision date: `2026-07-17`
-- Supersession: the 2026-07-15 scope is narrowed by Eli's explicit 2026-07-17
+- Decision date: `2026-08-06`
+- Supersession: Eli's explicit 2026-08-06 sequencing ruling defers the missing
+  maker password controls and password-mode browser QA until after extraction
+  and assembly. It does not make protected values public or remove any existing
+  fail-closed backend behavior. The later UI arc is bounded to protected/blurred
+  travel-card descriptions and the photo-mode UI/affordances, not a whole-app
+  access redesign. The 2026-07-15 scope was previously narrowed by Eli's
+  explicit 2026-07-17
   evening decision: protection exists for *trip-sabotage surface* — things
   that house you or move you between cities. Protected: stay addresses,
   access/entry codes, Wi-Fi credentials, stay and inter-city travel booking
@@ -2071,6 +2163,14 @@ exact live payload shapes.
     existing per-field protection (`addressVisibility`,
     `accessDetailsVisibility`), which is enforced and passing its bar.
     Activity/note descriptions stay public.
+  - SEQUENCING AND UI SCOPE (Eli, 2026-08-06): the deployed maker app has no
+    control for enabling or disabling the traveler password. Do not treat that
+    missing UI as an extraction/assembly defect or make password-mode browser
+    QA a condition of the fresh assembly run. Build the password component
+    after extraction and assembly are stable. Its customer-visible work is
+    bounded to blurring/protecting travel-card descriptions and changing the
+    photo-mode UI/affordances; existing backend privacy safeguards remain
+    active in the meantime.
 
   Effect on Δ3: seats and seat class move from "public on the card face" to
   "inside the protected container", i.e. visible to any traveler after ONE
@@ -2117,17 +2217,19 @@ exact live payload shapes.
   unlock route returns the same complete set when the password is disabled.
   Password-on initial rendering reads no private rows; invalid authentication
   still returns none. A revoked password-off snapshot fails closed instead of
-  serving stale details. A fresh production publish/browser observation is
-  still outstanding; route, page-state, RPC-payload, full-suite, typecheck,
-  and optimized-build proof are green.
+  serving stale details. Maker configuration UI and a fresh password-mode
+  publish/browser observation are still outstanding and deliberately deferred;
+  route, page-state, RPC-payload, full-suite, typecheck, and optimized-build
+  proof are green.
 - Enforcement: `PARTIAL`
 - Δ4 enforcement: `PARTIAL`. Recorded on its own line because the
   contract-level `Enforcement` field is machine-validated against a fixed
   vocabulary (`tests/product-contracts.test.ts`) and must stay a bare value.
   RW-PRI-001 as a whole remains `PARTIAL`; the Δ4 travel-card container and
   explicit password-off traveler mode are implemented and regression-tested,
-  while a fresh production/browser observation remains open. The prose-side
-  code sweep remains load-bearing until that production proof is recorded.
+  while maker configuration UI and fresh password-mode browser proof are
+  deferred. The prose-side code sweep remains load-bearing until that later
+  component is built and observed in production.
 - Contract: Clearly sensitive details default protected without a user Question.
   Exact lodging and private-residence addresses, access codes, private contacts,
   stay/travel booking-control identifiers, credentials, and personal safety
@@ -2258,6 +2360,12 @@ exact live payload shapes.
   residuals are pinned as explicit KNOWN_GAP characterisation assertions in
   `tests/delta3-travel-card-publicity.test.ts` so a change to either fails
   loudly.
+  2026-08-06 fresh-run evidence: a protected-class booking identifier and
+  customer-detail prose reached the public Prague City Note even though the raw
+  parse separately captured protected booking/contact details. Note restoration
+  reintroduced content through a weaker safety classification after an earlier
+  sanitizer pass. Password UI remains deferred; this is an assembly final-
+  projection defect and does not loosen the public activity-booking carve-outs.
 - Tests: `tests/canonical-regressions.test.ts`,
   `tests/generated-trip-model.test.ts`, `tests/published-snapshots.test.ts`,
   `tests/assembly-ground-truth.test.ts`,
@@ -2465,6 +2573,11 @@ exact live payload shapes.
   own repair predicate. Enforced by
   `tests/assembly-ground-truth-run6.test.ts` (known-good control +
   detector firing + evidence shape).
+  2026-08-06 fresh-run evidence: the assessment caught duplicate Pinball and a
+  loose `Eat` card but missed the public protected-value leak, the basilica
+  alias duplicate, the fabricated disjunctions, most lost carriers, and most
+  candidacy debris. The next pass keeps detectors non-authoritative and adds
+  independent source/canonical/final reconciliation before any owner repair.
 - Tests: `tests/trip-audit-reconciliation.test.ts`,
   `tests/trip-quality-gate.test.ts`,
   `tests/extraction-route-recovery.test.ts`
@@ -2586,6 +2699,11 @@ exact live payload shapes.
   (request-body assertion, strip-retry reported as not-sent, pin-hit null) and
   `tests/arc-f-telemetry.test.ts` 8.4/8.5 (whitelist survival, sent-vs-resolved
   divergence).
+  2026-08-06 fresh-run evidence: the route reached a usable persisted draft,
+  but the bounded quality retry preserved both confirmed P1 defects. The
+  corrected work order requires route-equivalent replay, one independently
+  proven owner repair, re-audit, and explicit clean/repaired/conservative
+  terminal tests before the assembly branch can merge.
 - Tests: `tests/extraction-route-recovery.test.ts`,
   `tests/extraction-pinning.test.ts`,
   `tests/canonical-identity.test.ts`, `tests/trip-quality-gate.test.ts`,

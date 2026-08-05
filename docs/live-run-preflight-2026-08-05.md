@@ -1,29 +1,66 @@
 # Live-run preflight — assembly phase 1
 
-Date: 2026-08-05
-Run budget: **one** fresh paid extraction. Publishing and password-mode checks
-reuse that extraction and do not spend another model run.
+Date: 2026-08-05; scope updated 2026-08-06
+Run budget: **one** fresh paid extraction. This work order stops after capture,
+replay, and the extraction/assembly audit. Password UI and password-mode
+publish/browser QA are a separate later component.
 
 ## Purpose
 
-Prove the current assembly, review-anchor, publishing, and password-off serving
-paths on one fresh production parse of `USE FOR TESTING CZECH.pdf`. This is the
-return condition still named by RW-GRP-001 and RW-ORD-001; the pinned replay is
-strong deterministic evidence but cannot prove a future provider response.
+Prove the current extraction, assembly, and review-anchor paths on one fresh
+production parse of `USE FOR TESTING CZECH.pdf`. This is the return condition
+still named by RW-GRP-001 and RW-ORD-001; the pinned replay is strong
+deterministic evidence but cannot prove a future provider response. The maker
+app has no password configuration UI. Per Eli's 2026-08-06 ruling, that UI and
+password-mode browser QA do not gate this run.
 
 ## Deployment gate
 
-- Production is still on the July 31 line: remote `main` resolves to
-  `80e2b38`. The repaired code is local on `assembly-restructure-phase-1` at
-  `9ce3683` plus the completed release package.
-- Therefore no live run is valid until the release package is committed,
-  pushed, deployed, and a fresh browser tab is opened. Running against the
-  existing deployment would spend the run on stale assembly code.
+- **Completed 2026-08-06:** the release package and report-output cleanup were
+  merged to `main` and deployed at revision `2e056d6`. Eli confirmed deployment
+  before starting the single fresh extraction.
 - No hosted environment variable, model, schema, or runtime limit is changed by
   this release. One prompt sentence is corrected: the stale
   `Mumok or Natural History Museum` example is replaced by a synthetic
   explicit-`or` example, and the prompt now forbids inferring `or` from
   adjacent source lines, proximity, or venue knowledge.
+
+## Live execution record — 2026-08-06
+
+- **Completed once:** the fresh production extraction reached
+  `completed-with-review` without a rerun loop on deployed revision `2e056d6`.
+- Production trip id: `6e200576-b6d5-4a6d-afd3-7beaec001f1c`.
+- Maker result:
+  `https://roamwoven.com/maker/trips/6e200576-b6d5-4a6d-afd3-7beaec001f1c/data?extraction=completed-with-review`.
+- Source shown in the maker result: `USE FOR TESTING CZECH.pdf`.
+- The one-run budget is consumed. **Do not trigger a second extraction.**
+- A read-only browser spot-check observed 5 legs over 14 days, 5 stays, 8
+  transport records, 64 Activities, 3 City Notes, and 6 open Questions. It
+  made no maker decision and did not edit, remove, publish, or retry anything.
+- Visible contract pass: Mumok and Natural History remain separate Vienna City
+  Note statements, with no synthesized `or`, Activity, or Question.
+- **Audit completed:** run `314c87b9-e014-4811-9d0f-bda60a263ac2`, snapshot
+  `8d57e788-0bf7-4dd3-8648-85a8753c4e59`, replacement pin
+  `d786e9e4a20d11b2476bc60951b07d45b6fe418881a40e788dc2d9282b882c94`.
+  The run events, processing row, raw calls, source materials, audit payload,
+  exact persisted QA bundle, pin, and geocode provider snapshot were preserved
+  before code changes. Production and replay were scored separately.
+- Runtime: about 225.8 seconds; unchanged `gpt-5.4-mini`; 30/30 primary chunks;
+  zero rescues/failures. Source recovery ran once over 45 lines, recovered 29,
+  and left 56 meaningful residual uncovered lines. The earlier “no source
+  recovery” reading was false.
+- **Verdict: not beta-ready.** Only 3/14 day sections are clean, 0/3 City Notes
+  are clean, and 1/4 expected groups is complete. Six Questions shipped versus
+  three expected. Two Calls shipped versus three expected, and the Schönbrunn
+  Call's source claim is false relative to its membership record.
+- Raw calls prove the two fabricated disjunctions are deterministic parser
+  normalization defects, not model titles. `30-minute walk`, `Payment due`,
+  `Wi-Fi`, and `Return` are downstream role/candidacy failures. Pinball,
+  basilica identity, card/note winner selection, note conservation, review
+  budget, and final-projection privacy also fail on persisted output.
+- The corrected assembly-only next pass is
+  `docs/assembly-beta-candidate-work-order-2026-08-06.md`. No second extraction
+  is authorized.
 
 ## Green package evidence
 
@@ -99,37 +136,41 @@ to reveal.
 | Checkout, auth, or extraction gate rejects before processing | No model run; setup time only | Correct the fresh QA trip or allowlist through the inventory-first env protocol. Do not bypass payment. |
 | Provider/OCR transient failure | May spend the one run | Inspect processing events; do not change models. Stop and re-plan before any second run. |
 | Fresh parse exposes a new assembly defect | One useful run | Preserve payload, pin, and geocode artifacts; do not patch from the symptom before reading the parser output below assembly. |
-| Publish/privacy browser check fails | No extra extraction cost | Keep the QA link undistributed and roll production back to the previous Vercel deployment while the failed layer is repaired. |
 
 ## Execution order
 
 1. **Complete:** run the bounded prompt smoke described above. Both controls
    and the structured output shape passed.
-2. Commit the complete release package, push it, deploy the final revision,
-   and open a fresh browser tab.
+2. **Complete:** commit the complete release package, push it, deploy final
+   revision `2e056d6`, and open a fresh browser tab.
 3. Inventory hosted env names/scopes without changing values. The run itself,
    not the console, will verify resolved models and sampling.
-4. Create one new QA trip, complete the normal Stripe test checkout with the
-   `QA100` promotion, and upload the known Central Europe source PDF.
-5. Trigger **Build parsed draft** once. Preserve its processing run, events,
-   audit payload, QA bundle, parse pin, and geocode replay snapshot.
-6. Score what actually shipped and replay the exact saved provider artifacts
-   through the current code. Do not substitute one surface for the other.
-7. Inspect the fresh source/model output before attributing any mismatch to
-   assembly.
-8. Verify the live contract bar, including:
+4. **Complete:** create one new QA trip and upload the known Central Europe
+   source PDF. The resulting production trip id is recorded above.
+5. **Complete:** **Build parsed draft** was triggered exactly once and reached
+   Review. Its processing run, events, audit payload, QA bundle, parse pin, and
+   geocode replay snapshot were preserved before code changes.
+6. **Complete:** score what actually shipped and replay the exact saved provider
+   artifacts through the current code. The persisted record surface remains
+   authoritative where replay diverges.
+7. **Complete:** inspect fresh source/model output before attributing each
+   mismatch. The resulting layer attribution is recorded in the handoff and
+   assembly work order.
+8. **Complete and failed as a beta gate:** verify the live contract bar:
    - Mumok and Natural History as separate Vienna City Note ideas, with no
      fabricated `or`, Activity, or Question;
    - no unsupported same-site children or retry-derived containment;
    - every maker-facing Question/Call anchored and every open Question bound
      to a surviving subject;
    - no public protected travel description or universal secret.
-9. Publish first with password ON and observe locked follower mode plus valid
-   unlock. Then turn password OFF, republish, and observe immediate traveler
-   mode with every `traveler_password` detail visible and no `maker_only`
-   detail served.
-10. Record the final deployed revision, run id, trip id, parse key, resolved
-   model telemetry, scorecard result, and browser observations in the handoff.
+9. **Complete:** stop after the extraction/assembly audit. Do not score the absent maker
+   password controls as a defect and do not improvise a password-mode browser
+   test. The later password component will cover protected/blurred travel-card
+   descriptions and the photo-mode UI/affordances while preserving the existing
+   backend privacy boundary.
+10. **Complete:** record the deployed revision, run id, trip id, parse key,
+   resolved model telemetry, scorecard result, and assembly observations in the
+   handoff.
 
 Two consecutive live failures without new information remain a hard stop. This
 work order authorizes only the first run.
