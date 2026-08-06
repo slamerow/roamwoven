@@ -51,6 +51,7 @@ function report(
       contextObservationCount: 0,
       dispositionCount: 0,
       // G4.4: structured telemetry, absent on a synthetic report.
+      containmentLedger: null,
       groupingClaims: null,
       stageWriterTrace: [],
       intentBlocks: { blocks: [], version: 1 },

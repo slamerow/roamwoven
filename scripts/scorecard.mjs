@@ -3020,6 +3020,14 @@ if (fromCacheDir) {
         )
     );
   }
+  if (process.env.SCORECARD_CONTAINMENT_TRACE === "1") {
+    console.log(
+      "CONTAINMENT TRACE " +
+        JSON.stringify(
+          assessment.report.canonicalization.containmentLedger ?? null
+        )
+    );
+  }
   const evidenceModule = require2(
     path.join(rootDir, "lib/extraction/evidence-clustering.ts")
   );

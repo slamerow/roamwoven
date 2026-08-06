@@ -215,6 +215,33 @@ export type TripExtractionAuditReport = {
     clusteredObservationCount: number;
     contextObservationCount: number;
     dispositionCount: number;
+    containmentLedger: {
+      decisions: Array<{
+        callPolicy: "required" | "silent";
+        containerObservationIds: string[];
+        containerPieceId: string | null;
+        containerTitle: string;
+        date: string;
+        decisionId: string;
+        members: Array<{
+          evidence: string[];
+          observationIds: string[];
+          pieceId: string;
+          sourceOrder: number;
+          title: string;
+        }>;
+        relationType: "authored_route" | "same_site" | "source_area_walk";
+        rejections: Array<{
+          pieceId: string;
+          reasonCode: string;
+          title: string;
+        }>;
+        source: "deterministic_containment" | "resolver_containment";
+      }>;
+      doNotMergePairCount: number;
+      rejectedCandidateCount: number;
+      version: 1;
+    } | null;
     // G4.4 (docket §C, field 2): produced by the claim ledger at
     // evidence-clustering.ts and, before this, consumed by NOBODY
     // repo-wide — never persisted, never served. Lane contention was

@@ -95,6 +95,20 @@ function activity({
   };
 }
 
+function sourcePosition(
+  line: number,
+  stageIndex: number,
+  relationshipSignal = false
+) {
+  return {
+    blockIds: [`block-${stageIndex}`],
+    line,
+    relationshipSignal,
+    sourceIdentityHash: "sanitized-source",
+    stageIndex,
+  };
+}
+
 type Draft = {
   activities: Array<Record<string, unknown>>;
   missingDetails: Array<Record<string, unknown>>;
@@ -117,6 +131,287 @@ function parentedTitles(draft: Draft, parentTitleFragment: RegExp) {
 
 export default async function run() {
   const { test } = await import("node:test");
+
+  await test("Loop 3: the non-mutating containment ledger is exact before identity", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "Tuesday, January 15th",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-15",
+                startTime: "09:00",
+                title: "Hidden Secrets walking tour",
+                extra: {
+                  _canonicalGroupingDecisionIds: ["resolver-route"],
+                  _canonicalSourcePosition: sourcePosition(10, 1),
+                  _resolverCandidateId: "route-parent",
+                  confirmation: "SANITIZED-BOOKING",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                date: "2019-01-15",
+                title: "Old Square",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(20, 1),
+                  _resolverCandidateId: "route-square",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                date: "2019-01-15",
+                title: "Historic Quarter",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(30, 1),
+                  _resolverCandidateId: "route-quarter",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                date: "2019-01-15",
+                startTime: "14:30",
+                title: "Independent Library Tour",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(40, 1),
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+            ],
+          })
+        ),
+        stage(
+          "Wednesday, January 16th",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-16",
+                description:
+                  "Hill Castle components: Changing of the Guard; Cathedral.",
+                title: "Hill Castle",
+                extra: {
+                  ...geocoded(50.091, 14.401, "Hill Castle grounds"),
+                  _canonicalSourcePosition: sourcePosition(10, 2, true),
+                  evidenceRole: "grouping_proposal",
+                  sourceSectionLabel: "Castle day",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                date: "2019-01-16",
+                startTime: "12:00",
+                title: "Changing of the Guard at Hill Castle",
+                extra: {
+                  ...geocoded(50.091, 14.401, "Hill Castle grounds"),
+                  _canonicalSourcePosition: sourcePosition(12, 2),
+                  sourceSectionLabel: "Castle day",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                date: "2019-01-16",
+                title: "Cathedral",
+                extra: {
+                  ...geocoded(50.0908, 14.4005, "Hill Castle grounds"),
+                  _canonicalSourcePosition: sourcePosition(18, 2),
+                  sourceSectionLabel: "Castle day",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+              activity({
+                area: "Mala Strana & Hradcany",
+                date: "2019-01-16",
+                title: "Distant Museum",
+                extra: {
+                  ...geocoded(50.06, 14.39, "Prague"),
+                  _canonicalSourcePosition: sourcePosition(20, 2),
+                  sourceSectionLabel: "Mala Strana & Hradcany",
+                },
+              }),
+              ...[
+                ["Kafka statue", 22, 50.0886, 14.4106],
+                ["John Lennon Wall", 24, 50.0862, 14.4067],
+                ["Vinarna Certovka", 26, 50.087, 14.4085],
+                ["Novy Svet", 28, 50.0918, 14.3892],
+              ].map(([title, line, lat, lng]) =>
+                activity({
+                  area: "Mala Strana & Hradcany",
+                  date: "2019-01-16",
+                  title: String(title),
+                  extra: {
+                    ...geocoded(Number(lat), Number(lng), "Prague"),
+                    _canonicalSourcePosition: sourcePosition(Number(line), 2),
+                    sourceSectionLabel: "Mala Strana & Hradcany",
+                  },
+                })
+              ),
+            ],
+          })
+        ),
+        stage(
+          "Saturday, January 19th",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2019-01-19",
+                title: "Garden Palace",
+                extra: {
+                  ...geocoded(48.1845, 16.3122, "Garden Palace"),
+                  _canonicalSourcePosition: sourcePosition(10, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                date: "2019-01-19",
+                title: "Gloriette",
+                extra: {
+                  ...geocoded(48.1774, 16.3121, "Garden Palace grounds"),
+                  _canonicalSourcePosition: sourcePosition(12, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                date: "2019-01-19",
+                title: "Orangerie at Garden Palace",
+                extra: {
+                  ...geocoded(48.1856, 16.3153, "Garden Palace grounds"),
+                  _canonicalSourcePosition: sourcePosition(14, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                date: "2019-01-19",
+                title: "Palm House at Garden Palace",
+                extra: {
+                  ...geocoded(48.1861, 16.306, "Garden Palace grounds"),
+                  _canonicalSourcePosition: sourcePosition(16, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                date: "2019-01-19",
+                title: "Strudel Show",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(18, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                category: "scenic_ride",
+                date: "2019-01-19",
+                title: "Panorama Train",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(20, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                date: "2019-01-19",
+                title: "Ferris wheel",
+                extra: {
+                  ...geocoded(48.2167, 16.3959, "City fairground"),
+                  _canonicalSourcePosition: sourcePosition(22, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+              activity({
+                category: "admin_logistics",
+                date: "2019-01-19",
+                title: "Laundry",
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(24, 3),
+                  sourceSectionLabel: "Saturday, January 19th",
+                },
+              }),
+            ],
+          })
+        ),
+      ],
+      groupingDecisions: [{
+        callRequired: false,
+        candidateIds: ["route-parent", "route-square", "route-quarter"],
+        claim: "source-authored walking tour with two listed stops",
+        containerCandidateId: "route-parent",
+        decisionId: "resolver-route",
+        parentCandidateId: "route-parent",
+        parentTitle: "Old Quarter Hidden Tour",
+        source: "canonical_resolver",
+      }],
+      tripOverview: TRIP_OVERVIEW,
+    });
+
+    const ledger = result.summary.containmentLedger;
+    assert.deepEqual(
+      ledger.decisions.map((decision) => ({
+        call: decision.callPolicy,
+        members: decision.members.map((member) => member.title),
+        relation: decision.relationType,
+      })),
+      [
+        {
+          call: "silent",
+          members: ["Old Square", "Historic Quarter"],
+          relation: "authored_route",
+        },
+        {
+          call: "required",
+          members: ["Changing of the Guard at Hill Castle", "Cathedral"],
+          relation: "same_site",
+        },
+        {
+          call: "required",
+          members: [
+            "Kafka statue",
+            "John Lennon Wall",
+            "Vinarna Certovka",
+            "Novy Svet",
+          ],
+          relation: "source_area_walk",
+        },
+        {
+          call: "required",
+          members: [
+            "Gloriette",
+            "Orangerie at Garden Palace",
+            "Palm House at Garden Palace",
+            "Strudel Show",
+            "Panorama Train",
+          ],
+          relation: "same_site",
+        },
+      ]
+    );
+    const containmentTrace = result.summary.stageWriterTrace.find(
+      (entry) => entry.writer === "createCanonicalContainmentAuthority"
+    );
+    assert.equal(containmentTrace?.decisionDomain, "containment");
+    assert.equal(containmentTrace?.changed, false);
+    assert.equal(
+      result.summary.stageWriterTrace.find(
+        (entry) => entry.writer === "absorbLocationFragmentCards"
+      )?.decisionDomain,
+      "identity"
+    );
+    assert.equal(
+      ledger.decisions.some((decision) =>
+        decision.members.some((member) =>
+          /ferris|laundry|distant museum/i.test(member.title)
+        )
+      ),
+      false,
+      "negative controls never become members"
+    );
+  });
 
   await test("arc G.3a: Schönbrunn groups all six stops — the geocoder's own address reaches the Gloriette the 300 m radius refuses", () => {
     // Gloriette is ~790 m from the palace. The locked same-site radius is

@@ -3,6 +3,7 @@ import type {
   DraftRecordSummary,
   DraftStaySummary,
   DraftTransportSummary,
+  TripExtractionAuditReport,
 } from "@/lib/extraction/trip-extraction-audit-types";
 import {
   asArray,
@@ -121,7 +122,9 @@ export function createDraftAuditSnapshot(draft: unknown): DraftAuditSnapshot {
   };
 }
 
-export function createCanonicalizationSummary(usage: unknown) {
+export function createCanonicalizationSummary(
+  usage: unknown
+): TripExtractionAuditReport["canonicalization"] {
   const openai = findOpenAIUsage(usage);
   const evidence = asRecord(openai.evidence);
   const identityRecovery = asRecord(openai.identityRecovery);
@@ -225,6 +228,109 @@ export function createCanonicalizationSummary(usage: unknown) {
     clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
     contextObservationCount: Number(evidence.contextObservationCount) || 0,
     dispositionCount,
+    containmentLedger: (() => {
+      const ledger = asRecord(evidence.containmentLedger);
+      if (Object.keys(ledger).length === 0) return null;
+      const decisions = Array.isArray(ledger.decisions)
+        ? ledger.decisions.flatMap((value) => {
+            const decision = asRecord(value);
+            const relationType = decision.relationType;
+            const source = decision.source;
+            const callPolicy = decision.callPolicy;
+            if (
+              (relationType !== "authored_route" &&
+                relationType !== "same_site" &&
+                relationType !== "source_area_walk") ||
+              (source !== "deterministic_containment" &&
+                source !== "resolver_containment") ||
+              (callPolicy !== "required" && callPolicy !== "silent") ||
+              typeof decision.decisionId !== "string" ||
+              typeof decision.containerTitle !== "string" ||
+              typeof decision.date !== "string"
+            ) {
+              return [];
+            }
+            const typedCallPolicy = callPolicy as "required" | "silent";
+            const typedRelationType = relationType as
+              | "authored_route"
+              | "same_site"
+              | "source_area_walk";
+            const typedSource = source as
+              | "deterministic_containment"
+              | "resolver_containment";
+            const members = Array.isArray(decision.members)
+              ? decision.members.flatMap((value) => {
+                  const member = asRecord(value);
+                  if (
+                    typeof member.pieceId !== "string" ||
+                    typeof member.title !== "string"
+                  ) {
+                    return [];
+                  }
+                  return [{
+                    evidence: Array.isArray(member.evidence)
+                      ? member.evidence.filter(
+                          (item): item is string => typeof item === "string"
+                        )
+                      : [],
+                    observationIds: Array.isArray(member.observationIds)
+                      ? member.observationIds.filter(
+                          (item): item is string => typeof item === "string"
+                        )
+                      : [],
+                    pieceId: member.pieceId,
+                    sourceOrder: Number(member.sourceOrder) || 0,
+                    title: member.title,
+                  }];
+                })
+              : [];
+            const rejections = Array.isArray(decision.rejections)
+              ? decision.rejections.flatMap((value) => {
+                  const rejection = asRecord(value);
+                  if (
+                    typeof rejection.pieceId !== "string" ||
+                    typeof rejection.reasonCode !== "string" ||
+                    typeof rejection.title !== "string"
+                  ) {
+                    return [];
+                  }
+                  return [{
+                    pieceId: rejection.pieceId,
+                    reasonCode: rejection.reasonCode,
+                    title: rejection.title,
+                  }];
+                })
+              : [];
+            return [{
+              callPolicy: typedCallPolicy,
+              containerObservationIds: Array.isArray(
+                decision.containerObservationIds
+              )
+                ? decision.containerObservationIds.filter(
+                    (item): item is string => typeof item === "string"
+                  )
+                : [],
+              containerPieceId:
+                typeof decision.containerPieceId === "string"
+                  ? decision.containerPieceId
+                  : null,
+              containerTitle: decision.containerTitle,
+              date: decision.date,
+              decisionId: decision.decisionId,
+              members,
+              relationType: typedRelationType,
+              rejections,
+              source: typedSource,
+            }];
+          })
+        : [];
+      return {
+        decisions,
+        doNotMergePairCount: Number(ledger.doNotMergePairCount) || 0,
+        rejectedCandidateCount: Number(ledger.rejectedCandidateCount) || 0,
+        version: 1 as const,
+      };
+    })(),
     // G4.4 (docket §C, field 2): the claim ledger's telemetry has been
     // produced by evidence-clustering since Arc G.3b with ZERO consumers
     // repo-wide — lane contention was designed to be visible in run

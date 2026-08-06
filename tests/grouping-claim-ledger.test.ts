@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createGroupingClaimLedger } from "@/lib/extraction/grouping-claim-ledger";
+import {
+  createContainmentLedger,
+  createGroupingClaimLedger,
+} from "@/lib/extraction/grouping-claim-ledger";
 
 // Arc G.3b. The ledger replaced a bare `Set` whose only arbitration rule
 // was which lane's code was written first. These tests pin the three
@@ -19,6 +22,76 @@ const alwaysSpare = () => true;
 const neverSpare = () => false;
 
 export default async function run() {
+  await test("containment records relations without mutating its inputs", () => {
+    const ledger = createContainmentLedger();
+    const decision = {
+      callPolicy: "required" as const,
+      containerObservationIds: ["obs-parent"],
+      containerPieceId: "parent",
+      containerTitle: "River Palace",
+      date: "2026-08-06",
+      decisionId: "site-1",
+      members: [
+        {
+          evidence: ["source_hierarchy" as const],
+          observationIds: ["obs-garden"],
+          pieceId: "garden",
+          sourceOrder: 1,
+          title: "Garden at River Palace",
+        },
+        {
+          evidence: ["source_order" as const],
+          observationIds: ["obs-orangerie"],
+          pieceId: "orangerie",
+          sourceOrder: 2,
+          title: "Orangerie",
+        },
+      ],
+      relationType: "same_site" as const,
+      rejections: [],
+      source: "deterministic_containment" as const,
+    };
+    const before = JSON.stringify(decision);
+
+    assert.equal(ledger.addDecision(decision), true);
+    assert.equal(JSON.stringify(decision), before, "the input remains untouched");
+    assert.equal(
+      ledger.doNotMerge(
+        { observationIds: ["obs-parent"], pieceId: "parent", title: "River Palace" },
+        { observationIds: ["obs-garden"], pieceId: "garden", title: "Garden" }
+      ),
+      true,
+      "a parent and member can never collapse in identity"
+    );
+    assert.equal(ledger.telemetry().decisions.length, 1);
+  });
+
+  await test("containment refuses one-child pseudo-groups", () => {
+    const ledger = createContainmentLedger();
+    assert.equal(
+      ledger.addDecision({
+        callPolicy: "required",
+        containerObservationIds: ["obs-parent"],
+        containerPieceId: "parent",
+        containerTitle: "River Palace",
+        date: "2026-08-06",
+        decisionId: "site-one-child",
+        members: [{
+          evidence: ["source_hierarchy"],
+          observationIds: ["obs-child"],
+          pieceId: "child",
+          sourceOrder: 1,
+          title: "Garden at River Palace",
+        }],
+        relationType: "same_site",
+        rejections: [],
+        source: "deterministic_containment",
+      }),
+      false
+    );
+    assert.deepEqual(ledger.telemetry().decisions, []);
+  });
+
   await test("the first lane to claim a piece holds it", () => {
     const ledger = createGroupingClaimLedger();
     ledger.claim({

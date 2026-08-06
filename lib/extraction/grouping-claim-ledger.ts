@@ -26,7 +26,199 @@
 // enforces the release rules; deciding whether a lane may contest a claim
 // stays with the caller, where the grouping doctrine lives.
 
+import { isSiteComponentTitlePair } from "@/lib/extraction/activity-classifier";
+
 export type GroupingLane = "same_site" | "walk";
+
+export type ContainmentRelationType =
+  | "authored_route"
+  | "same_site"
+  | "source_area_walk";
+
+export type ContainmentEvidenceKind =
+  | "resolver_source_relationship"
+  | "source_area"
+  | "source_hierarchy"
+  | "source_order"
+  | "verified_address"
+  | "verified_geo";
+
+export type ContainmentMemberDecision = {
+  evidence: ContainmentEvidenceKind[];
+  observationIds: string[];
+  pieceId: string;
+  sourceOrder: number;
+  title: string;
+};
+
+export type ContainmentRejectionReason =
+  | "already_claimed"
+  | "different_date"
+  | "independent_booking"
+  | "independent_time"
+  | "insufficient_members"
+  | "named_peer_site"
+  | "no_licensed_evidence"
+  | "one_child_pseudo_group"
+  | "source_boundary"
+  | "type_mismatch";
+
+export type ContainmentRejection = {
+  pieceId: string;
+  reasonCode: ContainmentRejectionReason;
+  title: string;
+};
+
+export type ContainmentDecision = {
+  callPolicy: "required" | "silent";
+  containerObservationIds: string[];
+  containerPieceId: string | null;
+  containerTitle: string;
+  date: string;
+  decisionId: string;
+  members: ContainmentMemberDecision[];
+  relationType: ContainmentRelationType;
+  rejections: ContainmentRejection[];
+  source: "deterministic_containment" | "resolver_containment";
+};
+
+export type ContainmentLedgerTelemetry = {
+  decisions: ContainmentDecision[];
+  doNotMergePairCount: number;
+  rejectedCandidateCount: number;
+  version: 1;
+};
+
+type ContainmentParticipant = {
+  observationIds: string[];
+  pieceId: string;
+  title: string;
+};
+
+function orderedPair(left: string, right: string) {
+  return left < right ? `${left}|${right}` : `${right}|${left}`;
+}
+
+// Identity code is allowed to ask the containment authority whether two
+// titles describe a site and one of its components. It may not import the
+// classifier helper directly and grow another semantic writer.
+export function containmentTitleConflict(
+  leftTitle: string | null | undefined,
+  rightTitle: string | null | undefined
+) {
+  const comparable = (value: string | null | undefined) =>
+    (value ?? "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  const left = comparable(leftTitle);
+  const right = comparable(rightTitle);
+  // Exact repeated evidence is identity, even when the shared title happens
+  // to contain an "at Site" phrase. Containment protects distinct entities;
+  // it must not manufacture duplicates of the same component.
+  if (!left || left === right) return false;
+  return isSiteComponentTitlePair(leftTitle, rightTitle);
+}
+
+// Containment is a non-mutating semantic ledger. It records relationships
+// and the negative identity constraint they imply, but it never creates a
+// parent, suppresses a piece, emits a Call, or changes a traveler field.
+export function createContainmentLedger() {
+  const decisions: ContainmentDecision[] = [];
+  const pairKeys = new Set<string>();
+  const observationPairKeys = new Set<string>();
+
+  const registerPair = (
+    left: ContainmentParticipant,
+    right: ContainmentParticipant
+  ) => {
+    if (left.pieceId === right.pieceId) return;
+    pairKeys.add(orderedPair(left.pieceId, right.pieceId));
+    for (const leftId of left.observationIds) {
+      for (const rightId of right.observationIds) {
+        if (leftId !== rightId) {
+          observationPairKeys.add(orderedPair(leftId, rightId));
+        }
+      }
+    }
+  };
+
+  const registerTitleConflict = (
+    left: ContainmentParticipant,
+    right: ContainmentParticipant
+  ) => {
+    if (!containmentTitleConflict(left.title, right.title)) return false;
+    registerPair(left, right);
+    return true;
+  };
+
+  const addDecision = (decision: ContainmentDecision) => {
+    if (decision.members.length < 2) return false;
+    if (decisions.some((candidate) => candidate.decisionId === decision.decisionId)) {
+      return false;
+    }
+    const participants: ContainmentParticipant[] = [
+      ...(decision.containerPieceId
+        ? [{
+            observationIds: decision.containerObservationIds,
+            pieceId: decision.containerPieceId,
+            title: decision.containerTitle,
+          }]
+        : []),
+      ...decision.members,
+    ];
+    for (let left = 0; left < participants.length; left += 1) {
+      for (let right = left + 1; right < participants.length; right += 1) {
+        registerPair(participants[left], participants[right]);
+      }
+    }
+    decisions.push(decision);
+    return true;
+  };
+
+  const doNotMerge = (
+    left: { observationIds: string[]; pieceId: string; title: string },
+    right: { observationIds: string[]; pieceId: string; title: string }
+  ) => {
+    if (left.pieceId === right.pieceId) return false;
+    if (pairKeys.has(orderedPair(left.pieceId, right.pieceId))) return true;
+    if (
+      left.observationIds.some((leftId) =>
+        right.observationIds.some((rightId) =>
+          observationPairKeys.has(orderedPair(leftId, rightId))
+        )
+      )
+    ) {
+      return true;
+    }
+    return containmentTitleConflict(left.title, right.title);
+  };
+
+  const telemetry = (): ContainmentLedgerTelemetry => ({
+    decisions: decisions.map((decision) => ({
+      ...decision,
+      containerObservationIds: [...decision.containerObservationIds],
+      members: decision.members.map((member) => ({
+        ...member,
+        evidence: [...member.evidence],
+        observationIds: [...member.observationIds],
+      })),
+      rejections: decision.rejections.map((rejection) => ({ ...rejection })),
+    })),
+    doNotMergePairCount: pairKeys.size,
+    rejectedCandidateCount: decisions.reduce(
+      (total, decision) => total + decision.rejections.length,
+      0
+    ),
+    version: 1,
+  });
+
+  return { addDecision, doNotMerge, registerTitleConflict, telemetry };
+}
+
+export type ContainmentLedger = ReturnType<typeof createContainmentLedger>;
 
 // A HIERARCHY claim is source-confirmed containment (a component list, a
 // "<stop> at <Site>" title, or a geocoded address that names the site).

@@ -326,6 +326,39 @@ function sourcePosition(title: string, sourceText: string | null | undefined) {
   return { block: null, line: null, precedingLabel: null };
 }
 
+// Containment needs the local itinerary occurrence, not a material overview
+// that happens to repeat every venue in one giant line. This is deliberately
+// separate from sourcePosition(): Loop 3 may add read-only evidence without
+// changing the resolver's existing semantic choices.
+function containmentSourceLine(
+  title: string,
+  sourceText: string | null | undefined
+) {
+  if (!sourceText?.trim()) return null;
+  const titleTokens = new Set(normalizeText(title).split(/\s+/).filter(Boolean));
+  return (
+    sourceText
+      .split(/\r?\n/)
+      .map((rawLine, index) => {
+        const line = rawLine.trim();
+        if (!line || !sourceLineMatchesTitle(title, line)) return null;
+        const extraTokenCount = normalizeText(line)
+          .split(/\s+/)
+          .filter(Boolean)
+          .filter((token) => !titleTokens.has(token)).length;
+        return { extraTokenCount, line: index + 1 };
+      })
+      .filter(
+        (value): value is { extraTokenCount: number; line: number } =>
+          Boolean(value)
+      )
+      .sort(
+        (left, right) =>
+          left.extraTokenCount - right.extraTokenCount || left.line - right.line
+      )[0]?.line ?? null
+  );
+}
+
 type SourceBlockWitness = {
   id: string;
   lines: string[];
@@ -825,7 +858,20 @@ function applyResolution({
 
   for (const candidate of candidates) {
     const item = itemFor(candidate.candidateId);
-    if (item) item._resolverCandidateId = candidate.candidateId;
+    if (item) {
+      const stageInput = stages[candidate.stageIndex];
+      item._resolverCandidateId = candidate.candidateId;
+      item._canonicalSourcePosition = {
+        blockIds: [...candidate.sourceBlockIds],
+        line: containmentSourceLine(candidate.title, stageInput?.sourceText),
+        relationshipSignal: candidate.sourceRelationshipSignal,
+        sourceIdentityHash: createHash("sha256")
+          .update(candidate.sourceIdentity)
+          .digest("hex")
+          .slice(0, 20),
+        stageIndex: candidate.stageIndex,
+      };
+    }
   }
 
   for (const decision of resolution.roleDecisions) {

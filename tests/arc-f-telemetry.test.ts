@@ -139,6 +139,54 @@ export default function run() {
     ]);
   });
 
+  test("RW-GRP-001 containment decisions survive the served audit whitelist", () => {
+    const summary = createCanonicalizationSummary({
+      evidence: {
+        containmentLedger: {
+          decisions: [{
+            callPolicy: "silent",
+            containerObservationIds: ["obs-tour"],
+            containerPieceId: "piece-tour",
+            containerTitle: "Old Quarter tour",
+            date: "2019-01-15",
+            decisionId: "containment-route-1",
+            members: [
+              {
+                evidence: ["source_hierarchy", "source_order"],
+                observationIds: ["obs-square"],
+                pieceId: "piece-square",
+                sourceOrder: 10,
+                title: "Old Square",
+              },
+              {
+                evidence: ["source_hierarchy", "source_order"],
+                observationIds: ["obs-quarter"],
+                pieceId: "piece-quarter",
+                sourceOrder: 20,
+                title: "Old Quarter",
+              },
+            ],
+            relationType: "authored_route",
+            rejections: [],
+            source: "deterministic_containment",
+          }],
+          doNotMergePairCount: 3,
+          rejectedCandidateCount: 0,
+          version: 1,
+        },
+      },
+    });
+
+    assert.equal(summary.containmentLedger?.decisions.length, 1);
+    assert.deepEqual(
+      summary.containmentLedger?.decisions[0]?.members.map(
+        (member) => member.title
+      ),
+      ["Old Square", "Old Quarter"]
+    );
+    assert.equal(summary.containmentLedger?.doNotMergePairCount, 3);
+  });
+
   test("8.2 excludedPlanningCostLineCount survives the audit-snapshot whitelist", () => {
     const summary = createExtractionSummary({
       sourceRecovery: {
