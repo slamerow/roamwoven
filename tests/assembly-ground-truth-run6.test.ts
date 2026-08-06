@@ -419,13 +419,23 @@ export default async function run() {
       tripOverview: TRIP_OVERVIEW,
     });
     const draft = result.draft as Draft;
-    const pinball = draft.activities.filter((item) =>
+    const pinballCards = draft.activities.filter((item) =>
       /pinball/i.test(String(item.title))
     );
     assert.equal(
-      pinball.length,
+      pinballCards.length,
+      0,
+      "sequence-inheritance plus distinct dates is dates alone: no planned card"
+    );
+    const pinballNotes = draft.activities.filter(
+      (item) =>
+        item.itemType === "note" &&
+        /pinball/i.test(`${String(item.title)} ${String(item.description)}`)
+    );
+    assert.equal(
+      pinballNotes.length,
       1,
-      "sequence-inheritance plus distinct dates is dates alone: one card, not two"
+      "repeated but never committed has one durable City Note home"
     );
   });
 

@@ -5,7 +5,10 @@ import type {
   CanonicalGroupingDecision,
   EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
-import { normalizeText } from "@/lib/extraction/traveler-text";
+import {
+  normalizeText,
+  normalizeTripDate,
+} from "@/lib/extraction/traveler-text";
 
 const CANONICAL_RESOLVER_VERSION = 7;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
@@ -357,6 +360,81 @@ function containmentSourceLine(
           left.extraTokenCount - right.extraTokenCount || left.line - right.line
       )[0]?.line ?? null
   );
+}
+
+type SourceTitleOccurrence = {
+  date: string;
+  line: number;
+  sequencedDay: boolean;
+  sourceIdentityHash: string;
+  stageIndex: number;
+};
+
+// Identity needs every local occurrence of a repeated title, not merely the
+// date the parser chose for one candidate. This reads only compact OCR/text
+// lines: giant text-layer overview lines are deliberately ineligible because
+// they collapse the whole trip into one false source position.
+function sourceTitleOccurrences({
+  defaultYear,
+  sourceIdentityHash,
+  sourceText,
+  stageIndex,
+  title,
+}: {
+  defaultYear: number | null;
+  sourceIdentityHash: string;
+  sourceText: string | null | undefined;
+  stageIndex: number;
+  title: string;
+}): SourceTitleOccurrence[] {
+  if (!sourceText?.trim()) return [];
+  const rows = sourceText.split(/\r?\n/).map((rawLine, index) => ({
+    index,
+    line: rawLine.trim(),
+  }));
+  const sections: Array<{
+    date: string;
+    rows: typeof rows;
+  }> = [];
+  let current: { date: string; rows: typeof rows } | null = null;
+
+  for (const row of rows) {
+    const dateHeading =
+      row.line.length <= 120 &&
+      /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+        row.line
+      )
+        ? normalizeTripDate(row.line, defaultYear)
+        : null;
+    if (dateHeading) {
+      if (current) sections.push(current);
+      current = { date: dateHeading, rows: [row] };
+      continue;
+    }
+    if (current) current.rows.push(row);
+  }
+  if (current) sections.push(current);
+
+  return sections.flatMap((section) => {
+    const timedLineCount = section.rows.filter(
+      ({ line }) =>
+        line.length <= 240 &&
+        /\b(?:[01]?\d|2[0-3])[:.]\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/i.test(
+          line
+        )
+    ).length;
+    return section.rows.flatMap(({ index, line }) =>
+      line.length <= 240 && sourceLineMatchesTitle(title, line)
+        ? [{
+            date: section.date,
+            line: index + 1,
+            sequencedDay: timedLineCount >= 3,
+            sourceIdentityHash,
+            stageIndex,
+          }]
+        : []
+    );
+  });
 }
 
 type SourceBlockWitness = {
@@ -848,6 +926,11 @@ function applyResolution({
     };
   });
   const candidateById = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
+  const sourceStages = stages.map((stageInput, stageIndex) => ({
+    sourceIdentity: sourceIdentityFor(stageInput),
+    sourceText: stageInput.sourceText,
+    stageIndex,
+  }));
   const itemFor = (candidateId: string) => {
     const candidate = candidateById.get(candidateId);
     if (!candidate) return null;
@@ -860,17 +943,48 @@ function applyResolution({
     const item = itemFor(candidate.candidateId);
     if (item) {
       const stageInput = stages[candidate.stageIndex];
+      const sourceIdentityHash = createHash("sha256")
+        .update(candidate.sourceIdentity)
+        .digest("hex")
+        .slice(0, 20);
       item._resolverCandidateId = candidate.candidateId;
       item._canonicalSourcePosition = {
         blockIds: [...candidate.sourceBlockIds],
         line: containmentSourceLine(candidate.title, stageInput?.sourceText),
         relationshipSignal: candidate.sourceRelationshipSignal,
-        sourceIdentityHash: createHash("sha256")
-          .update(candidate.sourceIdentity)
-          .digest("hex")
-          .slice(0, 20),
+        sourceIdentityHash,
         stageIndex: candidate.stageIndex,
       };
+      const defaultYear = candidate.date
+        ? Number(candidate.date.slice(0, 4)) || null
+        : null;
+      item._canonicalSourceOccurrences = Array.from(
+        new Map(
+          sourceStages
+            .filter(
+              (sourceStage) =>
+                sourceStage.sourceIdentity === candidate.sourceIdentity
+            )
+            .flatMap((sourceStage) =>
+              sourceTitleOccurrences({
+                defaultYear,
+                sourceIdentityHash,
+                sourceText: sourceStage.sourceText,
+                stageIndex: sourceStage.stageIndex,
+                title: candidate.title,
+              })
+            )
+            .map((occurrence) => [
+              `${occurrence.date}|${occurrence.stageIndex}|${occurrence.line}`,
+              occurrence,
+            ])
+        ).values()
+      ).sort(
+        (left, right) =>
+          left.date.localeCompare(right.date) ||
+          left.stageIndex - right.stageIndex ||
+          left.line - right.line
+      );
     }
   }
 

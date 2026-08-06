@@ -242,6 +242,28 @@ export type TripExtractionAuditReport = {
       rejectedCandidateCount: number;
       version: 1;
     } | null;
+    identityLedger: {
+      decisions: Array<{
+        acceptedFactDigests: string[];
+        decisionId: string;
+        finalDate: string | null;
+        finalHome: "activity" | "city_note";
+        loserPieceIds: string[];
+        observationIds: string[];
+        priorDates: string[];
+        reasonCode:
+          | "city_note_evidence_wins"
+          | "committed_activity_wins"
+          | "cross_referenced_same_day_venue"
+          | "identity_lane_merge"
+          | "repeated_uncommitted_to_city_note"
+          | "source_sequenced_occurrence_wins";
+        survivorPieceId: string;
+        usefulFactDigests: string[];
+      }>;
+      unresolvedCarrierCount: number;
+      version: 1;
+    } | null;
     // G4.4 (docket §C, field 2): produced by the claim ledger at
     // evidence-clustering.ts and, before this, consumed by NOBODY
     // repo-wide — never persisted, never served. Lane contention was

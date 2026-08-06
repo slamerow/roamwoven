@@ -55,8 +55,8 @@ export default function run() {
     tripOverview: { dateRange: "April 11-14, 2030", title: "Sample trip" },
   });
   const trace = result.summary.stageWriterTrace;
-  const reconciliations = trace.filter((entry) =>
-    entry.writer.startsWith("reconcileCardsAgainstCityNotes")
+  const identityWriters = trace.filter(
+    (entry) => entry.decisionDomain === "identity"
   );
   const classifier = trace.find(
     (entry) => entry.writer === "applyIntentBlockClassification"
@@ -66,15 +66,15 @@ export default function run() {
   );
 
   assert.ok(classifier, "classification is traceable");
-  assert.equal(reconciliations.length, 1, "one card/note semantic writer remains");
+  assert.equal(identityWriters.length, 1, "one identity semantic writer remains");
+  assert.equal(identityWriters[0].writer, "resolveCanonicalIdentity");
   assert.ok(
-    reconciliations[0].ordinal > classifier.ordinal,
-    "card/note reconciliation follows authoritative classification"
+    identityWriters[0].ordinal > classifier.ordinal,
+    "identity follows authoritative classification"
   );
-  assert.equal(reconciliations[0].decisionDomain, "identity");
   assert.ok(enforcement, "final role enforcement is traceable");
   assert.ok(
-    enforcement.ordinal > reconciliations[0].ordinal,
+    enforcement.ordinal > identityWriters[0].ordinal,
     "validation runs after downstream semantic writers"
   );
   assert.deepEqual(enforcement.writes, [], "final enforcement is non-mutating");
@@ -87,8 +87,8 @@ export default function run() {
   });
   assert.equal(served.stageWriterTrace.length, trace.length);
   assert.equal(
-    served.stageWriterTrace[reconciliations[0].ordinal - 1]?.writer,
-    reconciliations[0].writer
+    served.stageWriterTrace[identityWriters[0].ordinal - 1]?.writer,
+    identityWriters[0].writer
   );
   assert.equal(
     JSON.stringify(served.stageWriterTrace).includes("Sample Museum"),

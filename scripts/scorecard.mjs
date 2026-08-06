@@ -2876,6 +2876,7 @@ async function runExtractionAndAssembly({
     assembly: corridor.assembly,
     assessment: corridor.assessment,
     corridor,
+    evidenceArtifacts: result.evidenceArtifacts,
     preparedEvidence,
   };
 }
@@ -2976,7 +2977,12 @@ if (fromCacheDir) {
     sourceLabel: "cached",
   });
 
-  const { assembly, assessment, preparedEvidence } = await runExtractionAndAssembly({
+  const {
+    assembly,
+    assessment,
+    evidenceArtifacts,
+    preparedEvidence,
+  } = await runExtractionAndAssembly({
     callsJson: cachedCalls,
     geocodeReplaySeed: cachedGeocode,
     materials,
@@ -3026,6 +3032,106 @@ if (fromCacheDir) {
         JSON.stringify(
           assessment.report.canonicalization.containmentLedger ?? null
         )
+    );
+  }
+  const identityTraceTitle = process.env.SCORECARD_IDENTITY_TRACE_TITLE
+    ?.trim()
+    .toLowerCase();
+  if (identityTraceTitle) {
+    const titleMatches = (value) =>
+      String(value ?? "").toLowerCase().includes(identityTraceTitle);
+    const matchingCandidacy =
+      assessment.report.canonicalization.activityCandidacyDecisions
+        ?.filter((decision) => titleMatches(decision.title)) ?? [];
+    const matchingPieceIds = new Set(
+      matchingCandidacy.flatMap((decision) =>
+        decision.canonicalPieceIds ?? []
+      )
+    );
+    console.log(
+      "IDENTITY TRACE " +
+        JSON.stringify({
+          blocks:
+            assessment.report.canonicalization.intentBlocks?.blocks
+              ?.filter((block) =>
+                block.memberIds?.some((id) => matchingPieceIds.has(id))
+              ) ?? [],
+          candidacy: matchingCandidacy,
+          decisions:
+            assessment.report.canonicalization.identityLedger?.decisions
+              ?.filter((decision) =>
+                decision.observationIds?.some((id) =>
+                  evidenceArtifacts.observations?.some(
+                    (observation) =>
+                      observation.id === id &&
+                      titleMatches(observation.payload?.title)
+                  )
+                )
+              ) ?? [],
+          ledger: {
+            unresolvedCarrierCount:
+              assessment.report.canonicalization.identityLedger
+                ?.unresolvedCarrierCount ?? null,
+            version:
+              assessment.report.canonicalization.identityLedger?.version ??
+              null,
+          },
+          observations:
+            evidenceArtifacts.observations
+              ?.filter((observation) =>
+                titleMatches(observation.payload?.title)
+              )
+              .map((observation) => ({
+                date: observation.payload?.date ?? null,
+                id: observation.id,
+                ordinal: observation.ordinal,
+                role: observation.role,
+                sourceLabel: observation.sourceLabel,
+                sourcePosition:
+                  observation.payload?._canonicalSourcePosition ?? null,
+                sourceOccurrences:
+                  observation.payload?._canonicalSourceOccurrences ?? [],
+                sourceStructure: observation.sourceStructure,
+                title: observation.payload?.title ?? null,
+              })) ?? [],
+          pieces:
+            evidenceArtifacts.pieces
+              ?.filter(
+                (piece) =>
+                  titleMatches(piece.payload?.title) ||
+                  titleMatches(piece.payload?.description)
+              )
+              .map((piece) => ({
+                candidacy:
+                  piece.payload?._canonicalCandidacyDecision ?? null,
+                city: piece.payload?.city ?? null,
+                date: piece.payload?.date ?? null,
+                disposition: piece.disposition ?? null,
+                id: piece.id,
+                intentBlockType:
+                  piece.payload?._intentBlockType ?? null,
+                kind: piece.kind,
+                noteCollectionTitle:
+                  piece.payload?._canonicalNoteCollectionTitle ?? null,
+                observationIds: piece.observationIds,
+                outputEligible: piece.outputEligible,
+                title: piece.payload?.title ?? null,
+              })) ?? [],
+          lineage:
+            assessment.report.lineage
+              ?.filter((entry) => titleMatches(entry.title))
+              .map((entry) => ({
+                actions: entry.actions,
+                canonicalPieceId: entry.canonicalPieceId,
+                date: entry.date,
+                disposition: entry.disposition,
+                finalRecords: entry.finalRecords,
+                kind: entry.kind,
+                outputEligible: entry.outputEligible,
+                role: entry.role,
+                title: entry.title,
+              })) ?? [],
+        })
     );
   }
   const evidenceModule = require2(

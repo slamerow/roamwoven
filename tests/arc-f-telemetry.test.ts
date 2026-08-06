@@ -187,6 +187,40 @@ export default function run() {
     assert.equal(summary.containmentLedger?.doNotMergePairCount, 3);
   });
 
+  test("RW-CAN-001 identity carriers and fact acceptance survive the served audit whitelist", () => {
+    const summary = createCanonicalizationSummary({
+      evidence: {
+        identityLedger: {
+          decisions: [{
+            acceptedFactDigests: ["fact-a", "fact-b"],
+            decisionId: "identity-decision-1",
+            finalDate: "2019-01-22",
+            finalHome: "activity",
+            loserPieceIds: ["piece-loser"],
+            observationIds: ["obs-a", "obs-b"],
+            priorDates: ["2019-01-22", "2019-01-23"],
+            reasonCode: "source_sequenced_occurrence_wins",
+            survivorPieceId: "piece-survivor",
+            usefulFactDigests: ["fact-a", "fact-b"],
+          }],
+          unresolvedCarrierCount: 0,
+          version: 1,
+        },
+      },
+    });
+
+    assert.equal(summary.identityLedger?.decisions.length, 1);
+    assert.equal(summary.identityLedger?.unresolvedCarrierCount, 0);
+    assert.deepEqual(
+      summary.identityLedger?.decisions[0]?.acceptedFactDigests,
+      ["fact-a", "fact-b"]
+    );
+    assert.equal(
+      summary.identityLedger?.decisions[0]?.reasonCode,
+      "source_sequenced_occurrence_wins"
+    );
+  });
+
   test("8.2 excludedPlanningCostLineCount survives the audit-snapshot whitelist", () => {
     const summary = createExtractionSummary({
       sourceRecovery: {

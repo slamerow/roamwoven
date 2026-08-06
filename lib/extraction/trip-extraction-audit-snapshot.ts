@@ -331,6 +331,70 @@ export function createCanonicalizationSummary(
         version: 1 as const,
       };
     })(),
+    identityLedger: (() => {
+      const ledger = asRecord(evidence.identityLedger);
+      if (Object.keys(ledger).length === 0) return null;
+      const validReasons = new Set([
+        "city_note_evidence_wins",
+        "committed_activity_wins",
+        "cross_referenced_same_day_venue",
+        "identity_lane_merge",
+        "repeated_uncommitted_to_city_note",
+        "source_sequenced_occurrence_wins",
+      ]);
+      const stringList = (value: unknown) =>
+        Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === "string")
+          : [];
+      const decisions = Array.isArray(ledger.decisions)
+        ? ledger.decisions.flatMap((value) => {
+            const decision = asRecord(value);
+            if (
+              typeof decision.decisionId !== "string" ||
+              typeof decision.survivorPieceId !== "string" ||
+              (decision.finalHome !== "activity" &&
+                decision.finalHome !== "city_note") ||
+              typeof decision.reasonCode !== "string" ||
+              !validReasons.has(decision.reasonCode)
+            ) {
+              return [];
+            }
+            const finalHome = decision.finalHome as
+              | "activity"
+              | "city_note";
+            const reasonCode = decision.reasonCode as
+              | "city_note_evidence_wins"
+              | "committed_activity_wins"
+              | "cross_referenced_same_day_venue"
+              | "identity_lane_merge"
+              | "repeated_uncommitted_to_city_note"
+              | "source_sequenced_occurrence_wins";
+            return [{
+              acceptedFactDigests: stringList(
+                decision.acceptedFactDigests
+              ),
+              decisionId: decision.decisionId,
+              finalDate:
+                typeof decision.finalDate === "string"
+                  ? decision.finalDate
+                  : null,
+              finalHome,
+              loserPieceIds: stringList(decision.loserPieceIds),
+              observationIds: stringList(decision.observationIds),
+              priorDates: stringList(decision.priorDates),
+              reasonCode,
+              survivorPieceId: decision.survivorPieceId,
+              usefulFactDigests: stringList(decision.usefulFactDigests),
+            }];
+          })
+        : [];
+      return {
+        decisions,
+        unresolvedCarrierCount:
+          Number(ledger.unresolvedCarrierCount) || 0,
+        version: 1 as const,
+      };
+    })(),
     // G4.4 (docket §C, field 2): the claim ledger's telemetry has been
     // produced by evidence-clustering since Arc G.3b with ZERO consumers
     // repo-wide — lane contention was designed to be visible in run

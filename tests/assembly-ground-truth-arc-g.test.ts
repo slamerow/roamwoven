@@ -398,7 +398,7 @@ export default async function run() {
     assert.equal(containmentTrace?.changed, false);
     assert.equal(
       result.summary.stageWriterTrace.find(
-        (entry) => entry.writer === "absorbLocationFragmentCards"
+        (entry) => entry.writer === "resolveCanonicalIdentity"
       )?.decisionDomain,
       "identity"
     );

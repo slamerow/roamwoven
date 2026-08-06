@@ -638,4 +638,91 @@ export default async function run() {
 
     assert.deepEqual(resolution.groupings[0]?.candidateIds, ["a", "b", "c"]);
   });
+
+  await test("identity occurrences span parser chunks from the same source and never cross source identity", () => {
+    const candidate = activity("Riverside Market");
+    candidate.date = "2031-04-03";
+    const application = applyCanonicalEvidenceResolution(
+      [
+        {
+          label: "Wednesday candidate chunk",
+          source: "model_chunk",
+          sourceFilename: "shared-itinerary.txt",
+          sourceText: [
+            "Wednesday, April 3rd",
+            "Riverside Market",
+          ].join("\n"),
+          stage: {
+            activities: [candidate],
+            missingDetails: [],
+            places: [],
+            sensitiveDetails: [],
+            stays: [],
+            transport: [],
+          },
+        },
+        {
+          label: "Tuesday source-only chunk",
+          source: "model_chunk",
+          sourceFilename: "shared-itinerary.txt",
+          sourceText: [
+            "Tuesday, April 2nd",
+            "09:00 Old Square",
+            "10:30 Cathedral",
+            "12:00 Lunch",
+            "Riverside Market",
+          ].join("\n"),
+          stage: {
+            activities: [],
+            missingDetails: [],
+            places: [],
+            sensitiveDetails: [],
+            stays: [],
+            transport: [],
+          },
+        },
+        {
+          label: "unrelated upload",
+          source: "model_chunk",
+          sourceFilename: "different-itinerary.txt",
+          sourceText: [
+            "Monday, April 1st",
+            "09:00 First stop",
+            "10:00 Second stop",
+            "11:00 Third stop",
+            "Riverside Market",
+          ].join("\n"),
+          stage: {
+            activities: [],
+            missingDetails: [],
+            places: [],
+            sensitiveDetails: [],
+            stays: [],
+            transport: [],
+          },
+        },
+      ],
+      { groupings: [], roleDecisions: [] }
+    );
+    const resolved = (
+      application.stages[0].stage as {
+        activities: Array<Record<string, unknown>>;
+      }
+    ).activities[0];
+    const occurrences = resolved._canonicalSourceOccurrences as Array<{
+      date: string;
+      sequencedDay: boolean;
+    }>;
+
+    assert.deepEqual(
+      occurrences.map((occurrence) => ({
+        date: occurrence.date,
+        sequenced: occurrence.sequencedDay,
+      })),
+      [
+        { date: "2031-04-02", sequenced: true },
+        { date: "2031-04-03", sequenced: false },
+      ]
+    );
+  });
 }
