@@ -52,7 +52,7 @@ const AVAILABILITY_MARKER_PATTERN =
 // city" shipped as a card). Tested against normalizeText() output, so the
 // contraction is matched in its normalized form ("if you d like").
 const WEAK_RECOMMENDATION_PATTERN =
-  /\b(optional|maybe|if time|if we have time|if you want|if you d like|if you like|if you feel like|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b|\bwhen you(?: are| re)?\b[^.]{0,100}\bstop into\b/;
+  /\b(optional|maybe|if time|if we have time|if you want|if you d like|if you like|if you feel like|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended|take a peek|worth a quick look)\b|\bwhen you(?: are| re)?\b[^.]{0,100}\bstop into\b/;
 
 const LOOSE_FOOD_SHOPPING_PATTERN =
   /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/;
@@ -273,6 +273,10 @@ export function isSightOrLoosePlaceText(value: string | null | undefined) {
 export function isLooseTipActivity(input: DraftActivityCardInput) {
   const text = normalizeText(textForDraftActivity(input));
 
+  // Time and booking evidence are intrinsic to this card. Other commitment
+  // is decided by the canonical source ledger; it cannot erase an explicit
+  // loose-tip marker here (for example, "Dinner ideas"). Final diagnostics
+  // consult that authoritative ledger before reporting a committed card.
   if (!text || hasTime(input)) {
     return false;
   }
@@ -283,7 +287,11 @@ export function isLooseTipActivity(input: DraftActivityCardInput) {
     return false;
   }
 
-  return input.itemType === "note" || LOOSE_TIP_PATTERN.test(text);
+  return (
+    input.itemType === "note" ||
+    LOOSE_TIP_PATTERN.test(text) ||
+    WEAK_RECOMMENDATION_PATTERN.test(text)
+  );
 }
 
 export function isWeakDatedCityNoteCandidate(

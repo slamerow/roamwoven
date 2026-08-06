@@ -60,6 +60,7 @@ export type ActivityCandidacyReasonCode =
   | "EXPLICIT_ACCESSORY"
   | "EXPLICIT_CONTEXT"
   | "EXPLICIT_REJECTED"
+  | "GENERIC_BOOKING_LABEL"
   | "GENERIC_OVERVIEW"
   | "ITEM_TYPE_ADMIN"
   | "ITEM_TYPE_NOTE"
@@ -90,6 +91,14 @@ export type ActivityCandidacyInput = DraftActivityCardInput & {
 
 const ADMIN_ITEM_TYPE_PATTERN =
   /^(?:admin|administrative|accessory|evidence|logistics|receipt|ticket_detail)$/i;
+
+// A receipt/service label is evidence about an owning booking, not a
+// traveler-visible entity by itself. Source recovery can correctly prove
+// that the words are present while still having no venue, time, booking id,
+// or other standalone anchor (production: "Guided Tour / Prohlídka"). That
+// proof must not be misread as permission to mint a generic Activity.
+const GENERIC_BOOKING_LABEL_PATTERN =
+  /^(?:(?:guided|private|public|standard|general)\s+)?(?:admission|entry|pass|service|ticket|tour|voucher)(?:\s*\/\s*[\p{L}\s-]{2,40})?$/iu;
 
 export function decideActivityCandidacy(
   input: ActivityCandidacyInput
@@ -149,6 +158,18 @@ export function decideActivityCandidacy(
   }
   if (input.isGenericOverview || classifyDraftActivityCard(input).isOverviewActivity) {
     return refused("context", "context", "GENERIC_OVERVIEW", "source_structure");
+  }
+  if (
+    input.sourceSectionType === "booking_detail" &&
+    GENERIC_BOOKING_LABEL_PATTERN.test(input.title?.trim() ?? "") &&
+    !hasStandaloneActivityAnchor(input)
+  ) {
+    return refused(
+      "accessory",
+      "accessory_detail",
+      "GENERIC_BOOKING_LABEL",
+      "source_structure"
+    );
   }
   // Explicit audited source commitment is the only legal promotion path out
   // of note/admin/accessory material. The caller must prove it from source

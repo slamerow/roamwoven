@@ -59,6 +59,8 @@ export function createTripExtractionAuditReport({
   return {
     canonicalization,
     diagnostics: createAuditDiagnostics({
+      activityCandidacyDecisions:
+        canonicalization.activityCandidacyDecisions,
       undisposedObservationCount: canonicalization.undisposedObservationCount,
       lineage,
       records,

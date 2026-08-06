@@ -427,8 +427,14 @@ const ASSERTIONS = [
     claim:
       "Every dated named-site container that reached `atomic_candidate` appears as a top-level item",
     run: (ctx) => {
+      const authoritativeActivityPieceIds = new Set(
+        (ctx.report.canonicalization?.activityCandidacyDecisions ?? [])
+          .filter((decision) => decision.destination === "activity")
+          .flatMap((decision) => decision.canonicalPieceIds ?? [])
+      );
       const containers = ctx.report.lineage.filter(
         (row) =>
+          authoritativeActivityPieceIds.has(row.canonicalPieceId) &&
           containerish(row.title) &&
           row.observations.some(
             (observation) =>
@@ -483,6 +489,15 @@ const ASSERTIONS = [
       // — since that case has the same absorbing-side shape as this false
       // positive. A real container's title never itself says "note".
       const NOTE_MATERIAL_TITLE = /\bnotes?\b/i;
+      const candidacyByObservedTitle = new Map();
+      for (const decision of
+        ctx.report.canonicalization?.activityCandidacyDecisions ?? []) {
+        const title = norm(decision.observationTitle);
+        if (!title) continue;
+        const destinations = candidacyByObservedTitle.get(title) ?? new Set();
+        destinations.add(decision.destination);
+        candidacyByObservedTitle.set(title, destinations);
+      }
       const swallowed = [];
       for (const row of ctx.report.lineage) {
         if (containerish(row.title)) continue;
@@ -490,6 +505,15 @@ const ASSERTIONS = [
           for (const absorbed of action.absorbedTitles ?? []) {
             if (!containerish(absorbed)) continue;
             if (NOTE_MATERIAL_TITLE.test(absorbed)) continue;
+            // A route title can mention a site without being that site's
+            // identity. Likewise, classification may authoritatively route
+            // a weak site recommendation to City Notes. This invariant
+            // consumes those final decisions instead of re-promoting raw
+            // intake syntax while it scores containment.
+            if (/\s(?:\/|→|->)\s/.test(absorbed)) continue;
+            if (/route composite attached/i.test(action.reason ?? "")) continue;
+            const destinations = candidacyByObservedTitle.get(norm(absorbed));
+            if (destinations && !destinations.has("activity")) continue;
             swallowed.push(`"${absorbed}" -> "${row.title}" (${action.type})`);
           }
         }
@@ -3064,6 +3088,12 @@ if (fromCacheDir) {
         JSON.stringify(
           assessment.report.canonicalization.groupingExecution ?? null
         )
+    );
+  }
+  if (process.env.SCORECARD_DIAGNOSTIC_TRACE === "1") {
+    console.log(
+      "DIAGNOSTIC TRACE " +
+        JSON.stringify(assessment.report.diagnostics ?? [])
     );
   }
   const identityTraceTitle = process.env.SCORECARD_IDENTITY_TRACE_TITLE

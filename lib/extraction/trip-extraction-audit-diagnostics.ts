@@ -13,6 +13,7 @@ import type {
   DraftLineageCandidate,
   TripExtractionAuditDiagnostic,
   TripExtractionAuditLineageRow,
+  TripExtractionAuditReport,
 } from "@/lib/extraction/trip-extraction-audit-types";
 import {
   asRecord,
@@ -338,12 +339,14 @@ function getOcrFailedCount(usage: unknown) {
 }
 
 export function createAuditDiagnostics({
+  activityCandidacyDecisions = [],
   undisposedObservationCount = 0,
   lineage,
   records,
   sourceTransportAnchors = [],
   usage,
 }: {
+  activityCandidacyDecisions?: TripExtractionAuditReport["canonicalization"]["activityCandidacyDecisions"];
   undisposedObservationCount?: number;
   lineage: TripExtractionAuditLineageRow[];
   records: StructuredTripRecords;
@@ -1121,15 +1124,35 @@ export function createAuditDiagnostics({
 
   // Phase 1 (audit B4): loose-tip detection imports the pipeline classifier
   // (booking guard + time guard included) instead of a private keyword list.
-  const looseActivityExamples = activeActivities.filter((item) =>
-    isLooseTipActivity({
-      category: item.categoryId ?? null,
-      description: item.description ?? null,
-      endTime: item.endTime ?? null,
-      itemType: item.itemType ?? null,
-      startTime: item.startTime ?? null,
-      title: item.title,
-    })
+  const committedActivityPieceIds = new Set(
+    activityCandidacyDecisions
+      .filter(
+        (decision) =>
+          decision.destination === "activity" &&
+          decision.commitmentSignals.length > 0
+      )
+      .flatMap((decision) => decision.canonicalPieceIds)
+  );
+  const hasAuthoritativeCommitment = (itemId: string) =>
+    lineage.some(
+      (row) =>
+        Boolean(
+          row.canonicalPieceId &&
+            committedActivityPieceIds.has(row.canonicalPieceId) &&
+            row.finalRecords.some((record) => record.id === itemId)
+        )
+    );
+  const looseActivityExamples = activeActivities.filter(
+    (item) =>
+      !hasAuthoritativeCommitment(item.id) &&
+      isLooseTipActivity({
+        category: item.categoryId ?? null,
+        description: item.description ?? null,
+        endTime: item.endTime ?? null,
+        itemType: item.itemType ?? null,
+        startTime: item.startTime ?? null,
+        title: item.title,
+      })
   );
 
   if (looseActivityExamples.length > 0) {

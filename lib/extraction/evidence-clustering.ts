@@ -100,7 +100,7 @@ import {
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 import { classifySensitiveText } from "@/lib/trip-privacy-policy";
 
-export const EVIDENCE_CLUSTER_VERSION = 19;
+export const EVIDENCE_CLUSTER_VERSION = 20;
 
 export type EvidenceKind =
   | "activity"
@@ -377,6 +377,7 @@ export type CanonicalIdentityLedgerTelemetry = {
       | "cross_referenced_same_day_venue"
       | "identity_lane_merge"
       | "repeated_uncommitted_to_city_note"
+      | "route_composite_to_scheduled_entity"
       | "source_sequenced_occurrence_wins";
     survivorPieceId: string;
     usefulFactDigests: string[];
@@ -699,10 +700,28 @@ function activityCandidacyDecisionForPayload(
         itemType ?? ""
       )
   );
+  const title = stringValue(payload, "title") ?? "";
+  const sourceStructureLabels = [
+    stringValue(payload, "sourceSectionLabel") ?? "",
+    ...(Array.isArray(payload.sourceHeadingPath)
+      ? payload.sourceHeadingPath.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : []),
+  ].filter(Boolean);
+  const sourceCommittedDaySlot = DAY_SLOT_LEXICON.some(
+    ({ pattern, stems }) =>
+      stems.test(title) &&
+      sourceStructureLabels.some((label) =>
+        DAY_PLAN_LABEL_PATTERN.test(label)
+      ) &&
+      sourceStructureLabels.some((label) => pattern.test(label))
+  );
   const sourceCommitment = Boolean(
     !roleOrTypeRefusesImplicitPromotion &&
       (stringValue(payload, "startTime") ||
-        stringValue(payload, "confirmation"))
+        stringValue(payload, "confirmation") ||
+        sourceCommittedDaySlot)
   );
   return decideActivityCandidacy({
     ...activityInput(payload),
@@ -1174,6 +1193,20 @@ function activityMatchReason(
 
   const leftDate = stringValue(left, "date");
   const rightDate = stringValue(right, "date");
+
+  // A slash/arrow title can describe a route that mentions multiple real
+  // places. It is not an alias for whichever segment happens to be compared
+  // first. Identity handles this later, after it can see whether exactly one
+  // named segment owns independent scheduled evidence.
+  const leftMultiEntity = /\s(?:\/|→|->)\s/.test(
+    stringValue(left, "title") ?? ""
+  );
+  const rightMultiEntity = /\s(?:\/|→|->)\s/.test(
+    stringValue(right, "title") ?? ""
+  );
+  if (leftMultiEntity !== rightMultiEntity) {
+    return null;
+  }
 
   // A repeated venue name is not proof that two scheduled visits are one plan.
   // Cross-date evidence only clusters when a stronger booking identity matched above.
@@ -2215,6 +2248,11 @@ function gateOffContractQuestions(
   const eligibleIds = new Set(
     pieces.filter((piece) => piece.outputEligible).map((piece) => piece.id)
   );
+  const eligiblePieceById = new Map(
+    pieces
+      .filter((piece) => piece.outputEligible)
+      .map((piece) => [piece.id, piece])
+  );
   for (const record of records) {
     const related = stringValue(record, "relatedCanonicalPieceId");
     if (related && !eligibleIds.has(related)) {
@@ -2232,6 +2270,35 @@ function gateOffContractQuestions(
     const targetField = stringValue(record, "targetField") ?? "";
     const guessed = stringValue(record, "guessedValue");
     const evidence = stringValue(record, "evidence") ?? "";
+    const subject = eligiblePieceById.get(
+      stringValue(record, "relatedCanonicalPieceId") ?? ""
+    );
+    if (
+      /address.?visibility/i.test(targetField) &&
+      normalizeText(guessed) === "public" &&
+      subject?.kind === "activity" &&
+      Boolean(stringValue(subject.payload, "address"))
+    ) {
+      dismiss(
+        record,
+        "a named public venue address is classified automatically; privacy visibility is not a maker decision (RW-PRI-001)"
+      );
+      continue;
+    }
+    if (
+      guessed &&
+      /\bprovider\b/i.test(
+        `${stringValue(record, "prompt") ?? ""} ${targetField}`
+      ) &&
+      normalizeText(evidence).includes(normalizeText(guessed)) &&
+      /\bprovider\s*:/i.test(evidence)
+    ) {
+      dismiss(
+        record,
+        "the source explicitly labels the provider value; source-obvious metadata is applied without a maker question"
+      );
+      continue;
+    }
     if (/date/i.test(targetField) && guessed) {
       // Dismiss ONLY when the pipeline already holds the guessed date as a
       // settled fact (run7 hotfix: genuine date uncertainty — provisional
@@ -3304,7 +3371,10 @@ function genericActivityConcept(payload: Record<string, unknown>) {
   return null;
 }
 
-function attachGenericActivityPlaceholders(pieces: CanonicalEvidencePiece[]) {
+function attachGenericActivityPlaceholders(
+  pieces: CanonicalEvidencePiece[],
+  doNotMerge: ContainmentIdentityGuard = () => false
+) {
   const activities = pieces.filter(
     (piece) => piece.kind === "activity" && piece.outputEligible
   );
@@ -3322,7 +3392,9 @@ function attachGenericActivityPlaceholders(pieces: CanonicalEvidencePiece[]) {
         candidate === generic ||
         !candidate.outputEligible ||
         genericActivityConcept(candidate.payload) ||
-        !sameCanonicalDate(candidate.payload, generic.payload)
+        !sameCanonicalDate(candidate.payload, generic.payload) ||
+        doNotMerge(generic, candidate) ||
+        !hasIndependentActivityAnchor(candidate.payload)
       ) {
         return false;
       }
@@ -5498,9 +5570,23 @@ function scrubProtectedValuesFromPublicProse(
     const activities = outputPieces().filter(
       (piece) => piece.kind === "activity"
     );
-    const sameIdentity = activities.find((piece) =>
-      sameIdentityCarrier(source, piece)
-    );
+    const factTokens = identityTokens(fact);
+    const sameIdentity = activities.find((piece) => {
+      if (!sameIdentityCarrier(source, piece)) return false;
+      const carrierTokens = identityTokens(
+        stringValue(piece.payload, "title")
+      );
+      // A note wrapper can name several entities ("Bridge / Riverside
+      // bar"). Its individual facts may follow the wrapper's disposition
+      // only when the fact itself names the Activity. Wrapper overlap alone
+      // must never drag an unrelated sibling fact onto that card.
+      return (
+        factTokens.length > 0 &&
+        carrierTokens.length > 0 &&
+        overlapCount(factTokens, carrierTokens) >=
+          Math.min(2, carrierTokens.length)
+      );
+    });
     if (sameIdentity) return sameIdentity;
 
     // A generic note wrapper can carry one explicit planned clause. Route
@@ -5584,9 +5670,9 @@ function scrubProtectedValuesFromPublicProse(
     const evidenceSegments = splitCityNoteSegments(source.payload.evidence);
     const titleIsGenericWrapper = Boolean(
       title &&
-        /^(?:(?:budapest|prague|rome|vienna)\s+)?(?:city\s+)?(?:food\s+)?(?:ideas?|notes?|tips?)(?:\s*&\s*tips?)?$/i.test(
+        (/^(?:(?:budapest|prague|rome|vienna)\s+)?(?:city\s+)?(?:food\s+)?(?:ideas?|notes?|tips?)(?:\s*&\s*tips?)?$/i.test(
           title
-        )
+        ) || /\bnotes?\s*:/i.test(title))
     );
     const splitEnumeratedFacts = (value: string) => {
       const listShaped = Boolean(
@@ -6443,12 +6529,30 @@ function finalizeCanonicalOutputFields(pieces: CanonicalEvidencePiece[]) {
       stringValue(piece.payload, "description")
     );
     piece.payload.description = description;
+    const inputItemType = stringValue(piece.payload, "itemType");
+    // Canonical candidacy has already decided this output-eligible piece is
+    // a real Activity. A parser `placeholder` label is no longer a competing
+    // semantic writer at final projection; substantive source-backed content
+    // such as "Tour Rome" takes the Activity home selected above.
+    const authoritativeItemType =
+      piece.kind === "activity" && inputItemType === "placeholder"
+        ? "activity"
+        : inputItemType;
+    if (authoritativeItemType !== inputItemType) {
+      addCanonicalAction(piece, {
+        absorbedTitles: [title ?? "Untitled activity"],
+        observationIds: [...piece.observationIds],
+        reason:
+          "final projection normalized a parser placeholder to the authoritative Activity candidacy home",
+        type: "recovered",
+      });
+    }
     const itemType = piece.kind === "note"
       ? "note"
       : canonicalItemType({
           description,
           title,
-          value: stringValue(piece.payload, "itemType"),
+          value: authoritativeItemType,
         });
     piece.payload.itemType = itemType;
     piece.payload.category = canonicalCategoryId({
@@ -6912,9 +7016,15 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
 
     // Classify segment by segment so mixed prose lands in the right
     // sections and budget lines can be excluded without losing neighbors.
-    const segments = splitCityNoteSegments(
-      note.payload.description ?? note.payload.title
-    );
+    // Note evidence is a semantic input, not disposable parser metadata. A
+    // model may summarize only the first clause in `description` while the
+    // preserved evidence carries the rest of the safe traveler tip. Route
+    // both through the same privacy/booking/cost gate and de-duplicate in
+    // addEntry; this closes conservation before the final carrier audit.
+    const segments = [
+      ...splitCityNoteSegments(note.payload.description ?? note.payload.title),
+      ...splitCityNoteSegments(note.payload.evidence),
+    ];
     for (const segment of segments) {
       routeEntry(segment, () =>
         classifyCityNoteSection({ category, label, text: segment })
@@ -8575,6 +8685,23 @@ function collapseTitleContainmentAliases(
 // Same-day localized/alternate venue names are identity only when one
 // occurrence's own prose explicitly names the other. Shared nouns alone are
 // never enough, and containment has veto power before this lane can merge.
+function tokenEditDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+}
+
 function collapseCrossReferencedSameDayVenueAliases(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
@@ -8682,12 +8809,72 @@ function collapseCrossReferencedSameDayVenueAliases(
           leftOwnText.some((text) => text.includes(rightTitle)) ||
           rightOwnText.some((text) => text.includes(leftTitle));
         if (!crossReferenced) continue;
+        const sourceVerbatimTitleScore = (
+          piece: CanonicalEvidencePiece,
+          comparableTitle: string
+        ) =>
+          piece.observationIds.filter((id) => {
+            const observation = observations.find((candidate) => candidate.id === id);
+            if (!observation || observation.kind !== "activity") return false;
+            const evidence = normalizedComparable(
+              stringValue(observation.payload, "evidence")
+            );
+            return Boolean(evidence && evidence.includes(comparableTitle));
+          }).length;
+        const leftVerbatim = sourceVerbatimTitleScore(left, leftTitle);
+        const rightVerbatim = sourceVerbatimTitleScore(right, rightTitle);
+        const sourceEvidenceTokens = Array.from(
+          new Set(
+            [...left.observationIds, ...right.observationIds].flatMap((id) => {
+              const observation = observations.find(
+                (candidate) => candidate.id === id
+              );
+              return observation
+                ? identityTokens(stringValue(observation.payload, "evidence"))
+                : [];
+            })
+          )
+        );
+        const sourceDistance = (title: string, alternateTitle: string) => {
+          const alternateTokens = new Set(identityTokens(alternateTitle));
+          const distinguishing = identityTokens(title).filter(
+            (token) => !alternateTokens.has(token)
+          );
+          if (distinguishing.length === 0 || sourceEvidenceTokens.length === 0) {
+            return Number.POSITIVE_INFINITY;
+          }
+          return Math.min(
+            ...distinguishing.flatMap((token) =>
+              sourceEvidenceTokens.map(
+                (sourceToken) =>
+                  tokenEditDistance(token, sourceToken) /
+                  Math.max(token.length, sourceToken.length)
+              )
+            )
+          );
+        };
+        const leftSourceDistance = sourceDistance(leftTitle, rightTitle);
+        const rightSourceDistance = sourceDistance(rightTitle, leftTitle);
         const decision = chooseMergeWinner(
           mergeWinnerCardForPiece(left, timedCounts),
           mergeWinnerCardForPiece(right, timedCounts),
           { tripCities }
         );
-        const target = decision.winner === "left" ? left : right;
+        // A localized/parser-rephrased alias may enrich a venue, but it may
+        // not overwrite the title the source itself spells out. This keeps
+        // canonical naming source-backed without any venue alias table.
+        const target =
+          leftVerbatim !== rightVerbatim
+            ? leftVerbatim > rightVerbatim
+              ? left
+              : right
+            : leftSourceDistance !== rightSourceDistance
+              ? leftSourceDistance < rightSourceDistance
+                ? left
+                : right
+            : decision.winner === "left"
+              ? left
+              : right;
         const source = target === left ? right : left;
         mergeCanonicalPieceInto({
           reason:
@@ -9117,17 +9304,6 @@ function sourceSequencedIdentityDate(
   );
 }
 
-function activityDecisionReferencesNote(
-  piece: CanonicalEvidencePiece,
-  note: CanonicalEvidencePiece
-) {
-  const referenceId = stringValue(
-    canonicalCandidacyDecision(piece),
-    "referenceNoteObservationId"
-  );
-  return Boolean(referenceId && note.observationIds.includes(referenceId));
-}
-
 // A dated DAY-PLAN section label ("Sunday, January 20th") versus the source's
 // trailing notes/idea blob: membership in a deliberate day plan is the
 // "stronger planned sighting" of RW-CLS-001 even without a time. The key's
@@ -9174,6 +9350,34 @@ function isDeliberateDayPlanMention(
   if (pieceHasHedgeMarker(piece)) return false;
   const classification = classifyDraftActivityCard(activityInput(piece.payload));
   return !classification.hasAvailabilityMarker;
+}
+
+function hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  if (authoritativeActivityCommitment(piece) !== "sequenced") return false;
+  const classifiedDate = stringValue(
+    canonicalCandidacyDecision(piece),
+    "classifiedDate"
+  );
+  if (!classifiedDate) return false;
+  const occurrences = sourceOccurrencesForPiece(
+    piece,
+    observationById,
+    { identityTitleOnly: true }
+  );
+  const hasMatchingOccurrence = occurrences.some(
+    (occurrence) => occurrence.date === classifiedDate
+  );
+  const mentionDates = observationMentionDates(piece, observationById);
+  for (const occurrence of occurrences) {
+    mentionDates.add(occurrence.date);
+  }
+  return (
+    (mentionDates.size <= 1 || !hasMatchingOccurrence) &&
+    isDeliberateDayPlanMention(piece, observationById)
+  );
 }
 
 // Classification may observe that source-selected peers make an item
@@ -9281,42 +9485,20 @@ function activityHasIdentityWinningEvidence({
         normalizedComparable(stringValue(note.payload, "title")) &&
       stringValue(pieceDecision, "classifiedDate") &&
       stringValue(pieceDecision, "classifiedDate") ===
-        stringValue(noteDecision, "classifiedDate")
+      stringValue(noteDecision, "classifiedDate")
   );
+  // A single dated day-plan occurrence may defeat a duplicate reference
+  // note. Once the same identity appears on multiple dates, block-inherited
+  // `plan` is only placement evidence: the venue needs its own fixed or
+  // source-sequenced proof before it can defeat the City Note home.
   return Boolean(
-    authoritativeActivityCommitment(piece) !== "none" ||
+    authoritativeActivityCommitment(piece) === "fixed" ||
       sourceSequencedIdentityDate(piece, observationById) ||
-      (note && activityDecisionReferencesNote(piece, note)) ||
       sameAuthoritativeOccurrence ||
-      (note &&
-        authoritativeActivityCommitment(piece) === "sequenced" &&
-        !notesShareSourceSection(piece, [note], observationById))
-  );
-}
-
-function notesShareSourceSection(
-  piece: CanonicalEvidencePiece,
-  notePieces: CanonicalEvidencePiece[],
-  observationById: Map<string, EvidenceObservation>
-) {
-  // Compare against the card's DAY-PLAN section labels ONLY. A merged copy
-  // from the trailing notes blob must not poison this veto: in live run
-  // 7.18.1 the parser emitted the Vienna venues both as day-section
-  // activities and as a notes-blob reference list, the activity copies
-  // merged (so every card carried the notes-blob label too), the veto saw a
-  // "shared section" everywhere, and the entire Vienna leg folded into the
-  // city note. The question the veto answers is: did the source list this
-  // venue as a reference IN THE SAME DAY SECTION the card came from?
-  const dayPlanLabels = new Set(
-    pieceObservationLabels(piece, observationById).filter((label) =>
-      DAY_PLAN_SECTION_LABEL_PATTERN.test(label)
-    )
-  );
-  if (dayPlanLabels.size === 0) return true;
-  return notePieces.some((note) =>
-    pieceObservationLabels(note, observationById).some((label) =>
-      dayPlanLabels.has(label)
-    )
+      hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
+        piece,
+        observationById
+      )
   );
 }
 
@@ -9420,6 +9602,21 @@ function resolveUncommittedRepeatMentions(
     none: 0,
     sequenced: 1,
   };
+  const pendingResearchedDecision = (piece: CanonicalEvidencePiece) => {
+    const decision = canonicalCandidacyDecision(piece);
+    if (stringValue(decision, "reasonCode") !== "BLOCK_AMBIGUOUS") {
+      return false;
+    }
+    const text = [
+      activityText(piece.payload),
+      stringValue(piece.payload, "evidence") ?? "",
+    ].join(" ");
+    return Boolean(
+      PRICE_MARKER_PATTERN.test(text) ||
+        classifyDraftActivityCard(activityInput(piece.payload))
+          .hasAvailabilityMarker
+    );
+  };
 
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
@@ -9455,6 +9652,11 @@ function resolveUncommittedRepeatMentions(
       // Sequenced and loose copies fold into the strongest copy.
       for (const entry of ranked.slice(1)) {
         if (entry.commitment === "fixed") continue;
+        // Identity preserves a researched occurrence until the later review
+        // stage decides its reversible home. Folding it into another day's
+        // committed copy here would erase the very Friday-list choice review
+        // is required to present.
+        if (pendingResearchedDecision(entry.piece)) continue;
         if (doNotMerge(entry.piece, winner.piece)) continue;
         mergeCanonicalPieceInto({
           reason:
@@ -9478,16 +9680,18 @@ function resolveUncommittedRepeatMentions(
           Boolean(entry.sourceDate)
       )
       .sort((left, right) => left.sourceDate.localeCompare(right.sourceDate));
-    const contrastedPlan = ranked.find((entry) =>
-      pieces.some(
-        (candidate) =>
-          candidate.kind === "note" &&
-          activityDecisionReferencesNote(entry.piece, candidate)
-      )
+    const sequencedEntries = ranked.filter(
+      (entry) => entry.commitment === "sequenced"
     );
     const activityWinner =
       sourceSequenced[0]?.piece ??
-      contrastedPlan?.piece;
+      (sequencedEntries.length === 1 &&
+      hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
+        sequencedEntries[0].piece,
+        observationById
+      )
+        ? sequencedEntries[0].piece
+        : null);
     if (activityWinner) {
       const sourceDate =
         stringValue(canonicalCandidacyDecision(activityWinner), "classifiedDate") ??
@@ -9548,9 +9752,19 @@ function resolveUncommittedRepeatMentions(
     if (!title || questionSubjects.has(title)) continue;
     if (authoritativeActivityCommitment(piece) === "fixed") continue;
     if (authoritativeActivityCommitment(piece) === "sequenced") {
+      const classifiedDate = stringValue(
+        canonicalCandidacyDecision(piece),
+        "classifiedDate"
+      );
+      const sourceDate = sourceSequencedIdentityDate(piece, observationById);
+      // Generic one-token identities can inherit a more specific sibling's
+      // source occurrence ("Library" vs "State Hall Library"). Keep their
+      // own classified date. Properly named entities may use the stronger
+      // source sequence to correct a later parser copy.
       const authoritativeDate =
-        sourceSequencedIdentityDate(piece, observationById) ??
-        stringValue(canonicalCandidacyDecision(piece), "classifiedDate");
+        identityTokens(stringValue(piece.payload, "title")).length <= 1
+          ? classifiedDate ?? sourceDate
+          : sourceDate ?? classifiedDate;
       if (
         authoritativeDate &&
         stringValue(piece.payload, "date") !== authoritativeDate
@@ -9581,15 +9795,6 @@ function resolveUncommittedRepeatMentions(
           type: "recovered",
         });
       }
-      continue;
-    }
-    if (
-      pieces.some(
-        (candidate) =>
-          candidate.kind === "note" &&
-          activityDecisionReferencesNote(piece, candidate)
-      )
-    ) {
       continue;
     }
     const mentionDates = observationMentionDates(piece, observationById);
@@ -9864,6 +10069,62 @@ function identityUsefulFactDigest(observation: EvidenceObservation) {
   return stableHash({ fact, observationId: observation.id, version: 1 });
 }
 
+// A route-shaped parser card may name several places in one title while one
+// of those places also has its own timed/booked card. The composite is useful
+// description evidence, but it is not a fifth traveler home and it must not
+// bridge the identities of its sibling places. Identity attaches it only
+// when exactly one named segment has independent scheduled proof.
+function attachCompositeRouteEvidence(
+  pieces: CanonicalEvidencePiece[],
+  doNotMerge: ContainmentIdentityGuard
+) {
+  const composites = pieces.filter((piece) =>
+    Boolean(
+      piece.outputEligible &&
+        piece.kind === "activity" &&
+        /\s(?:\/|→|->)\s/.test(stringValue(piece.payload, "title") ?? "")
+    )
+  );
+
+  for (const composite of composites) {
+    if (!composite.outputEligible) continue;
+    const date = stringValue(composite.payload, "date");
+    const compositeTokens = identityTokens(
+      stringValue(composite.payload, "title")
+    );
+    const scheduled = pieces.filter((candidate) => {
+      if (
+        candidate === composite ||
+        !candidate.outputEligible ||
+        candidate.kind !== "activity" ||
+        /\s(?:\/|→|->)\s/.test(
+          stringValue(candidate.payload, "title") ?? ""
+        ) ||
+        doNotMerge(composite, candidate) ||
+        !sameCanonicalDate(composite.payload, candidate.payload) ||
+        !hasIndependentActivityAnchor(candidate.payload)
+      ) {
+        return false;
+      }
+      const candidateTokens = identityTokens(
+        stringValue(candidate.payload, "title")
+      );
+      return (
+        candidateTokens.length >= 2 &&
+        tokenSetContains(compositeTokens, candidateTokens) &&
+        (!date || stringValue(candidate.payload, "date") === date)
+      );
+    });
+    if (scheduled.length !== 1) continue;
+    mergeCanonicalPieceInto({
+      reason:
+        "route composite attached to its sole scheduled entity; incidental sibling mentions keep separate identities",
+      source: composite,
+      target: scheduled[0],
+    });
+  }
+}
+
 function resolveCanonicalIdentity({
   doNotMerge,
   missingDetails,
@@ -9894,6 +10155,8 @@ function resolveCanonicalIdentity({
 
   // These are evidence lanes inside ONE identity authority. None may run as
   // a later independent writer, and every merge is vetoed by containment.
+  attachGenericActivityPlaceholders(pieces, doNotMerge);
+  attachCompositeRouteEvidence(pieces, doNotMerge);
   absorbLocationFragmentCards(pieces, doNotMerge);
   collapseSlotCollisions(pieces, doNotMerge);
   collapseAlternativeSlotCards(pieces, doNotMerge);
@@ -9955,7 +10218,9 @@ function resolveCanonicalIdentity({
       .join(" ")
       .toLowerCase();
     const reasonCode: CanonicalIdentityLedgerTelemetry["decisions"][number]["reasonCode"] =
-      /same-day venue identity/.test(actionText)
+      /route composite attached to its sole scheduled entity/.test(actionText)
+        ? "route_composite_to_scheduled_entity"
+        : /same-day venue identity/.test(actionText)
         ? "cross_referenced_same_day_venue"
         : /source occurrence|source-supported planned occurrence/.test(
               actionText
@@ -10204,19 +10469,22 @@ function sourceIntentSignalsForPiece(
       observation.sourceStructure.sectionLabel ||
         observation.sourceStructure.headingPath.length > 0
     );
-    const evidence = normalizeText(
+    const rawEvidence =
       preservedEvidence ??
-        (hasPreservedSourceStructure
-          ? stringValue(observation.payload, "description") ?? ""
-          : "")
-    );
-    if (!evidence) continue;
+      (hasPreservedSourceStructure
+        ? stringValue(observation.payload, "description") ?? ""
+        : "");
+    if (!rawEvidence) continue;
     // Marker and entity must occur in the same source clause. Production's
     // injected evidence can contain a whole paragraph; a "go back" sentence
     // elsewhere in that paragraph is not commitment evidence for every
     // venue named later in the blob.
-    const matchingClauses = evidence
+    // Split preserved source bytes before normalizeText collapses newlines.
+    // A hedge on an earlier line must never poison the next named entity in
+    // a flattened paragraph (the production Friday Vienna list).
+    const matchingClauses = rawEvidence
       .split(/[.;!?\n]+/)
+      .map((clause) => normalizeText(clause))
       .filter((clause) => {
         const clauseTokens = identityTokens(clause);
         return (
@@ -10229,14 +10497,24 @@ function sourceIntentSignalsForPiece(
       hasHedgedMention = true;
       hedgedObservationIds.push(observation.id);
     }
+    const intakeRole = stringValue(
+      asRecord(observation.payload._canonicalIntakeCandidacyDecision),
+      "inputEvidenceRole"
+    );
+    const observationTitleTokens = identityTokens(
+      stringValue(observation.payload, "title")
+    );
+    const structuralContextOwnsEntity = Boolean(
+      intakeRole !== "grouping_proposal" ||
+        (observationTitleTokens.length > 0 &&
+          overlapCount(titleTokens, observationTitleTokens) >=
+            Math.min(2, titleTokens.length))
+    );
     if (
-      stringValue(
-        asRecord(observation.payload._canonicalIntakeCandidacyDecision),
-        "inputEvidenceRole"
-      ) !== "grouping_proposal" &&
+      structuralContextOwnsEntity &&
       matchingClauses.some(
         (clause) =>
-          /\b(?:go to|walk to|head to|return to|book(?:ed)?|reserv(?:e|ed)|tickets? for)\b/.test(
+          /\b(?:go to|walk to|head to|return to|arrive at|arrives? at|book(?:ed)?|reserv(?:e|ed)|tickets? for)\b/.test(
             clause
           ) &&
           !hasWeakRecommendationLanguage(clause)
@@ -10370,6 +10648,7 @@ function applyIntentBlockClassification({
     ReturnType<typeof sourceIntentSignalsForPiece>
   >();
   const sourceSupportedVenueAddressPieceIds = new Set<string>();
+  const sourceCommittedDaySlotPieceIds = new Set<string>();
   const entries: IntentBlockEntry[] = [];
 
   for (const piece of pieces) {
@@ -10445,6 +10724,15 @@ function applyIntentBlockClassification({
         ...observation.sourceStructure.headingPath,
       ])
       .filter(Boolean);
+    const sourceCommittedDaySlot = DAY_SLOT_LEXICON.some(
+      ({ pattern, stems }) =>
+        stems.test(title) &&
+        structuralLabels.some((label) => DAY_PLAN_LABEL_PATTERN.test(label)) &&
+        structuralLabels.some((label) => pattern.test(label))
+    );
+    if (sourceCommittedDaySlot) {
+      sourceCommittedDaySlotPieceIds.add(piece.id);
+    }
     const namedInObservedDayHeading = titleNamedInSourceLabels(
       title,
       structuralLabels.filter((label) => DAY_PLAN_LABEL_PATTERN.test(label))
@@ -10499,6 +10787,21 @@ function applyIntentBlockClassification({
               .join(" ")
           ).includes(normalizedComparable(publicVenueAddressEvidence))
         )
+    );
+    const uncommittedReferenceIdea = Boolean(
+      referenceNoteObservation &&
+        !referenceNoteIsAtomicTwin &&
+        (stringValue(referenceNoteObservation.payload, "date") === date ||
+          isRecommendationActivityCategory(
+            stringValue(piece.payload, "category")
+          )) &&
+        !sourceIntent.hasExplicitPlanMention &&
+        !pieceNamedInDayHeading(piece) &&
+        !namedInObservedDayHeading &&
+        !sourceCommittedDaySlot &&
+        !matchesCommittedDetailSubject(title) &&
+        !hasIndependentActivityAnchor(piece.payload) &&
+        !publicVenueAddressEvidence
     );
     if (sourceSupportedPublicVenueAddress) {
       sourceSupportedVenueAddressPieceIds.add(piece.id);
@@ -10623,11 +10926,12 @@ function applyIntentBlockClassification({
       // shopping span cannot promote each loose recommendation merely
       // because it mentions an unrelated "or" (production's `Buy wine`).
       hasExplicitChoice:
-        /\bor\b/i.test(title) ||
-        (!isRecommendationActivityCategory(
-          stringValue(piece.payload, "category")
-        ) &&
-          /\bor\b/i.test(ownEvidenceText.trim() ? ownEvidenceText : ownText)),
+        !uncommittedReferenceIdea &&
+        (/\bor\b/i.test(title) ||
+          (!isRecommendationActivityCategory(
+            stringValue(piece.payload, "category")
+          ) &&
+            /\bor\b/i.test(ownEvidenceText.trim() ? ownEvidenceText : ownText))),
       hasFixedEvidence: auditedFixedEvidence,
       hasHedgeMarker:
         classifyOwnTextEvidence(
@@ -10645,12 +10949,14 @@ function applyIntentBlockClassification({
       hasIdeaSignal:
         notesBlobSignal ||
         hasLooseTipVocabulary(ownText) ||
-        (Boolean(referenceNoteObservation) &&
-          !referenceNoteIsAtomicTwin &&
-          stringValue(referenceNoteObservation?.payload ?? {}, "date") ===
-            date &&
-          !hasIndependentActivityAnchor(piece.payload) &&
-          !publicVenueAddressEvidence),
+        (isRecommendationActivityCategory(
+          stringValue(piece.payload, "category")
+        ) &&
+          /\bor\b/i.test(
+            ownEvidenceText.trim() ? ownEvidenceText : ownText
+          ) &&
+          !auditedFixedEvidence) ||
+        uncommittedReferenceIdea,
       hasResearchEvidence:
         PRICE_MARKER_PATTERN.test(researchedText) ||
         classification.hasAvailabilityMarker,
@@ -10659,7 +10965,10 @@ function applyIntentBlockClassification({
         sourceIntent.hasExplicitPlanMention ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
-        pieceHasSourceSupportedPeerPlanShape(piece, pieces),
+        sourceCommittedDaySlot ||
+        (!isRecommendationActivityCategory(
+          stringValue(piece.payload, "category")
+        ) && pieceHasSourceSupportedPeerPlanShape(piece, pieces)),
       hasSourceStructure:
         structuralLabels.length > 0 ||
         localObservations.some(
@@ -10732,6 +11041,9 @@ function applyIntentBlockClassification({
         ? "source_ticket_choice"
         : null,
       pieceNamedInDayHeading(piece) ? "day_heading" : null,
+      sourceCommittedDaySlotPieceIds.has(piece.id)
+        ? "day_heading_slot"
+        : null,
       matchesCommittedDetailSubject(
         stringValue(piece.payload, "title")
       )
@@ -12801,7 +13113,6 @@ function createResearchedListQuestions(
   pieces: CanonicalEvidencePiece[],
   missingDetails: unknown[]
 ) {
-  const timedCounts = timedActivityCountsByDate(pieces);
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const byDate = new Map<string, CanonicalEvidencePiece[]>();
 
@@ -12812,7 +13123,28 @@ function createResearchedListQuestions(
   );
 
   for (const piece of pieces) {
-    if (!committedMentionPieceCandidate(piece)) continue;
+    const candidacy = canonicalCandidacyDecision(piece);
+    const classifiedDate = stringValue(candidacy, "classifiedDate");
+    const researchText = [
+      activityText(piece.payload),
+      stringValue(piece.payload, "evidence") ?? "",
+    ].join(" ");
+    const researchClassification = classifyDraftActivityCard(
+      activityInput(piece.payload)
+    );
+    const hasResearchEvidence = Boolean(
+      PRICE_MARKER_PATTERN.test(researchText) ||
+        researchClassification.hasAvailabilityMarker
+    );
+    const retainedResearchCandidate = Boolean(
+      (piece.kind === "activity" || piece.kind === "note") &&
+        classifiedDate &&
+        candidacy.hasAuditedCommitment !== true &&
+        hasResearchEvidence
+    );
+    if (!committedMentionPieceCandidate(piece) && !retainedResearchCandidate) {
+      continue;
+    }
     // A grouped parent or child is committed structure, never a researched
     // idea — live run 7.18.0 asked "planned or ideas?" about the Prague
     // Castle group and its own KGB child while the castle's ticket question
@@ -12824,7 +13156,7 @@ function createResearchedListQuestions(
       continue;
     }
     if (questionSubjectPieceIds.has(piece.id)) continue;
-    const date = stringValue(piece.payload, "date");
+    const date = stringValue(piece.payload, "date") ?? classifiedDate;
     const rawTitle = stringValue(piece.payload, "title") ?? "";
     const title = normalizedComparable(rawTitle);
     if (!date || !title) continue;
@@ -12856,23 +13188,15 @@ function createResearchedListQuestions(
         continue;
       }
     }
-    if (mentionCommitment(piece, timedCounts) !== "none") continue;
     // Review consumes the authoritative role; it may not turn an audited or
     // source-plan block into ideas merely because the parser also captured
     // prices/hours. Albertina is the production-shaped guard for this
     // boundary.
-    if (authoritativeActivityCommitment(piece) !== "none") continue;
+    if (candidacy.hasAuditedCommitment === true) continue;
     if (pieceHasHedgeMarker(piece)) continue;
     // Research markers can sit in any parser text field (live run 7.17.1
     // carried the trio's prices in `evidence`, not description).
-    const text = [
-      activityText(piece.payload),
-      stringValue(piece.payload, "evidence") ?? "",
-    ].join(" ");
-    const classification = classifyDraftActivityCard(activityInput(piece.payload));
-    if (!PRICE_MARKER_PATTERN.test(text) && !classification.hasAvailabilityMarker) {
-      continue;
-    }
+    if (!hasResearchEvidence) continue;
     const group = byDate.get(date);
     if (group) group.push(piece);
     else byDate.set(date, [piece]);
@@ -12880,8 +13204,48 @@ function createResearchedListQuestions(
 
   const questions: Array<Record<string, unknown>> = [];
 
-  for (const [date, group] of byDate) {
+  for (const [date, rawGroup] of byDate) {
+    // One semantic research candidate per title. Identity may already have
+    // folded a Friday idea into a stronger copy on another day; review still
+    // consumes its original classified-date evidence without cloning it.
+    const group = [...new Map(
+      rawGroup.map((piece) => [
+        normalizedComparable(stringValue(piece.payload, "title")),
+        piece,
+      ])
+    ).values()];
     if (group.length < 2) continue;
+
+    // An explicit source container such as "Explore Vienna" already states
+    // the list's semantic home: its researched members are city ideas. That
+    // source structure removes the ambiguity without relying on whether an
+    // unrelated committed activity happens to share the day. A standalone
+    // researched list still needs one reversible planned-or-ideas question.
+    const enclosedByIdeaContainer = pieces.some((piece) => {
+      if (
+        piece.payload._canonicalSourceContainer !== true ||
+        stringValue(piece.payload, "date") !== date
+      ) {
+        return false;
+      }
+      const containerText = normalizedComparable(
+        [
+          stringValue(piece.payload, "title"),
+          stringValue(piece.payload, "description"),
+          stringValue(piece.payload, "evidence"),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
+      return group.every((member) => {
+        const memberTitle = normalizedComparable(
+          stringValue(member.payload, "title")
+        );
+        return memberTitle.length >= 4 && containerText.includes(memberTitle);
+      });
+    });
+    if (enclosedByIdeaContainer) continue;
+
     const titles = group
       .map((piece) => stringValue(piece.payload, "title"))
       .filter((value): value is string => Boolean(value));
@@ -12901,6 +13265,7 @@ function createResearchedListQuestions(
       title: stringValue(piece.payload, "title"),
     }));
     for (const piece of group) {
+      if (!piece.outputEligible || piece.kind !== "activity") continue;
       // City preservation before the date-null used to be patched in
       // locally here (normalizedComparable'd, so it also mis-cased the
       // stamped city — e.g. "vienna" instead of "Vienna" on the final note
@@ -13029,6 +13394,71 @@ function piecePayloadAppendOption(
   payload.description = existing ? `${existing} ${optionLine}` : optionLine;
 }
 
+function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
+  const title = stringValue(piece.payload, "title") ?? "";
+  const sourceText = [
+    title,
+    stringValue(piece.payload, "description"),
+    stringValue(piece.payload, "evidence"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const city = normalizedComparable(stringValue(piece.payload, "city"));
+  const labels: string[] = [];
+  const push = (raw: string) => {
+    const cleaned = raw
+      .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const comparable = normalizedComparable(cleaned);
+    const distinctiveVenueTokens = distinctiveTitleTokens(cleaned).filter(
+      (token) =>
+        !/^(?:bath|baths|house|thermal|spa|sample|city|public|local|go|to|visit|visited|went)$/.test(
+          token
+        )
+    );
+    if (
+      !comparable ||
+      comparable === city ||
+      /^(?:bath|baths|bath house|bath houses|thermal|thermal bath|thermal baths)$/.test(
+        comparable
+      ) ||
+      distinctiveVenueTokens.length === 0
+    ) {
+      return;
+    }
+    labels.push(/\bbaths?(?:\s+house)?$/i.test(cleaned) ? cleaned : `${cleaned} Baths`);
+  };
+
+  for (const match of sourceText.matchAll(
+    /\b([\p{L}][\p{L}'’.-]{2,}(?:\s+[\p{L}][\p{L}'’.-]{2,})?)\s+(bath(?:s|\s+house)?)\b/giu
+  )) {
+    push(`${match[1]} ${match[2]}`);
+  }
+  for (const match of sourceText.matchAll(
+    /\bbaths?\s*[:–-]\s*([\p{L}][\p{L}'’.-]{2,})\s+(?:and|or)\s+([\p{L}][\p{L}'’.-]{2,})(?:\s+baths?)?/giu
+  )) {
+    push(match[1]);
+    push(match[2]);
+  }
+  for (const match of sourceText.matchAll(
+    /\b(?:went to|visit(?:ed)?)\s+([\p{L}][\p{L}'’.-]{2,})\b/giu
+  )) {
+    push(match[1]);
+  }
+
+  return [...new Map(
+    labels.map((label) => [
+      distinctiveTitleTokens(label)
+        .filter((token) => !/^(?:bath|house)$/.test(token))
+        .join(" "),
+      label,
+    ])
+  ).entries()]
+    .filter(([key]) => Boolean(key))
+    .map(([, label]) => label);
+}
+
 function createDayLabelSlotQuestions(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
@@ -13060,7 +13490,26 @@ function createDayLabelSlotQuestions(
       const title = stringValue(piece.payload, "title");
       if (!title || !stems.test(title)) return false;
       if (questionSubjects.has(normalizedComparable(title))) return false;
-      return mentionCommitment(piece, timedCounts) === "none";
+      const genericCommittedSlot =
+        slot === "bathing" && genericActivityConcept(piece.payload) === "bath";
+      const candidacy = canonicalCandidacyDecision(piece);
+      const commitmentSignals = Array.isArray(candidacy.commitmentSignals)
+        ? candidacy.commitmentSignals.filter(
+            (value): value is string => typeof value === "string"
+          )
+        : [];
+      // The day heading commits the activity kind, not a particular venue.
+      // Classification owns that Activity decision; review may consume it as
+      // an unresolved option only when no independent time/booking/plan
+      // signal selected the venue itself.
+      const daySlotOnlyCommitment =
+        commitmentSignals.includes("day_heading_slot") &&
+        commitmentSignals.every((signal) => signal === "day_heading_slot");
+      return (
+        genericCommittedSlot ||
+        daySlotOnlyCommitment ||
+        mentionCommitment(piece, timedCounts) === "none"
+      );
     });
     // Slot override (run5 PB-6, 6th-run baths defect): a committed day
     // title RESERVES its venue options. Options an earlier pass demoted to
@@ -13068,27 +13517,13 @@ function createDayLabelSlotQuestions(
     // the day title is stronger source intent than the demotion, so
     // matching note pieces rejoin the slot flow as options.
     const demotedOptions = pieces.filter((piece) => {
-      if (!piece.outputEligible || piece.kind !== "note") return false;
+      if (piece.kind !== "note") return false;
+      if (piece.payload._sourceSupport === "unsupported") return false;
       const title = stringValue(piece.payload, "title");
       if (!title || !stems.test(title)) return false;
       if (questionSubjects.has(normalizedComparable(title))) return false;
       return true;
     });
-    if (candidates.length === 0 && demotedOptions.length > 0) {
-      // Restore the most generic demoted option as the slot's flexible
-      // subject card; the day title committed the slot (RW-QUE-001).
-      const restored = demotedOptions[0];
-      restored.kind = "activity";
-      restored.payload.itemType = "activity";
-      addCanonicalAction(restored, {
-        absorbedTitles: [],
-        observationIds: [...restored.observationIds],
-        reason:
-          "day-title slot override: the committed day title reserves this venue option (restored from city notes)",
-        type: "recovered",
-      });
-      candidates.push(restored);
-    }
     for (const option of demotedOptions) {
       if (candidates.includes(option)) continue;
       candidates.push(option);
@@ -13101,13 +13536,17 @@ function createDayLabelSlotQuestions(
     );
     if (alreadyAsked) continue;
 
-    const titles = Array.from(
+    const candidateTitles = Array.from(
       new Set(
         candidates
           .map((piece) => stringValue(piece.payload, "title"))
           .filter((value): value is string => Boolean(value))
       )
     );
+    const titles =
+      slot === "bathing"
+        ? Array.from(new Set(candidates.flatMap(bathVenueOptionLabels)))
+        : candidateTitles;
     // The slot is committed (flavor 2): ONE flexible slot card owns the
     // choice, the other venue options fold into it as description options —
     // they are alternatives for the same committed slot, never additional
@@ -13129,15 +13568,20 @@ function createDayLabelSlotQuestions(
     // needs at least two genuinely different venues, otherwise the options
     // fold silently and the slot card simply carries the venue.
     const venueKeys = new Set(
-      ordered
-        .map((piece) =>
-          distinctiveTitleTokens(stringValue(piece.payload, "title") ?? "")
+      titles
+        .map((title) =>
+          distinctiveTitleTokens(title)
             .filter((token) => !stems.test(token) && !/^house?s?$/.test(token))
             .join(" ")
         )
         .filter(Boolean)
     );
     for (const option of ordered.slice(1)) {
+      if (slot === "bathing") {
+        for (const optionTitle of bathVenueOptionLabels(option)) {
+          piecePayloadAppendOption(subject.payload, optionTitle);
+        }
+      }
       const optionTitle = stringValue(option.payload, "title");
       if (optionTitle) {
         piecePayloadAppendOption(subject.payload, optionTitle);
@@ -13159,7 +13603,8 @@ function createDayLabelSlotQuestions(
     questions.push({
       _canonicalReviewDisposition: "question",
       _canonicalQuestionKind: "day_label_slot",
-      answerType: "text",
+      answerType: "single_choice",
+      answerOptions: titles.map((title) => ({ label: title, value: title })),
       confidence: "medium",
       evidence: `The day title commits ${slot}, and the source lists ${titles.join(
         ", "
@@ -13262,7 +13707,16 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
     const approvedCityNote =
       observation.payload._canonicalRoleDecision === "city_note";
 
-    if (approvedKeepActivity || approvedCityNote) {
+    // A grouping proposal is structural input until containment licenses an
+    // actual group. The older resolver `keep_activity` stamp cannot turn an
+    // unlicensed route/day heading into a second semantic writer. Named site
+    // containers retain their explicit rescue in the branch below.
+    const unlicensedGroupingProposal =
+      (observation.role === "grouping_proposal" ||
+        inputEvidenceRole === "grouping_proposal") &&
+      !approvedGrouping;
+
+    if ((approvedKeepActivity && !unlicensedGroupingProposal) || approvedCityNote) {
       stampObservationDecision(
         observation,
         activityCandidacyDecisionForPayload(observation.payload, {
@@ -15165,7 +15619,11 @@ export function canonicalizeCanonicalReviewDetails(
     const text = normalizeText(
       [detail.prompt, detail.evidence].filter(Boolean).join(" ")
     );
-    if (!/\bticket\b|\btour or (?:just a )?visit\b|\btour option\b/.test(text)) {
+    if (
+      !/\bticket\b|\btour or (?:just a )?visit\b|\btour option\b|\btour planned\b|\bplanned\b[^.]{0,40}\btour\b/.test(
+        text
+      )
+    ) {
       continue;
     }
     const subjectId = stringValue(detail, "relatedCanonicalPieceId");
@@ -15800,9 +16258,6 @@ export function clusterExtractedEvidence({
   );
   runPieceWriter("pre_classification_mutation", "attachGenericActivityAccessories", ["pieces[].payload", "pieces[].actions"], () =>
     attachGenericActivityAccessories(pieces)
-  );
-  runPieceWriter("pre_classification_mutation", "attachGenericActivityPlaceholders", ["pieces[].payload", "pieces[].actions"], () =>
-    attachGenericActivityPlaceholders(pieces)
   );
   runPieceWriter("pre_classification_mutation", "attachRentalCarReturns", ["pieces[].payload", "pieces[].actions"], () =>
     attachRentalCarReturns(pieces)
