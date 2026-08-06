@@ -208,6 +208,7 @@ export type EvidenceStageInput = {
   source: Exclude<EvidenceSource, "source_anchor">;
   sourceFilename?: string | null;
   sourceProvenance?: string | null;
+  sourceSpanIds?: string[];
   sourceText?: string | null;
   sourceUploadId?: string | null;
   stage: unknown;

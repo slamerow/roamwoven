@@ -18,6 +18,11 @@ import {
 } from "@/lib/extraction/source-transport-anchors";
 import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
 import {
+  buildSourceDocumentIndexV1,
+  sourceSpanIdsForMaterialTextV1,
+  type SourceDocumentIndexV1,
+} from "@/lib/extraction/source-document-index";
+import {
   runBoundedSourceRecovery,
   SOURCE_RECOVERY_SYSTEM_PROMPT,
 } from "@/lib/extraction/source-recovery";
@@ -49,6 +54,7 @@ export type ActivityExtractionChunk = {
   id: string;
   label: string;
   materials: TripExtractionMaterial[];
+  sourceSpanIds: string[];
 };
 
 const ACTIVITY_CHUNK_TARGET_CHARS = 18000;
@@ -676,7 +682,8 @@ function splitMaterialForActivityExtraction(
 
 export function createActivityExtractionChunks(
   materials: TripExtractionMaterial[],
-  maxChars = ACTIVITY_CHUNK_TARGET_CHARS
+  maxChars = ACTIVITY_CHUNK_TARGET_CHARS,
+  sourceDocumentIndex?: SourceDocumentIndexV1
 ): ActivityExtractionChunk[] {
   return materials
     .filter((material) => material.text.trim())
@@ -693,6 +700,13 @@ export function createActivityExtractionChunks(
             id: `activity-chunk-${materialIndex + 1}-${sectionIndex + 1}`,
             label: section.label,
             materials: [chunkMaterial],
+            sourceSpanIds: sourceDocumentIndex
+              ? sourceSpanIdsForMaterialTextV1({
+                  index: sourceDocumentIndex,
+                  material,
+                  text: section.text,
+                })
+              : [],
           };
         }
       )
@@ -965,6 +979,10 @@ function splitActivityChunk(
       id: `${chunk.id}-split-${index + 1}`,
       label: `${chunk.label} part ${index + 1}`,
       materials: [chunkMaterial],
+      // A retry split may retain a superset of the parent's references. The
+      // fact aligner still requires an exact/source-bounded match and records
+      // ambiguity instead of guessing between duplicate clauses.
+      sourceSpanIds: [...chunk.sourceSpanIds],
     };
   });
 }
@@ -1299,6 +1317,10 @@ export async function extractTripDraftWithOpenAI({
     throw new Error("No extracted text is available for AI trip parsing.");
   }
 
+  // Build immutable source identity once, from the complete prepared material
+  // set, before chunking. Model inputs remain byte-for-byte unchanged.
+  const sourceDocumentIndex = buildSourceDocumentIndexV1(usableMaterials);
+
   const config = getOpenAIConfig();
   const completeSpineCharBudget = Math.min(
     120000,
@@ -1323,7 +1345,11 @@ export async function extractTripDraftWithOpenAI({
     schemaName: "roamwoven_trip_spine",
     system: spineSystemPrompt,
   });
-  const activityChunks = createActivityExtractionChunks(usableMaterials);
+  const activityChunks = createActivityExtractionChunks(
+    usableMaterials,
+    ACTIVITY_CHUNK_TARGET_CHARS,
+    sourceDocumentIndex
+  );
   const recoveredActivityChunks = await mapWithConcurrency(
     activityChunks,
     ACTIVITY_EXTRACTION_CONCURRENCY,
@@ -1368,6 +1394,7 @@ export async function extractTripDraftWithOpenAI({
         source: "model_chunk" as const,
         sourceFilename: material?.filename ?? null,
         sourceProvenance: material?.sourceProvenance ?? null,
+        sourceSpanIds: chunk.sourceSpanIds,
         sourceText: getChunkText(chunk),
         sourceUploadId: material?.sourceUploadId ?? null,
         stage: {
@@ -1427,6 +1454,7 @@ export async function extractTripDraftWithOpenAI({
         source: "model_chunk" as const,
         sourceFilename: material?.filename ?? null,
         sourceProvenance: material?.sourceProvenance ?? null,
+        sourceSpanIds: chunk.sourceSpanIds,
         sourceText: getChunkText(chunk),
         sourceUploadId: material?.sourceUploadId ?? null,
         stage: result.json,

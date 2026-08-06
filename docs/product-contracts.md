@@ -1,8 +1,20 @@
 # Roamwoven Product Contracts
 
-Ledger version: 30
+Ledger version: 31
 
-Ledger date: 2026-08-06 (Fresh production assembly audit — COVERAGE/EVIDENCE
+Ledger date: 2026-08-07 (Source Fact Ledger V1 contract and Question-quality
+correction. Source facts become an immutable, source-derived boundary before
+classification, containment, identity, grouping, review, or publication can
+reinterpret them. V1 is shadow-only: it may compute, persist, audit, and score
+facts, but it may not change traveler output or add model/geocode work.
+
+The former exact-three Question gate is superseded. Question usefulness is the
+gate: material, non-duplicative, not source-answerable, not routine assembly,
+and not technical recovery. A small handful is experience guidance only; no
+fixed count establishes quality. Work order:
+`docs/source-fact-ledger-v1-work-order-2026-08-07.md`.)
+
+Prior: ledger version 30 (2026-08-06) — (Fresh production assembly audit — COVERAGE/EVIDENCE
 ONLY; no contract text or enforcement label changed. Deployed commit `2e056d6`
 completed the one authorized extraction for trip
 `6e200576-b6d5-4a6d-afd3-7beaec001f1c`, processing run
@@ -637,6 +649,49 @@ path is bypassed.
   adversarial review named — and kept `"Operator"` as its confirmation label
   where run-7.21.1b had `VXFHXKCQEPHPUSNT`. Day-section attribution, not the
   repair lane, is the precedence gap to close.
+
+## RW-SFL-001 — Source facts are durable before assembly interpretation
+
+- Status: `LOCKED`
+- Decision date: `2026-08-07`
+- Enforcement: `PARTIAL`
+- Contract: Every meaningful source clause receives one stable source span
+  identity before activity chunking. That identity is derived from the source
+  material fingerprint, normalized document identity, original line occurrence,
+  clause ordinal, and normalized-clause digest; it may not depend on chunk,
+  concurrency, parser-array, or model-response order. The protected source keeps
+  the prose. Durable fact storage keeps only source locations and digests.
+
+  Source facts are append-only and never merged or suppressed. Entity,
+  relationship, intent, decision, and exclusion are independent fact kinds.
+  Structural proposals and atomic entities remain different facts even when
+  their names overlap; optionality is intent, not containment. Resolver claims,
+  including rejected and incomplete claims, remain auditable with an explicit
+  outcome. Candidate-to-source alignment is deterministic and source-bounded;
+  an ambiguous or absent match records `unresolved_source` instead of guessing
+  from trip-wide fuzzy similarity.
+
+  Coverage is carrier-based. A source clause is `carried` only by an atomic
+  entity, City Note, Stay, Transport, or protected-detail fact. Words found only
+  in grouping/container prose are `structural_only`; accessory/context evidence
+  is `context_only`; shared exclusions are `excluded`; everything else is
+  `uncovered`. Recovery planning batches individual uncovered clauses under
+  their original section context and does not itself call a model.
+
+  V1 is shadow-only and defaults off behind
+  `EXTRACTION_FACT_LEDGER_SHADOW=1`. It adds no model call, geocode lookup,
+  retry, or traveler-output mutation. One append-only fact-set row may be
+  written per processing run. Aggregate events expose only versions, counts,
+  sizes, durations, and hashes—never source excerpts, names, addresses,
+  booking values, or other private content. A build or persistence failure is
+  an internal fail-soft event; the existing usable draft continues with no
+  maker Question or technical recovery state.
+- Evidence: The deterministic source index is implemented first. Fact, coverage,
+  persistence, served telemetry, scale, replay, and route evidence are added by
+  the five ordered commits in the V1 work order. Coverage remains `PARTIAL`
+  until the shadow route and saved-corpus gates are all green; shadow evidence
+  does not make the ledger authoritative for assembly behavior.
+- Tests: `tests/source-document-index.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
@@ -1899,14 +1954,17 @@ exact live payload shapes.
   one source makes that class of false statement structurally impossible rather
   than something each audit has to catch.
 
-  **Question budget.** Two to four Questions on a good run is the target; more
-  Questions is not better and superfluous Questions degrade the maker
-  experience against the product goal of a finished app in 15-20 minutes.
-  Because the target count is low, COUNT STOPS MEASURING QUALITY: the internal
-  standard must assert that the RIGHT Questions exist, or a run that silently
-  misclassifies everything outscores a correct one. Every classification
-  decision is therefore recorded in the audit even when it raises no Call and no
-  Question, so a silent wrong decision stays discoverable.
+  **Question usefulness, not a count gate.** There is no required exact count.
+  A useful Question is material, non-duplicative, not already answerable from
+  the source, not routine assembly, and not technical recovery. Roughly 5-10
+  can be reasonable experience guidance for a complex trip, while zero can be
+  correct for an explicit one; neither range nor count is an acceptance
+  assertion. Superfluous Questions degrade the maker experience against the
+  product goal of a finished app in 15-20 minutes. The internal standard
+  asserts that the RIGHT Questions exist, or a run that silently misclassifies
+  everything could outscore a correct one. Every classification decision is
+  therefore recorded in the audit even when it raises no Call and no Question,
+  so a silent wrong decision stays discoverable.
 - Evidence: Prompt and regression coverage exists, but the latest live run
   produced source-obvious, duplicated, irrelevant, and mis-targeted Questions.
   2026-08-02 (run 8.1.0): 12 open Questions shipped, of which 8 are excluded by
@@ -1923,7 +1981,9 @@ exact live payload shapes.
   Exact and unique title-containment subject binding keeps the castle decision
   on its real canonical card without synthesizing a subject.
   2026-08-06 fresh-run evidence: all served review items are anchored, but
-  semantics still fail. Six Questions shipped versus the exact three above.
+  semantics still fail. Six Questions shipped: four were materially useful;
+  the standalone `Home` city ask was routine assembly, and the booking-code ask
+  was already source-answerable.
   The required grouping Calls are Prague Castle, Malá Strana, and Schönbrunn;
   production shipped Castle and Schönbrunn, omitted Malá Strana, and rendered
   the Schönbrunn claim from state inconsistent with its membership record.
