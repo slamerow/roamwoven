@@ -133,6 +133,94 @@ export function createCanonicalizationSummary(usage: unknown) {
   const dispositionCount = Number(evidence.dispositionCount) || 0;
 
   return {
+    activityCandidacyDecisions: Array.isArray(
+      evidence.activityCandidacyDecisions
+    )
+      ? evidence.activityCandidacyDecisions.flatMap((value) => {
+          const decision = asRecord(value);
+          const decisionId =
+            typeof decision.decisionId === "string"
+              ? decision.decisionId
+              : null;
+          const observationId =
+            typeof decision.observationId === "string"
+              ? decision.observationId
+              : null;
+          if (!decisionId || !observationId) return [];
+          return [
+            {
+              activityCandidate: decision.activityCandidate === true,
+              blockDecisionId:
+                typeof decision.blockDecisionId === "string"
+                  ? decision.blockDecisionId
+                  : null,
+              canonicalPieceIds: Array.isArray(decision.canonicalPieceIds)
+                ? decision.canonicalPieceIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              commitmentObservationIds: Array.isArray(
+                decision.commitmentObservationIds
+              )
+                ? decision.commitmentObservationIds.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              commitmentSignals: Array.isArray(decision.commitmentSignals)
+                ? decision.commitmentSignals.filter(
+                    (entry): entry is string => typeof entry === "string"
+                  )
+                : [],
+              contradiction: decision.contradiction === true,
+              decisionId,
+              destination:
+                typeof decision.destination === "string"
+                  ? decision.destination
+                  : "context",
+              ideaContextBefore: decision.ideaContextBefore === true,
+              ideaContextObservationId:
+                typeof decision.ideaContextObservationId === "string"
+                  ? decision.ideaContextObservationId
+                  : null,
+              referenceNoteObservationId:
+                typeof decision.referenceNoteObservationId === "string"
+                  ? decision.referenceNoteObservationId
+                  : null,
+              inputEvidenceRole:
+                typeof decision.inputEvidenceRole === "string"
+                  ? decision.inputEvidenceRole
+                  : null,
+              inputItemType:
+                typeof decision.inputItemType === "string"
+                  ? decision.inputItemType
+                  : null,
+              observationId,
+              observationDate:
+                typeof decision.observationDate === "string"
+                  ? decision.observationDate
+                  : null,
+              observationOrdinal:
+                typeof decision.observationOrdinal === "number"
+                  ? decision.observationOrdinal
+                  : 0,
+              observationTitle:
+                typeof decision.observationTitle === "string"
+                  ? decision.observationTitle
+                  : null,
+              reasonCode:
+                typeof decision.reasonCode === "string"
+                  ? decision.reasonCode
+                  : "EXPLICIT_CONTEXT",
+              title:
+                typeof decision.title === "string" ? decision.title : null,
+              winningSignal:
+                typeof decision.winningSignal === "string"
+                  ? decision.winningSignal
+                  : "source_structure",
+            },
+          ];
+        })
+      : [],
     canonicalPieceCount: Number(evidence.canonicalPieceCount) || 0,
     clusteredObservationCount: Number(evidence.clusteredObservationCount) || 0,
     contextObservationCount: Number(evidence.contextObservationCount) || 0,

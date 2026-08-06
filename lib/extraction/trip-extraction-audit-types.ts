@@ -189,6 +189,28 @@ export type DraftAuditSnapshot = {
 
 export type TripExtractionAuditReport = {
   canonicalization: {
+    activityCandidacyDecisions: Array<{
+      activityCandidate: boolean;
+      blockDecisionId: string | null;
+      canonicalPieceIds: string[];
+      commitmentObservationIds: string[];
+      commitmentSignals: string[];
+      contradiction: boolean;
+      decisionId: string;
+      destination: string;
+      ideaContextBefore: boolean;
+      ideaContextObservationId: string | null;
+      inputEvidenceRole: string | null;
+      inputItemType: string | null;
+      observationId: string;
+      observationDate: string | null;
+      observationOrdinal: number;
+      observationTitle: string | null;
+      reasonCode: string;
+      referenceNoteObservationId: string | null;
+      title: string | null;
+      winningSignal: string;
+    }>;
     canonicalPieceCount: number;
     clusteredObservationCount: number;
     contextObservationCount: number;

@@ -1,5 +1,5 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
-import { classifyRecoveredLineRole } from "@/lib/extraction/activity-classifier";
+import { decideRecoveredActivityCandidacy } from "@/lib/extraction/activity-classifier";
 import { comparableTokens, normalizeTripDate } from "@/lib/extraction/traveler-text";
 import {
   distinctiveLineTokens,
@@ -277,22 +277,27 @@ export function buildSourceRecoveryStage(
         }
         const boundCard = bindRecordDate(activity as Record<string, unknown>);
         const card = boundCard;
-        if (typeof card.evidenceRole === "string" && card.evidenceRole) {
-          return card;
-        }
         const text = (value: unknown) =>
           typeof value === "string" ? value : null;
-        const role = classifyRecoveredLineRole({
+        const decision = decideRecoveredActivityCandidacy({
           category: text(card.category),
           confirmation: text(card.confirmation),
           date: text(card.date),
           description: text(card.description),
           endTime: text(card.endTime),
+          evidenceRole: text(card.evidenceRole),
           itemType: text(card.itemType),
           startTime: text(card.startTime),
           title: text(card.title),
         });
-        return role ? { ...card, evidenceRole: role } : card;
+        return {
+          ...card,
+          _canonicalRecoveryCandidacyDecision: {
+            ...decision,
+            inputEvidenceRole: text(card.evidenceRole),
+            inputItemType: text(card.itemType),
+          },
+        };
       })
     : [];
 

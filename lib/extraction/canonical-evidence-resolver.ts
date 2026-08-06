@@ -836,16 +836,6 @@ function applyResolution({
     const item = itemFor(decision.candidateId);
     if (!item) continue;
     item._canonicalRoleDecision = decision.classification;
-
-    if (decision.classification === "city_note") {
-      item.date = null;
-      item.evidenceRole = "city_note_candidate";
-      item.itemType = "note";
-      item.sourceSectionType = "city_reference";
-    } else {
-      item.evidenceRole = "atomic_candidate";
-      item.itemType = "activity";
-    }
   }
 
   const groupingDecisions: CanonicalGroupingDecision[] = [];
@@ -942,8 +932,6 @@ function applyResolution({
       decisionId,
     ];
     parent._canonicalRoleDecision = "keep_activity";
-    parent.evidenceRole = "atomic_candidate";
-    parent.itemType = "activity";
     groupingDecisions.push({
       callRequired: !groupCandidates.some(
         (candidate) =>

@@ -327,7 +327,7 @@ export default async function run() {
       assert.equal(records.items.length, 1);
     });
 
-    await test("extraction route repairs and re-audits before persistence", async () => {
+    await test("extraction route refuses semantic role drift before persistence", async () => {
       const repairable = createParserResult();
       const piece = repairable.evidenceArtifacts.pieces.find(
         (candidate) => candidate.outputEligible && candidate.kind === "activity"
@@ -352,35 +352,19 @@ export default async function run() {
         { params: Promise.resolve({ tripId: "route-quality-remediation" }) }
       );
       const location = response.headers.get("location") ?? "";
-      const completed = completedCalls[0];
-      const records = readStructuredTripSnapshot(completed?.draftJson);
-      const draftJson = completed?.draftJson as Record<string, unknown>;
-      const quality = draftJson._qualityAssessment as Record<string, unknown>;
-      const usage = completed?.usage as Record<string, unknown>;
-      const openai = usage.openai as Record<string, unknown>;
-      const remediation = openai.qualityRemediation as Record<string, unknown>;
-      const remediationEvents = events.filter(
-        (event) => event.stage === "quality_remediation"
-      );
 
-      assert.match(location, /extraction=completed/);
-      assert.equal(failedCalls.length, 0);
-      assert.ok(records);
-      assert.equal(records.items.length, 0);
-      assert.equal(remediation.retryAttempted, true);
-      assert.equal(remediation.retryChanged, true);
-      assert.deepEqual(
-        remediationEvents.map((event) => event.status),
-        ["started", "completed"]
+      assert.match(location, /error=extraction-failed/);
+      assert.equal(completedCalls.length, 0);
+      assert.equal(failedCalls.length, 1);
+      assert.match(
+        String(failedCalls[0]?.errorMessage ?? ""),
+        /role changed after classification.*current payload resolves to context/i
       );
       assert.equal(
-        (quality.diagnostics as Array<{ code?: string }>).some(
-          (diagnostic) => diagnostic.code === "day_overview_activity_survived"
-        ),
-        false
+        persistedPieceEligibility.length,
+        0,
+        "a contradictory downstream writer cannot be normalized and persisted"
       );
-      assert.equal(persistedPieceEligibility.length, 1);
-      assert.equal(persistedPieceEligibility[0].includes(false), true);
     });
 
     await test("extraction route preserves a review-visible fallback after one no-op retry", async () => {

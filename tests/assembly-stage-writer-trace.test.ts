@@ -55,17 +55,29 @@ export default function run() {
     tripOverview: { dateRange: "April 11-14, 2030", title: "Sample trip" },
   });
   const trace = result.summary.stageWriterTrace;
-  const early = trace.find(
-    (entry) => entry.writer === "reconcileCardsAgainstCityNotes:early"
+  const reconciliations = trace.filter((entry) =>
+    entry.writer.startsWith("reconcileCardsAgainstCityNotes")
   );
   const classifier = trace.find(
     (entry) => entry.writer === "applyIntentBlockClassification"
   );
+  const enforcement = trace.find(
+    (entry) => entry.writer === "enforceCanonicalOutputActivityRoles"
+  );
 
-  assert.ok(early, "early card/note reconciliation is traceable");
   assert.ok(classifier, "classification is traceable");
-  assert.ok(early.ordinal < classifier.ordinal, "the trace exposes the current wrong order");
-  assert.equal(early.decisionDomain, "pre_classification_mutation");
+  assert.equal(reconciliations.length, 1, "one card/note semantic writer remains");
+  assert.ok(
+    reconciliations[0].ordinal > classifier.ordinal,
+    "card/note reconciliation follows authoritative classification"
+  );
+  assert.equal(reconciliations[0].decisionDomain, "identity");
+  assert.ok(enforcement, "final role enforcement is traceable");
+  assert.ok(
+    enforcement.ordinal > reconciliations[0].ordinal,
+    "validation runs after downstream semantic writers"
+  );
+  assert.deepEqual(enforcement.writes, [], "final enforcement is non-mutating");
   assert.equal(trace.every((entry, index) => entry.ordinal === index + 1), true);
   assert.equal(trace.every((entry) => entry.beforeHash.length === 24), true);
   assert.equal(trace.every((entry) => entry.afterHash.length === 24), true);
@@ -74,7 +86,10 @@ export default function run() {
     openai: { evidence: result.summary },
   });
   assert.equal(served.stageWriterTrace.length, trace.length);
-  assert.equal(served.stageWriterTrace[early.ordinal - 1]?.writer, early.writer);
+  assert.equal(
+    served.stageWriterTrace[reconciliations[0].ordinal - 1]?.writer,
+    reconciliations[0].writer
+  );
   assert.equal(
     JSON.stringify(served.stageWriterTrace).includes("Sample Museum"),
     false,

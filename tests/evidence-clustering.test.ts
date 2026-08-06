@@ -809,7 +809,7 @@ export default async function run() {
     );
   });
 
-  await test("the canonical output retry is idempotent", () => {
+  await test("the canonical output retry rejects semantic role drift without mutating it", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [stage("retry", emptyStage({
@@ -830,10 +830,11 @@ export default async function run() {
     assert.ok(activity);
     activity.payload.title = "Paris day plan";
 
-    const first = reapplyCanonicalOutputInvariants({ pieces });
-    const second = reapplyCanonicalOutputInvariants({ pieces: first.pieces });
-    assert.equal(first.changed, true);
-    assert.equal(second.changed, false);
+    assert.throws(
+      () => reapplyCanonicalOutputInvariants({ pieces }),
+      /role changed after classification.*current payload resolves to context/i
+    );
+    assert.equal(activity.payload.title, "Paris day plan");
   });
 
   await test("car reservation details attach to the canonical rental", () => {

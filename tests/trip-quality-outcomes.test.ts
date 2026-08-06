@@ -45,6 +45,7 @@ function report(
 ): TripExtractionAuditReport {
   return {
     canonicalization: {
+      activityCandidacyDecisions: [],
       canonicalPieceCount: 0,
       clusteredObservationCount: 0,
       contextObservationCount: 0,

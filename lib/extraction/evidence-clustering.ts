@@ -43,6 +43,8 @@ import {
 import {
   chooseMergeWinner,
   classifyMergeEligibility,
+  isDayArcTitle,
+  tripCityTokenSet,
   type MergeWinnerCard,
 } from "@/lib/extraction/entity-winner";
 import {
@@ -56,18 +58,23 @@ import {
   classifyIntentBlocks,
   classifyIdeaListSections,
   classifyOwnTextEvidence,
+  decideActivityCandidacy,
   DAY_PLAN_LABEL_PATTERN,
+  isRecommendationActivityCategory,
   isSiteComponentTitlePair,
   resolveMentionCommitment,
   SITE_CONTAINER_NOUN_PATTERN,
   type IdeaListEntry,
+  type ActivityCandidacyDecision,
   type IntentBlockDecision,
   type IntentBlockEntry,
+  type IntentBlockType,
   type MentionCommitment,
 } from "@/lib/extraction/activity-classifier";
 import {
   classifyDraftActivityCard,
   hasLooseTipVocabulary,
+  hasWeakRecommendationLanguage,
 } from "@/lib/trip-card-taxonomy";
 import {
   isRentalCarPickupCandidate,
@@ -80,7 +87,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 14;
+export const EVIDENCE_CLUSTER_VERSION = 15;
 
 export type EvidenceKind =
   | "activity"
@@ -311,6 +318,28 @@ export type EvidenceClusteringResult = {
   pieces: CanonicalEvidencePiece[];
   transportFieldRepairs: TransportFieldRepair[];
   summary: {
+    activityCandidacyDecisions: Array<{
+      activityCandidate: boolean;
+      blockDecisionId: string | null;
+      canonicalPieceIds: string[];
+      commitmentObservationIds: string[];
+      commitmentSignals: string[];
+      contradiction: boolean;
+      decisionId: string;
+      destination: string;
+      ideaContextBefore: boolean;
+      ideaContextObservationId: string | null;
+      referenceNoteObservationId: string | null;
+      inputEvidenceRole: string | null;
+      inputItemType: string | null;
+      observationId: string;
+      observationDate: string | null;
+      observationOrdinal: number;
+      observationTitle: string | null;
+      reasonCode: string;
+      title: string | null;
+      winningSignal: string;
+    }>;
     canonicalPieceCount: number;
     clusteredObservationCount: number;
     contextObservationCount: number;
@@ -539,22 +568,119 @@ function evidenceRoleFromPayload(
   kind: EvidenceKind
 ): EvidenceRole {
   const explicit = stringValue(payload, "evidenceRole") as EvidenceRole | null;
+  if (kind === "context") return "context";
+  if (kind !== "activity" && kind !== "note") {
+    return explicit && EVIDENCE_ROLES.has(explicit)
+      ? explicit
+      : "atomic_candidate";
+  }
+  return activityCandidacyDecisionForPayload(payload, {
+    evidenceRole:
+      explicit && EVIDENCE_ROLES.has(explicit)
+        ? explicit
+        : kind === "note"
+          ? "city_note_candidate"
+          : null,
+  }).evidenceRole;
+}
 
-  if (explicit && EVIDENCE_ROLES.has(explicit)) {
-    if (
-      explicit === "accessory_detail" &&
-      kind === "activity" &&
-      payload._parserArtifactTicketCopy !== true &&
-      hasIndependentActivityAnchor(payload)
-    ) {
-      return "atomic_candidate";
-    }
-    return explicit;
+function activityCandidacyDecisionForPayload(
+  payload: Record<string, unknown>,
+  overrides: {
+    evidenceRole?: EvidenceRole | null;
+    hasAuditedCommitment?: boolean;
+    intentBlockType?: IntentBlockType | null;
+    isGenericOverview?: boolean;
+  } = {}
+): ActivityCandidacyDecision {
+  const recoveryDecision = asRecord(
+    payload._canonicalRecoveryCandidacyDecision
+  );
+  const recoveredEvidenceRole = stringValue(
+    recoveryDecision,
+    "inputEvidenceRole"
+  ) as EvidenceRole | null;
+  const recoveredItemType = stringValue(recoveryDecision, "inputItemType");
+  const explicitRole =
+    overrides.evidenceRole === undefined
+      ? recoveredEvidenceRole ??
+        (stringValue(payload, "evidenceRole") as EvidenceRole | null)
+      : overrides.evidenceRole;
+  const approvedGrouping =
+    Array.isArray(payload._canonicalGroupingDecisionIds) &&
+    payload._canonicalGroupingDecisionIds.length > 0;
+  const itemType = recoveredItemType ?? stringValue(payload, "itemType");
+  const roleOrTypeRefusesImplicitPromotion = Boolean(
+    explicitRole === "accessory_detail" ||
+      explicitRole === "city_note_candidate" ||
+      explicitRole === "context" ||
+      explicitRole === "rejected" ||
+      itemType === "note" ||
+      /^(?:admin|administrative|accessory|evidence|logistics|receipt|ticket_detail)$/i.test(
+        itemType ?? ""
+      )
+  );
+  const sourceCommitment = Boolean(
+    !roleOrTypeRefusesImplicitPromotion &&
+      (stringValue(payload, "startTime") ||
+        stringValue(payload, "confirmation"))
+  );
+  return decideActivityCandidacy({
+    ...activityInput(payload),
+    evidenceRole: explicitRole,
+    hasStandaloneAnchor: hasIndependentActivityAnchor(payload),
+    hasAuditedCommitment:
+      overrides.hasAuditedCommitment ??
+      ((approvedGrouping && !roleOrTypeRefusesImplicitPromotion) ||
+        sourceCommitment),
+    intentBlockType:
+      overrides.intentBlockType ??
+      (stringValue(payload, "_intentBlockType") as IntentBlockType | null),
+    isGenericOverview:
+      overrides.isGenericOverview ?? payload._canonicalSourceContainer === true,
+    itemType,
+  });
+}
+
+function hasSourceBackedIntakeCommitment(
+  payload: Record<string, unknown>
+) {
+  const provenance = stringValue(payload, "_evidenceProvenance");
+  const evidence = stringValue(payload, "evidence");
+  if (
+    !evidence ||
+    (provenance !== "model_verbatim" &&
+      provenance !== "line_match_injected")
+  ) {
+    return false;
   }
 
-  if (kind === "context") return "context";
-  if (kind === "note") return "city_note_candidate";
-  return "atomic_candidate";
+  return classifyOwnTextEvidence([
+    {
+      ...activityInput(payload),
+      confirmation: stringValue(payload, "confirmation"),
+      // Commitment must come from the verified source line, not a model
+      // paraphrase in the card description. This lets an undated explicit
+      // plan survive long enough for canonical placement to assign its
+      // provisional city date, while an unverified "we plan to" rewrite
+      // remains unable to promote a loose reference.
+      description: evidence,
+    },
+  ]).hasFixedCommitment;
+}
+
+function originalActivityCandidacyInputs(payload: Record<string, unknown>) {
+  const recoveryDecision = asRecord(
+    payload._canonicalRecoveryCandidacyDecision
+  );
+  return {
+    evidenceRole:
+      stringValue(recoveryDecision, "inputEvidenceRole") ??
+      stringValue(payload, "evidenceRole"),
+    itemType:
+      stringValue(recoveryDecision, "inputItemType") ??
+      stringValue(payload, "itemType"),
+  };
 }
 
 function sourceStructureFromPayload(
@@ -2868,9 +2994,27 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
       piece.role === "accessory_detail" &&
       !piece.outputEligible
   );
+  const places = pieces.filter(
+    (piece) => piece.kind === "place" && piece.outputEligible
+  );
+  const stayTargets = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
 
   for (const accessory of accessories) {
     const text = activityText(accessory.payload);
+    const rawAccessoryProse = [
+      stringValue(accessory.payload, "title"),
+      stringValue(accessory.payload, "description"),
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const stayAccessShaped =
+      STAY_ACCESS_INSTRUCTION_PATTERN.test(rawAccessoryProse) ||
+      isArrivalDirectionsProse(rawAccessoryProse) ||
+      /\barrival directions\b|\bgetting there\b|\baccess details?\b/i.test(
+        stringValue(accessory.payload, "title") ?? ""
+      );
     const accessoryDate = stringValue(accessory.payload, "date");
     const accessoryTime = timeFrom(accessory.payload);
     const titleTokens = identityTokens(accessory.payload.title);
@@ -2914,11 +3058,24 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
         );
       }
 
-      if (candidate.kind === "stay" && /\b(?:airbnb|check in|hostel|hotel|lodging|room|stay)\b/.test(text)) {
-        return tokenMatch || Boolean(
-          normalizedComparable(candidate.payload.address) &&
-          text.includes(normalizedComparable(candidate.payload.address))
-        );
+      if (candidate.kind === "stay") {
+        if (stayAccessShaped) {
+          const accessoryCity = normalizedComparable(
+            stringValue(accessory.payload, "city")
+          );
+          return Boolean(
+            (accessoryCity &&
+              normalizedComparable(stayCity(candidate, places)) ===
+                accessoryCity) ||
+              stayTargets.length === 1
+          );
+        }
+        if (/\b(?:airbnb|check in|hostel|hotel|lodging|room|stay)\b/.test(text)) {
+          return tokenMatch || Boolean(
+            normalizedComparable(candidate.payload.address) &&
+            text.includes(normalizedComparable(candidate.payload.address))
+          );
+        }
       }
 
       return candidate.kind === "activity" && (tokenMatch || timeMatch);
@@ -2935,10 +3092,23 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
     }
 
     const target = candidates[0];
-    target.payload.description = uniqueDescription(
-      target.payload.description,
-      accessory.payload.description ?? accessory.payload.title
-    );
+    const accessoryProse = stringValue(accessory.payload, "description") ??
+      stringValue(accessory.payload, "title");
+    if (
+      target.kind === "stay" &&
+      accessoryProse &&
+      stayAccessShaped
+    ) {
+      target.payload.accessInstructions = uniqueDescription(
+        target.payload.accessInstructions,
+        accessoryProse
+      );
+    } else {
+      target.payload.description = uniqueDescription(
+        target.payload.description,
+        accessoryProse
+      );
+    }
     mergeCanonicalPieceInto({
       reason: "accessory evidence attached to its unique canonical owner",
       source: accessory,
@@ -4790,6 +4960,25 @@ function scrubProtectedValuesFromPublicProse(
   // and the review surface cannot drift apart.
   const dropIdentitySegments = dropIdentityProseSegments;
   for (const piece of pieces) {
+    if (piece.kind === "context") {
+      const contextTitle = stringValue(piece.payload, "title");
+      const contextTitleSignal = contextTitle
+        ? findIdentityProseSignal(contextTitle)
+        : null;
+      if (contextTitleSignal) {
+        // Classification correctly routes admin/accessory material away from
+        // Activities before this boundary. It still needs an explicit final
+        // disposition when its label is itself protected identity material;
+        // silently leaving it as generic context loses the reason the source
+        // fact has no public carrier.
+        suppressCanonicalPiece(
+          piece,
+          `identity-shaped value (${contextTitleSignal}) in public title: record suppressed at the output boundary (RW-PRI-001 — identity is never trip content; no scrubbed husks)`,
+          { kind: "terminal", code: "PUBLIC_TITLE_IDENTITY_VALUE" }
+        );
+      }
+      continue;
+    }
     if (!piece.outputEligible) continue;
     // Run 7.23.0r: transport piece DESCRIPTIONS also carry ticket-page
     // prose (route via-stations are fine; codes are not) — token-sweep
@@ -5559,7 +5748,12 @@ function sanitizeCanonicalCardDescription(value: string | null) {
     if (tokens.size >= 4) {
       const isEcho = keptTokenSets.some((existing) => {
         const smaller = Math.min(existing.size, tokens.size);
+        const larger = Math.max(existing.size, tokens.size);
         if (smaller < 4) return false;
+        // A short entity sentence that is merely contained in a much longer
+        // city-note list is not an echo. Near-duplicate prose must be similar
+        // in scope as well as vocabulary.
+        if (smaller / larger < 0.65) return false;
         let shared = 0;
         for (const token of tokens) if (existing.has(token)) shared += 1;
         return shared / smaller >= 0.8;
@@ -6358,6 +6552,7 @@ function executeCanonicalGroupingDecisions({
       decision.source !== "canonical_resolver" ||
       !requestedAnchor ||
       requestedAnchor.kind !== "activity" ||
+      !hasAuthoritativeActivityRole(requestedAnchor) ||
       !requestedAnchor.outputEligible ||
       candidatePieces.some((piece) => !piece)
     ) {
@@ -6378,6 +6573,7 @@ function executeCanonicalGroupingDecisions({
       sourcePieces.some(
         (child) =>
           child.kind !== "activity" ||
+          !hasAuthoritativeActivityRole(child) ||
           !sameCanonicalDate(requestedAnchor.payload, child.payload)
       )
     ) {
@@ -6393,11 +6589,22 @@ function executeCanonicalGroupingDecisions({
         )
       )
     );
-    const explicitContainer = decision.containerCandidateId
+    const proposedContainer = decision.containerCandidateId
       ? candidatePiece(decision.containerCandidateId)
       : null;
+    // A grouping-proposal row is evidence, not automatically a traveler
+    // parent. When classification refuses that row, the resolver's already
+    // selected atomic parent may still execute; the refused proposal is
+    // simply ineligible to become a group member or parent. This preserves
+    // the relationship without resurrecting a note/accessory as an Activity.
+    const explicitContainer =
+      proposedContainer?.kind === "activity" &&
+      proposedContainer.outputEligible &&
+      hasAuthoritativeActivityRole(proposedContainer)
+        ? proposedContainer
+        : null;
     const requestedAnchorCoversVisit = Boolean(
-      !explicitContainer &&
+      !proposedContainer &&
         sourcePieces.includes(requestedAnchor) &&
         (/\b(?:same[ -]?site|complex|grounds|campus|estate|one .{0,24} visit|covers? the visit)\b/i.test(
           `${decision.claim} ${activityText(requestedAnchor.payload)}`
@@ -6924,109 +7131,145 @@ function createCanonicalConflictQuestions(pieces: CanonicalEvidencePiece[]) {
   });
 }
 
-function activityKind(payload: Record<string, unknown>): EvidenceKind {
-  const explicitRole = evidenceRoleFromPayload(payload, "activity");
-  const canonicalRoleDecision = stringValue(payload, "_canonicalRoleDecision");
-  const approvedGrouping = Array.isArray(payload._canonicalGroupingDecisionIds) &&
-    payload._canonicalGroupingDecisionIds.length > 0;
-  const sourceStructure = sourceStructureFromPayload(payload);
-  const classification = classifyDraftActivityCard({
-    category: stringValue(payload, "category"),
-    date: stringValue(payload, "date"),
-    description: stringValue(payload, "description"),
-    endTime: stringValue(payload, "endTime"),
-    itemType: stringValue(payload, "itemType"),
-    startTime: stringValue(payload, "startTime"),
-    title: stringValue(payload, "title"),
-  });
-
-  if (approvedGrouping) {
-    return "activity";
-  }
-
-  if (explicitRole === "context" || explicitRole === "rejected") {
-    return "context";
-  }
-
-  if (canonicalRoleDecision === "keep_activity") {
-    return "activity";
-  }
-
-  if (canonicalRoleDecision === "city_note") {
-    return "note";
-  }
-
-  // Concrete traveler intent outranks loose surrounding prose only when the
-  // canonical resolver has not already made the role decision.
-  if (hasIndependentActivityAnchor(payload)) {
-    return "activity";
-  }
-
-  if (
-    explicitRole === "city_note_candidate" ||
-    sourceStructure.sectionType === "city_reference" ||
-    stringValue(payload, "itemType") === "note" ||
-    classification.isLooseTipActivity ||
-    (classification.isWeakDatedCityNoteCandidate &&
-      classification.hasWeakRecommendationMarker)
-  ) {
-    return "note";
-  }
-
-  if (explicitRole === "atomic_candidate" && payload._recoveryRequired === true) {
-    return "activity";
-  }
-
-  if (
-    classification.isOverviewActivity ||
-    !stringValue(payload, "date") &&
-    !classification.hasStrongPlannedActivityLanguage
-  ) {
-    return "note";
-  }
-
-  return "activity";
+function splitExplicitPlanFromHedgedReference(
+  payload: Record<string, unknown>
+): Array<Record<string, unknown>> {
+  const evidence = stringValue(payload, "evidence") ?? "";
+  const match =
+    /\b(?:go|walk|head|return)\s+to\s+([^,;.!?]{2,80}?)\s+and\s+(?:maybe|perhaps|if time)\s+([^,;.!?]{2,80})(?:[.;!?]|$)/i.exec(
+      evidence
+    );
+  if (!match) return [];
+  const selectedTitle = match[1].trim();
+  const optionalTitle = match[2].trim();
+  if (!selectedTitle || !optionalTitle) return [];
+  const {
+    _canonicalGroupingDecisionIds: _discardedGroupingDecisions,
+    _canonicalIntakeCandidacyDecision: _discardedIntakeDecision,
+    _canonicalRecoveryCandidacyDecision: _discardedRecoveryDecision,
+    _canonicalRoleDecision: _discardedRoleDecision,
+    _resolverCandidateId: _discardedResolverCandidateId,
+    ...clauseBase
+  } = payload;
+  return [
+    {
+      ...clauseBase,
+      _canonicalClauseRole: "explicit_plan" as const,
+      category: "admin_logistics",
+      description: `Go to ${selectedTitle}.`,
+      evidenceRole: "atomic_candidate",
+      itemType: "activity",
+      title: selectedTitle,
+    },
+    {
+      ...clauseBase,
+      _canonicalClauseRole: "hedged_reference" as const,
+      description: `Maybe ${optionalTitle}.`,
+      evidenceRole: "city_note_candidate",
+      itemType: "note",
+      title: optionalTitle,
+    },
+  ];
 }
 
+type StampedIntentDecision = {
+  blockId: string;
+  blockType: IntentBlockType;
+  classifiedTitle: string | null;
+  piece: CanonicalEvidencePiece;
+};
+
 function enforceCanonicalOutputActivityRoles(
-  pieces: CanonicalEvidencePiece[]
+  stamps: StampedIntentDecision[]
 ) {
-  for (const piece of pieces) {
-    if (!piece.outputEligible || (piece.kind !== "activity" && piece.kind !== "note")) {
-      continue;
-    }
+  for (const stamp of stamps) {
+    const currentBlockId = stringValue(stamp.piece.payload, "_intentBlockId");
+    const currentBlockType = stringValue(
+      stamp.piece.payload,
+      "_intentBlockType"
+    );
     if (
-      piece.payload._canonicalGroupRole === "parent" ||
-      piece.payload._canonicalGroupRole === "child"
+      currentBlockId !== stamp.blockId ||
+      currentBlockType !== stamp.blockType
     ) {
-      continue;
-    }
-    const classification = classifyDraftActivityCard(activityInput(piece.payload));
-
-    if (classification.isOverviewActivity) {
-      // Terminal (structural/overview artifact family — this is the
-      // canonical example of it): a "Day 3 in Prague" heading is source
-      // structure, not evidence of a traveler-visible thing to absorb it.
-      suppressCanonicalPiece(
-        piece,
-        "generic day overview is source context, not a traveler card",
-        { kind: "terminal", code: "GENERIC_DAY_OVERVIEW" }
+      throw new Error(
+        `Canonical Activity role changed after classification for ${stamp.piece.id}: ` +
+          `${stamp.blockId}/${stamp.blockType} became ` +
+          `${currentBlockId ?? "missing"}/${currentBlockType ?? "missing"}.`
       );
-      continue;
     }
-
-    if (piece.kind === "activity" && activityKind(piece.payload) === "note") {
-      piece.kind = "note";
-      piece.payload.itemType = "note";
-      piece.payload.date = null;
-      addCanonicalAction(piece, {
-        absorbedTitles: [],
-        observationIds: [...piece.observationIds],
-        reason: "canonical activity policy routed a loose reference to city notes",
-        type: "recovered",
-      });
+    if (!stamp.piece.outputEligible) continue;
+    const decision = asRecord(
+      stamp.piece.payload._canonicalCandidacyDecision
+    );
+    const destination = stringValue(decision, "destination");
+    if (stamp.piece.kind === "activity") {
+      const currentDecision = activityCandidacyDecisionForPayload(
+        stamp.piece.payload,
+        {
+          evidenceRole: stringValue(
+            decision,
+            "inputEvidenceRole"
+          ) as EvidenceRole | null,
+          hasAuditedCommitment:
+            decision.hasAuditedCommitment === true,
+          intentBlockType: stamp.blockType,
+        }
+      );
+      if (currentDecision.destination !== "activity") {
+        throw new Error(
+          `Canonical Activity role changed after classification for ${stamp.piece.id} ` +
+            `(${stringValue(stamp.piece.payload, "title") ?? "untitled"}): ` +
+            `stamped ${destination}, current payload resolves to ` +
+            `${currentDecision.destination}; ` +
+            `decision=${JSON.stringify(decision)}; ` +
+            `classifiedTitle=${stamp.classifiedTitle ?? "untitled"}; ` +
+            `actions=${JSON.stringify(stamp.piece.actions.slice(-4))}.`
+        );
+      }
+    }
+    // Classification is a promotion ceiling, not the final identity/home
+    // decision. Identity may fold an uncommitted Activity candidate into a
+    // City Note, but no later writer may resurrect material classification
+    // refused as note/accessory/context/rejected into an Activity.
+    if (destination !== "activity" && stamp.piece.kind === "activity") {
+      throw new Error(
+        `Canonical Activity role changed after classification for ${stamp.piece.id} ` +
+          `(${stringValue(stamp.piece.payload, "title") ?? "untitled"}): ` +
+          `decision ${destination}, final kind ${stamp.piece.kind}; ` +
+          `decision=${JSON.stringify(decision)}; ` +
+          `classifiedTitle=${stamp.classifiedTitle ?? "untitled"}; ` +
+          `actions=${JSON.stringify(stamp.piece.actions.slice(-4))}.`
+      );
     }
   }
+}
+
+function stampedIntentDecisionsFromPieces(
+  pieces: CanonicalEvidencePiece[]
+): StampedIntentDecision[] {
+  return pieces.flatMap((piece) => {
+    const blockId = stringValue(piece.payload, "_intentBlockId");
+    const blockType = stringValue(piece.payload, "_intentBlockType");
+    if (
+      !blockId ||
+      (blockType !== "plan" &&
+        blockType !== "ideas" &&
+        blockType !== "logistics" &&
+        blockType !== "evidence" &&
+        blockType !== "ambiguous")
+    ) {
+      return [];
+    }
+    return [
+      {
+        blockId,
+        blockType,
+        classifiedTitle: stringValue(piece.payload, "title"),
+        piece,
+      },
+    ];
+  });
 }
 
 function activityInput(payload: Record<string, unknown>) {
@@ -7036,6 +7279,7 @@ function activityInput(payload: Record<string, unknown>) {
     description: stringValue(payload, "description"),
     endTime: stringValue(payload, "endTime"),
     itemType: stringValue(payload, "itemType"),
+    sourceSectionType: stringValue(payload, "sourceSectionType"),
     startTime: stringValue(payload, "startTime"),
     title: stringValue(payload, "title"),
   };
@@ -7718,6 +7962,42 @@ function reviewSubjectTitles(missingDetails: unknown[]) {
   return titles;
 }
 
+function committedDetailReviewSubjectTitles(missingDetails: unknown[]) {
+  const titles = new Set<string>();
+  for (const detail of missingDetails) {
+    const record = asRecord(detail);
+    const related = stringValue(record, "relatedTitle");
+    if (!related) continue;
+    const text = normalizeText(
+      [
+        stringValue(record, "prompt"),
+        stringValue(record, "reason"),
+        stringValue(record, "evidence"),
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    // A source-explicit ticket/entry/detail choice presupposes the visit and
+    // is audited commitment evidence for candidacy. Planned-vs-ideas and
+    // date questions do not establish that the subject belongs in the plan.
+    const placementDecision =
+      /\b(?:planned for (?:this|the) day|planned (?:or|versus|vs\.?) (?:just )?ideas?|just ideas?|keep (?:them|it) as ideas?|part of (?:the )?(?:day )?plan)\b/.test(
+        text
+      );
+    if (
+      placementDecision ||
+      /\b(?:which day|what day|when|date)\b/.test(text) ||
+      !/\b(?:ticket|entry|admission|tour|which option|need to decide which)\b/.test(
+        text
+      )
+    ) {
+      continue;
+    }
+    titles.add(normalizedComparable(related));
+  }
+  return titles;
+}
+
 // A question subject protects its entity under ALIASING too (live-run
 // 7.21.0: the baths question's subject was "Gellert Bath House" while the
 // piece shipped as "Gellert Baths" — exact-equality matching would have let
@@ -7741,17 +8021,12 @@ function titleMatchesQuestionSubject(
 // day's committed plan — never a researched idea, whatever research
 // markers its prose carries. Two shared distinctive tokens (or a full
 // single-token title hit) count as named.
-function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
+function titleNamedInSourceLabels(titleValue: string | null, labels: string[]) {
   const heading = normalizedComparable(
-    [
-      stringValue(piece.payload, "sourceSectionLabel") ?? "",
-      ...(pieceSourceHeadingPath(piece) ?? []),
-    ]
-      .filter(Boolean)
-      .join(" ")
+    labels.filter(Boolean).join(" ")
   );
   if (!heading) return false;
-  const title = normalizedComparable(stringValue(piece.payload, "title"));
+  const title = normalizedComparable(titleValue);
   if (!title) return false;
   const padded = ` ${heading} `;
   const tokens = title
@@ -7760,6 +8035,13 @@ function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
     .filter((token) => padded.includes(` ${token} `));
   const titleTokenCount = title.split(" ").filter((token) => token.length >= 4).length;
   return tokens.length >= 2 || (titleTokenCount === 1 && tokens.length === 1);
+}
+
+function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
+  return titleNamedInSourceLabels(stringValue(piece.payload, "title"), [
+    stringValue(piece.payload, "sourceSectionLabel") ?? "",
+    ...(pieceSourceHeadingPath(piece) ?? []),
+  ]);
 }
 
 // B7 city-note integrity gap, live-run defect 2026-08-04 (R2D2; the Jan-19
@@ -7789,6 +8071,19 @@ function demoteCanonicalPieceToCityNote(
   if (!stringValue(piece.payload, "city")) {
     const city = rawCityForDate(pieces, stringValue(piece.payload, "date"));
     if (city) piece.payload.city = city;
+  }
+  const title = stringValue(piece.payload, "title");
+  const description = stringValue(piece.payload, "description");
+  if (
+    title &&
+    description &&
+    !normalizedComparable(description).includes(normalizedComparable(title))
+  ) {
+    // A City Note is the entity's durable home after demotion. Keep the
+    // entity label with its useful detail so later collection rendering does
+    // not conserve only an alias-like description (for example "Giant
+    // wheel") while losing the observation's actual title.
+    piece.payload.description = `${title}: ${description}`;
   }
   piece.kind = "note";
   piece.payload.itemType = "note";
@@ -7863,27 +8158,31 @@ function citySetsOverlap(left: Set<string>, right: Set<string>) {
   return false;
 }
 
-function observationMentionDatesAndCommitment(
+function observationMentionDates(
   piece: CanonicalEvidencePiece,
   observationById: Map<string, EvidenceObservation>
 ) {
   const dates = new Set<string>();
-  let anyCommitted = false;
   for (const observationId of piece.observationIds) {
     const observation = observationById.get(observationId);
-    if (!observation || observation.kind !== "activity") continue;
+    if (!observation) continue;
+    const intakeDecision = asRecord(
+      observation.payload._canonicalIntakeCandidacyDecision
+    );
+    // A hedged parser Activity is correctly typed as a note at intake, but it
+    // remains an identity occurrence. Use its recorded input role instead of
+    // letting the classification result erase the cross-day repeat evidence.
+    if (
+      observation.kind !== "activity" &&
+      normalizeText(stringValue(intakeDecision, "inputItemType")) !==
+        "activity"
+    ) {
+      continue;
+    }
     const date = stringValue(observation.payload, "date");
     if (date) dates.add(date);
-    if (
-      timeFrom(observation.payload) ||
-      confirmationFrom(observation.payload) ||
-      classifyDraftActivityCard(activityInput(observation.payload))
-        .hasStrongPlannedActivityLanguage
-    ) {
-      anyCommitted = true;
-    }
   }
-  return { anyCommitted, dates };
+  return dates;
 }
 
 // A dated DAY-PLAN section label ("Sunday, January 20th") versus the source's
@@ -8030,13 +8329,46 @@ function pieceIsSameSiteGroupingStructure(
   );
 }
 
-function pieceIsProtectedPlanCopy(
+function pieceIsSharedAreaGroupingStructure(
   piece: CanonicalEvidencePiece,
   pieces: CanonicalEvidencePiece[]
 ) {
-  if (pieceHasHedgeMarker(piece)) return false;
-  if (pieceNamedInDayHeading(piece)) return true;
-  return pieceIsSameSiteGroupingStructure(piece, pieces);
+  const area = normalizedComparable(stringValue(piece.payload, "area"));
+  const date = stringValue(piece.payload, "date");
+  if (!area || !date || !pieceAreaSourceSupported(piece)) return false;
+  return (
+    pieces.filter(
+      (candidate) =>
+        candidate.kind === "activity" &&
+        stringValue(candidate.payload, "date") === date &&
+        normalizedComparable(stringValue(candidate.payload, "area")) ===
+          area &&
+        pieceAreaSourceSupported(candidate)
+    ).length >= 3
+  );
+}
+
+function canonicalCandidacyDecision(piece: CanonicalEvidencePiece) {
+  return asRecord(piece.payload._canonicalCandidacyDecision);
+}
+
+function hasAuthoritativeActivityRole(piece: CanonicalEvidencePiece) {
+  const decision = canonicalCandidacyDecision(piece);
+  return (
+    Boolean(stringValue(decision, "blockDecisionId")) &&
+    stringValue(decision, "destination") === "activity"
+  );
+}
+
+function authoritativeActivityCommitment(piece: CanonicalEvidencePiece) {
+  if (!hasAuthoritativeActivityRole(piece)) return "none" as const;
+  const reason = stringValue(
+    canonicalCandidacyDecision(piece),
+    "reasonCode"
+  );
+  if (reason === "AUDITED_COMMITMENT") return "fixed" as const;
+  if (reason === "BLOCK_PLAN") return "sequenced" as const;
+  return "none" as const;
 }
 
 function notesShareSourceSection(
@@ -8070,7 +8402,6 @@ function resolveUncommittedRepeatMentions(
   observations: EvidenceObservation[],
   missingDetails: unknown[]
 ) {
-  const timedCounts = timedActivityCountsByDate(pieces);
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const cityForDate = canonicalCityForDate(pieces);
   const observationById = new Map(
@@ -8127,10 +8458,19 @@ function resolveUncommittedRepeatMentions(
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
     const title = key.slice(0, key.lastIndexOf("|"));
+    const distinctDates = new Set(
+      group
+        .map((piece) => stringValue(piece.payload, "date"))
+        .filter((date): date is string => Boolean(date))
+    );
+    // Same-day duplicates are an identity collapse, not evidence that an
+    // occurrence is an uncommitted cross-day repeat. Other same-day identity
+    // passes choose their single carrier without changing its block role.
+    if (distinctDates.size < 2) continue;
 
     const ranked = group
       .map((piece) => ({
-        commitment: mentionCommitment(piece, timedCounts),
+        commitment: authoritativeActivityCommitment(piece),
         piece,
       }))
       .sort(
@@ -8161,37 +8501,9 @@ function resolveUncommittedRepeatMentions(
       continue;
     }
 
-    // No copy is committed. If exactly ONE copy sits in a deliberate
-    // day-plan section, that membership is the "stronger planned sighting"
-    // (RW-CLS-001; ground truth v2: the Jan 20 St. Stephen's plan beats
-    // the Jan 19 idea copy) — it keeps the card and the other copies fold
-    // into it. A protected plan copy (Arc E fold guard: heading-committed
-    // or same-site grouping structure) counts as deliberate regardless of
-    // merged price/hours text. Otherwise: repeated but never committed →
-    // one City Note.
+    // No copy is committed by the authoritative candidacy decision:
+    // repeated but never committed resolves to one City Note.
     if (questionSubjects.has(title)) continue;
-    const deliberate = group.filter(
-      (piece) =>
-        isDeliberateDayPlanMention(piece, observationById) ||
-        pieceIsProtectedPlanCopy(piece, pieces)
-    );
-    if (deliberate.length >= 1) {
-      // Exactly one deliberate copy is the ground-truth v2 shape. Multiple
-      // deliberate/protected copies (Arc E: e.g. two structure copies of
-      // one visit) still resolve to ONE home — first in source order —
-      // instead of demoting the whole family to a City Note.
-      const winnerPiece = deliberate[0];
-      for (const extra of group) {
-        if (extra === winnerPiece) continue;
-        mergeCanonicalPieceInto({
-          reason:
-            "cross-day repeat: the deliberate day-plan copy is the planned sighting; the loose copy folds in (ground truth v2 dedup)",
-          source: extra,
-          target: winnerPiece,
-        });
-      }
-      continue;
-    }
     const [kept, ...rest] = group;
     for (const extra of rest) {
       mergeCanonicalPieceInto({
@@ -8216,12 +8528,9 @@ function resolveUncommittedRepeatMentions(
     if (!committedMentionPieceCandidate(piece)) continue;
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title || questionSubjects.has(title)) continue;
-    if (mentionCommitment(piece, timedCounts) !== "none") continue;
-    // Arc E fold guard: heading-committed entities and same-site grouping
-    // structure never demote as "repeated but never committed".
-    if (pieceIsProtectedPlanCopy(piece, pieces)) continue;
-    const mentions = observationMentionDatesAndCommitment(piece, observationById);
-    if (mentions.dates.size < 2 || mentions.anyCommitted) continue;
+    if (authoritativeActivityCommitment(piece) !== "none") continue;
+    const mentionDates = observationMentionDates(piece, observationById);
+    if (mentionDates.size < 2) continue;
 
     demoteCanonicalPieceToCityNote(
       piece,
@@ -8270,35 +8579,9 @@ function resolveUncommittedRepeatMentions(
     );
     if (matches.length === 0) continue;
 
-    if (mentionCommitment(piece, timedCounts) === "none") {
-      // Deliberate day-plan membership beats an idea-list note copy from a
-      // DIFFERENT source section (ground truth v2 dedup: the planned copy
-      // wins). A note copy from the SAME section means the source listed the
-      // venue once as a reference and the note stays the single home. A
-      // protected plan copy (Arc E fold guard) wins regardless — grouping
-      // structure outranks a reference listing.
-      if (
-        pieceIsProtectedPlanCopy(piece, pieces) ||
-        (isDeliberateDayPlanMention(piece, observationById) &&
-          !notesShareSourceSection(
-            piece,
-            matches.map((match) => match.piece),
-            observationById
-          ))
-      ) {
-        for (const match of matches) {
-          if (!match.piece.outputEligible) continue;
-          // The winner is the outer `piece` in every iteration of this
-          // loop — a concrete, singular survivor even though it removes
-          // several note-copy losers.
-          suppressCanonicalPiece(
-            match.piece,
-            "planned day-plan visit wins over its loose city-note copy in the same leg",
-            { kind: "survivor", survivorId: piece.id }
-          );
-        }
-        continue;
-      }
+    const authoritativePlan =
+      authoritativeActivityCommitment(piece) !== "none";
+    if (!authoritativePlan) {
       // List disposition (Task B5): `matches` can hold more than one note
       // copy for this title/leg, and the existing rule never singled one
       // out as THE home — any of them is. Recording the whole set is the
@@ -8338,7 +8621,6 @@ function reconcileCardsAgainstCityNotes(
   const observationById = new Map(
     observations.map((observation) => [observation.id, observation])
   );
-  const timedCounts = timedActivityCountsByDate(pieces);
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const citiesForDate = canonicalCitiesForDate(pieces);
   const notes = pieces.filter((piece) => piece.kind === "note");
@@ -8391,9 +8673,21 @@ function reconcileCardsAgainstCityNotes(
     // cities for matching purposes.
     const cities = citiesForDate(stringValue(piece.payload, "date"));
     if (cities.size === 0) continue;
-    const commitment = mentionCommitment(piece, timedCounts);
+    const authoritativePlanCopy =
+      authoritativeActivityCommitment(piece) !== "none";
+    const titleTokens = identityTokens(title);
     const candidateNotes = notes.filter(
-      (note) => cities.has(noteCity(note)) && noteText(note).includes(title)
+      (note) => {
+        if (!cities.has(noteCity(note))) return false;
+        const text = noteText(note);
+        if (text.includes(title)) return true;
+        const noteTokens = identityTokens(text);
+        return (
+          titleTokens.length > 0 &&
+          overlapCount(titleTokens, noteTokens) >=
+            Math.min(2, titleTokens.length)
+        );
+      }
     );
     const matchingNote =
       candidateNotes.find((note) => note.outputEligible) ??
@@ -8404,19 +8698,7 @@ function reconcileCardsAgainstCityNotes(
     // Deliberate day-plan membership counts as the planned sighting (ground
     // truth v2 dedup: planned copy wins) when the note copy comes from a
     // different source section.
-    const deliberateDayPlanWins =
-      commitment === "none" &&
-      observations.length > 0 &&
-      isDeliberateDayPlanMention(piece, observationById) &&
-      !notesShareSourceSection(piece, [matchingNote], observationById);
-    // Arc E fold guard (live-run 7.22.4 Schönbrunn killer): a
-    // heading-committed entity or same-site grouping structure never folds
-    // into its reference copy, independent of observation availability and
-    // of the shared-section veto — structure outranks a reference listing.
-    const protectedPlanCopy =
-      commitment === "none" && pieceIsProtectedPlanCopy(piece, pieces);
-
-    if (commitment === "none" && !deliberateDayPlanWins && !protectedPlanCopy) {
+    if (!authoritativePlanCopy) {
       if (matchingNote.outputEligible) {
         mergeCanonicalPieceInto({
           reason:
@@ -8570,6 +8852,206 @@ function finitePayloadNumber(
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function sourceIntentSignalsForPiece(
+  piece: CanonicalEvidencePiece,
+  observations: EvidenceObservation[]
+) {
+  const ownObservationIds = new Set(piece.observationIds);
+  const ownObservations = observations.filter((observation) =>
+    ownObservationIds.has(observation.id)
+  );
+  const ownClauseRoles = ownObservations
+    .map((observation) =>
+      stringValue(observation.payload, "_canonicalClauseRole")
+    );
+  // The deterministic source-clause split is already a local source
+  // decision. Both child observations retain the full sentence for lineage,
+  // so honor the stamped clause role before scanning that shared sentence or
+  // the optional sibling's hedge leaks back onto the explicit plan.
+  if (ownClauseRoles.includes("explicit_plan")) {
+    return {
+      explicitPlanObservationIds: ownObservations
+        .filter(
+          (observation) =>
+            stringValue(observation.payload, "_canonicalClauseRole") ===
+            "explicit_plan"
+        )
+        .map((observation) => observation.id),
+      hasExplicitPlanMention: true,
+      hasHedgedMention: false,
+      hedgedObservationIds: [],
+    };
+  }
+  if (ownClauseRoles.includes("hedged_reference")) {
+    return {
+      explicitPlanObservationIds: [],
+      hasExplicitPlanMention: false,
+      hasHedgedMention: true,
+      hedgedObservationIds: ownObservations
+        .filter(
+          (observation) =>
+            stringValue(observation.payload, "_canonicalClauseRole") ===
+            "hedged_reference"
+        )
+        .map((observation) => observation.id),
+    };
+  }
+  const titleTokens = identityTokens(
+    stringValue(piece.payload, "title") ?? ""
+  );
+  if (titleTokens.length === 0) {
+    return {
+      explicitPlanObservationIds: [] as string[],
+      hasExplicitPlanMention: false,
+      hasHedgedMention: false,
+      hedgedObservationIds: [] as string[],
+    };
+  }
+  let hasExplicitPlanMention = false;
+  let hasHedgedMention = false;
+  const explicitPlanObservationIds: string[] = [];
+  const hedgedObservationIds: string[] = [];
+  const sourceKeys = new Set(ownObservations.map(intentSourceKey));
+  const pieceDate = stringValue(piece.payload, "date");
+  // A clause explicitly split as the optional half of "X and maybe Y" is
+  // source-backed negative commitment for the same entity even when another
+  // parser lane emitted a bare dated copy. This is the only cross-occurrence
+  // role signal classification consumes; ordinary prose remains day/lane
+  // local and identity handles the later cross-day merge.
+  for (const observation of observations) {
+    if (
+      stringValue(observation.payload, "_canonicalClauseRole") !==
+      "hedged_reference"
+    ) {
+      continue;
+    }
+    const clauseTokens = identityTokens(
+      stringValue(observation.payload, "title") ?? ""
+    );
+    if (
+      overlapCount(titleTokens, clauseTokens) >=
+      Math.min(2, titleTokens.length)
+    ) {
+      hasHedgedMention = true;
+      hedgedObservationIds.push(observation.id);
+    }
+  }
+  for (const observation of observations) {
+    if (!sourceKeys.has(intentSourceKey(observation))) continue;
+    if (
+      pieceDate &&
+      stringValue(observation.payload, "date") !== pieceDate
+    ) {
+      continue;
+    }
+    const preservedEvidence = stringValue(observation.payload, "evidence");
+    const hasPreservedSourceStructure = Boolean(
+      observation.sourceStructure.sectionLabel ||
+        observation.sourceStructure.headingPath.length > 0
+    );
+    const evidence = normalizeText(
+      preservedEvidence ??
+        (hasPreservedSourceStructure
+          ? stringValue(observation.payload, "description") ?? ""
+          : "")
+    );
+    if (!evidence) continue;
+    // Marker and entity must occur in the same source clause. Production's
+    // injected evidence can contain a whole paragraph; a "go back" sentence
+    // elsewhere in that paragraph is not commitment evidence for every
+    // venue named later in the blob.
+    const matchingClauses = evidence
+      .split(/[.;!?\n]+/)
+      .filter((clause) => {
+        const clauseTokens = identityTokens(clause);
+        return (
+          overlapCount(titleTokens, clauseTokens) >=
+          Math.min(2, titleTokens.length)
+        );
+      });
+    if (matchingClauses.length === 0) continue;
+    if (matchingClauses.some(hasWeakRecommendationLanguage)) {
+      hasHedgedMention = true;
+      hedgedObservationIds.push(observation.id);
+    }
+    if (
+      stringValue(
+        asRecord(observation.payload._canonicalIntakeCandidacyDecision),
+        "inputEvidenceRole"
+      ) !== "grouping_proposal" &&
+      matchingClauses.some(
+        (clause) =>
+          /\b(?:go to|walk to|head to|return to|book(?:ed)?|reserv(?:e|ed)|tickets? for)\b/.test(
+            clause
+          ) &&
+          !hasWeakRecommendationLanguage(clause)
+      )
+    ) {
+      hasExplicitPlanMention = true;
+      explicitPlanObservationIds.push(observation.id);
+    }
+  }
+  return {
+    explicitPlanObservationIds,
+    hasExplicitPlanMention,
+    hasHedgedMention,
+    hedgedObservationIds,
+  };
+}
+
+function referenceNoteObservationForPiece(
+  piece: CanonicalEvidencePiece,
+  observations: EvidenceObservation[],
+  pieces: CanonicalEvidencePiece[]
+) {
+  const titleTokens = identityTokens(stringValue(piece.payload, "title"));
+  if (titleTokens.length === 0) return null;
+  const pieceCity = normalizedComparable(
+    stringValue(piece.payload, "city") ??
+      rawCityForDate(pieces, stringValue(piece.payload, "date"))
+  );
+  const tripCities = pieces
+    .filter((candidate) => candidate.kind === "place")
+    .map((candidate) => stringValue(candidate.payload, "city"))
+    .filter((value): value is string => Boolean(value));
+
+  return (
+    observations.find((observation) => {
+      const intake = asRecord(
+        observation.payload._canonicalIntakeCandidacyDecision
+      );
+      const isReferenceNote = Boolean(
+        observation.kind === "note" ||
+          stringValue(intake, "destination") === "city_note"
+      );
+      if (!isReferenceNote) return false;
+      const text = normalizedComparable(
+        [
+          stringValue(observation.payload, "title"),
+          stringValue(observation.payload, "description"),
+          stringValue(observation.payload, "evidence"),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
+      const textTokens = identityTokens(text);
+      if (
+        overlapCount(titleTokens, textTokens) <
+        Math.min(2, titleTokens.length)
+      ) {
+        return false;
+      }
+      const noteCity = normalizedComparable(
+        stringValue(observation.payload, "city") ??
+          tripCities.find((city) =>
+            text.includes(normalizedComparable(city))
+          )
+      );
+      return !pieceCity || !noteCity || pieceCity === noteCity;
+    }) ?? null
+  );
+}
+
 // RW-CLS-001 block typing. This is intentionally the first intent-changing
 // pass after dates settle and before slot/title/repeat identity. It turns the
 // source's smallest coherent blocks into durable decisions; later passes may
@@ -8587,13 +9069,18 @@ function applyIntentBlockClassification({
     observations.map((observation) => [observation.id, observation])
   );
   const timedCounts = timedActivityCountsByDate(pieces);
-  const questionSubjects = reviewSubjectTitles(missingDetails);
+  const committedDetailSubjects =
+    committedDetailReviewSubjectTitles(missingDetails);
   const geocodeVerificationRan = observations.some(
     (observation) =>
       finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
       finitePayloadNumber(observation.payload, "verifiedLongitude") !== null
   );
   const pieceById = new Map<string, CanonicalEvidencePiece>();
+  const sourceIntentByPieceId = new Map<
+    string,
+    ReturnType<typeof sourceIntentSignalsForPiece>
+  >();
   const entries: IntentBlockEntry[] = [];
 
   for (const piece of pieces) {
@@ -8606,37 +9093,76 @@ function applyIntentBlockClassification({
       .filter((observation): observation is EvidenceObservation =>
         Boolean(observation)
       );
-    const primary = ownObservations
+    // Classification is occurrence-local. Initial clustering can already
+    // have collected a same-title reference from another day; its prose,
+    // hedge, or note section must not retype this dated occurrence before
+    // the identity loop decides whether the occurrences are the same home.
+    const blockObservations = ownObservations.filter(
+      (observation) =>
+        stringValue(observation.payload, "date") === date
+    );
+    const localObservations =
+      blockObservations.length > 0 ? blockObservations : ownObservations;
+    const primaryCandidates = localObservations
       .filter(
         (observation) =>
           observation.kind === "activity" &&
           stringValue(observation.payload, "date") === date
-      )
-      .sort((left, right) => left.ordinal - right.ordinal)[0];
+      );
+    const primary = primaryCandidates
+      .sort((left, right) => {
+        const dayPlanRank = (observation: EvidenceObservation) => {
+          const labels = [
+            observation.sourceLabel,
+            observation.sourceStructure.sectionLabel ?? "",
+            ...observation.sourceStructure.headingPath,
+          ];
+          return labels.some((label) => DAY_PLAN_LABEL_PATTERN.test(label))
+            ? 1
+            : 0;
+        };
+        return dayPlanRank(right) - dayPlanRank(left) ||
+          left.ordinal - right.ordinal;
+      })[0];
     if (!primary) continue;
-    const verifiedObservation = ownObservations.find(
+    const verifiedObservation = localObservations.find(
       (observation) =>
         finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
         finitePayloadNumber(observation.payload, "verifiedLongitude") !== null
     );
-    const labels = ownObservations.flatMap((observation) => [
+    const labels = localObservations.flatMap((observation) => [
+      observation.sourceLabel,
       observation.sourceStructure.sectionLabel ?? "",
       ...observation.sourceStructure.headingPath,
     ]);
-    const ownEvidenceText = ownObservations
+    const ownEvidenceText = localObservations
       .map((observation) => stringValue(observation.payload, "evidence") ?? "")
       .join(" ");
-    const ownText = ownObservations
+    const ownText = localObservations
       .flatMap((observation) => [
         stringValue(observation.payload, "title") ?? "",
         stringValue(observation.payload, "description") ?? "",
         stringValue(observation.payload, "evidence") ?? "",
       ])
       .join(" ");
-    const structuralLabels = labels.filter(Boolean);
+    // A stage/source label identifies the parser lane (tests use values such
+    // as `jan-19` and production uses chunk labels); it is useful when it
+    // actually contains a dated day heading, but its mere presence is not a
+    // source-authored section. Only parser-preserved section/heading fields
+    // may prove that a record came from a notes blob.
+    const structuralLabels = localObservations
+      .flatMap((observation) => [
+        observation.sourceStructure.sectionLabel ?? "",
+        ...observation.sourceStructure.headingPath,
+      ])
+      .filter(Boolean);
+    const namedInObservedDayHeading = titleNamedInSourceLabels(
+      title,
+      structuralLabels.filter((label) => DAY_PLAN_LABEL_PATTERN.test(label))
+    );
     const notesBlobSignal =
       structuralLabels.length > 0 &&
-      ownObservations.every(
+      localObservations.every(
         (observation) =>
           observation.sourceStructure.sectionType !== "dated_itinerary"
       ) &&
@@ -8644,10 +9170,101 @@ function applyIntentBlockClassification({
         (label) => !DAY_PLAN_LABEL_PATTERN.test(label)
       );
     const classification = classifyDraftActivityCard(activityInput(piece.payload));
+    const sourceIntent = sourceIntentSignalsForPiece(piece, observations);
+    const referenceNoteObservation = referenceNoteObservationForPiece(
+      piece,
+      observations,
+      pieces
+    );
+    sourceIntentByPieceId.set(piece.id, sourceIntent);
+    const priorLaneObservations = localObservations.flatMap((ownObservation) => {
+      const previous = observations
+        .filter(
+          (observation) =>
+            observation.ordinal < ownObservation.ordinal &&
+            stringValue(observation.payload, "date") === date &&
+            intentSourceKey(observation) === intentSourceKey(ownObservation)
+        )
+        .sort((left, right) => right.ordinal - left.ordinal)[0];
+      return previous ? [previous] : [];
+    });
+    const ideaContextObservation = priorLaneObservations.find(
+      (observation) => {
+        const noteShaped =
+          observation.kind === "note" ||
+          observation.role === "city_note_candidate" ||
+          stringValue(
+            asRecord(
+              observation.payload._canonicalIntakeCandidacyDecision
+            ),
+            "destination"
+          ) === "city_note";
+        if (!noteShaped) return false;
+        const previousTitle = normalizedComparable(
+          stringValue(observation.payload, "title")
+        );
+        const previousDate = stringValue(observation.payload, "date");
+        // A recovery lane may call one copy a note while the primary lane
+        // calls the same occurrence an Activity. That contradiction belongs
+        // to the shared candidate decision; it is not an intervening source
+        // note and must not retype the next sibling block.
+        const hasActivityTwin = pieces.some(
+          (candidate) =>
+            candidate.kind === "activity" &&
+            stringValue(candidate.payload, "date") === previousDate &&
+            normalizedComparable(stringValue(candidate.payload, "title")) ===
+              previousTitle
+        );
+        return !hasActivityTwin;
+      }
+    );
     const researchedText = [
       activityText(piece.payload),
       stringValue(piece.payload, "evidence") ?? "",
     ].join(" ");
+    const inputEvidenceRole = stringValue(primary.payload, "evidenceRole");
+    const hasDayPlanMembership = Boolean(
+      normalizeText(stringValue(piece.payload, "itemType")) === "activity" &&
+        (!inputEvidenceRole ||
+          inputEvidenceRole === "atomic_candidate" ||
+          inputEvidenceRole === "grouping_proposal") &&
+        !isRecommendationActivityCategory(
+          stringValue(piece.payload, "category")
+        ) &&
+        [
+          primary.sourceLabel,
+          primary.sourceStructure.sectionLabel ?? "",
+          ...primary.sourceStructure.headingPath,
+        ].some((label) => DAY_PLAN_LABEL_PATTERN.test(label)) &&
+        !labels.some((label) => hasLooseTipVocabulary(label)) &&
+        !sourceIntent.hasHedgedMention &&
+        !ideaContextObservation &&
+        !hasLooseTipVocabulary(ownText) &&
+        !classification.hasAvailabilityMarker &&
+        !PRICE_MARKER_PATTERN.test(researchedText)
+    );
+    const hasSequencedDayPlan = Boolean(
+      normalizeText(stringValue(piece.payload, "itemType")) === "activity" &&
+        (!inputEvidenceRole ||
+          inputEvidenceRole === "atomic_candidate" ||
+          inputEvidenceRole === "grouping_proposal") &&
+        (timedCounts.get(date) ?? 0) >= 3 &&
+        !isRecommendationActivityCategory(
+          stringValue(piece.payload, "category")
+        ) &&
+        !sourceIntent.hasHedgedMention &&
+        !ideaContextObservation &&
+        !hasLooseTipVocabulary(ownText)
+    );
+    const auditedFixedEvidence = Boolean(
+      timeFrom(piece.payload) ||
+        confirmationFrom(piece.payload) ||
+        sourceIntent.hasExplicitPlanMention ||
+        pieceNamedInDayHeading(piece) ||
+        namedInObservedDayHeading ||
+        committedDetailSubjects.has(normalizedComparable(title)) ||
+        /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(title)
+    );
 
     entries.push({
       approxLatitude: finitePayloadNumber(piece.payload, "approxLatitude"),
@@ -8655,23 +9272,55 @@ function applyIntentBlockClassification({
       boundaryBefore: false,
       category: stringValue(piece.payload, "category"),
       date,
-      // Explicit choice must appear in the observation's evidence field — a
-      // model-invented "or" in its rewritten title is not source support.
-      hasExplicitChoice: /\bor\b/i.test(
-        ownEvidenceText.trim() ? ownEvidenceText : ownText
-      ),
-      hasFixedEvidence:
-        mentionCommitment(piece, timedCounts) !== "none",
-      hasHedgeMarker: pieceHasHedgeMarker(piece),
+      // A bounded X-or-Y title is a planned choice slot. Non-recommendation
+      // venue rows may also inherit a source-clause choice (for example a
+      // ticket-or-tour detail that proves the venue visit). A broad food or
+      // shopping span cannot promote each loose recommendation merely
+      // because it mentions an unrelated "or" (production's `Buy wine`).
+      hasExplicitChoice:
+        /\bor\b/i.test(title) ||
+        (!isRecommendationActivityCategory(
+          stringValue(piece.payload, "category")
+        ) &&
+          /\bor\b/i.test(ownEvidenceText.trim() ? ownEvidenceText : ownText)),
+      hasFixedEvidence: auditedFixedEvidence,
+      hasHedgeMarker:
+        classifyOwnTextEvidence(
+          localObservations.map((observation) =>
+            activityInput(observation.payload)
+          )
+        ).hasHedgeMarker || sourceIntent.hasHedgedMention,
+      hasDayPlanMembership,
+      ideaContextBefore:
+        Boolean(ideaContextObservation) && structuralLabels.length > 0,
+      ideaContextObservationId:
+        ideaContextObservation && structuralLabels.length > 0
+          ? ideaContextObservation.id
+          : null,
       hasIdeaSignal:
-        notesBlobSignal || hasLooseTipVocabulary(ownText),
+        notesBlobSignal ||
+        hasLooseTipVocabulary(ownText) ||
+        (Boolean(referenceNoteObservation) &&
+          !hasIndependentActivityAnchor(piece.payload) &&
+          !stringValue(piece.payload, "address") &&
+          !hasDayPlanMembership &&
+          !hasSequencedDayPlan),
       hasResearchEvidence:
         PRICE_MARKER_PATTERN.test(researchedText) ||
         classification.hasAvailabilityMarker,
+      hasSequencedDayPlan,
       hasSourceSupportedPlan:
-        SITE_CONTAINER_NOUN_PATTERN.test(title) ||
-        pieceIsSameSiteGroupingStructure(piece, pieces),
-      hasSourceStructure: structuralLabels.length > 0,
+        sourceIntent.hasExplicitPlanMention ||
+        pieceNamedInDayHeading(piece) ||
+        namedInObservedDayHeading ||
+        pieceIsSameSiteGroupingStructure(piece, pieces) ||
+        pieceIsSharedAreaGroupingStructure(piece, pieces),
+      hasSourceStructure:
+        structuralLabels.length > 0 ||
+        localObservations.some(
+          (observation) =>
+            observation.sourceStructure.sectionType !== "unknown"
+        ),
       id: piece.id,
       itemType: stringValue(piece.payload, "itemType"),
       observationIds: [...piece.observationIds],
@@ -8722,28 +9371,110 @@ function applyIntentBlockClassification({
   for (const block of result.blocks) {
     for (const memberId of block.memberIds) blockByMember.set(memberId, block);
   }
+  const stamped: StampedIntentDecision[] = [];
   for (const [pieceId, type] of result.entryTypes) {
     const piece = pieceById.get(pieceId);
     const block = blockByMember.get(pieceId);
     if (!piece || !block) continue;
     piece.payload._intentBlockId = block.blockId;
     piece.payload._intentBlockType = type;
-    if (type !== "ideas") continue;
-    const normalizedTitle = normalizedComparable(
-      stringValue(piece.payload, "title")
-    );
-    if (normalizedTitle && titleMatchesQuestionSubject(questionSubjects, normalizedTitle)) {
+    const sourceIntent = sourceIntentByPieceId.get(pieceId);
+    const commitmentSignals = [
+      sourceIntent?.hasExplicitPlanMention ? "explicit_source_plan" : null,
+      timeFrom(piece.payload) ? "time" : null,
+      confirmationFrom(piece.payload) ? "confirmation" : null,
+      pieceNamedInDayHeading(piece) ? "day_heading" : null,
+      committedDetailSubjects.has(
+        normalizedComparable(stringValue(piece.payload, "title"))
+      )
+        ? "material_detail_question"
+        : null,
+      /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(
+        stringValue(piece.payload, "title") ?? ""
+      )
+        ? "meal_slot"
+        : null,
+      Array.isArray(piece.payload._canonicalGroupingDecisionIds) &&
+      piece.payload._canonicalGroupingDecisionIds.length > 0
+        ? "approved_grouping"
+        : null,
+    ].filter((value): value is string => Boolean(value));
+    const hasAuditedCommitment = commitmentSignals.length > 0;
+    const inputDecision = asRecord(piece.payload._canonicalIntakeCandidacyDecision);
+    const decision = activityCandidacyDecisionForPayload(piece.payload, {
+      evidenceRole:
+        (stringValue(inputDecision, "inputEvidenceRole") as EvidenceRole | null) ??
+        piece.role,
+      hasAuditedCommitment,
+      intentBlockType: type,
+    });
+    piece.payload._canonicalCandidacyDecision = {
+      ...decision,
+      blockDecisionId: block.blockId,
+      commitmentObservationIds:
+        sourceIntent?.explicitPlanObservationIds ?? [],
+      commitmentSignals,
+      ideaContextBefore:
+        entries.find((entry) => entry.id === pieceId)?.ideaContextBefore ===
+        true,
+      ideaContextObservationId:
+        entries.find((entry) => entry.id === pieceId)
+          ?.ideaContextObservationId ?? null,
+      referenceNoteObservationId:
+        referenceNoteObservationForPiece(piece, observations, pieces)?.id ??
+        null,
+      decisionId: `candidacy_${stableHash({
+        blockId: block.blockId,
+        inputEvidenceRole: stringValue(inputDecision, "inputEvidenceRole"),
+        inputItemType: stringValue(inputDecision, "inputItemType"),
+        pieceId,
+        type,
+        version: 1,
+      })}`,
+      hasAuditedCommitment,
+      inputEvidenceRole: stringValue(inputDecision, "inputEvidenceRole"),
+      inputItemType: stringValue(inputDecision, "inputItemType"),
+      version: 1,
+    };
+    piece.role = decision.evidenceRole;
+    stamped.push({
+      blockId: block.blockId,
+      blockType: type,
+      classifiedTitle: stringValue(piece.payload, "title"),
+      piece,
+    });
+    if (decision.destination === "activity") {
       continue;
     }
-    demoteCanonicalPieceToCityNote(
-      piece,
-      `intent block ${block.blockId}: ${block.reason}`,
-      pieces
-    );
+    if (decision.destination === "city_note" && piece.kind === "activity") {
+      demoteCanonicalPieceToCityNote(
+        piece,
+        `intent block ${block.blockId}: ${block.reason}`,
+        pieces
+      );
+      continue;
+    }
+    if (decision.destination !== "city_note") {
+      // The resolver/intake lanes may have temporarily represented an
+      // accessory or context row as an Activity. Classification is the one
+      // authority: a refused destination becomes non-output context here so
+      // containment can still attach useful evidence to its durable owner,
+      // but grouping/identity can never resurrect a traveler card.
+      piece.kind = "context";
+      piece.outputEligible = false;
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [...piece.observationIds],
+        reason:
+          `intent block ${block.blockId}: Activity candidacy resolved to ${decision.destination}`,
+        type: "rejected",
+      });
+    }
   }
 
   return {
     blocks: result.blocks,
+    stamped,
     version: 1 as const,
   };
 }
@@ -8757,9 +9488,14 @@ function demoteHedgedSingleUncommittedMentions(
 
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
+    // The block classifier already consumed occurrence-local hedge evidence.
+    // This legacy pass may only serve unstamped direct callers/fixtures; it
+    // cannot invert a production block decision.
+    if (stringValue(piece.payload, "_intentBlockId")) continue;
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title || questionSubjects.has(title)) continue;
     if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    if (authoritativeActivityCommitment(piece) !== "none") continue;
     if (!pieceHasHedgeMarker(piece)) continue;
 
     demoteCanonicalPieceToCityNote(
@@ -9708,6 +10444,11 @@ function createResearchedListQuestions(
       }
     }
     if (mentionCommitment(piece, timedCounts) !== "none") continue;
+    // Review consumes the authoritative role; it may not turn an audited or
+    // source-plan block into ideas merely because the parser also captured
+    // prices/hours. Albertina is the production-shaped guard for this
+    // boundary.
+    if (authoritativeActivityCommitment(piece) !== "none") continue;
     if (pieceHasHedgeMarker(piece)) continue;
     // Research markers can sit in any parser text field (live run 7.17.1
     // carried the trio's prices in `evidence`, not description).
@@ -9974,15 +10715,87 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
   const activities = observations.filter(
     (observation) => observation.kind === "activity"
   );
+  const tripCities = observations
+    .filter((observation) => observation.kind === "place")
+    .map((observation) => stringValue(observation.payload, "city"));
+
+  const stampObservationDecision = (
+    observation: EvidenceObservation,
+    decision: ActivityCandidacyDecision
+  ) => {
+    observation.payload._canonicalIntakeCandidacyDecision = {
+      ...decision,
+      decisionId: `candidacy_${stableHash({
+        inputEvidenceRole: stringValue(observation.payload, "evidenceRole"),
+        inputItemType: stringValue(observation.payload, "itemType"),
+        observationId: observation.id,
+        version: 1,
+      })}`,
+      inputEvidenceRole: stringValue(observation.payload, "evidenceRole"),
+      inputItemType: stringValue(observation.payload, "itemType"),
+      version: 1,
+    };
+    observation.payload.evidenceRole = decision.evidenceRole;
+    observation.role = decision.evidenceRole;
+    observation.kind =
+      decision.destination === "activity"
+        ? "activity"
+        : decision.destination === "city_note"
+          ? "note"
+          : "context";
+  };
 
   for (const observation of observations) {
+    const intakeDecision = asRecord(
+      observation.payload._canonicalIntakeCandidacyDecision
+    );
+    const inputEvidenceRole = stringValue(
+      intakeDecision,
+      "inputEvidenceRole"
+    );
+    const inputItemType = stringValue(intakeDecision, "inputItemType");
+    const resolverKeepRefusedByInput = Boolean(
+      inputEvidenceRole === "accessory_detail" ||
+        inputEvidenceRole === "city_note_candidate" ||
+        inputEvidenceRole === "context" ||
+        inputEvidenceRole === "rejected" ||
+        inputItemType === "note" ||
+        /^(?:admin|administrative|accessory|evidence|logistics|receipt|ticket_detail)$/i.test(
+          inputItemType ?? ""
+        )
+    );
     const approvedGrouping = Array.isArray(
       observation.payload._canonicalGroupingDecisionIds
     ) && observation.payload._canonicalGroupingDecisionIds.length > 0;
     const approvedKeepActivity =
-      observation.payload._canonicalRoleDecision === "keep_activity";
+      observation.payload._canonicalRoleDecision === "keep_activity" &&
+      !resolverKeepRefusedByInput;
+    const approvedCityNote =
+      observation.payload._canonicalRoleDecision === "city_note";
 
-    if (observation.role === "grouping_proposal" && !approvedGrouping) {
+    if (approvedKeepActivity || approvedCityNote) {
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          evidenceRole: approvedKeepActivity
+            ? (stringValue(
+                asRecord(
+                  observation.payload._canonicalIntakeCandidacyDecision
+                ),
+                "inputEvidenceRole"
+              ) as EvidenceRole | null)
+            : "city_note_candidate",
+          hasAuditedCommitment: approvedKeepActivity,
+        })
+      );
+      continue;
+    }
+
+    if (
+      (observation.role === "grouping_proposal" ||
+        inputEvidenceRole === "grouping_proposal") &&
+      !approvedGrouping
+    ) {
       // A grouping proposal whose group never formed is normally redundant
       // structure, and demoting it is what keeps "Explore Vienna" and bare
       // day/route headings out of the traveler's day. A NAMED SITE container
@@ -10022,11 +10835,23 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
         stringValue(observation.payload, "date") &&
         SAME_SITE_CONTAINER_PATTERN.test(containerTitle)
       ) {
-        observation.role = "atomic_candidate";
+        stampObservationDecision(
+          observation,
+          activityCandidacyDecisionForPayload(observation.payload, {
+            evidenceRole: "atomic_candidate",
+            hasAuditedCommitment: true,
+          })
+        );
         continue;
       }
-      observation.kind = "context";
-      observation.role = "context";
+      observation.payload._canonicalSourceContainer = true;
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          evidenceRole: "grouping_proposal",
+          isGenericOverview: true,
+        })
+      );
       continue;
     }
 
@@ -10072,10 +10897,22 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
     });
     const containerTitle =
       /\b(day|meals?|overview|itinerary|schedule|sights?|plan)\b$/.test(title);
+    const genericDayArc = isDayArcTitle(
+      input.title,
+      tripCityTokenSet(tripCities)
+    );
 
-    if (mentionedChildren.length >= 2 || (containerTitle && mentionedChildren.length >= 1)) {
-      observation.kind = "context";
-      observation.role = "context";
+    if (
+      mentionedChildren.length >= 2 ||
+      ((containerTitle || genericDayArc) && mentionedChildren.length >= 1)
+    ) {
+      observation.payload._canonicalSourceContainer = true;
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          isGenericOverview: true,
+        })
+      );
     }
   }
 }
@@ -10286,7 +11123,9 @@ export function reapplyCanonicalOutputInvariants({
   const pieces = structuredClone(inputPieces);
   const before = JSON.stringify(pieces);
 
-  enforceCanonicalOutputActivityRoles(pieces);
+  enforceCanonicalOutputActivityRoles(
+    stampedIntentDecisionsFromPieces(pieces)
+  );
   suppressRepresentedTravelAndStayActivities(pieces);
   routeCanonicalAccessoryEvidence({
     actions: {
@@ -12046,8 +12885,44 @@ export function clusterExtractedEvidence({
           );
         }
         ordinal += 1;
-        const kind =
-          collection === "activities" ? activityKind(payload) : defaultKind;
+        const intakeDecision =
+          collection === "activities"
+            ? activityCandidacyDecisionForPayload(
+                payload,
+                hasSourceBackedIntakeCommitment(payload)
+                  ? { hasAuditedCommitment: true }
+                  : {}
+              )
+            : null;
+        if (intakeDecision) {
+          const originalInputs = originalActivityCandidacyInputs(payload);
+          const inputEvidenceRole = originalInputs.evidenceRole;
+          const inputItemType = originalInputs.itemType;
+          payload._canonicalIntakeCandidacyDecision = {
+            ...intakeDecision,
+            decisionId: `candidacy_${stableHash({
+              inputEvidenceRole,
+              inputItemType,
+              resolverCandidateId: stringValue(
+                payload,
+                "_resolverCandidateId"
+              ),
+              sourceLabel: stageInput.label,
+              version: 1,
+            })}`,
+            inputEvidenceRole,
+            inputItemType,
+            version: 1,
+          };
+          payload.evidenceRole = intakeDecision.evidenceRole;
+        }
+        const kind = intakeDecision
+          ? intakeDecision.destination === "activity"
+            ? "activity"
+            : intakeDecision.destination === "city_note"
+              ? "note"
+              : "context"
+          : defaultKind;
         const noteEntries = kind === "note"
           ? explicitCityNoteEntries(payload)
           : null;
@@ -12108,27 +12983,83 @@ export function clusterExtractedEvidence({
               })
             );
           }
-          continue;
+        } else {
+          const role =
+            intakeDecision?.evidenceRole ??
+            evidenceRoleFromPayload(payload, kind);
+          pushUniqueObservation(
+            observations,
+            createObservation({
+              kind,
+              ordinal,
+              payload,
+              role,
+              source: stageInput.source,
+              sourceFilename:
+                stringValue(payload, "sourceFilename") ??
+                stageInput.sourceFilename ??
+                null,
+              sourceLabel: stageInput.label,
+              sourceProvenance: stageInput.sourceProvenance ?? null,
+              sourceStructure: sourceStructureFromPayload(payload),
+              sourceUploadId: stageInput.sourceUploadId ?? null,
+            })
+          );
         }
-        const role = evidenceRoleFromPayload(payload, kind);
-        pushUniqueObservation(
-          observations,
-          createObservation({
-            kind,
-            ordinal,
-            payload,
-            role,
-            source: stageInput.source,
-            sourceFilename:
-              stringValue(payload, "sourceFilename") ??
-              stageInput.sourceFilename ??
-              null,
-            sourceLabel: stageInput.label,
-            sourceProvenance: stageInput.sourceProvenance ?? null,
-            sourceStructure: sourceStructureFromPayload(payload),
-            sourceUploadId: stageInput.sourceUploadId ?? null,
-          })
-        );
+        if (collection === "activities") {
+          for (const clausePayload of splitExplicitPlanFromHedgedReference(
+            payload
+          )) {
+            ordinal += 1;
+            const hasAuditedCommitment =
+              clausePayload._canonicalClauseRole === "explicit_plan";
+            const clauseDecision = activityCandidacyDecisionForPayload(
+              clausePayload,
+              { hasAuditedCommitment }
+            );
+            const inputEvidenceRole = stringValue(
+              clausePayload,
+              "evidenceRole"
+            );
+            const inputItemType = stringValue(clausePayload, "itemType");
+            clausePayload._canonicalIntakeCandidacyDecision = {
+              ...clauseDecision,
+              decisionId: `candidacy_${stableHash({
+                clauseRole: clausePayload._canonicalClauseRole,
+                inputEvidenceRole,
+                inputItemType,
+                sourceLabel: stageInput.label,
+                version: 1,
+              })}`,
+              inputEvidenceRole,
+              inputItemType,
+              version: 1,
+            };
+            pushUniqueObservation(
+              observations,
+              createObservation({
+                kind:
+                  clauseDecision.destination === "activity"
+                    ? "activity"
+                    : clauseDecision.destination === "city_note"
+                      ? "note"
+                      : "context",
+                ordinal,
+                payload: clausePayload,
+                role: clauseDecision.evidenceRole,
+                source: stageInput.source,
+                sourceFilename:
+                  stringValue(payload, "sourceFilename") ??
+                  stageInput.sourceFilename ??
+                  null,
+                sourceLabel: stageInput.label,
+                sourceProvenance: stageInput.sourceProvenance ?? null,
+                sourceStructure: sourceStructureFromPayload(clausePayload),
+                sourceUploadId: stageInput.sourceUploadId ?? null,
+              })
+            );
+          }
+        }
       }
     }
 
@@ -12280,8 +13211,18 @@ export function clusterExtractedEvidence({
     ["pieces[].outputEligible", "pieces[].disposition"],
     () => {
       for (const piece of pieces) {
-        if (!piece.outputEligible) continue;
-        if (piece.kind !== "activity" && piece.kind !== "note") continue;
+        // Intake stamps this only on parser Activity candidates. The shared
+        // candidacy decision may already have routed an admin-shaped row to
+        // context; Costs exclusion must still be path-independent and must
+        // not accidentally widen to real stay/transport/place records.
+        if (
+          !stringValue(
+            asRecord(piece.payload._canonicalIntakeCandidacyDecision),
+            "decisionId"
+          )
+        ) {
+          continue;
+        }
         if (
           isPlanningCostMaterial({
             label: stringValue(piece.payload, "sourceSectionLabel"),
@@ -12389,13 +13330,6 @@ export function clusterExtractedEvidence({
   runPieceWriter("pre_classification_mutation", "applyExplicitSourceUpdates", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
     applyExplicitSourceUpdates(pieces)
   );
-  // Card/note reconciliation must see the ORIGINAL note lists before
-  // accessory routing strips matched sentences onto activity records —
-  // otherwise an uncommitted venue card eats its own note evidence and
-  // survives (live-run 7.17.2 Budapest promotions).
-  runPieceWriter("pre_classification_mutation", "reconcileCardsAgainstCityNotes:early", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions", "missingDetails[]"], () =>
-    reconcileCardsAgainstCityNotes(pieces, missingDetails, observations)
-  );
   runPieceWriter("pre_classification_mutation", "routeCanonicalAccessoryEvidence", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
     routeCanonicalAccessoryEvidence({
       actions: {
@@ -12427,7 +13361,7 @@ export function clusterExtractedEvidence({
   runPieceWriter("pre_classification_mutation", "suppressRepresentedTravelAndStayActivities:dated", ["pieces[].outputEligible", "pieces[].disposition"], () =>
     suppressRepresentedTravelAndStayActivities(pieces)
   );
-  const intentBlocks = runPieceWriter(
+  const intentClassification = runPieceWriter(
     "classification",
     "applyIntentBlockClassification",
     ["pieces[].role", "pieces[].kind", "pieces[].payload", "pieces[].actions", "missingDetails[]"],
@@ -12478,9 +13412,6 @@ export function clusterExtractedEvidence({
       observations,
       pieces,
     })
-  );
-  runPieceWriter("grouping", "enforceCanonicalOutputActivityRoles", ["pieces[].kind", "pieces[].role", "pieces[].payload"], () =>
-    enforceCanonicalOutputActivityRoles(pieces)
   );
   // Question creation runs AFTER grouping so committed group structure is
   // visible: a grouped parent or child can never be mistaken for a
@@ -12538,6 +13469,11 @@ export function clusterExtractedEvidence({
   // otherwise resurrect unscrubbed prose after an earlier sweep.
   runPieceWriter("final_projection", "scrubProtectedValuesFromPublicProse", ["pieces[].payload"], () =>
     scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails)
+  );
+  // Validation-only final guard. Every later semantic writer has run; an
+  // output-eligible piece may not invert the block decision's role or kind.
+  runPieceWriter("final_projection", "enforceCanonicalOutputActivityRoles", [], () =>
+    enforceCanonicalOutputActivityRoles(intentClassification.stamped)
   );
   const canonicalGroupingCalls = runPieceWriter(
     "review",
@@ -12682,6 +13618,69 @@ export function clusterExtractedEvidence({
     // maker-facing extraction mechanics (AGENTS.md dark-factory).
     transportFieldRepairs: transportFieldRepair.repairs,
     summary: {
+      activityCandidacyDecisions: observations.flatMap((observation) => {
+        const owners = pieces.filter((piece) =>
+          piece.observationIds.includes(observation.id)
+        );
+        const finalDecision = owners
+          .map((piece) => asRecord(piece.payload._canonicalCandidacyDecision))
+          .find((decision) => stringValue(decision, "decisionId"));
+        const intakeDecision = asRecord(
+          observation.payload._canonicalIntakeCandidacyDecision
+        );
+        const decision = finalDecision ?? intakeDecision;
+        const decisionId = stringValue(decision, "decisionId");
+        if (!decisionId) return [];
+        return [
+          {
+            activityCandidate: decision.activityCandidate === true,
+            blockDecisionId: stringValue(decision, "blockDecisionId"),
+            canonicalPieceIds: owners.map((piece) => piece.id),
+            commitmentObservationIds: Array.isArray(
+              decision.commitmentObservationIds
+            )
+              ? decision.commitmentObservationIds.filter(
+                  (value): value is string => typeof value === "string"
+                )
+              : [],
+            commitmentSignals: Array.isArray(decision.commitmentSignals)
+              ? decision.commitmentSignals.filter(
+                  (value): value is string => typeof value === "string"
+                )
+              : [],
+            contradiction: decision.contradiction === true,
+            decisionId,
+            destination: stringValue(decision, "destination") ?? "context",
+            ideaContextBefore: decision.ideaContextBefore === true,
+            ideaContextObservationId: stringValue(
+              decision,
+              "ideaContextObservationId"
+            ),
+            referenceNoteObservationId: stringValue(
+              decision,
+              "referenceNoteObservationId"
+            ),
+            inputEvidenceRole: stringValue(
+              intakeDecision,
+              "inputEvidenceRole"
+            ),
+            inputItemType: stringValue(intakeDecision, "inputItemType"),
+            observationId: observation.id,
+            observationDate: stringValue(observation.payload, "date"),
+            observationOrdinal: observation.ordinal,
+            observationTitle: stringValue(observation.payload, "title"),
+            reasonCode:
+              stringValue(decision, "reasonCode") ?? "EXPLICIT_CONTEXT",
+            title:
+              owners
+                .map((piece) => stringValue(piece.payload, "title"))
+                .find(Boolean) ??
+              stringValue(observation.payload, "title"),
+            winningSignal:
+              stringValue(decision, "winningSignal") ?? "source_structure",
+          },
+        ];
+      }),
       canonicalPieceCount: pieces.filter((piece) => piece.outputEligible).length,
       clusteredObservationCount: pieces.reduce(
         (count, piece) => count + Math.max(0, piece.observationIds.length - 1),
@@ -12735,7 +13734,10 @@ export function clusterExtractedEvidence({
           .flatMap((piece) => piece.observationIds)
       ).size,
       groupingClaims: deterministicGrouping.telemetry,
-      intentBlocks,
+      intentBlocks: {
+        blocks: intentClassification.blocks,
+        version: intentClassification.version,
+      },
       stageWriterTrace,
       sourceAnchorObservationCount: sourceTransportAnchors.length,
       suppressedWeakAnchorCount,

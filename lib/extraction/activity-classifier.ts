@@ -31,6 +31,202 @@ import { comparableTokens, normalizeText } from "@/lib/extraction/traveler-text"
 
 export type MentionCommitment = "fixed" | "sequenced" | "none";
 
+// One Activity-candidacy decision for every parser lane. The model emits two
+// overlapping labels (`itemType` and `evidenceRole`), and production proved
+// that treating either label as an unconditional Activity promotion leaks
+// booking/admin fragments into the itinerary. This decision is deliberately
+// pure: callers provide source-backed facts, and every caller receives the
+// same destination, reason code, and contradiction verdict.
+export type ActivityCandidacyEvidenceRole =
+  | "accessory_detail"
+  | "atomic_candidate"
+  | "city_note_candidate"
+  | "context"
+  | "grouping_proposal"
+  | "rejected";
+
+export type ActivityCandidacyDestination =
+  | "activity"
+  | "accessory"
+  | "city_note"
+  | "context"
+  | "rejected";
+
+export type ActivityCandidacyReasonCode =
+  | "AUDITED_COMMITMENT"
+  | "BLOCK_AMBIGUOUS"
+  | "BLOCK_IDEAS"
+  | "BLOCK_PLAN"
+  | "EXPLICIT_ACCESSORY"
+  | "EXPLICIT_CONTEXT"
+  | "EXPLICIT_REJECTED"
+  | "GENERIC_OVERVIEW"
+  | "ITEM_TYPE_ADMIN"
+  | "ITEM_TYPE_NOTE"
+  | "LOOSE_REFERENCE"
+  | "MODEL_ACTIVITY_DEFAULT";
+
+export type ActivityCandidacyDecision = {
+  activityCandidate: boolean;
+  contradiction: boolean;
+  destination: ActivityCandidacyDestination;
+  evidenceRole: ActivityCandidacyEvidenceRole;
+  reasonCode: ActivityCandidacyReasonCode;
+  winningSignal:
+    | "audited_source_commitment"
+    | "intent_block"
+    | "item_type"
+    | "model_default"
+    | "source_structure";
+};
+
+export type ActivityCandidacyInput = DraftActivityCardInput & {
+  evidenceRole?: string | null;
+  hasAuditedCommitment?: boolean;
+  intentBlockType?: IntentBlockType | null;
+  isGenericOverview?: boolean;
+  sourceSectionType?: string | null;
+};
+
+const ADMIN_ITEM_TYPE_PATTERN =
+  /^(?:admin|administrative|accessory|evidence|logistics|receipt|ticket_detail)$/i;
+
+export function decideActivityCandidacy(
+  input: ActivityCandidacyInput
+): ActivityCandidacyDecision {
+  const explicitRole = input.evidenceRole;
+  const itemType = normalizeText(input.itemType);
+  const hasAuditedCommitment = input.hasAuditedCommitment === true;
+  const roleSaysActivity =
+    explicitRole === "atomic_candidate" || explicitRole === "grouping_proposal";
+  const typeSaysActivity = itemType === "activity";
+  const typeSaysNote = itemType === "note";
+  const typeSaysAdmin =
+    ADMIN_ITEM_TYPE_PATTERN.test(itemType) ||
+    (typeSaysNote && input.sourceSectionType === "booking_detail" &&
+      /(?:^|[_\s-])(?:admin|logistics?)(?:$|[_\s-])/i.test(
+        input.category ?? ""
+      ));
+  const contradiction = Boolean(
+    (roleSaysActivity && (typeSaysNote || typeSaysAdmin)) ||
+      (explicitRole === "accessory_detail" && typeSaysActivity) ||
+      (explicitRole === "city_note_candidate" && typeSaysActivity)
+  );
+
+  const activity = (
+    reasonCode: ActivityCandidacyReasonCode,
+    winningSignal: ActivityCandidacyDecision["winningSignal"]
+  ): ActivityCandidacyDecision => ({
+    activityCandidate: true,
+    contradiction,
+    destination: "activity",
+    evidenceRole:
+      explicitRole === "grouping_proposal"
+        ? "grouping_proposal"
+        : "atomic_candidate",
+    reasonCode,
+    winningSignal,
+  });
+  const refused = (
+    destination: Exclude<ActivityCandidacyDestination, "activity">,
+    evidenceRole: ActivityCandidacyEvidenceRole,
+    reasonCode: ActivityCandidacyReasonCode,
+    winningSignal: ActivityCandidacyDecision["winningSignal"]
+  ): ActivityCandidacyDecision => ({
+    activityCandidate: false,
+    contradiction,
+    destination,
+    evidenceRole,
+    reasonCode,
+    winningSignal,
+  });
+
+  if (explicitRole === "rejected") {
+    return refused("rejected", "rejected", "EXPLICIT_REJECTED", "source_structure");
+  }
+  if (explicitRole === "context") {
+    return refused("context", "context", "EXPLICIT_CONTEXT", "source_structure");
+  }
+  if (input.isGenericOverview || classifyDraftActivityCard(input).isOverviewActivity) {
+    return refused("context", "context", "GENERIC_OVERVIEW", "source_structure");
+  }
+  // Explicit audited source commitment is the only legal promotion path out
+  // of note/admin/accessory material. The caller must prove it from source
+  // structure or a resolver decision; model prose alone is not that proof.
+  // Context/rejected/overview rows above are structural non-candidates, not
+  // weak candidates, so a time or grouping claim can never resurrect them.
+  if (hasAuditedCommitment) {
+    return activity("AUDITED_COMMITMENT", "audited_source_commitment");
+  }
+  if (typeSaysAdmin) {
+    return refused(
+      "accessory",
+      "accessory_detail",
+      "ITEM_TYPE_ADMIN",
+      "item_type"
+    );
+  }
+  if (explicitRole === "accessory_detail") {
+    return refused(
+      "accessory",
+      "accessory_detail",
+      "EXPLICIT_ACCESSORY",
+      "source_structure"
+    );
+  }
+  if (input.intentBlockType === "ideas") {
+    return refused(
+      "city_note",
+      "city_note_candidate",
+      "BLOCK_IDEAS",
+      "intent_block"
+    );
+  }
+  if (input.intentBlockType === "ambiguous") {
+    // Ambiguous is pending review, not a semantic home. Keep the candidate
+    // alive so the review loop can create one consolidated question and then
+    // place its members as City Notes while that question is open. Demoting
+    // here would erase the candidates before review can conserve them.
+    return activity("BLOCK_AMBIGUOUS", "intent_block");
+  }
+  if (typeSaysNote) {
+    return refused(
+      "city_note",
+      "city_note_candidate",
+      "ITEM_TYPE_NOTE",
+      "item_type"
+    );
+  }
+  if (explicitRole === "city_note_candidate") {
+    return refused(
+      "city_note",
+      "city_note_candidate",
+      "LOOSE_REFERENCE",
+      "source_structure"
+    );
+  }
+  if (input.intentBlockType === "plan") {
+    return activity("BLOCK_PLAN", "intent_block");
+  }
+
+  const classification = classifyDraftActivityCard(input);
+  if (
+    classification.suggestedKind === "city_note" &&
+    (classification.isLooseTipActivity ||
+      classification.hasWeakRecommendationMarker ||
+      !input.date ||
+      (!typeSaysActivity && !roleSaysActivity))
+  ) {
+    return refused(
+      "city_note",
+      "city_note_candidate",
+      "LOOSE_REFERENCE",
+      "source_structure"
+    );
+  }
+  return activity("MODEL_ACTIVITY_DEFAULT", "model_default");
+}
+
 // A named-site container noun. Shared with grouping (evidence-clustering
 // re-exports this as SAME_SITE_CONTAINER_PATTERN) so the site↔component
 // relation and same-site grouping can never diverge. Defined in
@@ -185,6 +381,10 @@ export const DAY_PLAN_LABEL_PATTERN =
 const RECOMMENDATION_CATEGORY_PATTERN =
   /food|dining|nightlife|drink|bar|cafe|shopping|social/i;
 
+export function isRecommendationActivityCategory(category: string | null) {
+  return RECOMMENDATION_CATEGORY_PATTERN.test(category ?? "");
+}
+
 function entryIdeaVocabularySignal(entry: IdeaListEntry) {
   return (
     entry.ownTextHedge ||
@@ -263,7 +463,7 @@ export function classifyIdeaListSections(entries: IdeaListEntry[]) {
           )
       );
     const recommendationCount = group.filter((entry) =>
-      RECOMMENDATION_CATEGORY_PATTERN.test(entry.category ?? "")
+      isRecommendationActivityCategory(entry.category)
     ).length;
     const recommendationMajority =
       recommendationCount * 2 >= group.length;
@@ -301,8 +501,21 @@ export type IntentBlockEntry = {
   hasExplicitChoice: boolean;
   hasFixedEvidence: boolean;
   hasHedgeMarker: boolean;
+  // The immediately preceding source observation is already typed as note
+  // or context. This is a local block-boundary fact, not a day-wide signal.
+  ideaContextBefore?: boolean;
+  ideaContextObservationId?: string | null;
   hasIdeaSignal: boolean;
   hasResearchEvidence: boolean;
+  // A parser Activity belongs to a dated day-plan source section and carries
+  // no local note/research/hedge evidence. This is weaker than a booking,
+  // time, explicit source verb, or site-containment plan: block-level idea
+  // evidence must get the first chance to refuse it.
+  hasDayPlanMembership: boolean;
+  // A hedge-free candidate sits on a day with enough fixed slots to infer
+  // sequence. Like day-plan membership, this is weaker than block-level idea
+  // evidence and therefore belongs in the neutral fallback, not strongIntent.
+  hasSequencedDayPlan: boolean;
   // Source-supported site containment, not geographic proximity by itself.
   hasSourceSupportedPlan: boolean;
   // A recommendation-category majority is meaningful only inside an actual
@@ -485,7 +698,13 @@ function geographicComponents(
 }
 
 function strongIntent(entry: IntentBlockEntry): IntentBlockType | null {
-  const roleText = `${entry.itemType ?? ""} ${entry.category ?? ""}`;
+  // Parser category is presentation metadata, not commitment. Production's
+  // Jan-20 Laundry row was an explicit Activity in a dated plan but carried
+  // category `admin_logistics`; treating that category as a role silently
+  // inverted the source. Only the item role itself may force logistics or
+  // evidence here. The shared candidacy decision has already resolved any
+  // itemType/evidenceRole contradiction before this block judgement.
+  const roleText = entry.itemType ?? "";
   if (LOGISTICS_PATTERN.test(roleText)) return "logistics";
   if (EVIDENCE_PATTERN.test(roleText)) return "evidence";
   if (
@@ -495,7 +714,11 @@ function strongIntent(entry: IntentBlockEntry): IntentBlockType | null {
   ) {
     return "plan";
   }
-  if (entry.hasHedgeMarker || entry.hasIdeaSignal) return "ideas";
+  if (
+    entry.hasHedgeMarker ||
+    entry.hasIdeaSignal ||
+    entry.ideaContextBefore
+  ) return "ideas";
   return null;
 }
 
@@ -506,7 +729,7 @@ function recommendationMajority(entries: IntentBlockEntry[]) {
   if (candidates.length < 3) return false;
   if (!candidates.every((entry) => entry.hasSourceStructure)) return false;
   const recommendationCount = candidates.filter((entry) =>
-    RECOMMENDATION_CATEGORY_PATTERN.test(entry.category ?? "")
+    isRecommendationActivityCategory(entry.category)
   ).length;
   return recommendationCount * 2 >= candidates.length;
 }
@@ -556,7 +779,9 @@ export function classifyIntentBlocks(
     // proximity alone may split blocks but may never turn an unrelated nearby
     // venue into part of the plan (the geocoder echo failure this arc pins).
     const hasPropagatingPlanAnchor = component.some(
-      (entry) => entry.hasFixedEvidence || entry.hasExplicitChoice
+      (entry) =>
+        entry.hasSourceStructure &&
+        (entry.hasFixedEvidence || entry.hasExplicitChoice)
     );
     const hasIdeaAnchor = component.some(
       (entry) => strongById.get(entry.id) === "ideas"
@@ -580,6 +805,14 @@ export function classifyIntentBlocks(
       neutralReason =
         "multiple researched alternatives carry no source-supported selection; preserve pending one consolidated decision";
     } else if (
+      component.some(
+        (entry) => entry.hasDayPlanMembership || entry.hasSequencedDayPlan
+      )
+    ) {
+      neutralType = "plan";
+      neutralReason =
+        "source-contiguous parser Activities carry day-plan membership or sequenced-day evidence with no contrary idea, hedge, or research evidence";
+    } else if (
       strongPlanDates.has(date) &&
       (candidateCountByDate.get(date) ?? 0) >= DENSITY_REEVALUATION_FLOOR
     ) {
@@ -594,7 +827,8 @@ export function classifyIntentBlocks(
 
     const finalByType = new Map<IntentBlockType, IntentBlockEntry[]>();
     for (const entry of component) {
-      const finalType = strongById.get(entry.id) ?? neutralType;
+      const strong = strongById.get(entry.id);
+      const finalType = strong ?? neutralType;
       entryTypes.set(entry.id, finalType);
       const group = finalByType.get(finalType);
       if (group) group.push(entry);
@@ -637,17 +871,30 @@ export function classifyIntentBlocks(
 export function classifyRecoveredLineRole(
   input: OwnTextEvidenceInput
 ): "city_note_candidate" | null {
-  const classification = classifyDraftActivityCard(input);
-  if (hasStandaloneActivityAnchor(input) || input.confirmation) {
-    return null;
-  }
-  if (
-    classification.isLooseTipActivity ||
-    classification.hasWeakRecommendationMarker
-  ) {
-    return "city_note_candidate";
-  }
-  return null;
+  const decision = decideRecoveredActivityCandidacy(input);
+  return decision.destination === "city_note" ? "city_note_candidate" : null;
+}
+
+export function decideRecoveredActivityCandidacy(
+  input: OwnTextEvidenceInput & { evidenceRole?: string | null }
+) {
+  const roleOrTypeRefusesPromotion = Boolean(
+    input.evidenceRole === "accessory_detail" ||
+      input.evidenceRole === "city_note_candidate" ||
+      normalizeText(input.itemType) === "note" ||
+      ADMIN_ITEM_TYPE_PATTERN.test(normalizeText(input.itemType))
+  );
+  return decideActivityCandidacy({
+    ...input,
+    evidenceRole: input.evidenceRole,
+    hasAuditedCommitment:
+      !roleOrTypeRefusesPromotion &&
+      Boolean(
+        input.confirmation ||
+          input.startTime ||
+          classifyDraftActivityCard(input).hasStrongPlannedActivityLanguage
+      ),
+  });
 }
 
 // --- Shared commitment language (B1) ----------------------------------------

@@ -3012,6 +3012,14 @@ if (fromCacheDir) {
     );
   }
   const traceEntries = assessment.report.canonicalization.stageWriterTrace ?? [];
+  if (process.env.SCORECARD_CANDIDACY_TRACE === "1") {
+    console.log(
+      "CANDIDACY TRACE " +
+        JSON.stringify(
+          assessment.report.canonicalization.activityCandidacyDecisions ?? []
+        )
+    );
+  }
   const evidenceModule = require2(
     path.join(rootDir, "lib/extraction/evidence-clustering.ts")
   );
@@ -3023,6 +3031,15 @@ if (fromCacheDir) {
       legacyFingerprints: assessment.report.fingerprints ?? {},
       records: assembly.records,
     });
+  const classifierTrace = traceEntries.find(
+    (entry) => entry.writer === "applyIntentBlockClassification"
+  );
+  const reconciliationTrace = traceEntries.filter((entry) =>
+    entry.writer.startsWith("reconcileCardsAgainstCityNotes")
+  );
+  const enforcementTrace = traceEntries.find(
+    (entry) => entry.writer === "enforceCanonicalOutputActivityRoles"
+  );
   const writerTrace = {
     changedCount: traceEntries.filter((entry) => entry.changed).length,
     codeVersion: evidenceModule.EVIDENCE_CLUSTER_VERSION,
@@ -3037,12 +3054,12 @@ if (fromCacheDir) {
         (entry, index) =>
           entry.ordinal === index + 1 && entry.beforeHash && entry.afterHash
       ) &&
-      traceEntries.some(
-        (entry) => entry.writer === "reconcileCardsAgainstCityNotes:early"
-      ) &&
-      traceEntries.some(
-        (entry) => entry.writer === "applyIntentBlockClassification"
-      ),
+      Boolean(classifierTrace) &&
+      reconciliationTrace.length === 1 &&
+      reconciliationTrace[0].ordinal > classifierTrace.ordinal &&
+      Boolean(enforcementTrace) &&
+      enforcementTrace.ordinal > reconciliationTrace[0].ordinal &&
+      enforcementTrace.writes.length === 0,
   };
   console.log(
     `WRITER TRACE: ${writerTrace.entryCount} stages, ${writerTrace.changedCount} changed state`
@@ -3071,6 +3088,27 @@ if (fromCacheDir) {
         : "FAIL"
     }: ${persistedStyleParity.scoreStateDiffs.length} score-state difference(s)`
   );
+  if (process.env.SCORECARD_PARITY_TRACE === "1") {
+    console.log(
+      "PERSISTED-STYLE PARITY TRACE " +
+        JSON.stringify(
+          persistedStyleParity.scoreStateDiffs.map((difference) => {
+            const assertion = ASSERTIONS.find(
+              (candidate) => candidate.id === difference.id
+            );
+            return {
+              ...difference,
+              productionDetail: assertion
+                ? evaluate(assertion, persistedStyleContext).detail
+                : null,
+              replayDetail: assertion
+                ? evaluate(assertion, replayContext).detail
+                : null,
+            };
+          })
+        )
+    );
+  }
 
   // Exit 0 by default, same as the live replay: this is a baseline, and a
   // permanently red gate teaches people to ignore it.

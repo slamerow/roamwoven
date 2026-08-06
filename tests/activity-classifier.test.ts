@@ -4,6 +4,8 @@ import {
   classifyIdeaListSections,
   classifyOwnTextEvidence,
   classifyRecoveredLineRole,
+  decideActivityCandidacy,
+  decideRecoveredActivityCandidacy,
   isSiteComponentTitlePair,
   resolveMentionCommitment,
   type IdeaListEntry,
@@ -50,9 +52,11 @@ function blockEntry(
     date: "2019-01-19",
     hasExplicitChoice: false,
     hasFixedEvidence: false,
+    hasDayPlanMembership: false,
     hasHedgeMarker: false,
     hasIdeaSignal: false,
     hasResearchEvidence: false,
+    hasSequencedDayPlan: false,
     hasSourceSupportedPlan: false,
     hasSourceStructure: true,
     id,
@@ -68,6 +72,118 @@ function blockEntry(
 }
 
 export default async function run() {
+  await test("activity candidacy: contradictions resolve through one ordered decision", () => {
+    const base = {
+      category: "art_culture",
+      date: "2030-04-12",
+      description: "A source item.",
+      endTime: null,
+      startTime: null,
+      title: "Sample place",
+    };
+    const matrix = [
+      {
+        expected: ["accessory", "ITEM_TYPE_ADMIN", true],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          itemType: "admin",
+        },
+      },
+      {
+        expected: ["accessory", "EXPLICIT_ACCESSORY", true],
+        input: {
+          ...base,
+          evidenceRole: "accessory_detail",
+          itemType: "activity",
+        },
+      },
+      {
+        expected: ["city_note", "ITEM_TYPE_NOTE", true],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          itemType: "note",
+        },
+      },
+      {
+        expected: ["accessory", "ITEM_TYPE_ADMIN", true],
+        input: {
+          ...base,
+          category: "admin_logistics",
+          evidenceRole: "atomic_candidate",
+          itemType: "note",
+          sourceSectionType: "booking_detail",
+        },
+      },
+      {
+        expected: ["city_note", "BLOCK_IDEAS", false],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          intentBlockType: "ideas" as const,
+          itemType: "activity",
+        },
+      },
+      {
+        expected: ["activity", "BLOCK_PLAN", false],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          intentBlockType: "plan" as const,
+          itemType: "activity",
+        },
+      },
+      {
+        expected: ["activity", "BLOCK_AMBIGUOUS", false],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          intentBlockType: "ambiguous" as const,
+          itemType: "activity",
+        },
+      },
+      {
+        expected: ["activity", "AUDITED_COMMITMENT", true],
+        input: {
+          ...base,
+          evidenceRole: "city_note_candidate",
+          hasAuditedCommitment: true,
+          itemType: "activity",
+        },
+      },
+    ] as const;
+    for (const row of matrix) {
+      const decision = decideActivityCandidacy(row.input);
+      assert.deepEqual(
+        [decision.destination, decision.reasonCode, decision.contradiction],
+        row.expected
+      );
+    }
+  });
+
+  await test("activity candidacy: recovery and primary agree on note and accessory refusals", () => {
+    const cases = [
+      {
+        evidenceRole: "city_note_candidate",
+        itemType: "note",
+        title: "City recommendation",
+      },
+      {
+        evidenceRole: "accessory_detail",
+        itemType: "activity",
+        startTime: "14:00",
+        title: "Walking direction",
+      },
+    ];
+    for (const input of cases) {
+      const primary = decideActivityCandidacy(input);
+      const recovery = decideRecoveredActivityCandidacy(input);
+      assert.equal(recovery.destination, primary.destination);
+      assert.equal(recovery.reasonCode, primary.reasonCode);
+    }
+  });
+
   await test("intent blocks: one dated section can hold a site plan, scattered ideas, and an unresolved researched choice", () => {
     const entries = [
       blockEntry({
@@ -169,6 +285,23 @@ export default async function run() {
       assert.equal(result.entryTypes.get(id), "plan", id);
     }
     assert.equal(result.entryTypes.get("laundry"), "logistics");
+  });
+
+  await test("intent blocks: missing source telemetry remains ambiguous rather than inventing commitment", () => {
+    const unstructured = blockEntry({
+      hasSourceStructure: false,
+      id: "parser-activity",
+      sourceOrder: 1,
+    });
+    const result = classifyIntentBlocks([unstructured], {
+      geocodeVerificationRan: true,
+    });
+
+    assert.equal(result.entryTypes.get("parser-activity"), "ambiguous");
+    assert.match(
+      result.blocks[0]?.reason ?? "",
+      /does not distinguish selected plan from ideas/i
+    );
   });
 
   await test("intent blocks: parser coordinates cannot split a block after verification ran, and one verified outlier cannot split it alone", () => {

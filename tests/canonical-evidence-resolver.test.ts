@@ -406,7 +406,7 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
-  await test("a high-confidence role decision is the source-role authority", () => {
+  await test("a resolver role proposal cannot rewrite a source-declared note into an Activity", () => {
     const input = stage(["Museum evening"], "Museum evening");
     const stagedActivity = (input.stage as { activities: Array<Record<string, unknown>> })
       .activities[0];
@@ -424,7 +424,11 @@ export default async function run() {
     });
     const draft = cluster(application);
 
-    assert.deepEqual(draft.activities.map((item) => item.title), ["Museum evening"]);
+    assert.deepEqual(
+      draft.activities.map((item) => item.title),
+      ["Vienna Notes & Tips"]
+    );
+    assert.equal(draft.activities[0]?.itemType, "note");
   });
 
   await test("downstream timing cannot override a canonical city-note decision", () => {
