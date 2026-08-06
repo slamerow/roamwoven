@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createTripExtractionQaBundlePayload } from "@/lib/extraction/trip-extraction-qa-bundle";
+import {
+  createRecordSummaries,
+  createTripExtractionQaBundlePayload,
+} from "@/lib/extraction/trip-extraction-qa-bundle";
 import type { MaterialExtractionRecord } from "@/lib/extraction/material-extractions";
 import type { TripExtractionAuditPayload } from "@/lib/extraction/trip-extraction-audit-view";
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
@@ -463,4 +466,28 @@ test("QA bundle can include private debug previews when explicitly requested", (
     "traveler_password"
   );
   assert.equal(bundle.audit.processingEvents[0]?.details.rawText, "door code 2468");
+});
+
+test("served QA records keep complete redacted City Notes beyond the ordinary preview limit", () => {
+  const tailFact = "Ring Tram Tour and Prater Ferris Wheel";
+  const noteDescription = `${"Public Vienna idea. ".repeat(50)}${tailFact}. Call +1 202 555 0198.`;
+  const note = {
+    ...records.items[0],
+    canonicalId: "canonical-note-vienna",
+    cityNoteKey: "vienna",
+    date: null,
+    description: noteDescription,
+    id: "item-note-vienna",
+    itemType: "note" as const,
+    title: "Vienna Notes & Tips",
+  };
+  const summaries = createRecordSummaries({
+    includePrivate: false,
+    records: { ...records, items: [note] },
+  });
+  const served = summaries?.items[0]?.description ?? "";
+
+  assert.match(served, /Ring Tram Tour and Prater Ferris Wheel/);
+  assert.doesNotMatch(served, /202\s+555\s+0198/);
+  assert.match(served, /\[redacted phone\]/);
 });

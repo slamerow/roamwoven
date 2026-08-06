@@ -54,6 +54,8 @@ function report(
       containmentLedger: null,
       groupingExecution: null,
       identityLedger: null,
+      ambiguousIntentHomes: [],
+      finalProjectionSafety: null,
       groupingClaims: null,
       stageWriterTrace: [],
       intentBlocks: { blocks: [], version: 1 },

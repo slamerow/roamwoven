@@ -52,7 +52,7 @@ const AVAILABILITY_MARKER_PATTERN =
 // city" shipped as a card). Tested against normalizeText() output, so the
 // contraction is matched in its normalized form ("if you d like").
 const WEAK_RECOMMENDATION_PATTERN =
-  /\b(optional|maybe|if time|if we have time|if you want|if you d like|if you like|if you feel like|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b/;
+  /\b(optional|maybe|if time|if we have time|if you want|if you d like|if you like|if you feel like|could visit|could also|far away|things to check out|ideas?|recommendations?|possible sights?|not sure|would recommend|recommended)\b|\bwhen you(?: are| re)?\b[^.]{0,100}\bstop into\b/;
 
 const LOOSE_FOOD_SHOPPING_PATTERN =
   /\b(food|eat|cafes?|restaurants?|bars?|shopping|wine|beer)\b/;

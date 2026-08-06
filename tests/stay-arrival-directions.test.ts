@@ -267,6 +267,7 @@ export default async function run() {
                 description: "Turn left at the obelisk for the panoramic terrace.",
                 itemType: "activity",
                 sourceSectionLabel: "Sunday, January 13th",
+                startTime: "17:00",
                 title: "Pincio Terrace",
               },
             ],

@@ -348,6 +348,20 @@ function routeDatedNoteEvidence({
       !piece.outputEligible &&
       dispositionTargetsPiece(piece.disposition, noteIdentityIds)
   );
+  const noteOwnedNotes = pieces.filter((piece) => {
+    if (
+      piece.kind !== "note" ||
+      piece.outputEligible ||
+      !dispositionTargetsPiece(piece.disposition, noteIdentityIds)
+    ) {
+      return false;
+    }
+    const title = normalizeText(stringValue(piece.payload, "title"));
+    return Boolean(
+      title &&
+        !/^(?:eat|food|ideas?|notes?|restaurant options|tips?)$/.test(title)
+    );
+  });
   const absorbingPieceIds = new Set<string>();
   const segments = splitEvidenceSegments(note.payload.description);
   const retained = segments.flatMap((segment) => {
@@ -365,6 +379,9 @@ function routeDatedNoteEvidence({
       exactRecordMention(segment, [activity.payload.title, activity.payload.address])
     );
     const activityMention = matchingActivities.length > 0;
+    const matchingNoteOwnedNotes = noteOwnedNotes.filter((owned) =>
+      exactRecordMention(segment, [owned.payload.title])
+    );
     const matchingTransport = compatibleTransport.filter((transport) =>
       exactRecordMention(segment, [
         transport.payload.title,
@@ -404,7 +421,7 @@ function routeDatedNoteEvidence({
       });
     }
 
-    if (activityMention) {
+    if (activityMention && matchingNoteOwnedNotes.length === 0) {
       if (matchingActivities.length === 1) {
         const detail = factualActivityDetail(segment, matchingActivities[0]);
         if (detail) {
@@ -479,6 +496,17 @@ function routeDatedNoteEvidence({
           !normalizeText(ownedDescription).includes(normalizeText(ownedTitle))
           ? `${ownedTitle}: ${ownedDescription}`
           : ownedDescription ?? ownedTitle
+      );
+    }
+    for (const owned of matchingNoteOwnedNotes) {
+      const ownedTitle = stringValue(owned.payload, "title");
+      const ownedDescription = stringValue(owned.payload, "description");
+      preservedNoteOwnedContent.push(
+        ownedDescription &&
+          ownedTitle &&
+          !normalizeText(ownedDescription).includes(normalizeText(ownedTitle))
+          ? `${ownedTitle}: ${ownedDescription}`
+          : ownedDescription ?? ownedTitle ?? segment
       );
     }
 

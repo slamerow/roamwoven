@@ -64,17 +64,24 @@ const readJson = (name) =>
   JSON.parse(fs.readFileSync(path.join(cacheDir, name), "utf8"));
 const parse = readJson("parse.json");
 const calls = readJson("calls.json");
+const geocodeSeed = readJson("geocode.json");
 const materials = readJson("materials.json");
 const trip = readJson("trip.json");
 
 const pinning = require2(path.join(rootDir, "lib/extraction/extraction-pinning.ts"));
+const geocode = require2(
+  path.join(rootDir, "lib/extraction/geocode-verification.ts")
+);
 const parser = require2(path.join(rootDir, "lib/extraction/openai-trip-parser.ts"));
 const cache = pinning.createExtractionParseCache(calls.calls_json ?? calls);
+const geocodeReplay = geocode.createGeocodeVerificationReplayCache(geocodeSeed);
 const result = await pinning.runWithExtractionParseCache(cache, () =>
-  parser.extractTripDraftWithOpenAI({
-    materials: materials.materials ?? materials,
-    tripName: trip.name,
-  })
+  geocode.runWithGeocodeVerificationReplay(geocodeReplay, () =>
+    parser.extractTripDraftWithOpenAI({
+      materials: materials.materials ?? materials,
+      tripName: trip.name,
+    })
+  )
 );
 if (cache.misses > 0) {
   console.error(`PROBE ABORT: ${cache.misses} pinned call(s) missed.`);
@@ -87,13 +94,19 @@ const assemblyModule = require2(
 const prepared = assemblyModule.prepareCanonicalEvidencePieces(
   result.evidenceArtifacts.pieces
 );
-const assembly = assemblyModule.assembleCanonicalTripDraft({
+const preparedPiecesBeforeAssembly = structuredClone(prepared.pieces);
+const corridorModule = require2(
+  path.join(rootDir, "lib/extraction/canonical-assembly-quality-corridor.ts")
+);
+const corridor = corridorModule.runCanonicalAssemblyQualityCorridor({
+  baseUsage: result.usage,
   draft: result.draft,
-  evidencePieces: prepared.pieces,
   fallbackTripName: trip.name,
-  priorRecoveryActions: prepared.recoveryActions,
+  preparedEvidence: prepared,
+  sourceEvidenceArtifacts: result.evidenceArtifacts,
   tripId: trip.id ?? parse.trip_id,
 });
+const assembly = corridor.assembly;
 
 const norm = (v) =>
   String(v ?? "")
@@ -101,7 +114,7 @@ const norm = (v) =>
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 
-const pieces = prepared.pieces;
+const pieces = corridor.pieces;
 const items = assembly.records.items;
 const notesShipped = items.filter(
   (i) => i.itemType === "note" && i.status !== "ignored"
@@ -115,6 +128,20 @@ const openReviewQuestions = assembly.records.reviewQuestions.filter(
 const sourceCoverageFindings = assembly.records.reviewQuestions.filter(
   (question) => /source coverage/i.test(question.dismissalReason ?? "")
 );
+
+const draftActivities = Array.isArray(assembly.draft?.activities)
+  ? assembly.draft.activities
+  : [];
+const draftNotes = draftActivities.filter((item) => item?.itemType === "note");
+console.log(`\n=== DRAFT/PIECE NOTE PROJECTION ===`);
+console.log(
+  `draft notes=${draftNotes.length}; eligible note pieces=${pieces.filter((piece) => piece.kind === "note" && piece.outputEligible).length}; recovery=${JSON.stringify(assembly.recovery)}`
+);
+for (const note of draftNotes) {
+  console.log(
+    `  draft ${note._canonicalId ?? note._canonicalPieceId ?? "no-id"} ${JSON.stringify(note.title)}`
+  );
+}
 
 console.log(`\n=== PLACEHOLDERS THAT SHIPPED (${placeholders.length}) ===`);
 for (const item of placeholders) {
@@ -144,6 +171,43 @@ for (const finding of sourceCoverageFindings) {
   console.log(`\n• ${JSON.stringify(finding)}`);
 }
 
+console.log(`\n=== SOURCE RECOVERY LEDGER ===`);
+console.log(
+  JSON.stringify(
+    {
+      coverage: result.usage?.sourceCoverage ?? null,
+      finalProjectionSafety:
+        result.usage?.evidence?.finalProjectionSafety ?? null,
+      unresolvedFinalProjectionFacts:
+        (result.usage?.evidence?.finalProjectionSafety?.contentCarrierDecisions ?? [])
+          .filter((decision) => decision.outcome === "unresolved")
+          .map((decision) => ({
+            ...decision,
+            source: pieces.find(
+              (piece) => piece.id === decision.sourcePieceId
+            )?.payload ?? null,
+          })),
+      recovery: result.usage?.sourceRecovery ?? null,
+      deterministicResidualObservations:
+        result.evidenceArtifacts.observations
+          .filter(
+            (observation) =>
+              observation.payload?._canonicalDeterministicResidualReference ===
+              true
+          )
+          .map((observation) => ({
+            disposition: observation.disposition ?? null,
+            id: observation.id,
+            kind: observation.kind,
+            payload: observation.payload,
+            role: observation.role,
+          })),
+    },
+    null,
+    2
+  )
+);
+
 console.log(`\n=== NOTE RECORDS THAT SHIPPED (${notesShipped.length}) ===`);
 for (const n of notesShipped) {
   console.log(`\n• "${n.title}"  date=${n.date}  len=${(n.description ?? "").length}`);
@@ -162,7 +226,13 @@ for (const p of notePieces.filter((p) => p.outputEligible)) {
 console.log(`\n\n=== WHERE EACH TOKEN DIES ===`);
 for (const token of TOKENS) {
   const t = norm(token);
+  const matchingObservations = result.evidenceArtifacts.observations.filter(
+    (observation) => norm(JSON.stringify(observation.payload)).includes(t)
+  );
   const inAnyPiece = pieces.filter(
+    (p) => norm(p.payload.title).includes(t) || norm(p.payload.description).includes(t)
+  );
+  const beforeAssembly = preparedPiecesBeforeAssembly.filter(
     (p) => norm(p.payload.title).includes(t) || norm(p.payload.description).includes(t)
   );
   const eligiblePiece = inAnyPiece.filter((p) => p.outputEligible);
@@ -178,15 +248,55 @@ for (const token of TOKENS) {
     (i) => i.itemType !== "note" && i.status !== "ignored" && norm(i.title).includes(t)
   );
   console.log(
-    `\n${token}: pieces=${inAnyPiece.length} eligible=${eligiblePiece.length} inEligibleNoteText=${inNotePieceText.length} inShippedNote=${inShippedNote.length} asCard=${asCard.length}`
+    `\n${token}: observations=${matchingObservations.length} beforeAssembly=${beforeAssembly.length} pieces=${inAnyPiece.length} eligible=${eligiblePiece.length} inEligibleNoteText=${inNotePieceText.length} inShippedNote=${inShippedNote.length} asCard=${asCard.length}`
   );
-  for (const p of inAnyPiece.slice(0, 3)) {
+  for (const observation of matchingObservations.slice(0, 10)) {
+    console.log(
+      `   observation ${observation.id} kind=${observation.kind} role=${observation.role} payload=${JSON.stringify(observation.payload)}`
+    );
+  }
+  for (const p of beforeAssembly.slice(0, 5)) {
+    console.log(
+      `   before "${p.payload.title}" kind=${p.kind} role=${p.role} groupingDecisionIds=${JSON.stringify(p.payload._canonicalGroupingDecisionIds ?? [])}`
+    );
+  }
+  for (const p of inAnyPiece.slice(0, 8)) {
     console.log(
       `   piece "${p.payload.title}" kind=${p.kind} role=${p.role} eligible=${p.outputEligible} city=${JSON.stringify(p.payload.city)} date=${JSON.stringify(p.payload.date)}`
     );
     console.log(`      description=${JSON.stringify(p.payload.description ?? null)}`);
     console.log(
+      `      candidacy=${JSON.stringify(p.payload._canonicalCandidacyDecision ?? null)} groupingDecisionIds=${JSON.stringify(p.payload._canonicalGroupingDecisionIds ?? [])}`
+    );
+    const contextObservationId =
+      p.payload._canonicalCandidacyDecision?.ideaContextObservationId ?? null;
+    if (contextObservationId) {
+      const contextObservation = result.evidenceArtifacts.observations.find(
+        (observation) => observation.id === contextObservationId
+      );
+      console.log(
+        `      ideaContextObservation=${JSON.stringify(contextObservation ?? null)}`
+      );
+    }
+    console.log(
+      `      structure=${JSON.stringify({ area: p.payload.area ?? null, parentActivityTitle: p.payload.parentActivityTitle ?? null, sourceHeadingPath: p.payload.sourceHeadingPath ?? null, sourceOccurrences: p.payload._canonicalSourceOccurrences ?? null, sourceSectionLabel: p.payload.sourceSectionLabel ?? null, sourceSectionType: p.payload.sourceSectionType ?? null })}`
+    );
+    console.log(
       `      disposition=${JSON.stringify(p.disposition ?? null)} lastReasons=${JSON.stringify((p.actions ?? []).slice(-2).map((a) => `${a.type}: ${(a.reason ?? "").slice(0, 70)}`))}`
     );
+    const tokenActions = (p.actions ?? []).filter((action) =>
+      norm(JSON.stringify(action)).includes(t)
+    );
+    if (tokenActions.length > 0) {
+      console.log(`      tokenActions=${JSON.stringify(tokenActions)}`);
+    }
+    if (p.disposition?.kind === "survivor") {
+      const carrier = pieces.find((candidate) => candidate.id === p.disposition.survivorId);
+      if (carrier) {
+        console.log(
+          `      carrier="${carrier.payload.title}" eligible=${carrier.outputEligible} containsToken=${norm([carrier.payload.title, carrier.payload.description].join(" ")).includes(t)} tokenActions=${JSON.stringify((carrier.actions ?? []).filter((action) => norm(JSON.stringify(action)).includes(t)))}`
+        );
+      }
+    }
   }
 }

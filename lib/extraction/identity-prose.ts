@@ -325,7 +325,7 @@ export function findProtectedCodeShapedTokens(prose: string): string[] {
 // Dangling code-label phrases left behind once their token is removed
 // ("travel code", "Ticketcode:") — swept so scrubbed prose reads clean.
 const DANGLING_CODE_LABEL_PATTERN =
-  /\b(?:travel|ticket|booking|confirmation)\s*[- ]?code\s*[:#]?\s*(?=[.,;:)\]]|$)/gi;
+  /\b(?:travel|ticket|booking|confirmation)\s*[- ]?code\s*[:#]?\s*/gi;
 
 // Removes every protected-code-shaped token from prose and tidies the
 // leftovers. Returns the input unchanged when nothing matches. Callers:

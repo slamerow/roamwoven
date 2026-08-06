@@ -62,10 +62,19 @@ function truncateText(value: string | null | undefined, limit: number) {
 
 function redactSensitiveText(
   value: string | null | undefined,
-  includePrivate: boolean
+  includePrivate: boolean,
+  limitOverride?: number | null
 ) {
-  const limit = includePrivate ? PRIVATE_TEXT_LIMIT : DEFAULT_TEXT_LIMIT;
-  const truncated = truncateText(value, limit);
+  const limit =
+    limitOverride === undefined
+      ? includePrivate
+        ? PRIVATE_TEXT_LIMIT
+        : DEFAULT_TEXT_LIMIT
+      : limitOverride;
+  const truncated =
+    limit === null
+      ? value?.replace(/\s+/g, " ").trim() ?? null
+      : truncateText(value, limit);
 
   if (!truncated || includePrivate) {
     return truncated;
@@ -465,7 +474,15 @@ export function createRecordSummaries({
       categoryId: item.categoryId,
       cityNoteKey: item.cityNoteKey ?? null,
       date: item.date,
-      description: redactSensitiveText(item.description, includePrivate),
+      // City Notes are the durable carrier for many independent source
+      // facts. Truncating them makes the served QA records disagree with the
+      // route output and hides late-list conservation failures. Keep the
+      // complete redacted note while ordinary card previews remain bounded.
+      description: redactSensitiveText(
+        item.description,
+        includePrivate,
+        item.itemType === "note" ? null : undefined
+      ),
       endTime: item.endTime,
       id: item.id,
       itemType: item.itemType,

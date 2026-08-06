@@ -30,7 +30,7 @@ async function test(name: string, fn: () => void | Promise<void>) {
   }
 }
 
-function cluster(activities: Array<Record<string, unknown>>) {
+function clusterResult(activities: Array<Record<string, unknown>>) {
   return clusterExtractedEvidence({
     sourceTransportAnchors: [],
     stages: [
@@ -54,7 +54,11 @@ function cluster(activities: Array<Record<string, unknown>>) {
       },
     ],
     tripOverview: { dateRange: "January 12-25, 2019" },
-  }).draft as {
+  });
+}
+
+function cluster(activities: Array<Record<string, unknown>>) {
+  return clusterResult(activities).draft as {
     activities: Array<{
       description?: string | null;
       itemType?: string | null;
@@ -214,6 +218,67 @@ export default async function run() {
         note.description ?? "",
         /202\s+555\s+0198/,
         "the phone-bearing section remains scrubbed from public note prose"
+      );
+    }
+  );
+
+  await test(
+    "Loop 6: one final safety/conservation ledger preserves public numbers and excludes private access without unresolved facts",
+    () => {
+      const result = clusterResult([
+        {
+          address: "Public Cathedral Square 33",
+          category: "art_culture",
+          city: "Prague",
+          date: "2019-01-16",
+          description:
+            "South Tower is open 9:00 AM to 5:30 PM, costs 3.50€ per person, and uses the public entrance at Cathedral Square 33.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          title: "South Tower visitor tip",
+        },
+        {
+          category: "admin_logistics",
+          city: "Prague",
+          date: "2019-01-16",
+          description:
+            "Wi-Fi password: FictionalSecret987. Use the apartment lockbox code 2580.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          title: "Private arrival note",
+        },
+        {
+          category: "art_culture",
+          city: null,
+          date: null,
+          description: "https://example.test/external-itinerary",
+          evidence: "- https://example.test/external-itinerary",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          title: "External itinerary",
+        },
+      ]);
+      const draft = result.draft as {
+        activities: Array<{ description?: string | null; itemType?: string }>;
+      };
+      const noteText = draft.activities
+        .filter((item) => item.itemType === "note")
+        .map((item) => item.description ?? "")
+        .join(" ");
+      assert.match(noteText, /9:00 AM/);
+      assert.match(noteText, /3\.50€/);
+      assert.match(noteText, /Cathedral Square 33/);
+      assert.doesNotMatch(noteText, /FictionalSecret987|2580/);
+      assert.equal(result.summary.finalProjectionSafety.unresolvedFactCount, 0);
+      assert.equal(
+        result.summary.finalProjectionSafety.finalPublicProtectedSegmentCount,
+        0
+      );
+      assert.ok(
+        result.summary.finalProjectionSafety.contentCarrierDecisions.some(
+          (decision) => decision.outcome === "explicitly_excluded"
+        ),
+        "the protected segment receives a durable exclusion disposition"
       );
     }
   );

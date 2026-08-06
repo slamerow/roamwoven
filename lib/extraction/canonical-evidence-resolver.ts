@@ -487,6 +487,7 @@ function buildCandidates(stages: EvidenceStageInput[]) {
 
       if (
         !title ||
+        activity._canonicalDeterministicResidualReference === true ||
         /^(?:fly|flight|train|bus|ferry|transfer)\b|\b(?:flight|train|bus|ferry)\s+(?:to|from)\b/i.test(
           title
         )

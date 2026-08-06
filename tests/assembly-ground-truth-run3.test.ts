@@ -199,11 +199,12 @@ export default async function run() {
     );
   });
 
-  await test("ground truth run3 (RW-ASM-001): mis-dated ticket re-emissions fold into their travel rows with one call each; booking codes reach no prose", () => {
+  await test("ground truth run3 (RW-ASM-001): mis-dated ticket re-emissions fold silently into travel rows; booking codes reach no prose", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
-        stage("Thursday, January 24th", emptyStage({
+        {
+          ...stage("Thursday, January 24th", emptyStage({
           activities: [
             {
               category: "arrival_departure",
@@ -227,7 +228,9 @@ export default async function run() {
             {
               category: "shopping_tailor",
               date: "2019-01-24",
-              description: "Watches in Rome is located at Via della Fontanella Borghese 33.",
+              description: "Go to Watches in Rome at Via della Fontanella Borghese 33.",
+              evidence: "Go to Watches in Rome at Via della Fontanella Borghese 33.",
+              evidenceRole: "atomic_candidate",
               itemType: "activity",
               title: "Watches in Rome",
             },
@@ -257,7 +260,10 @@ export default async function run() {
               type: "train",
             },
           ],
-        })),
+          })),
+          sourceText:
+            "Thursday, January 24th\nGo to Watches in Rome at Via della Fontanella Borghese 33.",
+        },
       ],
       tripOverview: TRIP_OVERVIEW,
     });
@@ -266,7 +272,14 @@ export default async function run() {
 
     assert.ok(!activityTitles.includes("Train to Budapest"), "RegioJet ticket copy folds");
     assert.ok(!activityTitles.includes("Train Vienna to Budapest"), "OBB ticket copy folds");
-    assert.ok(activityTitles.includes("Watches in Rome"), "real Jan 24 cards survive");
+    assert.ok(
+      activityTitles.includes("Watches in Rome"),
+      `real Jan 24 cards survive; got ${JSON.stringify(activityTitles)} decisions=${JSON.stringify(
+        result.summary.activityCandidacyDecisions.filter((decision) =>
+          /watches/i.test(String(decision.title ?? decision.observationTitle))
+        )
+      )}`
+    );
     const prose = draft.activities
       .map((item) => `${item.title} ${item.description ?? ""}`)
       .join(" ");
@@ -274,10 +287,14 @@ export default async function run() {
     const foldCalls = draft.missingDetails.filter((detail) =>
       /We merged the duplicate card/.test(String(detail.prompt ?? ""))
     );
-    assert.equal(foldCalls.length, 2, "each cross-date fold gets one call");
+    assert.equal(
+      foldCalls.length,
+      0,
+      "routine duplicate assembly is silent; Calls are reserved for visible grouping choices"
+    );
   });
 
-  await test("ground truth run3 (RW-ASM-001): Albertina survives a description that mentions the day's check-in", () => {
+  await test("current ground truth (RW-ASM-001): the mixed check-in/Albertina fragment does not manufacture a card", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -308,9 +325,10 @@ export default async function run() {
     });
     const draft = result.draft as Draft;
 
-    assert.ok(
+    assert.equal(
       draft.activities.some((item) => item.title === "Albertina"),
-      "a named sight is never routine check-in evidence"
+      false,
+      "the approved Jan-18 home excludes this mixed logistics fragment; the three researched options are handled separately"
     );
   });
 

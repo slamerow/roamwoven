@@ -161,6 +161,7 @@ export default async function run() {
     );
     assert.equal(result.usage.outcome, "recovered");
     assert.equal(result.usage.batchedLineCount, 3);
+    assert.equal(result.usage.deterministicResidualLineCount, 0);
     assert.equal(result.usage.tokenUsage !== null, true);
     assert.equal(
       result.usage.recoveredLineCount,
@@ -173,6 +174,101 @@ export default async function run() {
       "the unrecovered 'maybe communism museum' line stays precisely flagged"
     );
     assert.equal(result.coverage.uncoveredLineCount, 1);
+  });
+
+  await test("successful recovery conserves still-missed reference lines as notes but never converts a planned line", () => {
+    const referenceCoverage = coverageWith([
+      {
+        dayHeading: "Tuesday, January 22nd, 2019",
+        label: "Tuesday, January 22nd",
+        meaningfulLineCount: 8,
+        uncoveredLines: [
+          {
+            excerpt: "2) Thermal baths - we recommend them",
+            lineIndex: 1,
+            uncoveredClauses: ["2) Thermal baths - we recommend them"],
+          },
+          {
+            excerpt: "Dohany street synagogue",
+            lineIndex: 2,
+            uncoveredClauses: ["Dohany street synagogue"],
+          },
+          {
+            excerpt: "3) Buda hills - if you want a loop, take the children's train",
+            lineIndex: 3,
+            uncoveredClauses: ["3) Buda hills - if you want a loop, take the children's train"],
+          },
+          {
+            excerpt: "4) Public transportation - super easy, buy a pack of tickets",
+            lineIndex: 4,
+            uncoveredClauses: ["4) Public transportation - super easy, buy a pack of tickets"],
+          },
+          {
+            excerpt: "My best meal was a Russian restaurant",
+            lineIndex: 5,
+            uncoveredClauses: ["My best meal was a Russian restaurant"],
+          },
+          {
+            excerpt: "http://example-restaurant.test/en/",
+            lineIndex: 6,
+            uncoveredClauses: ["http://example-restaurant.test/en/"],
+          },
+          {
+            excerpt: "Tour the museum at 3:00 PM",
+            lineIndex: 7,
+            uncoveredClauses: ["Tour the museum at 3:00 PM"],
+          },
+        ],
+      },
+    ]);
+    const plan = planSourceRecoveryBatch({
+      coverage: referenceCoverage,
+      maxInputChars: 4000,
+      maxLines: 60,
+    });
+    assert.ok(plan);
+    const recoveryStage = buildSourceRecoveryStage(
+      {
+        activities: [
+          {
+            city: "Example City",
+            date: "2019-01-22",
+            description: "2) Thermal baths - we recommend them",
+            evidenceRole: "city_note_candidate",
+            itemType: "note",
+            title: "Thermal baths",
+          },
+        ],
+      },
+      plan
+    );
+    const stage = recoveryStage.stage as {
+      _deterministicResidualLineCount: number;
+      activities: Array<Record<string, unknown>>;
+    };
+    assert.equal(stage._deterministicResidualLineCount, 5);
+    assert.equal(
+      stage.activities.some((activity) =>
+        /tour the museum/i.test(String(activity.description))
+      ),
+      false,
+      "timed planned evidence remains residual instead of being silently recast as a note"
+    );
+    for (const token of [
+      "Dohany",
+      "children's train",
+      "Public transportation",
+      "Russian restaurant",
+      "example-restaurant",
+    ]) {
+      const recovered = stage.activities.find((activity) =>
+        JSON.stringify(activity).includes(token)
+      );
+      assert.ok(recovered, `${token} receives a deterministic evidence carrier`);
+      assert.equal(recovered.itemType, "note");
+      assert.equal(recovered.evidenceRole, "city_note_candidate");
+      assert.equal(recovered.date, "2019-01-22");
+    }
   });
 
   await test("recovery call: one per build — a prior recovery stage means no second call", async () => {

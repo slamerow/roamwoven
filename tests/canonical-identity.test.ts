@@ -34,12 +34,18 @@ function identityFixture(reverseActivities = false) {
     {
       category: "art_culture",
       date: "2032-06-16",
+      description: "Go to Alpha Museum.",
+      evidence: "Go to Alpha Museum.",
+      evidenceRole: "atomic_candidate",
       itemType: "activity",
       title: "Alpha Museum",
     },
     {
       category: "art_culture",
       date: "2032-06-17",
+      description: "Go to Beta Museum.",
+      evidence: "Go to Beta Museum.",
+      evidenceRole: "atomic_candidate",
       itemType: "activity",
       title: "Beta Museum",
     },
@@ -356,12 +362,14 @@ export default async function run() {
                 category: "art_culture",
                 date: "2032-06-16",
                 itemType: "activity",
+                startTime: "11:00",
                 title: "Museum A",
               },
               {
                 category: "art_culture",
                 date: "2032-06-16",
                 itemType: "activity",
+                startTime: "11:00",
                 title: "Museum A",
               },
               // 2026-07-17 commitment rule: bare repeats on distinct dates

@@ -507,6 +507,108 @@ export function createCanonicalizationSummary(
         version: 1 as const,
       };
     })(),
+    ambiguousIntentHomes: Array.isArray(evidence.ambiguousIntentHomes)
+      ? evidence.ambiguousIntentHomes.flatMap((value) => {
+          const decision = asRecord(value);
+          if (
+            typeof decision.blockDecisionId !== "string" ||
+            typeof decision.decisionId !== "string" ||
+            typeof decision.pieceId !== "string" ||
+            decision.finalHome !== "city_note" ||
+            decision.reasonCode !== "unresolved_ambiguous_to_city_note"
+          ) {
+            return [];
+          }
+          return [{
+            blockDecisionId: decision.blockDecisionId,
+            decisionId: decision.decisionId,
+            finalHome: "city_note" as const,
+            originalDate:
+              typeof decision.originalDate === "string"
+                ? decision.originalDate
+                : null,
+            pieceId: decision.pieceId,
+            reasonCode: "unresolved_ambiguous_to_city_note" as const,
+            title:
+              typeof decision.title === "string" ? decision.title : null,
+          }];
+        })
+      : [],
+    finalProjectionSafety: (() => {
+      const ledger = asRecord(evidence.finalProjectionSafety);
+      if (Object.keys(ledger).length === 0) return null;
+      const validCarrierOutcomes = new Set([
+        "already_present",
+        "explicitly_excluded",
+        "restored",
+        "unresolved",
+      ]);
+      const validSafetyOutcomes = new Set(["excluded", "redacted"]);
+      const contentCarrierDecisions = Array.isArray(
+        ledger.contentCarrierDecisions
+      )
+        ? ledger.contentCarrierDecisions.flatMap((value) => {
+            const decision = asRecord(value);
+            if (
+              typeof decision.factDigest !== "string" ||
+              typeof decision.sourcePieceId !== "string" ||
+              decision.carrierField !== "description" ||
+              typeof decision.outcome !== "string" ||
+              !validCarrierOutcomes.has(decision.outcome)
+            ) {
+              return [];
+            }
+            return [{
+              carrierField: "description" as const,
+              carrierPieceId:
+                typeof decision.carrierPieceId === "string"
+                  ? decision.carrierPieceId
+                  : null,
+              factDigest: decision.factDigest,
+              outcome: decision.outcome as
+                | "already_present"
+                | "explicitly_excluded"
+                | "restored"
+                | "unresolved",
+              sourcePieceId: decision.sourcePieceId,
+            }];
+          })
+        : [];
+      const decisions = Array.isArray(ledger.decisions)
+        ? ledger.decisions.flatMap((value) => {
+            const decision = asRecord(value);
+            if (
+              typeof decision.canonicalPieceId !== "string" ||
+              typeof decision.segmentDigest !== "string" ||
+              typeof decision.outcome !== "string" ||
+              !validSafetyOutcomes.has(decision.outcome)
+            ) {
+              return [];
+            }
+            return [{
+              canonicalPieceId: decision.canonicalPieceId,
+              outcome: decision.outcome as "excluded" | "redacted",
+              rawSafety:
+                typeof decision.rawSafety === "string"
+                  ? decision.rawSafety
+                  : "unknown",
+              sanitizedSafety:
+                typeof decision.sanitizedSafety === "string"
+                  ? decision.sanitizedSafety
+                  : "unknown",
+              segmentDigest: decision.segmentDigest,
+            }];
+          })
+        : [];
+      return {
+        contentCarrierDecisions,
+        decisions,
+        finalPublicProtectedSegmentCount:
+          Number(ledger.finalPublicProtectedSegmentCount) || 0,
+        unresolvedFactCount: Number(ledger.unresolvedFactCount) || 0,
+        version: 1 as const,
+      };
+    })(),
     // G4.4 (docket §C, field 2): the claim ledger's telemetry has been
     // produced by evidence-clustering since Arc G.3b with ZERO consumers
     // repo-wide — lane contention was designed to be visible in run
@@ -826,8 +928,10 @@ export function createExtractionSummary(usage: unknown) {
       const sourceRecovery = asRecord(openai.sourceRecovery);
 
       return Object.keys(sourceRecovery).length > 0
-        ? {
+          ? {
             batchedLineCount: Number(sourceRecovery.batchedLineCount) || 0,
+            deterministicResidualLineCount:
+              Number(sourceRecovery.deterministicResidualLineCount) || 0,
             droppedLineCount: Number(sourceRecovery.droppedLineCount) || 0,
             // Run 7.23.2 chain 8.2: computed by source-recovery since
             // ddb1699 but dropped by this whitelist — must-pass item 6

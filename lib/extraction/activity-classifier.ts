@@ -184,9 +184,9 @@ export function decideActivityCandidacy(
   }
   if (input.intentBlockType === "ambiguous") {
     // Ambiguous is pending review, not a semantic home. Keep the candidate
-    // alive so the review loop can create one consolidated question and then
-    // place its members as City Notes while that question is open. Demoting
-    // here would erase the candidates before review can conserve them.
+    // alive so containment and identity can map source-backed structure.
+    // The review phase gives any still-unresolved member its reversible City
+    // Note home after grouping has consumed the frozen ledgers.
     return activity("BLOCK_AMBIGUOUS", "intent_block");
   }
   if (typeSaysNote) {

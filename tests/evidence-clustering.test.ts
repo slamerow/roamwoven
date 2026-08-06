@@ -197,8 +197,24 @@ export default async function run() {
           "one plan",
           emptyStage({
             activities: [
-              activity({ sourceFilename: "trip.pdf", title: "Gallery East" }),
-              activity({ sourceFilename: "trip.pdf", title: "Gallery West" }),
+              {
+                ...activity({
+                  description: "Go to Gallery East.",
+                  sourceFilename: "trip.pdf",
+                  title: "Gallery East",
+                }),
+                evidence: "Go to Gallery East.",
+                evidenceRole: "atomic_candidate",
+              },
+              {
+                ...activity({
+                  description: "Go to Gallery West.",
+                  sourceFilename: "trip.pdf",
+                  title: "Gallery West",
+                }),
+                evidence: "Go to Gallery West.",
+                evidenceRole: "atomic_candidate",
+              },
             ],
           })
         ),
@@ -218,14 +234,24 @@ export default async function run() {
           "same-site day",
           emptyStage({
             activities: [
-              activity({
-                sourceFilename: "plan.pdf",
-                title: "River Palace",
-              }),
-              activity({
-                sourceFilename: "plan.pdf",
-                title: "River Palace Gardens",
-              }),
+              {
+                ...activity({
+                  description: "Go to River Palace.",
+                  sourceFilename: "plan.pdf",
+                  title: "River Palace",
+                }),
+                evidence: "Go to River Palace.",
+                evidenceRole: "atomic_candidate",
+              },
+              {
+                ...activity({
+                  description: "Go to River Palace Gardens.",
+                  sourceFilename: "plan.pdf",
+                  title: "River Palace Gardens",
+                }),
+                evidence: "Go to River Palace Gardens.",
+                evidenceRole: "atomic_candidate",
+              },
             ],
           })
         ),
@@ -297,14 +323,24 @@ export default async function run() {
   });
 
   await test("source overview containers do not become traveler activities", () => {
-    const childOne = activity({
-      sourceFilename: "plan.pdf",
-      title: "Market Hall",
-    });
-    const childTwo = activity({
-      sourceFilename: "plan.pdf",
-      title: "Old Library",
-    });
+    const childOne = {
+      ...activity({
+        description: "Go to Market Hall.",
+        sourceFilename: "plan.pdf",
+        title: "Market Hall",
+      }),
+      evidence: "Go to Market Hall.",
+      evidenceRole: "atomic_candidate",
+    };
+    const childTwo = {
+      ...activity({
+        description: "Go to Old Library.",
+        sourceFilename: "plan.pdf",
+        title: "Old Library",
+      }),
+      evidence: "Go to Old Library.",
+      evidenceRole: "atomic_candidate",
+    };
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -817,6 +853,9 @@ export default async function run() {
           category: "art_culture",
           city: "Paris",
           date: "2032-06-17",
+          description: "Go to the Museum visit.",
+          evidence: "Go to the Museum visit.",
+          evidenceRole: "atomic_candidate",
           itemType: "activity",
           title: "Museum visit",
         }],
@@ -927,21 +966,24 @@ export default async function run() {
             activities: [
               activity({
                 date: "2019-01-21",
-                description: "Gellert Baths.",
+                description: "Go to Gellert Baths.",
                 sourceFilename: "plan.pdf",
+                startTime: "10:00",
                 title: "Gellert Baths",
               }),
               activity({
                 date: "2019-01-21",
-                description: "Bath houses, including Gellert Baths.",
+                description: "Go to bath houses, including Gellert Baths.",
                 sourceFilename: "plan.pdf",
+                startTime: "10:00",
                 title: "Bath houses",
               }),
               activity({
                 date: "2019-01-23",
                 description:
-                  "Gellert Bath House after the spa; return to the lobby for the cafe.",
+                  "Go back to Gellert Bath House after the spa; return to the lobby for the cafe.",
                 sourceFilename: "day-plan.pdf",
+                startTime: "14:00",
                 title: "Gellert Bath House",
               }),
               activity({
@@ -956,12 +998,16 @@ export default async function run() {
               }),
               activity({
                 date: "2019-01-21",
+                description: "Go to Great Synagogue.",
                 sourceFilename: "plan.pdf",
+                startTime: "12:00",
                 title: "Great Synagogue",
               }),
               activity({
                 date: "2019-01-21",
+                description: "Go to Great Synagogue for Jewish history.",
                 sourceFilename: "plan.pdf",
+                startTime: "12:00",
                 title: "Great Synagogue / Jewish History",
               }),
             ],
@@ -1338,12 +1384,18 @@ export default async function run() {
               {
                 category: "art_culture",
                 date: "2031-04-02",
+                description: "Go to Albertina.",
+                evidence: "Go to Albertina.",
+                evidenceRole: "atomic_candidate",
                 itemType: "activity",
                 title: "Albertina",
               },
               {
                 category: "art_culture",
                 date: "2031-04-02",
+                description: "Go to Prater Ferris Wheel.",
+                evidence: "Go to Prater Ferris Wheel.",
+                evidenceRole: "atomic_candidate",
                 itemType: "activity",
                 title: "Prater Ferris Wheel",
               },
@@ -1578,9 +1630,11 @@ export default async function run() {
               {
                 ...activity({
                   date: "2031-04-04",
+                  description: "Go to the Ferris wheel.",
                   sourceFilename: "vienna.txt",
                   title: "Ferris wheel",
                 }),
+                evidence: "Go to the Ferris wheel.",
                 evidenceRole: "atomic_candidate",
                 sourceHeadingPath: ["Saturday", "Explore Vienna"],
                 sourceSectionLabel: "Explore Vienna",
@@ -1782,7 +1836,7 @@ export default async function run() {
     assert.equal(typeof question?.relatedCanonicalPieceId, "string");
   });
 
-  await test("canonical evidence preserves private source text for the public projection", () => {
+  await test("canonical evidence preserves private source text while the public projection excludes it", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -1807,7 +1861,14 @@ export default async function run() {
         ?.description
     );
 
-    assert.match(description, /secretword|1234/);
+    assert.doesNotMatch(description, /secretword|1234/);
+    const sourceEvidence = result.observations.find(
+      (observation) => observation.payload.title === "Arrival note"
+    );
+    assert.match(
+      String(sourceEvidence?.payload.description ?? ""),
+      /secretword|1234/
+    );
   });
 
   await test("an undated committed activity gets one provisional city date and one date question", () => {
@@ -1978,6 +2039,7 @@ export default async function run() {
             date: "2031-04-02",
             description: "Walk through the old town.",
             sourceFilename: "itinerary.txt",
+            startTime: "10:00",
             title: "Old Town walk",
           }),
         ],
@@ -2039,6 +2101,7 @@ export default async function run() {
             activity({
               date: "2019-01-24",
               sourceFilename: "rome-day.txt",
+              startTime: "11:00",
               title: "Watches in Rome errand",
             }),
             // Invention: nothing about Prague in this chunk's text.
@@ -2087,6 +2150,60 @@ export default async function run() {
       null,
       "confirmation code absent from source text is scrubbed"
     );
+  });
+
+  await test("generic wrappers may carry exact source facts but cannot launder a named invention", () => {
+    const sourceLine =
+      "Castle District: Balthazar or Pest-Buda Bisztro, Pest: Pomodoro or Menza, Buda: Zona";
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "budapest references",
+          source: "model_chunk",
+          sourceFilename: "budapest.txt",
+          sourceText: sourceLine,
+          stage: emptyStage({
+            activities: [
+              {
+                ...activity({
+                  category: "food_dining",
+                  city: "Budapest",
+                  date: "2019-01-23",
+                  description: sourceLine,
+                  sourceFilename: "budapest.txt",
+                  title: "Restaurant options",
+                }),
+                evidence: `- ${sourceLine}`,
+                evidenceRole: "city_note_candidate",
+                itemType: "placeholder",
+              },
+              {
+                ...activity({
+                  category: "art_culture",
+                  city: "Budapest",
+                  date: "2019-01-23",
+                  description: sourceLine,
+                  sourceFilename: "budapest.txt",
+                  title: "Fictional Palace",
+                }),
+                evidence: sourceLine,
+              },
+            ],
+          }),
+        },
+      ],
+      tripOverview: { dateRange: "January 12-25, 2019" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+    };
+    const publicText = draft.activities
+      .map((item) => `${item.title ?? ""} ${item.description ?? ""}`)
+      .join(" ");
+
+    assert.match(publicText, /Balthazar/);
+    assert.doesNotMatch(publicText, /Fictional Palace/);
   });
 
   await test("slot collisions collapse alias-titled duplicates into one booked card", () => {

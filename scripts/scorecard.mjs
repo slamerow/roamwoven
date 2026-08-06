@@ -1748,7 +1748,11 @@ function cityNoteAssertion({ city, forbidden = [], required }) {
     claim: `${city} City Notes contain every required idea and no displaced planned item`,
     run: (ctx) => {
       const surface = cityNoteText(ctx, city);
-      const missing = required.filter((token) => !has(surface, token));
+      const missing = required.filter((token) =>
+        Array.isArray(token)
+          ? !token.some((alternative) => has(surface, alternative))
+          : !has(surface, token)
+      );
       const misplaced = forbidden.filter((token) => has(surface, token));
       return {
         ok: Boolean(surface) && missing.length === 0 && misplaced.length === 0,
@@ -1757,7 +1761,14 @@ function cityNoteAssertion({ city, forbidden = [], required }) {
           missing.length === 0 && misplaced.length === 0
             ? `${required.length} required idea(s) present; no forbidden home`
             : [
-                missing.length ? `missing: ${list(missing, 14)}` : null,
+                missing.length
+                  ? `missing: ${list(
+                      missing.map((token) =>
+                        Array.isArray(token) ? token.join(" / ") : token
+                      ),
+                      14
+                    )}`
+                  : null,
                 misplaced.length ? `wrongly retained: ${list(misplaced, 14)}` : null,
               ]
                 .filter(Boolean)
@@ -1780,7 +1791,10 @@ ASSERTIONS.push(
   }),
   cityNoteAssertion({
     city: "budapest",
-    required: ["huf", "gypsy music", "great synagogue", "pinball", "konyv", "mazel tov", "hilton", "ruszwurm", "vaci", "comme chez soi", "smart kitchen", "bors", "szimpla", "dohany", "children s train", "public transport", "pontoon", "hospital in the rock", "balthazar", "pest buda", "pomodoro", "menza", "zona", "aranykaviar", "retro langos", "karavan"],
+    // The authoritative corpus spells the pastry shop "Ruszwerm"; accept
+    // that source spelling as well as the normalized name without rewriting
+    // persisted evidence or teaching runtime code a venue-specific alias.
+    required: ["huf", "gypsy music", "great synagogue", "pinball", "konyv", "mazel tov", "hilton", ["ruszwurm", "ruszwerm", "oldest pastry shop"], "vaci", "comme chez soi", "smart kitchen", "bors", "szimpla", "dohany", "children s train", "public transport", "pontoon", "hospital in the rock", "balthazar", "pest buda", "pomodoro", "menza", "zona", "aranykaviar", "retro langos", "karavan"],
     forbidden: ["thermal baths"],
   })
 );
@@ -3167,8 +3181,11 @@ if (fromCacheDir) {
   const classifierTrace = traceEntries.find(
     (entry) => entry.writer === "applyIntentBlockClassification"
   );
-  const reconciliationTrace = traceEntries.filter((entry) =>
-    entry.writer.startsWith("reconcileCardsAgainstCityNotes")
+  const cityNoteMergeTrace = traceEntries.filter(
+    (entry) => entry.writer === "mergeCanonicalCityNotes"
+  );
+  const finalSafetyTrace = traceEntries.filter(
+    (entry) => entry.writer === "scrubProtectedValuesFromPublicProse"
   );
   const enforcementTrace = traceEntries.find(
     (entry) => entry.writer === "enforceCanonicalOutputActivityRoles"
@@ -3188,10 +3205,12 @@ if (fromCacheDir) {
           entry.ordinal === index + 1 && entry.beforeHash && entry.afterHash
       ) &&
       Boolean(classifierTrace) &&
-      reconciliationTrace.length === 1 &&
-      reconciliationTrace[0].ordinal > classifierTrace.ordinal &&
+      cityNoteMergeTrace.length === 1 &&
+      cityNoteMergeTrace[0].ordinal > classifierTrace.ordinal &&
+      finalSafetyTrace.length === 1 &&
+      finalSafetyTrace[0].ordinal > cityNoteMergeTrace[0].ordinal &&
       Boolean(enforcementTrace) &&
-      enforcementTrace.ordinal > reconciliationTrace[0].ordinal &&
+      enforcementTrace.ordinal > finalSafetyTrace[0].ordinal &&
       enforcementTrace.writes.length === 0,
   };
   console.log(

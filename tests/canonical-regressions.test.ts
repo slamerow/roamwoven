@@ -414,6 +414,9 @@ export default async function run() {
   await test("canonical date review keeps uncertainty and audits a resolved planner ask", () => {
     const activity = {
       date: "2019-01-13",
+      description: "Go to a Rome walk after bag drop.",
+      evidence: "Go to a Rome walk after bag drop.",
+      evidenceRole: "atomic_candidate",
       itemType: "activity",
       title: "Rome walk after bag drop",
     };
@@ -690,7 +693,10 @@ export default async function run() {
           category: "shopping_tailor",
           city: "Rome",
           date: "2019-01-24",
-          description: "Visit the shop.",
+          description: "Go to Watches In Rome.",
+          evidence:
+            "Go to Watches In Rome at Via della Fontanella Borghese 33.",
+          evidenceRole: "atomic_candidate",
           itemType: "activity",
           title: "Watches In Rome",
         },
@@ -794,7 +800,11 @@ export default async function run() {
     const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
     assert.ok(draft.activities.some((item) => item.title === "Borkonyha Winekitchen dinner"));
     assert.ok(/ruin bars/i.test(note?.description ?? ""));
-    assert.equal(/Borkhonya|Vitae|private room|\$15/i.test(note?.description ?? ""), false);
+    assert.equal(
+      /Borkhonya|Vitae|private room|\$15/i.test(note?.description ?? ""),
+      false,
+      `lodging or scheduled-detail prose leaked into City Notes: ${String(note?.description ?? "")}`
+    );
   });
 
   await test("a scheduled venue cannot also survive in a city-note list", () => {
@@ -909,7 +919,9 @@ export default async function run() {
         category: "art_culture",
         city: "Kutna Hora",
         date: "2019-01-17",
-        description: "Visit Kutna Hora and return to Prague.",
+        description: "Go to Kutna Hora and return to Prague.",
+        evidence: "Go to Kutna Hora and return to Prague.",
+        evidenceRole: "atomic_candidate",
         itemType: "activity",
         title: "Kutna Hora day trip",
       }],

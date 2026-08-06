@@ -293,6 +293,7 @@ export default function run() {
     const summary = createExtractionSummary({
       sourceRecovery: {
         batchedLineCount: 55,
+        deterministicResidualLineCount: 4,
         droppedLineCount: 0,
         excludedPlanningCostLineCount: 11,
         model: "gpt-5.4-mini",
@@ -302,6 +303,58 @@ export default function run() {
       },
     });
     assert.equal(summary.sourceRecovery?.excludedPlanningCostLineCount, 11);
+    assert.equal(summary.sourceRecovery?.deterministicResidualLineCount, 4);
+  });
+
+  test("Loop 6 final-projection carrier and safety decisions survive the served audit whitelist", () => {
+    const summary = createCanonicalizationSummary({
+      evidence: {
+        ambiguousIntentHomes: [
+          {
+            blockDecisionId: "intent-one",
+            decisionId: "home-one",
+            finalHome: "city_note",
+            originalDate: "2019-01-22",
+            pieceId: "piece-one",
+            reasonCode: "unresolved_ambiguous_to_city_note",
+            title: "Example idea",
+          },
+        ],
+        finalProjectionSafety: {
+          contentCarrierDecisions: [
+            {
+              carrierField: "description",
+              carrierPieceId: "note-one",
+              factDigest: "fact-one",
+              outcome: "restored",
+              sourcePieceId: "piece-one",
+            },
+          ],
+          decisions: [
+            {
+              canonicalPieceId: "note-one",
+              outcome: "excluded",
+              rawSafety: "access",
+              sanitizedSafety: "access",
+              segmentDigest: "segment-one",
+            },
+          ],
+          finalPublicProtectedSegmentCount: 0,
+          unresolvedFactCount: 0,
+          version: 1,
+        },
+      },
+    });
+    assert.equal(summary.ambiguousIntentHomes.length, 1);
+    assert.equal(
+      summary.finalProjectionSafety?.contentCarrierDecisions[0]?.outcome,
+      "restored"
+    );
+    assert.equal(
+      summary.finalProjectionSafety?.finalPublicProtectedSegmentCount,
+      0
+    );
+    assert.equal(summary.finalProjectionSafety?.unresolvedFactCount, 0);
   });
 
   test("G5.1 container-retry source support survives the audit-snapshot whitelist", () => {

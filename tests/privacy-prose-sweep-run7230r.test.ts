@@ -100,7 +100,10 @@ export default async function run() {
     if (card) {
       // Non-protected ticket prose survives — the sweep is a redaction,
       // not a card deletion.
-      assert.ok(textOf(card).includes("PDF-Ticket"));
+      assert.ok(
+        textOf(card).includes("PDF-Ticket"),
+        `non-protected ticket prose was lost: ${JSON.stringify(card)}`
+      );
     }
   });
 

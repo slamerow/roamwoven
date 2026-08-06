@@ -302,6 +302,38 @@ export type TripExtractionAuditReport = {
       unresolvedCarrierCount: number;
       version: 1;
     } | null;
+    ambiguousIntentHomes: Array<{
+      blockDecisionId: string;
+      decisionId: string;
+      finalHome: "city_note";
+      originalDate: string | null;
+      pieceId: string;
+      reasonCode: "unresolved_ambiguous_to_city_note";
+      title: string | null;
+    }>;
+    finalProjectionSafety: {
+      contentCarrierDecisions: Array<{
+        carrierField: "description";
+        carrierPieceId: string | null;
+        factDigest: string;
+        outcome:
+          | "already_present"
+          | "explicitly_excluded"
+          | "restored"
+          | "unresolved";
+        sourcePieceId: string;
+      }>;
+      decisions: Array<{
+        canonicalPieceId: string;
+        outcome: "excluded" | "redacted";
+        rawSafety: string;
+        sanitizedSafety: string;
+        segmentDigest: string;
+      }>;
+      finalPublicProtectedSegmentCount: number;
+      unresolvedFactCount: number;
+      version: 1;
+    } | null;
     // G4.4 (docket §C, field 2): produced by the claim ledger at
     // evidence-clustering.ts and, before this, consumed by NOBODY
     // repo-wide — never persisted, never served. Lane contention was
@@ -397,6 +429,7 @@ export type TripExtractionAuditReport = {
     } | null;
     sourceRecovery: {
       batchedLineCount: number;
+      deterministicResidualLineCount: number;
       droppedLineCount: number;
       excludedPlanningCostLineCount: number;
       model: string | null;

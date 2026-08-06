@@ -1,5 +1,6 @@
 import type { EvidenceStageInput } from "@/lib/extraction/evidence-clustering";
 import { decideRecoveredActivityCandidacy } from "@/lib/extraction/activity-classifier";
+import { isDayHeadingLine } from "@/lib/extraction/parser-artifact-normalization";
 import { comparableTokens, normalizeTripDate } from "@/lib/extraction/traveler-text";
 import {
   distinctiveLineTokens,
@@ -56,6 +57,7 @@ export type SourceRecoveryPlan = {
 
 export type SourceRecoveryUsage = {
   batchedLineCount: number;
+  deterministicResidualLineCount: number;
   droppedLineCount: number;
   excludedPlanningCostLineCount?: number;
   error: { message: string; name: string } | null;
@@ -192,6 +194,185 @@ function recoveryStageSourceText(plan: SourceRecoveryPlan) {
     .join("\n\n");
 }
 
+const TIMED_OR_COMMITTED_RECOVERY_LINE =
+  /\b(?:\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm)|book(?:ed|ing)?|reservation|confirmation|check[ -]?in|pick[ -]?up|drop[ -]?off|(?:go|head|return)\s+(?:back\s+)?to|flight\s+[a-z0-9]|train\s+to)\b/i;
+const REFERENCE_RECOVERY_LINE =
+  /\b(?:recommend(?:ed|ation|ations)?|my best meal|if you want|super easy|skippable|worth a quick look|beautiful at dusk|tips?)\b/i;
+const REFERENCE_RECOVERY_CONTEXT =
+  /\b(?:recs?|recommend(?:ed|ation|ations)?|my best meal|if you want|super easy|skippable|worth a quick look|beautiful at dusk|tips?)\b/i;
+
+function lineCoveredByRecoveryOutput(line: string, outputTokens: Set<string>) {
+  const distinctive = distinctiveLineTokens(line);
+  return (
+    distinctive.length > 0 &&
+    distinctive.every((token) => outputTokens.has(token))
+  );
+}
+
+function recoveryReferenceTitle(excerpt: string) {
+  const url = /https?:\/\/([^/\s]+)/i.exec(excerpt);
+  if (url) {
+    return url[1].replace(/^www\./i, "").split(".")[0] || "Local reference";
+  }
+  return (
+    excerpt
+      .replace(/^\s*\d{1,2}[.)]\s*/, "")
+      .split(/\s+[-–—]\s+/)[0]
+      .replace(/[.!,;:]+$/g, "")
+      .trim()
+      .slice(0, 96) || "Local reference"
+  );
+}
+
+// A successful bounded model response can still omit a few lines from the
+// excerpt batch. Deterministic coverage already proves exactly which lines
+// remain absent, so preserve only conservative reference/tip shapes as note
+// evidence. This is deliberately structure-driven: no city, venue, or corpus
+// name appears in the rule, and timed/booked/command-shaped lines never enter
+// this lane. Those ambiguous planned lines stay residual and auditable.
+function appendDeterministicResidualReferences(
+  activities: unknown[],
+  plan: SourceRecoveryPlan,
+  yearHint: number | null,
+  existingOutputTokens?: Set<string>
+) {
+  const appended: Array<Record<string, unknown>> = [];
+  const outputTokens =
+    existingOutputTokens ?? stageOutputTokenSet({ activities });
+
+  for (const section of plan.sections) {
+    for (let index = 0; index < section.excerpts.length; index += 1) {
+      const excerpt = section.excerpts[index].trim();
+      if (
+        !excerpt ||
+        lineCoveredByRecoveryOutput(excerpt, outputTokens) ||
+        isPlanningCostMaterial({ label: section.label, lines: [excerpt] }) ||
+        TIMED_OR_COMMITTED_RECOVERY_LINE.test(excerpt)
+      ) {
+        continue;
+      }
+
+      const previous = section.excerpts[index - 1]?.trim() ?? "";
+      const next = section.excerpts[index + 1]?.trim() ?? "";
+      const numbered = /^\d{1,2}[.)]\s+/.test(excerpt);
+      const insideNumberedReferenceBlock =
+        (/^\d{1,2}[.)]\s+/.test(previous) &&
+          /^\d{1,2}[.)]\s+/.test(next)) ||
+        (numbered && REFERENCE_RECOVERY_LINE.test(excerpt));
+      const adjacentToReference = Boolean(
+        (REFERENCE_RECOVERY_CONTEXT.test(previous) ||
+          /^\d{1,2}[.)]\s+/.test(previous)) &&
+          /^https?:\/\//i.test(excerpt)
+      );
+      if (
+        !REFERENCE_RECOVERY_LINE.test(excerpt) &&
+        !insideNumberedReferenceBlock &&
+        !adjacentToReference
+      ) {
+        continue;
+      }
+
+      const date = normalizeTripDate(
+        section.dayHeading ?? section.label,
+        yearHint
+      );
+      const recovered = {
+        _canonicalDeterministicResidualReference: true,
+        category: "local_tips",
+        city: null,
+        date,
+        description: excerpt,
+        evidence: excerpt,
+        evidenceRole: "city_note_candidate",
+        itemType: "note",
+        sourceHeadingPath: [section.label, section.dayHeading].filter(Boolean),
+        sourceSectionLabel: section.label,
+        sourceSectionType: "dated_itinerary",
+        title: recoveryReferenceTitle(excerpt),
+      };
+      appended.push(recovered);
+      for (const token of comparableTokens(excerpt)) outputTokens.add(token);
+    }
+  }
+
+  return appended;
+}
+
+function sourceReferencePlan(stages: EvidenceStageInput[]): SourceRecoveryPlan {
+  const sections: SourceRecoveryPlanSection[] = [];
+  for (const stageInput of stages) {
+    if (stageInput.source !== "model_chunk" || !stageInput.sourceText?.trim()) {
+      continue;
+    }
+    let current: SourceRecoveryPlanSection | null = null;
+    for (const rawLine of stageInput.sourceText.split(/\r?\n/)) {
+      const line = rawLine
+        .trim()
+        .replace(/^[-*•●▪◦>·]+\s*/, "")
+        .trim();
+      if (!line) continue;
+      if (isDayHeadingLine(line)) {
+        current = {
+          dayHeading: line,
+          excerpts: [],
+          label: stageInput.label,
+        };
+        sections.push(current);
+        continue;
+      }
+      current?.excerpts.push(line);
+    }
+  }
+  return {
+    batchedLineCount: 0,
+    droppedLineCount: 0,
+    excludedPlanningCostLineCount: 0,
+    input: "",
+    sections,
+  };
+}
+
+function appendSourceReferenceConservation({
+  recoveryStage,
+  sourceStages,
+  yearHint,
+}: {
+  recoveryStage: EvidenceStageInput;
+  sourceStages: EvidenceStageInput[];
+  yearHint: number | null;
+}) {
+  const record = recoveryStage.stage as Record<string, unknown>;
+  const activities = Array.isArray(record.activities) ? record.activities : [];
+  const sourcePlan = sourceReferencePlan(sourceStages);
+  const combinedOutput = [
+    ...sourceStages.map((stageInput) => stageInput.stage),
+    recoveryStage.stage,
+  ];
+  const outputTokens = stageOutputTokenSet(combinedOutput);
+  const appended = appendDeterministicResidualReferences(
+    activities,
+    sourcePlan,
+    yearHint,
+    outputTokens
+  );
+  if (appended.length === 0) return;
+
+  const existing = new Set(
+    activities.map((activity) =>
+      JSON.stringify(activity && typeof activity === "object" ? activity : {})
+    )
+  );
+  const unique = appended.filter((activity) => {
+    const key = JSON.stringify(activity);
+    if (existing.has(key)) return false;
+    existing.add(key);
+    return true;
+  });
+  record.activities = [...activities, ...unique];
+  record._deterministicResidualLineCount =
+    (Number(record._deterministicResidualLineCount) || 0) + unique.length;
+}
+
 export function buildSourceRecoveryStage(
   json: unknown,
   plan: SourceRecoveryPlan
@@ -270,7 +451,7 @@ export function buildSourceRecoveryStage(
   // cards). A recovered line is judged by the unified classifier exactly
   // like parser output: loose-tip vocabulary or a hedge with no standalone
   // anchor makes it a city-note candidate before it ever enters assembly.
-  const activities = Array.isArray(record.activities)
+  const modelActivities = Array.isArray(record.activities)
     ? record.activities.map((activity) => {
         if (!activity || typeof activity !== "object" || Array.isArray(activity)) {
           return activity;
@@ -298,8 +479,14 @@ export function buildSourceRecoveryStage(
             inputItemType: text(card.itemType),
           },
         };
-      })
+    })
     : [];
+  const deterministicResidualReferences = appendDeterministicResidualReferences(
+    modelActivities,
+    plan,
+    yearHint
+  );
+  const activities = [...modelActivities, ...deterministicResidualReferences];
 
   return {
     label: SOURCE_RECOVERY_STAGE_LABEL,
@@ -316,6 +503,8 @@ export function buildSourceRecoveryStage(
       transport: [],
       ...record,
       activities,
+      _deterministicResidualLineCount:
+        deterministicResidualReferences.length,
       _sourceRecovery: true,
     },
   };
@@ -396,11 +585,7 @@ export function applySourceRecoveryToCoverage(
           return true;
         }
 
-        const covered = distinctive.filter((token) =>
-          recoveryTokens.has(token)
-        );
-
-        if (covered.length >= Math.ceil(distinctive.length / 2)) {
+        if (lineCoveredByRecoveryOutput(line.excerpt, recoveryTokens)) {
           recoveredLineCount += 1;
           return false;
         }
@@ -449,6 +634,7 @@ export async function runBoundedSourceRecovery({
 }> {
   const baseUsage = {
     batchedLineCount: 0,
+    deterministicResidualLineCount: 0,
     droppedLineCount: 0,
     error: null,
     inputCharCount: 0,
@@ -504,7 +690,16 @@ export async function runBoundedSourceRecovery({
       model: effectiveCaps.model,
     });
     const stage = buildSourceRecoveryStage(response.json, plan);
+    const responseYearMatch = /\b(20\d{2})-\d{2}-\d{2}\b/.exec(
+      JSON.stringify(response.json)
+    );
+    appendSourceReferenceConservation({
+      recoveryStage: stage,
+      sourceStages: stages,
+      yearHint: responseYearMatch ? Number(responseYearMatch[1]) : null,
+    });
     const reconciled = applySourceRecoveryToCoverage(coverage, stage);
+    const stageRecord = stage.stage as Record<string, unknown>;
 
     return {
       coverage: reconciled.coverage,
@@ -512,6 +707,8 @@ export async function runBoundedSourceRecovery({
       usage: {
         ...baseUsage,
         batchedLineCount: plan.batchedLineCount,
+        deterministicResidualLineCount:
+          Number(stageRecord._deterministicResidualLineCount) || 0,
         droppedLineCount: plan.droppedLineCount,
         excludedPlanningCostLineCount: plan.excludedPlanningCostLineCount,
         inputCharCount: plan.input.length,

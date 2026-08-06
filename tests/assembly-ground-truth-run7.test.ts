@@ -878,7 +878,18 @@ export default async function run() {
               card("Customer details", null),
               // Real records survive.
               card("Pick up car", "Pick up car at 9:00 AM. Reservation number 81486.", { startTime: "09:00", category: "arrival_departure" }),
-              activity({ title: "Sedlec Ossuary", date: "2019-01-17" }),
+              activity({
+                title: "Sedlec Ossuary",
+                date: "2019-01-17",
+                description: "Go to Sedlec Ossuary.",
+                extra: {
+                  evidence: "Go to Sedlec Ossuary.",
+                  evidenceRole: "atomic_candidate",
+                  sourceHeadingPath: ["Thursday, January 17th"],
+                  sourceSectionLabel: "Thursday, January 17th",
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
             ],
           })
         ),

@@ -98,8 +98,9 @@ import {
   isCriticalTransportRecord,
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
+import { classifySensitiveText } from "@/lib/trip-privacy-policy";
 
-export const EVIDENCE_CLUSTER_VERSION = 18;
+export const EVIDENCE_CLUSTER_VERSION = 19;
 
 export type EvidenceKind =
   | "activity"
@@ -314,6 +315,7 @@ export const CANONICAL_TERMINAL_DISPOSAL_CODES = [
   // -- no source support --
   "ISOLATED_TERM_NO_SOURCE_SUPPORT",
   "NOTE_CONTENT_REDISTRIBUTED_NO_SINGLE_SURVIVOR",
+  "EMPTY_CITY_NOTE_AFTER_EXCLUSIONS",
   // -- structural/overview artifact --
   "GENERIC_DAY_OVERVIEW",
   "STAY_NAME_DOCUMENT_ARTIFACT",
@@ -412,6 +414,7 @@ export type EvidenceClusteringResult = {
       title: string | null;
       winningSignal: string;
     }>;
+    ambiguousIntentHomes: AmbiguousIntentHomeDecision[];
     canonicalPieceCount: number;
     clusteredObservationCount: number;
     contextObservationCount: number;
@@ -433,6 +436,7 @@ export type EvidenceClusteringResult = {
     groupingClaims: GroupingClaimLedgerTelemetry;
     groupingExecution: CanonicalGroupingExecutionLedger;
     identityLedger: CanonicalIdentityLedgerTelemetry;
+    finalProjectionSafety: FinalProjectionSafetyLedger;
     stageWriterTrace: AssemblyStageWriterTraceEntry[];
     intentBlocks: {
       blocks: IntentBlockDecision[];
@@ -5015,6 +5019,30 @@ function scrubProtectedValuesFromText(
   return rebuilt;
 }
 
+type FinalProjectionSafetyDecision = {
+  canonicalPieceId: string;
+  outcome: "excluded" | "redacted";
+  rawSafety: CityNoteSegmentSafety;
+  sanitizedSafety: CityNoteSegmentSafety;
+  segmentDigest: string;
+};
+
+type ContentCarrierDecision = {
+  carrierField: "description";
+  carrierPieceId: string | null;
+  factDigest: string;
+  outcome: "already_present" | "explicitly_excluded" | "restored" | "unresolved";
+  sourcePieceId: string;
+};
+
+type FinalProjectionSafetyLedger = {
+  contentCarrierDecisions: ContentCarrierDecision[];
+  decisions: FinalProjectionSafetyDecision[];
+  finalPublicProtectedSegmentCount: number;
+  unresolvedFactCount: number;
+  version: 1;
+};
+
 // Arc F identity output gate (run 7.23.2 chains 1-3; CEO decision 2).
 // This is the SAME pass as the protected-value sweep (tripwire T1: extend
 // the existing "LAST text mutation before outputFor" position, never add a
@@ -5035,8 +5063,10 @@ function scrubProtectedValuesFromText(
 function scrubProtectedValuesFromPublicProse(
   pieces: CanonicalEvidencePiece[],
   sensitiveDetails: unknown[] = []
-) {
+): FinalProjectionSafetyLedger {
   const denyList = collectProtectedValueDenyList(pieces, sensitiveDetails);
+  const contentCarrierDecisions: ContentCarrierDecision[] = [];
+  const decisions: FinalProjectionSafetyDecision[] = [];
   const staysExist = pieces.some(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
@@ -5045,6 +5075,51 @@ function scrubProtectedValuesFromPublicProse(
   // identity-prose.ts (same split, same filter, same join) so the card lane
   // and the review surface cannot drift apart.
   const dropIdentitySegments = dropIdentityProseSegments;
+  const projectPublicCityNoteSegment = (
+    segment: string
+  ): CityNoteSegmentProjection => {
+    const rawProjection = projectCityNoteSegment(segment);
+    const withoutProtectedCode = TRAVEL_CONFIRMATION_SENTENCE_PATTERN.test(
+      segment
+    )
+      ? scrubProtectedCodeShapedTokens(segment)
+      : segment;
+    const redacted = dropIdentitySegments(
+      scrubBookingFieldNames(
+        scrubProtectedValuesFromText(
+          withoutProtectedCode,
+          denyList,
+          staysExist
+        )
+      )
+    );
+    let publicCandidate = redacted;
+    let publicProjection = projectCityNoteSegment(publicCandidate);
+    const hasPublicRemainder =
+      /(?:[$€£]\s?\d|\b(?:czk|eur|huf|usd)\s?\d|\d[.,]\d{2}\s*[$€£]|\bhttps?:\/\/|\bwww\.|\bdigital\b|\bopen(?:s|ing)?\b)/i.test(
+        publicCandidate
+      );
+    if (publicProjection.safety === "booking" && hasPublicRemainder) {
+      publicCandidate = publicCandidate
+        .replace(new RegExp(NOTE_TICKET_OCR_PATTERN.source, "gi"), " ")
+        .replace(
+          /\bpassenger and ticket details(?:\s+\[private\])?/gi,
+          " "
+        )
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      publicProjection = projectCityNoteSegment(publicCandidate);
+    }
+    return {
+      rawSafety: rawProjection.rawSafety,
+      sanitized: publicProjection.sanitized,
+      sanitizedSafety: publicProjection.sanitizedSafety,
+      // A mixed segment is judged on the public remainder after every
+      // proven protected value is removed. Pure access/booking/cost prose
+      // remains non-content because its marker survives the redaction.
+      safety: publicProjection.safety,
+    };
+  };
   for (const piece of pieces) {
     if (piece.kind === "context") {
       const contextTitle = stringValue(piece.payload, "title");
@@ -5134,6 +5209,71 @@ function scrubProtectedValuesFromPublicProse(
     }
     if (piece.kind !== "activity" && piece.kind !== "note") continue;
     let scrubbed = false;
+    // City Notes are sectioned prose. Sweep each newline/sentence segment
+    // independently through the same raw+sanitized safety projection used by
+    // initial rendering and restore. A protected later section can therefore
+    // never delete an unrelated earlier fact (the production R2D2 shape).
+    if (piece.kind === "note") {
+      const description = stringValue(piece.payload, "description");
+      if (description) {
+        const kept: string[] = [];
+        for (const segment of splitCityNoteSegments(description)) {
+          const projection = projectPublicCityNoteSegment(segment);
+          const segmentDigest = stableHash({
+            normalized: normalizedComparable(segment),
+            version: 1,
+          });
+          if (projection.safety !== "content") {
+            decisions.push({
+              canonicalPieceId: piece.id,
+              outcome: "excluded",
+              rawSafety: projection.rawSafety,
+              sanitizedSafety: projection.sanitizedSafety,
+              segmentDigest,
+            });
+            scrubbed = true;
+            continue;
+          }
+          const cleaned = dropIdentityProseSegments(
+            scrubBookingFieldNames(
+              scrubProtectedValuesFromText(
+                projection.sanitized,
+                denyList,
+                staysExist
+              )
+            )
+          );
+          const finalProjection = projectPublicCityNoteSegment(cleaned);
+          if (!cleaned || finalProjection.safety !== "content") {
+            decisions.push({
+              canonicalPieceId: piece.id,
+              outcome: "excluded",
+              rawSafety: projection.rawSafety,
+              sanitizedSafety: finalProjection.sanitizedSafety,
+              segmentDigest,
+            });
+            scrubbed = true;
+            continue;
+          }
+          kept.push(cleaned);
+          if (cleaned !== segment) {
+            decisions.push({
+              canonicalPieceId: piece.id,
+              outcome: "redacted",
+              rawSafety: projection.rawSafety,
+              sanitizedSafety: finalProjection.sanitizedSafety,
+              segmentDigest,
+            });
+            scrubbed = true;
+          }
+        }
+        const rebuilt = kept.join("\n").trim();
+        if (rebuilt !== description) {
+          piece.payload.description = rebuilt || null;
+          scrubbed = true;
+        }
+      }
+    }
     const transportShaped =
       piece.kind === "activity" &&
       isTransportShapedActivityPayload(piece.payload);
@@ -5146,7 +5286,12 @@ function scrubProtectedValuesFromPublicProse(
       }
       const description = stringValue(piece.payload, "description");
       if (description) {
-        const kept = description
+        const redacted = scrubProtectedValuesFromText(
+          scrubProtectedCodeShapedTokens(description),
+          denyList,
+          false
+        );
+        const kept = redacted
           .split(PROSE_SEGMENT_SPLIT)
           .filter(
             (segment) => !TRAVEL_CONFIRMATION_SENTENCE_PATTERN.test(segment)
@@ -5161,6 +5306,7 @@ function scrubProtectedValuesFromPublicProse(
       }
     }
     for (const field of ["description", "title", "address", "locationName", "location"]) {
+      if (piece.kind === "note" && field === "description") continue;
       const value = stringValue(piece.payload, field);
       if (!value) continue;
       const cleaned =
@@ -5231,6 +5377,538 @@ function scrubProtectedValuesFromPublicProse(
       );
     }
   }
+
+  // Content conservation is part of this same final-projection authority,
+  // after every ordinary mutation and scrub. A survivor id alone is not
+  // acceptance: the final carrier must contain the normalized fact. Safe
+  // note facts that disappeared are restored to the declared same-identity
+  // Activity or to their city-keyed City Note. Protected facts receive an
+  // explicit exclusion decision and are never reinserted.
+  const outputPieces = () => pieces.filter((piece) => piece.outputEligible);
+  const carrierText = (piece: CanonicalEvidencePiece) =>
+    normalizedComparable(
+      [piece.payload.title, piece.payload.description]
+        .filter(Boolean)
+        .join(" ")
+    );
+  const noteCollectionForCity = (city: string | null) => {
+    const normalizedCity = normalizedComparable(city);
+    if (!normalizedCity) return null;
+    return (
+      outputPieces().find(
+        (piece) =>
+          piece.kind === "note" &&
+          normalizedComparable(stringValue(piece.payload, "city")) ===
+            normalizedCity &&
+          /\bnotes?\s*(?:&|and)?\s*tips?\b/i.test(
+            stringValue(piece.payload, "title") ?? ""
+          )
+      ) ?? null
+    );
+  };
+  const sameIdentityCarrier = (
+    source: CanonicalEvidencePiece,
+    candidate: CanonicalEvidencePiece | null
+  ) => {
+    if (!candidate || !candidate.outputEligible) return false;
+    if (candidate.kind !== "activity" && candidate.kind !== "note") {
+      return false;
+    }
+    const sourceTokens = identityTokens(stringValue(source.payload, "title"));
+    const candidateTokens = identityTokens(
+      stringValue(candidate.payload, "title")
+    );
+    if (sourceTokens.length === 0 || candidateTokens.length === 0) return false;
+    const sourceCity = normalizedComparable(stringValue(source.payload, "city"));
+    const candidateCity = normalizedComparable(
+      stringValue(candidate.payload, "city")
+    );
+    if (sourceCity && candidateCity && sourceCity !== candidateCity) {
+      return false;
+    }
+    const genericOnlyIdentity =
+      sourceTokens.every((token) => GENERIC_SINGLE_IDENTITY_TOKENS.has(token)) ||
+      candidateTokens.every((token) => GENERIC_SINGLE_IDENTITY_TOKENS.has(token));
+    if (genericOnlyIdentity && (!sourceCity || !candidateCity)) return false;
+    const genericGeographicIdentity = new Set([
+      "area",
+      "castle",
+      "city",
+      "district",
+      "hill",
+      "hills",
+      "old",
+      "town",
+    ]);
+    for (const token of identityTokens(
+      [
+        source.payload.area,
+        source.payload.city,
+        candidate.payload.area,
+        candidate.payload.city,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    )) {
+      genericGeographicIdentity.add(token);
+    }
+    const sharedDistinctiveIdentity = sourceTokens.some(
+      (token) =>
+        !genericGeographicIdentity.has(token) &&
+        candidateTokens.includes(token)
+    );
+    if (
+      !sharedDistinctiveIdentity &&
+      normalizedComparable(stringValue(source.payload, "title")) !==
+        normalizedComparable(stringValue(candidate.payload, "title"))
+    ) {
+      return false;
+    }
+    return (
+      overlapCount(sourceTokens, candidateTokens) >=
+      Math.min(2, sourceTokens.length, candidateTokens.length)
+    );
+  };
+  const escapedPattern = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const removeFactFromNoteCollections = (fact: string) => {
+    if (!fact.trim()) return;
+    const pattern = new RegExp(escapedPattern(fact.trim()), "giu");
+    for (const note of outputPieces()) {
+      if (note.kind !== "note" || !note.payload._canonicalNoteSections) {
+        continue;
+      }
+      const description = stringValue(note.payload, "description");
+      if (!description || !pattern.test(description)) continue;
+      pattern.lastIndex = 0;
+      const next = description
+        .replace(pattern, " ")
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/\s+([,.;:])/g, "$1")
+        .replace(/(?:^|\n)(?:Food|Drinks & Nightlife|Sights & Culture|Shopping|Getting Around|Local Tips|Notes):\s*(?=\n|$)/g, "")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+      note.payload.description = next || null;
+    }
+  };
+  const activityCarrierForFact = (
+    source: CanonicalEvidencePiece,
+    fact: string
+  ) => {
+    const activities = outputPieces().filter(
+      (piece) => piece.kind === "activity"
+    );
+    const sameIdentity = activities.find((piece) =>
+      sameIdentityCarrier(source, piece)
+    );
+    if (sameIdentity) return sameIdentity;
+
+    // A generic note wrapper can carry one explicit planned clause. Route
+    // only the verb-bound subject ("go to X"), not every venue merely
+    // mentioned as context (for example a recommendation near a castle).
+    const normalizedFact = normalizedComparable(fact);
+    return (
+      activities.find((piece) => {
+        const title = normalizedComparable(
+          stringValue(piece.payload, "title")
+        );
+        return Boolean(
+          title &&
+            normalizedFact.includes(title) &&
+            (new RegExp(
+              `\\b(?:go|head|return)\\s+(?:back\\s+)?(?:to\\s+)?${escapedPattern(title)}\\b`
+            ).test(normalizedFact) ||
+              /\b(?:admission|admit|booking|confirmation|entry|reservation|ticket)\b/.test(
+                normalizedFact
+              ))
+        );
+      }) ?? null
+    );
+  };
+  const structuredHomeForFact = (
+    source: CanonicalEvidencePiece,
+    fact: string
+  ) => {
+    const normalizedFact = normalizedComparable(fact);
+    const namedStay = outputPieces().find((piece) => {
+      if (piece.kind !== "stay") return false;
+      const name = normalizedComparable(stringValue(piece.payload, "name"));
+      return Boolean(name && normalizedFact.includes(name));
+    });
+    if (namedStay) return namedStay;
+
+    // A note copy may preserve a typo in the venue name while retaining the
+    // exact scheduled slot. When exactly one Activity has the same category
+    // and clock time, that structured card is the durable home and the note
+    // fragment is explicitly excluded instead of being restored as a loose
+    // tip. Ambiguous slots deliberately do not match.
+    const clockMatch =
+      /\b(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?))\b/i.exec(fact);
+    const factTime = clockMatch
+      ? normalizeTripClockTime(clockMatch[1])
+      : null;
+    if (!factTime) return null;
+    const sourceCategory = normalizedComparable(
+      stringValue(source.payload, "category")
+    );
+    const scheduledMatches = outputPieces().filter(
+      (piece) =>
+        piece.kind === "activity" &&
+        normalizedClockTime(timeFrom(piece.payload)) === factTime &&
+        (!sourceCategory ||
+          normalizedComparable(stringValue(piece.payload, "category")) ===
+            sourceCategory)
+    );
+    return scheduledMatches.length === 1 ? scheduledMatches[0] : null;
+  };
+
+  for (const source of pieces) {
+    if (
+      source.payload._canonicalNoteSections ||
+      source.role === "context" ||
+      source.role === "grouping_proposal"
+    ) {
+      continue;
+    }
+    const candidacy = canonicalCandidacyDecision(source);
+    const noteShaped = Boolean(
+      source.kind === "note" ||
+        source.role === "city_note_candidate" ||
+        stringValue(candidacy, "destination") === "city_note"
+    );
+    if (!noteShaped) continue;
+    const title = stringValue(source.payload, "title");
+    const descriptionSegments = splitCityNoteSegments(
+      source.payload.description
+    );
+    const evidenceSegments = splitCityNoteSegments(source.payload.evidence);
+    const titleIsGenericWrapper = Boolean(
+      title &&
+        /^(?:(?:budapest|prague|rome|vienna)\s+)?(?:city\s+)?(?:food\s+)?(?:ideas?|notes?|tips?)(?:\s*&\s*tips?)?$/i.test(
+          title
+        )
+    );
+    const splitEnumeratedFacts = (value: string) => {
+      const listShaped = Boolean(
+        /\//.test(title ?? "") ||
+          /^\s*[-•]?\s*(?:eat|food|cafes?|restaurants?|shopping)\s*:/i.test(
+            value
+          )
+      );
+      if (!listShaped || !/[,;]/.test(value)) return [value];
+      const parts = value
+        .split(/[,;]/)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 3);
+      return parts.length >= 2 && parts.length <= 10 ? parts : [value];
+    };
+    const candidates = Array.from(
+      new Map(
+        [
+          ...descriptionSegments,
+          // Deterministically split list entries all retain the shared source
+          // line for lineage. That evidence names siblings too; treating it
+          // as this entry's own fact lets one scheduled sibling absorb and
+          // delete the rest of the list. Entry conservation therefore uses
+          // its scoped description/title while the unsplit wrapper still
+          // conserves the complete source line.
+          ...(source.payload._canonicalNoteEntry === true
+            ? []
+            : evidenceSegments),
+          ...(!titleIsGenericWrapper && title ? [title] : []),
+        ]
+          .flatMap(splitEnumeratedFacts)
+          .filter(Boolean)
+          .map((value) => [normalizedComparable(value), value])
+      ).values()
+    );
+    const declaredSurvivorId =
+      source.disposition?.kind === "survivor"
+        ? source.disposition.survivorId
+        : null;
+    const declaredCarrier =
+      declaredSurvivorId
+        ? pieces.find((piece) => piece.id === declaredSurvivorId) ?? null
+        : outputPieces().find((piece) =>
+            source.observationIds.every((id) =>
+              piece.observationIds.includes(id)
+            )
+          ) ?? null;
+    const city =
+      stringValue(source.payload, "city") ??
+      rawCityForDate(pieces, stringValue(source.payload, "date"));
+    const cityNote = noteCollectionForCity(city);
+    const sourceReferenceSegments = [
+      ...descriptionSegments,
+      ...evidenceSegments,
+    ].filter(Boolean);
+    const isUnplacedLinkOnlyReference = Boolean(
+      !city &&
+        sourceReferenceSegments.length > 0 &&
+        sourceReferenceSegments.every((segment) =>
+          /^\s*[-•]?\s*https?:\/\/\S+\s*$/i.test(segment)
+        )
+    );
+
+    for (const rawCandidate of candidates) {
+      const projection = projectPublicCityNoteSegment(rawCandidate);
+      const factDigest = stableHash({
+        normalized: normalizedComparable(rawCandidate),
+        version: 1,
+      });
+      if (!projection.sanitized || projection.sanitized.length < 4) continue;
+      if (projection.safety !== "content") {
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: null,
+          factDigest,
+          outcome: "explicitly_excluded",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const cleaned = dropIdentityProseSegments(
+        scrubBookingFieldNames(
+          scrubProtectedValuesFromText(
+            projection.sanitized,
+            denyList,
+            staysExist
+          )
+        )
+      );
+      if (!cleaned || projectPublicCityNoteSegment(cleaned).safety !== "content") {
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: null,
+          factDigest,
+          outcome: "explicitly_excluded",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const structuredHome = structuredHomeForFact(source, cleaned);
+      if (structuredHome) {
+        removeFactFromNoteCollections(rawCandidate);
+        if (cleaned !== rawCandidate) {
+          removeFactFromNoteCollections(cleaned);
+        }
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: structuredHome.id,
+          factDigest,
+          outcome: "explicitly_excluded",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      if (
+        source.payload._sourceSupport === "unsupported" ||
+        isUnplacedLinkOnlyReference ||
+        (!city && /^https?:\/\/\S+$/i.test(cleaned.trim()))
+      ) {
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: null,
+          factDigest,
+          outcome: "explicitly_excluded",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const normalizedFact = normalizedComparable(cleaned);
+      const normalizedListEntry =
+        /^\s*(?:cafes?|eat|food|restaurants?|shopping|sights?|tips?)\s*:/i.test(
+          cleaned
+        )
+          ? normalizedFact.replace(
+              /^(?:cafes?|eat|food|restaurants?|shopping|sights?|tips?)\s+/,
+              ""
+            )
+          : "";
+      const activityCarrier = activityCarrierForFact(source, cleaned);
+      if (activityCarrier) {
+        const alreadyPresent = carrierText(activityCarrier).includes(
+          normalizedFact
+        );
+        if (!alreadyPresent) {
+          activityCarrier.payload.description = mergeCityNoteDescription(
+            stringValue(activityCarrier.payload, "description"),
+            cleaned
+          );
+          addCanonicalAction(activityCarrier, {
+            absorbedTitles: [stringValue(source.payload, "title")].filter(
+              (value): value is string => Boolean(value)
+            ),
+            observationIds: [...source.observationIds],
+            reason:
+              "final content-carrier check routed a safe fact to its output-eligible same-identity Activity",
+            type: "recovered",
+          });
+        }
+        removeFactFromNoteCollections(rawCandidate);
+        if (cleaned !== rawCandidate) {
+          removeFactFromNoteCollections(cleaned);
+        }
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: activityCarrier.id,
+          factDigest,
+          outcome: alreadyPresent ? "already_present" : "restored",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const existingCarrier = outputPieces().find((piece) => {
+        const text = carrierText(piece);
+        return (
+          text.includes(normalizedFact) ||
+          (normalizedListEntry.length >= 4 && text.includes(normalizedListEntry))
+        );
+      });
+      if (existingCarrier) {
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: existingCarrier.id,
+          factDigest,
+          outcome: "already_present",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const carrier = sameIdentityCarrier(source, declaredCarrier)
+        ? declaredCarrier
+        : cityNote;
+      if (!carrier) {
+        contentCarrierDecisions.push({
+          carrierField: "description",
+          carrierPieceId: null,
+          factDigest,
+          outcome: "unresolved",
+          sourcePieceId: source.id,
+        });
+        continue;
+      }
+      const existingDescription = stringValue(
+        carrier.payload,
+        "description"
+      );
+      if (carrier.kind === "note") {
+        const section = classifyCityNoteSection({
+          category: stringValue(source.payload, "category"),
+          label:
+            stringValue(source.payload, "_canonicalNoteCollectionLabel") ??
+            null,
+          text: cleaned,
+        });
+        const line = `${section}: ${cleaned}`;
+        carrier.payload.description = existingDescription
+          ? `${existingDescription}\n${line}`
+          : line;
+      } else {
+        carrier.payload.description = mergeCityNoteDescription(
+          existingDescription,
+          cleaned
+        );
+      }
+      addCanonicalAction(carrier, {
+        absorbedTitles: [stringValue(source.payload, "title")].filter(
+          (value): value is string => Boolean(value)
+        ),
+        observationIds: [...source.observationIds],
+        reason:
+          "final content-carrier check restored a safe fact whose declared survivor did not contain its digest",
+        type: "recovered",
+      });
+      contentCarrierDecisions.push({
+        carrierField: "description",
+        carrierPieceId: carrier.id,
+        factDigest,
+        outcome: "restored",
+        sourcePieceId: source.id,
+      });
+    }
+  }
+
+  // Restoring or redirecting a fact is the last text mutation, so run the
+  // same segment projection once more on the resulting City Notes. This is
+  // a local scrub, not a second semantic writer: the classifier and ledger
+  // above remain the sole authority, and any newly exposed unsafe/generic
+  // remainder receives an exclusion decision before it is removed.
+  for (const piece of outputPieces()) {
+    if (piece.kind !== "note") continue;
+    const description = stringValue(piece.payload, "description");
+    if (!description) continue;
+    const kept: string[] = [];
+    for (const segment of splitCityNoteSegments(description)) {
+      const projection = projectPublicCityNoteSegment(segment);
+      const cleaned =
+        projection.safety === "content"
+          ? dropIdentityProseSegments(
+              scrubBookingFieldNames(
+                scrubProtectedValuesFromText(
+                  projection.sanitized,
+                  denyList,
+                  staysExist
+                )
+              )
+            )
+          : "";
+      const finalProjection = projectPublicCityNoteSegment(cleaned);
+      if (
+        !cleaned ||
+        projection.safety !== "content" ||
+        finalProjection.safety !== "content"
+      ) {
+        decisions.push({
+          canonicalPieceId: piece.id,
+          outcome: "excluded",
+          rawSafety: projection.rawSafety,
+          sanitizedSafety: finalProjection.sanitizedSafety,
+          segmentDigest: stableHash({
+            normalized: normalizedComparable(segment),
+            version: 1,
+          }),
+        });
+        continue;
+      }
+      kept.push(cleaned);
+    }
+    piece.payload.description = kept.join("\n").trim() || null;
+    if (!stringValue(piece.payload, "description")) {
+      suppressCanonicalPiece(
+        piece,
+        "City Note collection has no public content after every source fact received a protected carrier or explicit exclusion",
+        { kind: "terminal", code: "EMPTY_CITY_NOTE_AFTER_EXCLUSIONS" }
+      );
+    }
+  }
+
+  let finalPublicProtectedSegmentCount = 0;
+  for (const piece of pieces) {
+    if (!piece.outputEligible || piece.kind !== "note") continue;
+    for (const segment of splitCityNoteSegments(piece.payload.description)) {
+      const projection = projectPublicCityNoteSegment(segment);
+      const containsDeniedValue = denyList.some((denied) =>
+        segment.toLowerCase().includes(denied.toLowerCase())
+      );
+      if (
+        projection.safety !== "content" ||
+        containsDeniedValue ||
+        Boolean(findIdentityProseSignal(segment))
+      ) {
+        finalPublicProtectedSegmentCount += 1;
+      }
+    }
+  }
+  return {
+    contentCarrierDecisions,
+    decisions,
+    finalPublicProtectedSegmentCount,
+    unresolvedFactCount: contentCarrierDecisions.filter(
+      (decision) => decision.outcome === "unresolved"
+    ).length,
+    version: 1,
+  };
 }
 
 // One stay per venue per leg (RW-TRV-001 night coverage + RW-CAN-001 one
@@ -5977,10 +6655,19 @@ function sanitizeCityNoteText(value: unknown) {
 
   return value
     .replace(
-      /\b(?:booking|confirmation|reservation|reference|ref|voucher|ticket)\s*(?:code|number|no\.?|#)?\s*[:#]?\s*[A-Z0-9][A-Z0-9-]{3,}\b/gi,
-      " "
+      /\b(?:booking|confirmation|reservation|reference|ref|voucher|ticket)\s*(code|number|no\.?|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/gi,
+      (full: string, qualifier: string | undefined, token: string) =>
+        qualifier || /\d/.test(token) || /^[A-Z0-9-]{5,}$/.test(token)
+          ? " "
+          : full
     )
-    .replace(/\b\d{8,}\b/g, " ")
+    // Preserve the shared head on both sides of a compact alternative.
+    // "onion or garlic soup" otherwise loses the standalone "onion soup"
+    // fact even though the source states both variants.
+    .replace(
+      /\b([a-z][a-z-]{2,})\s+or\s+([a-z][a-z-]{2,})\s+(soup|tea|wine|beer|coffee|cake|bread)\b/gi,
+      "$1 $3 or $2 $3"
+    )
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -6029,9 +6716,19 @@ const NOTE_TICKET_OCR_PATTERN =
 // Negative controls: HUF-only prose and priced venue/idea lines carry no
 // lodging word and stay note content.
 const NOTE_LODGING_COST_PATTERN =
-  /[$€£]\s?\d[\d,.]*[^\n]{0,60}\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|per night|a night|stay)\b|\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|stay)\b[^\n]{0,60}[$€£]\s?\d/i;
+  /[$€£]\s?\d[\d,.]*[^\n]{0,60}\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|per night|a night|stay)\b|\b(?:room|rooms|airbnb|hostel|hotel|lodging|apartment|ensuite|en-suite|guesthouse|bnb|stay)\b[^\n]{0,60}[$€£]\s?\d|\b(?:lodging|accommodation|airbnb|hostel|hotel|room)\s+(?:cost|price|pricing)\s+note\b|\bprivate room\b[^\n]{0,50}\b(?:cost|price|pricing)\b/i;
+const NOTE_STAY_ADMIN_PATTERN =
+  /\bcheck[ -]?in (?:to|at)\b[^\n]{0,80}\b(?:airbnb|hostel|hotel|lodging|apartment|guesthouse|bnb)\b|\bfrom\b[^\n]{0,80}\b(?:station|airport)\b[^\n]{0,180}\b(?:take|turn|walk|reach|located|number)\b|\bstay\s*:\s*[^\n]{0,100}\b(?:airbnb|hostel|hotel|lodging|apartment|guesthouse|bnb)\b|\b(?:airbnb|hostel|hotel|lodging|apartment|guesthouse|bnb)\b[^\n]{0,80}\b(?:access directions?|check[ -]?in|stay note)\b|\bstay note\b|\breach\b[^\n]{0,160}\b(?:take|turn|first street|located at number)\b/i;
+const NOTE_GENERIC_MEAL_PATTERN =
+  /^(?:food:\s*)?(?:eat|grab|have)\s+(?:some\s+)?(?:breakfast|brunch|dinner|food|lunch|meal|pizza|[‘'’]?za)\s*[.!?]?(?:\s+(?:drinks & nightlife|getting around|local tips|notes|shopping|sights & culture):)?$/i;
 
-type CityNoteSegmentSafety = "access" | "booking" | "content" | "cost";
+type CityNoteSegmentSafety =
+  | "access"
+  | "booking"
+  | "content"
+  | "cost"
+  | "generic"
+  | "private";
 
 function classifyCityNoteSegmentSafety(segment: string): CityNoteSegmentSafety {
   if (
@@ -6044,9 +6741,13 @@ function classifyCityNoteSegmentSafety(segment: string): CityNoteSegmentSafety {
   if (
     CREDENTIAL_SENTENCE_PATTERN.test(segment) ||
     STAY_ACCESS_INSTRUCTION_PATTERN.test(segment) ||
-    NOTE_ACCESS_SHAPE_PATTERN.test(segment)
+    NOTE_ACCESS_SHAPE_PATTERN.test(segment) ||
+    NOTE_STAY_ADMIN_PATTERN.test(segment)
   ) {
     return "access";
+  }
+  if (NOTE_GENERIC_MEAL_PATTERN.test(segment.trim())) {
+    return "generic";
   }
   if (
     NOTE_TICKET_OCR_PATTERN.test(segment) ||
@@ -6054,7 +6755,42 @@ function classifyCityNoteSegmentSafety(segment: string): CityNoteSegmentSafety {
   ) {
     return "booking";
   }
+  if (classifySensitiveText(segment)) {
+    return "private";
+  }
   return "content";
+}
+
+type CityNoteSegmentProjection = {
+  rawSafety: CityNoteSegmentSafety;
+  sanitized: string;
+  sanitizedSafety: CityNoteSegmentSafety;
+  safety: CityNoteSegmentSafety;
+};
+
+function projectCityNoteSegment(segment: string): CityNoteSegmentProjection {
+  const raw = segment.trim();
+  const rawSafety = classifyCityNoteSegmentSafety(raw);
+  const sanitizedValue = sanitizeCityNoteText(raw);
+  const sanitized = typeof sanitizedValue === "string" ? sanitizedValue : "";
+  const sanitizedSafety = sanitized
+    ? classifyCityNoteSegmentSafety(sanitized)
+    : rawSafety;
+  return {
+    rawSafety,
+    sanitized,
+    sanitizedSafety,
+    safety: rawSafety === "content" ? sanitizedSafety : rawSafety,
+  };
+}
+
+function splitCityNoteSegments(value: unknown) {
+  if (typeof value !== "string") return [];
+  return value
+    .split(/(?:\r?\n)+/)
+    .flatMap((part) => part.split(PROSE_SEGMENT_SPLIT))
+    .map((segment) => segment.trim())
+    .filter(Boolean);
 }
 
 const SECTION_LABEL_HINTS: Array<[RegExp, CityNoteSection]> = [
@@ -6116,6 +6852,8 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
   const excludedAccess: string[] = [];
   const excludedBooking: string[] = [];
   const excludedCosts: string[] = [];
+  const excludedGeneric: string[] = [];
+  const excludedPrivate: string[] = [];
 
   const addEntry = (
     section: CityNoteSection,
@@ -6135,7 +6873,8 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     entry: string,
     classify: () => CityNoteSection
   ) => {
-    switch (classifyCityNoteSegmentSafety(entry)) {
+    const projection = projectCityNoteSegment(entry);
+    switch (projection.safety) {
       case "cost":
         excludedCosts.push(entry);
         return;
@@ -6145,8 +6884,16 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
       case "booking":
         excludedBooking.push(entry);
         return;
+      case "private":
+        excludedPrivate.push(entry);
+        return;
+      case "generic":
+        excludedGeneric.push(entry);
+        return;
       default:
-        addEntry(classify(), entry);
+        if (projection.sanitized) {
+          addEntry(classify(), projection.sanitized);
+        }
     }
   };
 
@@ -6157,22 +6904,17 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     const title = stringValue(note.payload, "title");
 
     if (note.payload._canonicalNoteEntry === true && title) {
-      const text = sanitizeCityNoteText(title);
-      if (typeof text !== "string" || !text) continue;
-      routeEntry(text, () => classifyCityNoteSection({ category, label, text }));
+      routeEntry(title, () =>
+        classifyCityNoteSection({ category, label, text: title })
+      );
       continue;
     }
 
-    const raw = sanitizeCityNoteText(
-      note.payload.description ?? note.payload.title
-    );
-    if (typeof raw !== "string" || !raw) continue;
     // Classify segment by segment so mixed prose lands in the right
     // sections and budget lines can be excluded without losing neighbors.
-    const segments = raw
-      .split(/(?:\r?\n)+/).flatMap((part) => part.split(PROSE_SEGMENT_SPLIT))
-      .map((segment) => segment.trim())
-      .filter(Boolean);
+    const segments = splitCityNoteSegments(
+      note.payload.description ?? note.payload.title
+    );
     for (const segment of segments) {
       routeEntry(segment, () =>
         classifyCityNoteSection({ category, label, text: segment })
@@ -6187,7 +6929,14 @@ function cityNoteCollectionSections(notes: CanonicalEvidencePiece[]) {
     section,
   }));
 
-  return { excludedAccess, excludedBooking, excludedCosts, sections: orderedSections };
+  return {
+    excludedAccess,
+    excludedBooking,
+    excludedCosts,
+    excludedGeneric,
+    excludedPrivate,
+    sections: orderedSections,
+  };
 }
 
 function renderCityNoteSectionEntries(entries: string[]) {
@@ -6218,89 +6967,6 @@ function cityNoteCollectionDescription(notes: CanonicalEvidencePiece[]) {
   if (sections.length === 0) return null;
 
   return renderCityNoteSections(sections);
-}
-
-// Content beats context (defect docket 2026-07-17): appendix material — a
-// Colosseum ticket sitting among the Prague lockbox pages — inherits the
-// wrong city from its surroundings. Before notes consolidate, any note whose
-// text names a canonical entity that lives in a DIFFERENT city routes to
-// that entity's lineage instead of polluting this city's notes.
-function rerouteCrossCityNoteContent(pieces: CanonicalEvidencePiece[]) {
-  const cityForDate = canonicalCityForDate(pieces);
-  const entities = pieces.filter(
-    (piece) =>
-      piece.outputEligible &&
-      (piece.kind === "activity" || piece.kind === "stay" || piece.kind === "transport") &&
-      piece.payload._canonicalGroupRole !== "child"
-  );
-  const entityIndex = entities
-    .map((piece) => {
-      const title =
-        stringValue(piece.payload, "title") ?? stringValue(piece.payload, "name");
-      const tokens = title ? distinctiveTitleTokens(title) : [];
-      const date =
-        stringValue(piece.payload, "date") ??
-        stringValue(piece.payload, "checkIn") ??
-        stringValue(piece.payload, "firstNightDate");
-      const city =
-        normalizedComparable(stringValue(piece.payload, "city")) ||
-        cityForDate(date);
-      return tokens.length > 0 && city ? { city, piece, tokens } : null;
-    })
-    .filter((value): value is NonNullable<typeof value> => Boolean(value));
-
-  for (const note of pieces) {
-    if (!note.outputEligible || note.kind !== "note") continue;
-    if (
-      note.payload._canonicalGroupRole === "parent" ||
-      note.payload._canonicalGroupRole === "child"
-    ) {
-      continue;
-    }
-    const noteCity =
-      normalizedComparable(stringValue(note.payload, "city")) ||
-      cityForDate(stringValue(note.payload, "date"));
-    if (!noteCity) continue;
-    const text = foldForSourceSupport(
-      [note.payload.title, note.payload.description].filter(Boolean).join(" ")
-    );
-    if (!text) continue;
-
-    // A wholesale reroute is destructive: it moves the ENTIRE note onto the
-    // named entity. That is only safe when the note is genuinely about that
-    // entity — a short, single-topic note with a distinctive multi-token
-    // match. A multi-segment tips blob that merely mentions a name from
-    // another leg keeps its city home (live-run 7.18.0 killed the Budapest
-    // public-transport tip through this rule).
-    const owner = entityIndex.find(
-      (entity) =>
-        entity.city !== noteCity &&
-        entity.tokens.every((token) => text.includes(token))
-    );
-    if (!owner) continue;
-    // A named tips/ideas collection is multi-topic city content: mentioning
-    // an entity from another leg does not make the whole note that entity's
-    // material (live-run 7.18.0 killed the "Budapest public transportation
-    // tip" this way). Single-topic notes (a stray ticket screenshot) still
-    // route wholesale.
-    if (
-      /\b(?:tips?|ideas?|notes?|recommendations?|guide)\b/i.test(
-        stringValue(note.payload, "title") ?? ""
-      )
-    ) {
-      continue;
-    }
-
-    note.payload.description = sanitizeCityNoteText(
-      stringValue(note.payload, "description")
-    );
-    mergeCanonicalPieceInto({
-      reason:
-        "content beats context: note text names an entity in another leg, so it routes to that entity instead of this city's notes",
-      source: note,
-      target: owner.piece,
-    });
-  }
 }
 
 function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
@@ -6400,7 +7066,14 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       )?.city ??
       "City";
     const insertionIndex = Math.min(...group.map((note) => pieces.indexOf(note)));
-    const { excludedAccess, excludedBooking, excludedCosts, sections } =
+    const {
+      excludedAccess,
+      excludedBooking,
+      excludedCosts,
+      excludedGeneric,
+      excludedPrivate,
+      sections,
+    } =
       cityNoteCollectionSections(group);
     const target: CanonicalEvidencePiece = {
       actions: [],
@@ -6435,6 +7108,15 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
         observationIds: [],
         reason:
           "costs/budget planning content excluded from traveler notes (ground truth: Costs section is a planning artifact)",
+        type: "rejected",
+      });
+    }
+    if (excludedGeneric.length > 0) {
+      addCanonicalAction(target, {
+        absorbedTitles: excludedGeneric,
+        observationIds: [],
+        reason:
+          "generic meal text without a venue or durable traveler fact excluded from City Notes",
         type: "rejected",
       });
     }
@@ -6486,6 +7168,20 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
         type: "rejected",
       });
     }
+    if (excludedPrivate.length > 0) {
+      addCanonicalAction(target, {
+        absorbedTitles: excludedPrivate.map((entry) =>
+          `protected segment ${stableHash({
+            normalized: normalizedComparable(entry),
+            version: 1,
+          })}`
+        ),
+        observationIds: [],
+        reason:
+          "personal or protected-class content excluded from traveler notes by the shared raw-and-sanitized segment classifier",
+        type: "rejected",
+      });
+    }
 
     for (const note of group) {
       mergeCanonicalPieceInto({
@@ -6496,114 +7192,10 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
       });
     }
 
-    // Collection integrity (live-run 7.18.0: Mistral Cafe, Cafe Louvre,
-    // Malostranská Beseda, Country Life, and Pontoon were all routed into
-    // their city collection yet absent from the final note text): every
-    // routed note's content must land in the rendered note or carry an
-    // explicit exclusion disposition. Anything else is silent content loss —
-    // restore it into its classified section and record the recovery.
-    const renderedNow = () =>
-      normalizedComparable(stringValue(target.payload, "description") ?? "");
-    const excludedNormalized = [
-      ...excludedAccess,
-      ...excludedBooking,
-      ...excludedCosts,
-    ].map((entry) => normalizedComparable(entry));
-    const restored: string[] = [];
-    for (const note of group) {
-      const label =
-        stringValue(note.payload, "_canonicalNoteCollectionLabel") ?? null;
-      const category = stringValue(note.payload, "category");
-      const isNoteEntry = note.payload._canonicalNoteEntry === true;
-      const descriptionCandidates = isNoteEntry
-        ? [stringValue(note.payload, "title")]
-        : [
-            ...(sanitizeCityNoteText(
-              note.payload.description ?? note.payload.title
-            ) as string | null ?? "")
-              .split(PROSE_SEGMENT_SPLIT)
-              .map((segment) => segment.trim()),
-          ];
-      // B7.1 (2026-08-04, R2D2 defect): a note "landing" means one of its
-      // candidates matched something the check already treats as covered —
-      // already in the rendered text, already carrying an explicit
-      // cost/access/booking disposition, or freshly restored below. A note
-      // whose candidates ALL fail to land (none of the three) walks away
-      // with neither content nor a disposition — that is the exact silent-
-      // loss shape this integrity check exists to catch (comment above,
-      // "every routed note's content must land ... or carry an explicit
-      // exclusion disposition"), just one step upstream of what the
-      // original 7.18.0 fix covered: that fix caught content that rendered
-      // but then went missing from the FINAL text; this closes the case
-      // where a note's own description-derived candidates never produce
-      // anything the classifier below ever sees at all.
-      let landed = false;
-      const tryCandidate = (candidate: string | null) => {
-        if (!candidate || candidate.length < 4) return;
-        const normalized = normalizedComparable(candidate);
-        if (!normalized || normalized.length < 4) return;
-        if (renderedNow().includes(normalized)) {
-          landed = true;
-          return;
-        }
-        if (
-          excludedNormalized.some(
-            (excluded) =>
-              excluded.includes(normalized) || normalized.includes(excluded)
-          )
-        ) {
-          landed = true;
-          return;
-        }
-        // Run8 P0 (7.21.1b) + Arc F.2 C4: restored content passes the SAME
-        // safety classifier the initial render enforces — never costs,
-        // never credentials/access narration, never booking/receipt
-        // boilerplate — plus the legacy lockbox/safe-box shapes, and never
-        // material whose own source city disagrees with this collection's
-        // city.
-        if (classifyCityNoteSegmentSafety(candidate) !== "content") return;
-        if (/\block\s*box|\bsafe box\b|\bstep \d\b/i.test(candidate)) return;
-        const noteCity = normalizedComparable(
-          stringValue(note.payload, "city") ?? ""
-        );
-        const targetCity = normalizedComparable(
-          stringValue(target.payload, "city") ?? ""
-        );
-        if (noteCity && targetCity && noteCity !== targetCity) return;
-        const section = classifyCityNoteSection({
-          category,
-          label,
-          text: candidate,
-        });
-        const description = stringValue(target.payload, "description");
-        const line = `${section}: ${candidate}`;
-        target.payload.description = description
-          ? `${description}\n${line}`
-          : line;
-        restored.push(candidate);
-        landed = true;
-      };
-      for (const candidate of descriptionCandidates) tryCandidate(candidate);
-      // The title is the one field every demoted piece always carries,
-      // independent of whatever happened to its description on the way
-      // here — so it is the last-resort candidate, tried through the
-      // IDENTICAL gate above (never a parallel check), and only when the
-      // description-derived candidates landed nothing. A note-entry piece
-      // already used its title as the (sole) description candidate above,
-      // so retrying it would just repeat the same failing check.
-      if (!landed && !isNoteEntry) {
-        tryCandidate(stringValue(note.payload, "title"));
-      }
-    }
-    if (restored.length > 0) {
-      addCanonicalAction(target, {
-        absorbedTitles: restored.slice(0, 12),
-        observationIds: [],
-        reason:
-          "note content restored by the city-note collection integrity check (routed content must land or carry an explicit disposition)",
-        type: "recovered",
-      });
-    }
+    // Content acceptance is verified once, after the final text mutation, by
+    // scrubProtectedValuesFromPublicProse. This merger only renders the
+    // classifier-approved segments above; it must not independently restore
+    // text and create a second content-carrier authority.
   }
 }
 
@@ -7380,6 +7972,9 @@ const SOURCE_SUPPORT_STOPWORDS = new Set([
   "walking", "with",
 ]);
 
+const GENERIC_SOURCE_SUPPORT_WRAPPER_PATTERN =
+  /^(?:(?:city|food|local|restaurant|venue)\s+)?(?:ideas?|notes?|options?|recommendations?|references?|tips?)$/i;
+
 function foldForSourceSupport(value: string) {
   return value
     .normalize("NFD")
@@ -7441,9 +8036,25 @@ function stampSourceSupport(
   const tokens = distinctiveTitleTokens(title);
   if (tokens.length === 0) return;
 
-  payload._sourceSupport = tokens.some((token) => corpus.includes(token))
-    ? "supported"
-    : "unsupported";
+  // Generic parser wrappers do not name the underlying source fact, so their
+  // title cannot prove or disprove support. Accept such a wrapper only when
+  // its preserved evidence is a substantial verbatim span of the producing
+  // chunk. A fabricated named title still has to match by its own distinctive
+  // tokens, so copied nearby prose cannot launder a model invention.
+  const evidence = foldForSourceSupport(
+    stringValue(payload, "evidence") ?? ""
+  ).trim();
+  const genericWrapperWithVerbatimEvidence = Boolean(
+    GENERIC_SOURCE_SUPPORT_WRAPPER_PATTERN.test(title.trim()) &&
+      evidence.length >= 16 &&
+      corpus.includes(evidence)
+  );
+
+  payload._sourceSupport =
+    genericWrapperWithVerbatimEvidence ||
+    tokens.some((token) => corpus.includes(token))
+      ? "supported"
+      : "unsupported";
 }
 
 function suppressUnsupportedModelInventions(
@@ -8027,12 +8638,37 @@ function collapseCrossReferencedSameDayVenueAliases(
         ) {
           continue;
         }
-        const leftOwnText = left.observationIds
+        const identityOwnedObservationText = (
+          piece: CanonicalEvidencePiece,
+          pieceTitle: string
+        ) => piece.observationIds
           .map((id) => observations.find((observation) => observation.id === id))
           .filter(
             (observation): observation is EvidenceObservation =>
-              Boolean(observation)
+              Boolean(
+                observation &&
+                  observation.kind === "activity" &&
+                  observation.role !== "context" &&
+                  observation.role !== "grouping_proposal" &&
+                  observation.payload._canonicalSourceContainer !== true
+              )
           )
+          // Prior identity/description folds can add broad overview
+          // observations to a venue piece. Those observations describe a
+          // list, not this venue's aliases. Only the atomic observation whose
+          // own title identifies the current piece may prove a cross-name.
+          .filter((observation) => {
+            const observationTitle = identityTokens(
+              stringValue(observation.payload, "title")
+            );
+            const currentTitle = identityTokens(pieceTitle);
+            return (
+              observationTitle.length > 0 &&
+              currentTitle.length > 0 &&
+              overlapCount(observationTitle, currentTitle) >=
+                Math.min(2, observationTitle.length, currentTitle.length)
+            );
+          })
           .map((observation) =>
             normalizedComparable(
               `${stringValue(observation.payload, "title") ?? ""} ${
@@ -8040,19 +8676,8 @@ function collapseCrossReferencedSameDayVenueAliases(
               }`
             )
           );
-        const rightOwnText = right.observationIds
-          .map((id) => observations.find((observation) => observation.id === id))
-          .filter(
-            (observation): observation is EvidenceObservation =>
-              Boolean(observation)
-          )
-          .map((observation) =>
-            normalizedComparable(
-              `${stringValue(observation.payload, "title") ?? ""} ${
-                stringValue(observation.payload, "description") ?? ""
-              }`
-            )
-          );
+        const leftOwnText = identityOwnedObservationText(left, leftTitle);
+        const rightOwnText = identityOwnedObservationText(right, rightTitle);
         const crossReferenced =
           leftOwnText.some((text) => text.includes(rightTitle)) ||
           rightOwnText.some((text) => text.includes(leftTitle));
@@ -8448,14 +9073,19 @@ function sourceSequencedIdentityDate(
   piece: CanonicalEvidencePiece,
   observationById: Map<string, EvidenceObservation>
 ) {
-  const pieceTitle = normalizedComparable(stringValue(piece.payload, "title"));
+  const pieceTitleTokens = identityTokens(stringValue(piece.payload, "title"));
   const classifiedBlockTypesForDate = (date: string) => {
     const types = new Set<string>();
     for (const observation of observationById.values()) {
+      const observationTitleTokens = identityTokens(
+        stringValue(observation.payload, "title")
+      );
       if (
-        normalizedComparable(stringValue(observation.payload, "title")) !==
-          pieceTitle ||
-        stringValue(observation.payload, "date") !== date
+        stringValue(observation.payload, "date") !== date ||
+        observationTitleTokens.length === 0 ||
+        pieceTitleTokens.length === 0 ||
+        overlapCount(observationTitleTokens, pieceTitleTokens) <
+          Math.min(2, observationTitleTokens.length, pieceTitleTokens.length)
       ) {
         continue;
       }
@@ -8465,19 +9095,25 @@ function sourceSequencedIdentityDate(
       const reason = stringValue(decision, "reasonCode");
       if (reason === "BLOCK_IDEAS") types.add("ideas");
       if (reason === "BLOCK_PLAN") types.add("plan");
+      if (reason === "BLOCK_AMBIGUOUS") types.add("ambiguous");
     }
     return types;
   };
+  const occurrences = sourceOccurrencesForPiece(piece, observationById, {
+    identityTitleOnly: true,
+  }).filter((occurrence) => occurrence.sequencedDay);
+  // A deliberate plan occurrence outranks an earlier reference-list
+  // occurrence. Only when no occurrence was classified as a plan do we
+  // fall back to the earliest sequenced mention that was not ideas-only.
   return (
-    sourceOccurrencesForPiece(piece, observationById, {
-      identityTitleOnly: true,
-    }).find(
-      (occurrence) => {
-        if (!occurrence.sequencedDay) return false;
-        const classified = classifiedBlockTypesForDate(occurrence.date);
-        return !(classified.has("ideas") && !classified.has("plan"));
-      }
-    )?.date ?? null
+    occurrences.find((occurrence) =>
+      classifiedBlockTypesForDate(occurrence.date).has("plan")
+    )?.date ??
+    occurrences.find((occurrence) => {
+      const classified = classifiedBlockTypesForDate(occurrence.date);
+      return classified.has("plan") || classified.size === 0;
+    })?.date ??
+    null
   );
 }
 
@@ -8636,13 +9272,25 @@ function activityHasIdentityWinningEvidence({
   observationById: Map<string, EvidenceObservation>;
   piece: CanonicalEvidencePiece;
 }) {
+  const pieceDecision = canonicalCandidacyDecision(piece);
+  const noteDecision = note ? canonicalCandidacyDecision(note) : {};
+  const sameAuthoritativeOccurrence = Boolean(
+    note &&
+      authoritativeActivityCommitment(piece) === "sequenced" &&
+      normalizedComparable(stringValue(piece.payload, "title")) ===
+        normalizedComparable(stringValue(note.payload, "title")) &&
+      stringValue(pieceDecision, "classifiedDate") &&
+      stringValue(pieceDecision, "classifiedDate") ===
+        stringValue(noteDecision, "classifiedDate")
+  );
   return Boolean(
-    authoritativeActivityCommitment(piece) === "fixed" ||
+    authoritativeActivityCommitment(piece) !== "none" ||
       sourceSequencedIdentityDate(piece, observationById) ||
       (note && activityDecisionReferencesNote(piece, note)) ||
+      sameAuthoritativeOccurrence ||
       (note &&
         authoritativeActivityCommitment(piece) === "sequenced" &&
-        notesShareSourceSection(piece, [note], observationById))
+        !notesShareSourceSection(piece, [note], observationById))
   );
 }
 
@@ -8685,6 +9333,48 @@ function resolveUncommittedRepeatMentions(
   );
   const groups = new Map<string, CanonicalEvidencePiece[]>();
   const undatedByTitle = new Map<string, CanonicalEvidencePiece[]>();
+
+  // A parser lane can preserve an identity-bearing component qualifier in
+  // a source note while another lane emits the dated Activity with only the
+  // base venue title. Rehydrate that source-qualified identity before
+  // repeat grouping, otherwise a tower/garden/chapel occurrence is folded
+  // into the parent venue merely because the model dropped one title word.
+  for (const piece of pieces) {
+    if (!committedMentionPieceCandidate(piece)) continue;
+    const date = stringValue(piece.payload, "date");
+    const title = stringValue(piece.payload, "title");
+    if (!date || !title) continue;
+    const qualifiedNote = pieces.find((candidate) => {
+      if (candidate.kind !== "note") return false;
+      const candidateTitle = stringValue(candidate.payload, "title");
+      const baseTokens = aliasIdentityTokens(piece.payload);
+      const qualifiedTokens = aliasIdentityTokens(candidate.payload);
+      const addedTokens = qualifiedTokens.filter(
+        (token) => !new Set(baseTokens).has(token)
+      );
+      if (
+        !candidateTitle ||
+        !tokenSetContains(qualifiedTokens, baseTokens) ||
+        !addedTokens.some((token) => DISTINCT_COMPONENT_TOKENS.has(token))
+      ) {
+        return false;
+      }
+      const candidateDecision = canonicalCandidacyDecision(candidate);
+      return stringValue(candidateDecision, "classifiedDate") === date;
+    });
+    const qualifiedTitle = qualifiedNote
+      ? stringValue(qualifiedNote.payload, "title")
+      : null;
+    if (!qualifiedTitle) continue;
+    piece.payload.title = qualifiedTitle;
+    addCanonicalAction(piece, {
+      absorbedTitles: [title],
+      observationIds: [...qualifiedNote!.observationIds],
+      reason:
+        "source-qualified component identity restored before repeat resolution",
+      type: "recovered",
+    });
+  }
 
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
@@ -8795,11 +9485,14 @@ function resolveUncommittedRepeatMentions(
           activityDecisionReferencesNote(entry.piece, candidate)
       )
     );
-    const activityWinner = sourceSequenced[0]?.piece ?? contrastedPlan?.piece;
+    const activityWinner =
+      sourceSequenced[0]?.piece ??
+      contrastedPlan?.piece;
     if (activityWinner) {
-      const sourceDate = sourceSequenced.find(
-        (entry) => entry.piece === activityWinner
-      )?.sourceDate;
+      const sourceDate =
+        stringValue(canonicalCandidacyDecision(activityWinner), "classifiedDate") ??
+        sourceSequenced.find((entry) => entry.piece === activityWinner)
+          ?.sourceDate;
       if (sourceDate && stringValue(activityWinner.payload, "date") !== sourceDate) {
         activityWinner.payload.date = sourceDate;
         addCanonicalAction(activityWinner, {
@@ -8854,6 +9547,25 @@ function resolveUncommittedRepeatMentions(
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title || questionSubjects.has(title)) continue;
     if (authoritativeActivityCommitment(piece) === "fixed") continue;
+    if (authoritativeActivityCommitment(piece) === "sequenced") {
+      const authoritativeDate =
+        sourceSequencedIdentityDate(piece, observationById) ??
+        stringValue(canonicalCandidacyDecision(piece), "classifiedDate");
+      if (
+        authoritativeDate &&
+        stringValue(piece.payload, "date") !== authoritativeDate
+      ) {
+        piece.payload.date = authoritativeDate;
+        addCanonicalAction(piece, {
+          absorbedTitles: [],
+          observationIds: [...piece.observationIds],
+          reason:
+            "identity date follows the authoritative planned occurrence decision",
+          type: "recovered",
+        });
+      }
+      continue;
+    }
     const sourceSequencedDate = sourceSequencedIdentityDate(
       piece,
       observationById
@@ -9064,6 +9776,10 @@ function reconcileCardsAgainstCityNotes(
       }
     );
     const matchingNote =
+      candidateNotes.find(
+        (note) =>
+          normalizedComparable(stringValue(note.payload, "title")) === title
+      ) ??
       candidateNotes.find((note) => note.outputEligible) ??
       candidateNotes[0] ??
       null;
@@ -9564,6 +10280,22 @@ function referenceNoteObservationForPiece(
           stringValue(intake, "destination") === "city_note"
       );
       if (!isReferenceNote) return false;
+      if (
+        observation.role === "context" ||
+        observation.role === "grouping_proposal" ||
+        isDayArcTitle(
+          stringValue(observation.payload, "title"),
+          tripCityTokenSet(tripCities)
+        ) ||
+        isDayArcTitle(
+          stringValue(observation.payload, "description"),
+          tripCityTokenSet(tripCities)
+        ) ||
+        classifyDraftActivityCard(activityInput(observation.payload))
+          .isOverviewActivity
+      ) {
+        return false;
+      }
       const text = normalizedComparable(
         [
           stringValue(observation.payload, "title"),
@@ -9610,16 +10342,34 @@ function applyIntentBlockClassification({
   const timedCounts = timedActivityCountsByDate(pieces);
   const committedDetailSubjects =
     committedDetailReviewSubjectTitles(missingDetails);
+  const matchesCommittedDetailSubject = (title: string | null) => {
+    const titleTokens = identityTokens(title ?? "");
+    if (titleTokens.length === 0) return false;
+    return [...committedDetailSubjects].some((subject) => {
+      const subjectTokens = identityTokens(subject);
+      if (subjectTokens.length === 0) return false;
+      return (
+        overlapCount(titleTokens, subjectTokens) >=
+        Math.min(2, titleTokens.length, subjectTokens.length)
+      );
+    });
+  };
   const geocodeVerificationRan = observations.some(
     (observation) =>
       finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
       finitePayloadNumber(observation.payload, "verifiedLongitude") !== null
   );
   const pieceById = new Map<string, CanonicalEvidencePiece>();
+  const intentTripCityTokens = tripCityTokenSet(
+    pieces
+      .filter((piece) => piece.kind === "place")
+      .map((piece) => stringValue(piece.payload, "city"))
+  );
   const sourceIntentByPieceId = new Map<
     string,
     ReturnType<typeof sourceIntentSignalsForPiece>
   >();
+  const sourceSupportedVenueAddressPieceIds = new Set<string>();
   const entries: IntentBlockEntry[] = [];
 
   for (const piece of pieces) {
@@ -9715,6 +10465,44 @@ function applyIntentBlockClassification({
       observations,
       pieces
     );
+    const referenceNoteIsAtomicTwin = Boolean(
+      referenceNoteObservation &&
+        [
+          stringValue(referenceNoteObservation.payload, "title"),
+          stringValue(referenceNoteObservation.payload, "description"),
+        ]
+          .filter((value): value is string => Boolean(value))
+          .some((value) =>
+            [title, stringValue(piece.payload, "description")]
+              .filter((candidate): candidate is string => Boolean(candidate))
+              .some(
+                (candidate) =>
+                  normalizedComparable(value) ===
+                  normalizedComparable(candidate)
+              )
+          )
+    );
+    const publicVenueAddressEvidence =
+      stringValue(piece.payload, "address") ??
+      (referenceNoteIsAtomicTwin
+        ? stringValue(referenceNoteObservation?.payload ?? {}, "address")
+        : null);
+    const sourceSupportedPublicVenueAddress = Boolean(
+      publicVenueAddressEvidence &&
+        localObservations.some((observation) =>
+          normalizedComparable(
+            [
+              observation.payload.evidence,
+              observation.payload.description,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          ).includes(normalizedComparable(publicVenueAddressEvidence))
+        )
+    );
+    if (sourceSupportedPublicVenueAddress) {
+      sourceSupportedVenueAddressPieceIds.add(piece.id);
+    }
     sourceIntentByPieceId.set(piece.id, sourceIntent);
     const priorLaneObservations = localObservations.flatMap((ownObservation) => {
       const previous = observations
@@ -9739,6 +10527,22 @@ function applyIntentBlockClassification({
             "destination"
           ) === "city_note";
         if (!noteShaped) return false;
+        if (
+          observation.role === "context" ||
+          observation.role === "grouping_proposal" ||
+          isDayArcTitle(
+            stringValue(observation.payload, "title"),
+            intentTripCityTokens
+          ) ||
+          isDayArcTitle(
+            stringValue(observation.payload, "description"),
+            intentTripCityTokens
+          ) ||
+          classifyDraftActivityCard(activityInput(observation.payload))
+            .isOverviewActivity
+        ) {
+          return false;
+        }
         const previousTitle = normalizedComparable(
           stringValue(observation.payload, "title")
         );
@@ -9767,9 +10571,9 @@ function applyIntentBlockClassification({
         (!inputEvidenceRole ||
           inputEvidenceRole === "atomic_candidate" ||
           inputEvidenceRole === "grouping_proposal") &&
-        !isRecommendationActivityCategory(
+        (!isRecommendationActivityCategory(
           stringValue(piece.payload, "category")
-        ) &&
+        ) || Boolean(publicVenueAddressEvidence)) &&
         [
           primary.sourceLabel,
           primary.sourceStructure.sectionLabel ?? "",
@@ -9799,9 +10603,11 @@ function applyIntentBlockClassification({
       timeFrom(piece.payload) ||
         confirmationFrom(piece.payload) ||
         sourceIntent.hasExplicitPlanMention ||
+        canonicalSourceDecisions(piece.payload).length > 0 ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
-        committedDetailSubjects.has(normalizedComparable(title)) ||
+        matchesCommittedDetailSubject(title) ||
+        sourceSupportedPublicVenueAddress ||
         /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(title)
     );
 
@@ -9840,10 +10646,11 @@ function applyIntentBlockClassification({
         notesBlobSignal ||
         hasLooseTipVocabulary(ownText) ||
         (Boolean(referenceNoteObservation) &&
+          !referenceNoteIsAtomicTwin &&
+          stringValue(referenceNoteObservation?.payload ?? {}, "date") ===
+            date &&
           !hasIndependentActivityAnchor(piece.payload) &&
-          !stringValue(piece.payload, "address") &&
-          !hasDayPlanMembership &&
-          !hasSequencedDayPlan),
+          !publicVenueAddressEvidence),
       hasResearchEvidence:
         PRICE_MARKER_PATTERN.test(researchedText) ||
         classification.hasAvailabilityMarker,
@@ -9921,9 +10728,12 @@ function applyIntentBlockClassification({
       sourceIntent?.hasExplicitPlanMention ? "explicit_source_plan" : null,
       timeFrom(piece.payload) ? "time" : null,
       confirmationFrom(piece.payload) ? "confirmation" : null,
+      canonicalSourceDecisions(piece.payload).length > 0
+        ? "source_ticket_choice"
+        : null,
       pieceNamedInDayHeading(piece) ? "day_heading" : null,
-      committedDetailSubjects.has(
-        normalizedComparable(stringValue(piece.payload, "title"))
+      matchesCommittedDetailSubject(
+        stringValue(piece.payload, "title")
       )
         ? "material_detail_question"
         : null,
@@ -9935,6 +10745,9 @@ function applyIntentBlockClassification({
       Array.isArray(piece.payload._canonicalGroupingDecisionIds) &&
       piece.payload._canonicalGroupingDecisionIds.length > 0
         ? "approved_grouping"
+        : null,
+      sourceSupportedVenueAddressPieceIds.has(piece.id)
+        ? "source_supported_venue_address"
         : null,
     ].filter((value): value is string => Boolean(value));
     const hasAuditedCommitment = commitmentSignals.length > 0;
@@ -9949,9 +10762,11 @@ function applyIntentBlockClassification({
     const canonicalCandidacyDecision = {
       ...decision,
       blockDecisionId: block.blockId,
+      classifiedDate: stringValue(piece.payload, "date"),
       commitmentObservationIds:
         sourceIntent?.explicitPlanObservationIds ?? [],
       commitmentSignals,
+      hedgedObservationIds: sourceIntent?.hedgedObservationIds ?? [],
       ideaContextBefore:
         entries.find((entry) => entry.id === pieceId)?.ideaContextBefore ===
         true,
@@ -9975,11 +10790,21 @@ function applyIntentBlockClassification({
       version: 1,
     };
     piece.payload._canonicalCandidacyDecision = canonicalCandidacyDecision;
+    const classifiedDate = stringValue(piece.payload, "date");
     for (const observationId of piece.observationIds) {
       const observation = observations.find(
         (candidate) => candidate.id === observationId
       );
-      if (observation) {
+      // Intent is occurrence-local. A piece can already carry same-identity
+      // observations from another date; stamping this occurrence's block
+      // decision onto those observations makes the earliest date look
+      // planned and inverts identity (production Library/St. Stephen shape).
+      if (
+        observation &&
+        (!classifiedDate ||
+          !stringValue(observation.payload, "date") ||
+          stringValue(observation.payload, "date") === classifiedDate)
+      ) {
         observation.payload._canonicalCandidacyDecision = {
           ...canonicalCandidacyDecision,
         };
@@ -12118,6 +12943,67 @@ function createResearchedListQuestions(
   return questions;
 }
 
+type AmbiguousIntentHomeDecision = {
+  blockDecisionId: string;
+  decisionId: string;
+  finalHome: "city_note";
+  originalDate: string | null;
+  pieceId: string;
+  reasonCode: "unresolved_ambiguous_to_city_note";
+  title: string | null;
+};
+
+// Review is the terminal owner of an unresolved intent block. Classification
+// keeps an ambiguous candidate structurally available long enough for frozen
+// containment and identity ledgers to map it; grouping may consume only that
+// licensed structure. Once those ledgers have run, an ungrouped, uncommitted
+// candidate cannot ship as a speculative Activity. Its reversible home is the
+// City Note. Researched candidates already handled above retain their one
+// consolidated question; this pass closes every remaining ambiguous home.
+function finalizeAmbiguousIntentHomes(
+  pieces: CanonicalEvidencePiece[]
+): AmbiguousIntentHomeDecision[] {
+  const decisions: AmbiguousIntentHomeDecision[] = [];
+  for (const piece of pieces) {
+    if (
+      !piece.outputEligible ||
+      piece.kind !== "activity" ||
+      piece.payload._canonicalGroupRole === "parent" ||
+      piece.payload._canonicalGroupRole === "child"
+    ) {
+      continue;
+    }
+    const candidacy = canonicalCandidacyDecision(piece);
+    if (stringValue(candidacy, "reasonCode") !== "BLOCK_AMBIGUOUS") {
+      continue;
+    }
+    if (candidacy.hasAuditedCommitment === true) continue;
+    const blockDecisionId = stringValue(candidacy, "blockDecisionId");
+    if (!blockDecisionId) continue;
+    const originalDate = stringValue(piece.payload, "date");
+    const title = stringValue(piece.payload, "title");
+    demoteCanonicalPieceToCityNote(
+      piece,
+      `review finalized unresolved intent block ${blockDecisionId} to its reversible City Note home after grouping consumed the frozen ledgers`,
+      pieces
+    );
+    decisions.push({
+      blockDecisionId,
+      decisionId: `ambiguous-home-${stableHash({
+        blockDecisionId,
+        pieceId: piece.id,
+        version: 1,
+      })}`,
+      finalHome: "city_note",
+      originalDate,
+      pieceId: piece.id,
+      reasonCode: "unresolved_ambiguous_to_city_note",
+      title,
+    });
+  }
+  return decisions;
+}
+
 // Day-title slot rule (ground truth v2, question #3): when a source day
 // TITLE commits an activity slot ("… // Budapest Bathing") but the matching
 // entries read as options (untimed, unbooked, alias variants), the slot is
@@ -12334,6 +13220,21 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
   };
 
   for (const observation of observations) {
+    // Explicit entries split from a source-authored City Note collection are
+    // already atomic note facts. They are not fresh resolver candidates: the
+    // copied parent metadata can still say `keep_activity`, but allowing that
+    // stale parent decision to promote each comma-separated entry creates
+    // standalone note records with guessed dates/cities. Source
+    // normalization owns this boundary once and preserves the entry lane.
+    if (observation.payload._canonicalNoteEntry === true) {
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          evidenceRole: "city_note_candidate",
+        })
+      );
+      continue;
+    }
     const intakeDecision = asRecord(
       observation.payload._canonicalIntakeCandidacyDecision
     );
@@ -15009,6 +15910,12 @@ export function clusterExtractedEvidence({
     ["reviewDetails[]"],
     () => createResearchedListQuestions(pieces, missingDetails)
   );
+  const ambiguousIntentHomes = runPieceWriter(
+    "review",
+    "finalizeAmbiguousIntentHomes",
+    ["pieces[].kind", "pieces[].payload", "pieces[].actions", "ambiguousIntentHomes[]"],
+    () => finalizeAmbiguousIntentHomes(pieces)
+  );
   const dayLabelSlotQuestions = runPieceWriter(
     "review",
     "createDayLabelSlotQuestions",
@@ -15024,9 +15931,6 @@ export function clusterExtractedEvidence({
   );
   runPieceWriter("final_projection", "suppressUnresolvedIsolatedTerms", ["pieces[].outputEligible", "pieces[].disposition"], () =>
     suppressUnresolvedIsolatedTerms({ observations, pieces })
-  );
-  runPieceWriter("final_projection", "rerouteCrossCityNoteContent", ["pieces[].payload", "pieces[].actions"], () =>
-    rerouteCrossCityNoteContent(pieces)
   );
   runPieceWriter("final_projection", "mergeCanonicalCityNotes", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
     mergeCanonicalCityNotes(pieces)
@@ -15054,7 +15958,7 @@ export function clusterExtractedEvidence({
   // Run 7.23.0r ordering fix: the sweep is the LAST text mutation before
   // outputFor — conflict reconciliation selects field values and could
   // otherwise resurrect unscrubbed prose after an earlier sweep.
-  runPieceWriter("final_projection", "scrubProtectedValuesFromPublicProse", ["pieces[].payload"], () =>
+  const finalProjectionSafety = runPieceWriter("final_projection", "scrubProtectedValuesFromPublicProse", ["pieces[].payload", "finalProjectionSafety[]"], () =>
     scrubProtectedValuesFromPublicProse(pieces, sensitiveDetails)
   );
   // Validation-only final guard. Every later semantic writer has run; an
@@ -15268,6 +16172,7 @@ export function clusterExtractedEvidence({
           },
         ];
       }),
+      ambiguousIntentHomes,
       canonicalPieceCount: pieces.filter((piece) => piece.outputEligible).length,
       clusteredObservationCount: pieces.reduce(
         (count, piece) => count + Math.max(0, piece.observationIds.length - 1),
@@ -15324,6 +16229,7 @@ export function clusterExtractedEvidence({
       groupingClaims: groupingClaimTelemetryFromAuthority(groupingAuthority),
       groupingExecution: groupingAuthority,
       identityLedger: identityAuthority,
+      finalProjectionSafety,
       intentBlocks: {
         blocks: intentClassification.blocks,
         version: intentClassification.version,
