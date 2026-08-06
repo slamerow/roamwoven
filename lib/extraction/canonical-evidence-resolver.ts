@@ -68,6 +68,18 @@ export type CanonicalEvidenceResolution = {
 export type CanonicalEvidenceResolverMetadata = {
   cacheHit: boolean;
   candidateCount: number;
+  claimEvaluations: Array<{
+    candidateIds: string[];
+    claimDigest: string;
+    confidence: "high" | "medium" | "low";
+    parentCandidateId: string | null;
+    rejectionCodes: Array<
+      | "incomplete_membership"
+      | "low_confidence"
+      | "resolver_policy_rejected"
+    >;
+    status: "accepted" | "rejected";
+  }>;
   claims: Array<{
     candidateIds: string[];
     claim: string;
@@ -1136,6 +1148,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
   const emptyMetadata: CanonicalEvidenceResolverMetadata = {
     cacheHit: false,
     candidateCount: candidates.length,
+    claimEvaluations: [],
     claims: [],
     lookupKey: null,
     resolvedAt: null,
@@ -1203,6 +1216,39 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     }));
 
   const applied = applyCanonicalEvidenceResolution(stages, resolution);
+  const claimEvaluations = resolution.groupings.map((grouping) => {
+    const candidateIds = [...new Set(grouping.candidateIds)].sort();
+    const accepted = applied.groupingDecisions.some((decision) =>
+      decision.candidateIds.every((candidateId) =>
+        candidateIds.includes(candidateId)
+      )
+    );
+    const rejectionCodes: CanonicalEvidenceResolverMetadata["claimEvaluations"][number]["rejectionCodes"] = [];
+    if (grouping.confidence !== "high") rejectionCodes.push("low_confidence");
+    if (
+      candidateIds.length < 2 ||
+      candidateIds.some(
+        (candidateId) =>
+          !candidates.some((candidate) => candidate.candidateId === candidateId)
+      )
+    ) {
+      rejectionCodes.push("incomplete_membership");
+    }
+    if (!accepted && rejectionCodes.length === 0) {
+      rejectionCodes.push("resolver_policy_rejected");
+    }
+
+    return {
+      candidateIds,
+      claimDigest: createHash("sha256")
+        .update(normalizeText(grouping.claim))
+        .digest("hex"),
+      confidence: grouping.confidence,
+      parentCandidateId: grouping.parentCandidateId,
+      rejectionCodes,
+      status: accepted ? ("accepted" as const) : ("rejected" as const),
+    };
+  });
   const acceptedClaims = applied.groupingDecisions.map((grouping) => ({
     candidateIds: grouping.candidateIds,
     claim: grouping.claim,
@@ -1214,6 +1260,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     metadata: {
       ...emptyMetadata,
       cacheHit: windowResults.every((result) => result.cacheHit),
+      claimEvaluations,
       claims: acceptedClaims,
       lookupKey: createHash("sha256")
         .update(windowResults.map((result) => result.lookupKey).join("|"))

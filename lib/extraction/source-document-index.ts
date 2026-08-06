@@ -41,7 +41,11 @@ export type SourceDocumentIndexV1 = {
   sourceFingerprint: string;
   spans: SourceDocumentSpanV1[];
   lookups: {
+    spanIdsByNormalizedClause: Map<string, string[]>;
+    spanIdsBySectionAndNormalizedClause: Map<string, string[]>;
     spanIdsBySourceAndExcerptDigest: Map<string, string[]>;
+    spanIdsBySourceUploadId: Map<string, string[]>;
+    spanIdsByToken: Map<string, string[]>;
     spanById: Map<string, SourceDocumentSpanV1>;
   };
 };
@@ -93,7 +97,10 @@ function meaningfulClauses(line: string) {
 
   // A dated heading can itself carry the source-authored route or visit name.
   // Preserve it as one structural clause instead of splitting its members.
-  const clauses = isDayHeadingLine(clean) ? [clean] : splitLineClauses(clean);
+  const clauses =
+    isDayHeadingLine(clean) || /\s(?:&|or)\s/i.test(clean)
+      ? [clean]
+      : splitLineClauses(clean);
 
   return clauses.filter((clause) => {
     if (isBoilerplateSourceLine(clause)) return false;
@@ -195,17 +202,49 @@ export function buildSourceDocumentIndexV1(
   );
 
   const spanById = new Map(spans.map((span) => [span.spanId, span]));
+  const spanIdsByNormalizedClause = new Map<string, string[]>();
+  const spanIdsBySectionAndNormalizedClause = new Map<string, string[]>();
   const spanIdsBySourceAndExcerptDigest = new Map<string, string[]>();
+  const spanIdsBySourceUploadId = new Map<string, string[]>();
+  const spanIdsByToken = new Map<string, string[]>();
   for (const span of spans) {
     const key = lookupKey(span.sourceIdentityHash, span.excerptDigest);
     spanIdsBySourceAndExcerptDigest.set(key, [
       ...(spanIdsBySourceAndExcerptDigest.get(key) ?? []),
       span.spanId,
     ]);
+    spanIdsByNormalizedClause.set(span.normalizedClause, [
+      ...(spanIdsByNormalizedClause.get(span.normalizedClause) ?? []),
+      span.spanId,
+    ]);
+    const sectionKey = `${span.normalizedSectionLabel ?? ""}:${span.normalizedClause}`;
+    spanIdsBySectionAndNormalizedClause.set(sectionKey, [
+      ...(spanIdsBySectionAndNormalizedClause.get(sectionKey) ?? []),
+      span.spanId,
+    ]);
+    if (span.sourceUploadId) {
+      spanIdsBySourceUploadId.set(span.sourceUploadId, [
+        ...(spanIdsBySourceUploadId.get(span.sourceUploadId) ?? []),
+        span.spanId,
+      ]);
+    }
+    for (const token of new Set(distinctiveLineTokens(span.normalizedClause))) {
+      spanIdsByToken.set(token, [
+        ...(spanIdsByToken.get(token) ?? []),
+        span.spanId,
+      ]);
+    }
   }
 
   return {
-    lookups: { spanById, spanIdsBySourceAndExcerptDigest },
+    lookups: {
+      spanById,
+      spanIdsByNormalizedClause,
+      spanIdsBySectionAndNormalizedClause,
+      spanIdsBySourceAndExcerptDigest,
+      spanIdsBySourceUploadId,
+      spanIdsByToken,
+    },
     schemaVersion: SOURCE_DOCUMENT_INDEX_SCHEMA_VERSION,
     sourceFingerprint: hashStableValue({
       materials: uniqueMaterials
