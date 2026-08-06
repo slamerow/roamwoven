@@ -25,6 +25,7 @@ import type {
   ContainmentLedgerTelemetry,
   ContainmentMemberDecision,
   ContainmentRejection,
+  ContainmentRelationType,
   GroupingClaimLedgerTelemetry,
 } from "@/lib/extraction/grouping-claim-ledger";
 import {
@@ -98,7 +99,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 
-export const EVIDENCE_CLUSTER_VERSION = 17;
+export const EVIDENCE_CLUSTER_VERSION = 18;
 
 export type EvidenceKind =
   | "activity"
@@ -162,6 +163,43 @@ export type CanonicalGroupingDecision = {
   parentCandidateId: string;
   parentTitle: string;
   source: "canonical_resolver";
+};
+
+export type CanonicalGroupingExecutionDecision = {
+  callPolicy: "required" | "silent";
+  claim: string;
+  date: string;
+  decisionId: string;
+  members: Array<{
+    evidence: ContainmentEvidenceKind[];
+    observationIds: string[];
+    pieceId: string;
+    sourceOrder: number;
+    title: string;
+  }>;
+  parent: {
+    observationIds: string[];
+    pieceId: string;
+    synthetic: boolean;
+    title: string;
+  };
+  provenance: {
+    containmentDecisionId: string;
+    relationType: ContainmentRelationType;
+    source: ContainmentDecision["source"];
+  };
+  rejections: ContainmentRejection[];
+};
+
+export type CanonicalGroupingExecutionLedger = {
+  decisions: CanonicalGroupingExecutionDecision[];
+  unresolvedMappings: Array<{
+    containmentDecisionId: string;
+    observationIds: string[];
+    pieceId: string | null;
+    role: "member" | "parent";
+  }>;
+  version: 1;
 };
 
 export type EvidenceStageInput = {
@@ -393,6 +431,7 @@ export type EvidenceClusteringResult = {
     rejectedObservationCount: number;
     containmentLedger: ContainmentLedgerTelemetry;
     groupingClaims: GroupingClaimLedgerTelemetry;
+    groupingExecution: CanonicalGroupingExecutionLedger;
     identityLedger: CanonicalIdentityLedgerTelemetry;
     stageWriterTrace: AssemblyStageWriterTraceEntry[];
     intentBlocks: {
@@ -6568,217 +6607,211 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
   }
 }
 
-function executeCanonicalGroupingDecisions({
-  decisions,
-  observations,
+function groupingClaimFromContainment(decision: ContainmentDecision) {
+  const count = decision.members.length;
+  if (decision.relationType === "authored_route") {
+    return `The source defines one route containing these ${count} stops in this order.`;
+  }
+  if (decision.relationType === "source_area_walk") {
+    return `The source places these ${count} untimed stops in one area route; the frozen source order is preserved.`;
+  }
+  const evidence = new Set(
+    decision.members.flatMap((member) => member.evidence)
+  );
+  const basis = evidence.has("source_hierarchy")
+    ? "source hierarchy"
+    : evidence.has("verified_address")
+      ? "source order and verified site address"
+      : evidence.has("verified_geo")
+        ? "source order and verified site coordinates"
+        : "source order";
+  return `Same-site visit: the containment ledger places these ${count} stops inside one ${decision.containerTitle} visit using ${basis}.`;
+}
+
+function compileCanonicalGroupingAuthority({
+  containment,
   pieces,
 }: {
-  decisions: CanonicalGroupingDecision[];
-  observations: EvidenceObservation[];
+  containment: ContainmentLedgerTelemetry;
   pieces: CanonicalEvidencePiece[];
-}) {
-  const observationIdByCandidateId = new Map<string, string>();
+}): CanonicalGroupingExecutionLedger {
+  const unresolvedMappings: CanonicalGroupingExecutionLedger["unresolvedMappings"] = [];
+  const carrierFor = ({
+    observationIds,
+    pieceId,
+  }: {
+    observationIds: string[];
+    pieceId: string | null;
+  }) => {
+    const carriers = pieces.filter(
+      (piece) =>
+        piece.outputEligible &&
+        piece.kind === "activity" &&
+        observationIds.every((id) => piece.observationIds.includes(id))
+    );
+    return (
+      carriers.find((piece) => piece.id === pieceId) ??
+      carriers[0] ??
+      (pieceId
+        ? pieces.find(
+            (piece) =>
+              piece.id === pieceId &&
+              piece.outputEligible &&
+              piece.kind === "activity"
+          ) ?? null
+        : null)
+    );
+  };
+  const decisions: CanonicalGroupingExecutionDecision[] = [];
 
-  for (const observation of observations) {
-    const candidateId = stringValue(observation.payload, "_resolverCandidateId");
-    if (candidateId) observationIdByCandidateId.set(candidateId, observation.id);
+  for (const containmentDecision of containment.decisions) {
+    const mappedMembers = containmentDecision.members.flatMap((member) => {
+      const carrier = carrierFor({
+        observationIds: member.observationIds,
+        pieceId: member.pieceId,
+      });
+      if (!carrier || !hasAuthoritativeActivityRole(carrier)) {
+        unresolvedMappings.push({
+          containmentDecisionId: containmentDecision.decisionId,
+          observationIds: [...member.observationIds],
+          pieceId: member.pieceId,
+          role: "member",
+        });
+        return [];
+      }
+      return [{
+        evidence: [...member.evidence],
+        observationIds: [...member.observationIds],
+        pieceId: carrier.id,
+        sourceOrder: member.sourceOrder,
+        title: stringValue(carrier.payload, "title") ?? member.title,
+      }];
+    });
+    const memberPieceIds = new Set(mappedMembers.map((member) => member.pieceId));
+    if (
+      mappedMembers.length !== containmentDecision.members.length ||
+      memberPieceIds.size !== mappedMembers.length ||
+      mappedMembers.length < 2
+    ) {
+      continue;
+    }
+
+    const mappedParent = containmentDecision.containerPieceId
+      ? carrierFor({
+          observationIds: containmentDecision.containerObservationIds,
+          pieceId: containmentDecision.containerPieceId,
+        })
+      : null;
+    if (
+      containmentDecision.containerPieceId &&
+      (!mappedParent || !hasAuthoritativeActivityRole(mappedParent))
+    ) {
+      unresolvedMappings.push({
+        containmentDecisionId: containmentDecision.decisionId,
+        observationIds: [...containmentDecision.containerObservationIds],
+        pieceId: containmentDecision.containerPieceId,
+        role: "parent",
+      });
+      continue;
+    }
+    if (mappedParent && memberPieceIds.has(mappedParent.id)) {
+      unresolvedMappings.push({
+        containmentDecisionId: containmentDecision.decisionId,
+        observationIds: [...mappedParent.observationIds],
+        pieceId: mappedParent.id,
+        role: "parent",
+      });
+      continue;
+    }
+
+    const parentPieceId =
+      mappedParent?.id ??
+      `piece_${stableHash({
+        containmentDecisionId: containmentDecision.decisionId,
+        type: "frozen_group_parent",
+      })}`;
+    decisions.push({
+      callPolicy: containmentDecision.callPolicy,
+      claim: groupingClaimFromContainment(containmentDecision),
+      date: containmentDecision.date,
+      decisionId: containmentDecision.decisionId,
+      members: mappedMembers.sort(
+        (left, right) => left.sourceOrder - right.sourceOrder
+      ),
+      parent: {
+        observationIds: mappedParent
+          ? [...mappedParent.observationIds]
+          : [...containmentDecision.containerObservationIds],
+        pieceId: parentPieceId,
+        synthetic: !mappedParent,
+        title:
+          stringValue(mappedParent?.payload ?? {}, "title") ??
+          containmentDecision.containerTitle,
+      },
+      provenance: {
+        containmentDecisionId: containmentDecision.decisionId,
+        relationType: containmentDecision.relationType,
+        source: containmentDecision.source,
+      },
+      rejections: containmentDecision.rejections.map((rejection) => ({
+        ...rejection,
+      })),
+    });
   }
 
-  for (const decision of decisions) {
-    const candidatePiece = (candidateId: string) => {
-      const observationId = observationIdByCandidateId.get(candidateId);
-      return observationId
-        ? pieces.find((piece) => piece.observationIds.includes(observationId)) ?? null
-        : null;
-    };
-    const requestedAnchor = candidatePiece(decision.parentCandidateId);
-    const candidatePieces = decision.candidateIds.map(candidatePiece);
+  return { decisions, unresolvedMappings, version: 1 };
+}
 
-    if (
-      !decision.decisionId ||
-      decision.source !== "canonical_resolver" ||
-      !requestedAnchor ||
-      requestedAnchor.kind !== "activity" ||
-      !hasAuthoritativeActivityRole(requestedAnchor) ||
-      !requestedAnchor.outputEligible ||
-      candidatePieces.some((piece) => !piece)
-    ) {
-      continue;
-    }
-
-    const sourcePieces = Array.from(
-      new Set(
-        candidatePieces.filter(
-          (piece): piece is CanonicalEvidencePiece =>
-            Boolean(piece && piece.outputEligible)
-        )
+function executeCanonicalGroupingAuthority({
+  authority,
+  pieces,
+}: {
+  authority: CanonicalGroupingExecutionLedger;
+  pieces: CanonicalEvidencePiece[];
+}) {
+  for (const decision of authority.decisions) {
+    const children = decision.members.map((member) =>
+      pieces.find(
+        (piece) =>
+          piece.id === member.pieceId &&
+          piece.outputEligible &&
+          piece.kind === "activity"
       )
     );
-
-    if (
-      sourcePieces.length < 2 ||
-      sourcePieces.some(
-        (child) =>
-          child.kind !== "activity" ||
-          !hasAuthoritativeActivityRole(child) ||
-          !sameCanonicalDate(requestedAnchor.payload, child.payload)
-      )
-    ) {
-      continue;
-    }
-
-    const fixedPieces = sourcePieces.filter((piece) =>
-      Boolean(
-        timeFrom(piece.payload) ||
-          confirmationFrom(piece.payload) ||
-          /\b(?:booked|paid|reservation|reserved|ticketed|timed|voucher)\b/.test(
-            activityText(piece.payload)
-        )
-      )
+    if (children.some((child) => !child)) continue;
+    const groupedChildren = children.filter(
+      (child): child is CanonicalEvidencePiece => Boolean(child)
     );
-    const proposedContainer = decision.containerCandidateId
-      ? candidatePiece(decision.containerCandidateId)
-      : null;
-    // A grouping-proposal row is evidence, not automatically a traveler
-    // parent. When classification refuses that row, the resolver's already
-    // selected atomic parent may still execute; the refused proposal is
-    // simply ineligible to become a group member or parent. This preserves
-    // the relationship without resurrecting a note/accessory as an Activity.
-    const explicitContainer =
-      proposedContainer?.kind === "activity" &&
-      proposedContainer.outputEligible &&
-      hasAuthoritativeActivityRole(proposedContainer)
-        ? proposedContainer
-        : null;
-    const requestedAnchorCoversVisit = Boolean(
-      !proposedContainer &&
-        sourcePieces.includes(requestedAnchor) &&
-        (/\b(?:same[ -]?site|complex|grounds|campus|estate|one .{0,24} visit|covers? the visit)\b/i.test(
-          `${decision.claim} ${activityText(requestedAnchor.payload)}`
-        ) ||
-          (/\b(?:walk|walking tour|walking route|neighbou?rhood route)\b/i.test(
-            activityText(requestedAnchor.payload)
-          ) && /\b(?:walk|route|tour)\b/i.test(decision.claim))
-        )
-    );
-    const promotedParent = requestedAnchorCoversVisit ? requestedAnchor : null;
-    // A same-site visit owns its timed sub-stops (approved answer key:
-    // Changing of the Guard 12:00 inside Prague Castle). Booking-carrying
-    // stops are already excluded by the decision creator. Route walks keep
-    // the standard rule: independently timed stops stay standalone.
-    const sameSiteVisitDecision = decision.claim.startsWith("same-site visit");
-
-    // Same-site membership is VERIFIED, never taken on the decision's word
-    // (live-run 7.18.0: a resolver decision claimed Chain Bridge and
-    // Gerbeaud's sat "within 300 m" of the Royal Palace with no coordinates
-    // anywhere in the payload, and a parser-manufactured "Prague Castle and
-    // Lesser Town visit" container swallowed Lesser Town sights, KGB, and a
-    // lodging-cost note). Doctrine v3: a same-site child needs parser-
-    // coordinate proof or source-hierarchy proof; a container naming two
-    // distinct sites is not one site; cost/budget fragments are never
-    // tourist stops; and the call claim must state the rule that actually
-    // held.
-    let verifiedSourcePieces = sourcePieces;
-    if (sameSiteVisitDecision) {
-      const siteContainer = explicitContainer ?? promotedParent ?? requestedAnchor;
-      const containerRawTitle = stringValue(siteContainer.payload, "title") ?? "";
-      const multiSiteTitle =
-        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(containerRawTitle) &&
-        SAME_SITE_CONTAINER_PATTERN.test(containerRawTitle);
-      if (multiSiteTitle) {
-        continue;
-      }
-      // Run5 PB-4: a passing mention is never a visit container, whichever
-      // layer proposed the decision.
-      if (PASSING_MENTION_TITLE_PATTERN.test(containerRawTitle)) {
-        continue;
-      }
-      // Arc G.3a: verification now asks the SAME membership context the
-      // lane used. Before this, the lane matched container tokens on whole
-      // words and distrusted unverified coordinates once the geocode lane
-      // had run, while this filter used a substring match and trusted any
-      // precise-looking coordinate — a decision could be built under one
-      // rule and audited under another, and the address path would have
-      // been invisible here. One context, two callers.
-      const membership = createSiteMembershipContext({
-        candidates: sourcePieces.filter((piece) => piece !== siteContainer),
-        container: siteContainer,
-        excludedContainerTokens: tripCityAddressTokens(pieces),
-        geocodeLaneRan:
-          decision.verificationPolicy === "strict_verified_coordinates"
-            ? groupingGeocodeLaneRan(pieces)
-            : false,
-      });
-      let geoVerifiedCount = 0;
-      verifiedSourcePieces = sourcePieces.filter((piece) => {
-        if (piece === siteContainer) return true;
-        const text = activityText(piece.payload);
-        if (COSTS_CONTENT_PATTERN.test(text)) return false;
-        const evidence = membership.evidenceFor(piece);
-        if (evidence === "geo") {
-          geoVerifiedCount += 1;
-          return true;
-        }
-        return evidence === "hierarchy";
-      });
-      if (
-        verifiedSourcePieces.filter((piece) => piece !== siteContainer).length < 2
-      ) {
-        continue;
-      }
-      if (/within\s+\d+\s*m/i.test(decision.claim) && geoVerifiedCount === 0) {
-        const childCount = verifiedSourcePieces.filter(
-          (piece) => piece !== siteContainer
-        ).length;
-        decision.claim = `same-site visit: the source lists ${childCount} stops inside ${containerRawTitle}'s own visit, so one visit card owns them`;
-      }
-    }
-
-    const independentFixedPieces = sameSiteVisitDecision
-      ? []
-      : fixedPieces.filter((piece) => piece !== promotedParent);
-    const groupedChildPieces = verifiedSourcePieces.filter(
+    let parent = pieces.find(
       (piece) =>
-        piece !== explicitContainer &&
-        piece !== promotedParent &&
-        !independentFixedPieces.includes(piece)
+        piece.id === decision.parent.pieceId &&
+        piece.outputEligible &&
+        piece.kind === "activity"
     );
-    const meaningfulStopCount = groupedChildPieces.filter((piece) =>
-      !/^(?:breakfast|brunch|coffee|dinner|lunch|meal)(?:\s+break|\s+nearby)?$/i.test(
-        stringValue(piece.payload, "title") ?? ""
-      )
-    ).length;
-
-    const minimumStopCount = explicitContainer || promotedParent ? 1 : 2;
-
-    if (
-      groupedChildPieces.length < minimumStopCount ||
-      meaningfulStopCount < minimumStopCount
-    ) {
-      continue;
-    }
-
-    const parent = explicitContainer ?? promotedParent ?? {
-      actions: [],
-      confidence: "high" as const,
-      conflicts: [],
-      fieldSources: {},
-      fieldWinnerRanks: {},
-      id: `piece_${stableHash({
-        decisionId: decision.decisionId,
-        type: "canonical_group",
-      })}`,
-      kind: "activity" as const,
-      mergeReasons: ["canonical grouping container"],
-      observationIds: [],
-      outputEligible: true,
-      payload: {},
-      role: "grouping_proposal" as const,
-    };
-
-    if (!explicitContainer && !promotedParent) {
+    if (!parent && decision.parent.synthetic) {
+      const firstChild = groupedChildren[0];
+      parent = {
+        actions: [],
+        confidence: "high",
+        conflicts: [],
+        fieldSources: {},
+        fieldWinnerRanks: {},
+        id: decision.parent.pieceId,
+        kind: "activity",
+        mergeReasons: ["frozen containment grouping parent"],
+        observationIds: [...decision.parent.observationIds],
+        outputEligible: true,
+        payload: {
+          category: firstChild.payload.category,
+          city: firstChild.payload.city,
+          date: decision.date,
+          itemType: "activity",
+          title: decision.parent.title,
+        },
+        role: "grouping_proposal",
+      };
       const insertionIndex = Math.min(
-        ...groupedChildPieces.map((piece) => pieces.indexOf(piece))
+        ...groupedChildren.map((piece) => pieces.indexOf(piece))
       );
       pieces.splice(
         insertionIndex >= 0 ? insertionIndex : pieces.length,
@@ -6786,60 +6819,58 @@ function executeCanonicalGroupingDecisions({
         parent
       );
     }
+    if (!parent) continue;
 
-    parent.kind = "activity";
-    parent.outputEligible = true;
-    parent.role = "grouping_proposal";
-    const sourceParentTitle = stringValue(parent.payload, "title");
-    const restrainedSourceParentTitle =
-      sourceParentTitle &&
-      !/\b(?:cluster|collection|group|highlights|sights|attractions)\b/i.test(
-        sourceParentTitle
-      )
-        ? sourceParentTitle
-        : null;
-    parent.payload = {
-      ...parent.payload,
-      category: requestedAnchor.payload.category,
-      city: requestedAnchor.payload.city,
-      date: requestedAnchor.payload.date,
-      itemType: "activity",
-      title:
-        restrainedSourceParentTitle ||
-        decision.parentTitle ||
-        sourceParentTitle ||
-        stringValue(requestedAnchor.payload, "title") ||
-        "Grouped visit",
-      _canonicalGroupDecisionId: decision.decisionId,
-      _canonicalGroupRole: "parent",
-      _canonicalGroupStopCount: groupedChildPieces.length,
-    };
-
-    const childTitles = groupedChildPieces
-      .map((piece) => stringValue(piece.payload, "title"))
-      .filter((title): title is string => Boolean(title));
+    parent.payload._canonicalGroupDecisionId = decision.decisionId;
+    parent.payload._canonicalGroupRole = "parent";
+    parent.payload._canonicalGroupStopCount = groupedChildren.length;
     addCanonicalAction(parent, {
-      absorbedTitles: childTitles,
+      absorbedTitles: decision.members.map((member) => member.title),
       decisionId: decision.decisionId,
-      observationIds: groupedChildPieces.flatMap((piece) => piece.observationIds),
-      reason: `canonical resolver decision: ${decision.claim}`,
+      observationIds: decision.members.flatMap(
+        (member) => member.observationIds
+      ),
+      reason: decision.claim,
       type: "grouped",
     });
 
-    groupedChildPieces.forEach((child, index) => {
+    groupedChildren.forEach((child, index) => {
       child.payload._canonicalGroupDecisionId = decision.decisionId;
       child.payload._canonicalGroupOrder = index;
       child.payload._canonicalGroupRole = "child";
-      child.payload._canonicalParentPieceId = parent.id;
+      child.payload._canonicalParentPieceId = parent?.id;
       addCanonicalAction(child, {
         absorbedTitles: [],
         decisionId: decision.decisionId,
         observationIds: [...child.observationIds],
-        reason: `parented without flattening: ${decision.claim}`,
+        reason: `parented from frozen containment: ${decision.claim}`,
         type: "grouped",
       });
     });
   }
+}
+
+function groupingClaimTelemetryFromAuthority(
+  authority: CanonicalGroupingExecutionLedger
+): GroupingClaimLedgerTelemetry {
+  const claimedPieceIds = new Set<string>();
+  let sameSiteClaims = 0;
+  let walkClaims = 0;
+  for (const decision of authority.decisions) {
+    claimedPieceIds.add(decision.parent.pieceId);
+    for (const member of decision.members) claimedPieceIds.add(member.pieceId);
+    if (decision.provenance.relationType === "same_site") {
+      sameSiteClaims += decision.members.length;
+    } else {
+      walkClaims += decision.members.length;
+    }
+  }
+  return {
+    claimedPieceCount: claimedPieceIds.size,
+    claimsByLane: { same_site: sameSiteClaims, walk: walkClaims },
+    contestedPieceCount: 0,
+    releasedDecisionCount: 0,
+  };
 }
 
 function suppressIsolatedUntimedGenericMeals(pieces: CanonicalEvidencePiece[]) {
@@ -6923,12 +6954,12 @@ function suppressUnresolvedIsolatedTerms({
 }
 
 function createCanonicalGroupingCalls(
-  decisions: CanonicalGroupingDecision[],
+  decisions: CanonicalGroupingExecutionDecision[],
   pieces: CanonicalEvidencePiece[]
 ) {
   const calls: Array<Record<string, unknown>> = [];
   for (const decision of decisions) {
-    if (decision.callRequired === false) continue;
+    if (decision.callPolicy === "silent") continue;
 
     const parent = pieces.find(
       (piece) =>
@@ -10561,10 +10592,12 @@ function containmentMemberDecision({
 
 function createCanonicalContainmentAuthority({
   existingDecisions,
+  missingDetails,
   observations,
   pieces,
 }: {
   existingDecisions: CanonicalGroupingDecision[];
+  missingDetails: unknown[];
   observations: EvidenceObservation[];
   pieces: CanonicalEvidencePiece[];
 }): CanonicalContainmentAuthority {
@@ -10636,6 +10669,12 @@ function createCanonicalContainmentAuthority({
         );
       })
     ) ?? null;
+  const candidateObservation = (candidateId: string) =>
+    observations.find(
+      (observation) =>
+        (stringValue(observation.payload, "_resolverCandidateId") ??
+          observation.id) === candidateId
+    ) ?? null;
 
   // Resolver decisions are admitted only as source-authored routes here.
   // Site and proximity decisions are rebuilt below under the typed rules so
@@ -10664,15 +10703,280 @@ function createCanonicalContainmentAuthority({
         }),
       ]),
     ].join(" ");
-    if (!/\b(?:tour|route|walk(?:ing)?)\b/i.test(routeSignal)) continue;
-    const parent = candidatePiece(decision.parentCandidateId) ?? resolved[0];
+    const routeLike = /\b(?:tour|route|walk(?:ing)?)\b/i.test(routeSignal);
+    const requestedParent = candidatePiece(decision.parentCandidateId);
+    const requestedContainer = decision.containerCandidateId
+      ? candidatePiece(decision.containerCandidateId)
+      : null;
+    const requestedContainerObservation = decision.containerCandidateId
+      ? candidateObservation(decision.containerCandidateId)
+      : null;
+    const declaredContainerDidNotSurvive = Boolean(
+      decision.containerCandidateId && !requestedContainer
+    );
+    if (routeLike && declaredContainerDidNotSurvive) {
+      const containerPosition = asRecord(
+        requestedContainerObservation?.payload._canonicalSourcePosition
+      );
+      const containerSourceIdentityHash = stringValue(
+        containerPosition,
+        "sourceIdentityHash"
+      );
+      const containerIntakeDecision = asRecord(
+        requestedContainerObservation?.payload._canonicalIntakeCandidacyDecision
+      );
+      const sourceAuthoredContainer = Boolean(
+        requestedContainerObservation &&
+          (stringValue(containerIntakeDecision, "inputEvidenceRole") ??
+            originalActivityCandidacyInputs(
+              requestedContainerObservation.payload
+            ).evidenceRole) === "grouping_proposal" &&
+          stringValue(
+            requestedContainerObservation.payload,
+            "sourceSectionType"
+          ) === "dated_itinerary" &&
+          Number.isFinite(Number(containerPosition.line)) &&
+          containerSourceIdentityHash
+      );
+      const positionedMembers = resolved
+        .map((piece) => ({
+          piece,
+          position: containmentSourcePosition(piece, observationById),
+        }))
+        .filter(
+          (entry): entry is {
+            piece: CanonicalEvidencePiece;
+            position: ContainmentSourcePosition;
+          } => Boolean(entry.position)
+        );
+      if (
+        sourceAuthoredContainer &&
+        positionedMembers.length === resolved.length &&
+        positionedMembers.length >= 2 &&
+        positionedMembers.every(
+          ({ position }) =>
+            position.sourceIdentityHash === containerSourceIdentityHash
+        )
+      ) {
+        const members = positionedMembers
+          .map(({ piece }) =>
+            containmentMemberDecision({
+              evidence: [
+                "resolver_source_relationship",
+                "source_hierarchy",
+                "source_order",
+              ],
+              observationById,
+              piece,
+            })
+          )
+          .sort((left, right) => left.sourceOrder - right.sourceOrder);
+        addDecision({
+          callPolicy:
+            decision.callRequired === false ? "silent" : "required",
+          containerObservationIds: requestedContainerObservation
+            ? [requestedContainerObservation.id]
+            : [],
+          containerPieceId: null,
+          containerTitle: decision.parentTitle,
+          date: stringValue(resolved[0].payload, "date") ?? "",
+          decisionId: decision.decisionId,
+          members,
+          relationType: "authored_route",
+          rejections: [],
+          source: "resolver_containment",
+        });
+      }
+      continue;
+    }
+    if (
+      !routeLike &&
+      (!requestedParent || declaredContainerDidNotSurvive)
+    ) {
+      const positions = resolved
+        .map((piece) => containmentSourcePosition(piece, observationById))
+        .filter(
+          (position): position is ContainmentSourcePosition => Boolean(position)
+        );
+      const firstPosition = positions[0] ?? null;
+      const sharedPositionedRelationship = Boolean(
+        firstPosition &&
+          positions.length === resolved.length &&
+          positions.some((position) => position.relationshipSignal) &&
+          positions.every(
+            (position) =>
+              position.sourceIdentityHash === firstPosition.sourceIdentityHash &&
+              position.stageIndex === firstPosition.stageIndex
+          )
+      );
+      const syntheticTitle = decision.parentTitle;
+      const syntheticSameSite =
+        /\bsame[ -]?site\b|\b(?:component|complex|grounds|inside|within)\b/i.test(
+          `${decision.claim} ${syntheticTitle}`
+        ) && SAME_SITE_CONTAINER_PATTERN.test(syntheticTitle);
+      const multiSiteSynthetic =
+        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(
+          syntheticTitle
+        ) && SAME_SITE_CONTAINER_PATTERN.test(syntheticTitle);
+      if (
+        sharedPositionedRelationship &&
+        syntheticSameSite &&
+        !multiSiteSynthetic &&
+        resolved.length >= 2
+      ) {
+        const members = resolved.map((piece) =>
+          containmentMemberDecision({
+            evidence: ["resolver_source_relationship", "source_hierarchy"],
+            observationById,
+            piece,
+          })
+        );
+        addDecision({
+          callPolicy:
+            decision.callRequired === false ? "silent" : "required",
+          containerObservationIds: [],
+          containerPieceId: null,
+          containerTitle: syntheticTitle,
+          date: stringValue(resolved[0].payload, "date") ?? "",
+          decisionId: decision.decisionId,
+          members,
+          relationType: "same_site",
+          rejections: [],
+          source: "resolver_containment",
+        });
+      }
+      continue;
+    }
+    const parent = requestedParent ?? resolved[0];
     if (!parent) continue;
-    const members = resolved
-      .filter((piece) => piece !== parent)
-      .filter(
-        (piece) =>
-          !confirmationFrom(piece.payload) && !timeFrom(piece.payload)
-      )
+    if (!routeLike) {
+      // A resolver same-site proposal needs either a shared executable
+      // source relationship or source-free licensed membership evidence.
+      // Both paths freeze into this ledger; grouping itself never discovers
+      // or re-judges membership.
+      const sourceFree = resolved.every(
+        (piece) => containmentSourcePosition(piece, observationById) === null
+      );
+      const parentTitle = stringValue(parent.payload, "title") ?? "";
+      const parentPosition = containmentSourcePosition(parent, observationById);
+      const positionedResolverRelationship = Boolean(
+        parentPosition?.relationshipSignal &&
+          resolved
+            .filter((piece) => piece !== parent)
+            .every((piece) => {
+              const position = containmentSourcePosition(piece, observationById);
+              return (
+                position?.sourceIdentityHash ===
+                  parentPosition.sourceIdentityHash &&
+                position.stageIndex === parentPosition.stageIndex
+              );
+            })
+      );
+      const sameSiteClaim =
+        /\bsame[ -]?site\b|\b(?:component|complex|grounds|inside|within)\b/i.test(
+          `${decision.claim} ${decision.parentTitle}`
+        ) && SAME_SITE_CONTAINER_PATTERN.test(parentTitle);
+      if (
+        !sameSiteClaim ||
+        (!sourceFree && !positionedResolverRelationship)
+      ) {
+        continue;
+      }
+      const multiSiteTitle =
+        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(
+          parentTitle
+        ) && SAME_SITE_CONTAINER_PATTERN.test(parentTitle);
+      if (
+        multiSiteTitle ||
+        PASSING_MENTION_TITLE_PATTERN.test(
+          `${parentTitle} ${stringValue(parent.payload, "description") ?? ""}`
+        )
+      ) {
+        continue;
+      }
+      const allResolverCandidates = resolved.filter((piece) => piece !== parent);
+      const resolverOwnsFixedStops = /\bsame[ -]?site visit\b/i.test(
+        decision.claim
+      );
+      const independentSitePieces = resolverOwnsFixedStops
+        ? []
+        : allResolverCandidates.filter((piece) =>
+            Boolean(
+              timeFrom(piece.payload) ||
+                confirmationFrom(piece.payload) ||
+                /\b(?:booked|paid|reservation|reserved|ticketed|timed|voucher)\b/i.test(
+                  activityText(piece.payload)
+                )
+            )
+          );
+      const resolverCandidates = allResolverCandidates.filter(
+        (piece) => !independentSitePieces.includes(piece)
+      );
+      const resolverMembership = sourceFree
+        ? createSiteMembershipContext({
+            candidates: resolverCandidates,
+            container: parent,
+            excludedContainerTokens: tripCityAddressTokens(pieces),
+            geocodeLaneRan:
+              decision.verificationPolicy === "strict_verified_coordinates"
+                ? groupingGeocodeLaneRan(pieces)
+                : false,
+          })
+        : null;
+      const members = resolverCandidates.flatMap((piece) => {
+        const relationship =
+          positionedResolverRelationship
+            ? "hierarchy"
+            : resolverMembership?.evidenceFor(piece) ?? null;
+        if (!relationship) return [];
+        const evidence: ContainmentEvidenceKind[] = [
+          "resolver_source_relationship",
+        ];
+        if (
+          positionedResolverRelationship ||
+          resolverMembership?.sourceHierarchyMember(piece)
+        ) {
+          evidence.push("source_hierarchy");
+        }
+        if (resolverMembership?.addressMember(piece)) {
+          evidence.push("verified_address");
+        } else if (relationship === "geo") {
+          evidence.push("verified_geo");
+        }
+        return [containmentMemberDecision({
+          evidence,
+          observationById,
+          piece,
+        })];
+      });
+      if (members.length < 2) continue;
+      addDecision({
+        callPolicy: decision.callRequired === false ? "silent" : "required",
+        containerObservationIds: [...parent.observationIds],
+        containerPieceId: parent.id,
+        containerTitle:
+          parentTitle || decision.parentTitle,
+        date: stringValue(parent.payload, "date") ?? "",
+        decisionId: decision.decisionId,
+        members,
+        relationType: "same_site",
+        rejections: independentSitePieces.map((piece) => ({
+          pieceId: piece.id,
+          reasonCode: timeFrom(piece.payload)
+            ? ("independent_time" as const)
+            : ("independent_booking" as const),
+          title: stringValue(piece.payload, "title") ?? "Untitled activity",
+        })),
+        source: "resolver_containment",
+      });
+      continue;
+    }
+    const routeCandidates = resolved.filter((piece) => piece !== parent);
+    const independentRoutePieces = routeCandidates.filter(
+      (piece) => confirmationFrom(piece.payload) || timeFrom(piece.payload)
+    );
+    const members = routeCandidates
+      .filter((piece) => !independentRoutePieces.includes(piece))
       .map((piece) =>
         containmentMemberDecision({
           evidence: ["resolver_source_relationship", "source_hierarchy"],
@@ -10683,19 +10987,21 @@ function createCanonicalContainmentAuthority({
       .sort((left, right) => left.sourceOrder - right.sourceOrder);
     if (members.length < 2) continue;
     addDecision({
-      callPolicy: "silent",
+      callPolicy: decision.callRequired === false ? "silent" : "required",
       containerObservationIds: [...parent.observationIds],
       containerPieceId: parent.id,
       containerTitle: stringValue(parent.payload, "title") ?? decision.parentTitle,
       date: stringValue(parent.payload, "date") ?? "",
-      decisionId: `containment-route-${stableHash({
-        date: stringValue(parent.payload, "date"),
-        members: members.map((member) => member.pieceId),
-        parent: parent.id,
-      })}`,
+      decisionId: decision.decisionId,
       members,
       relationType: "authored_route",
-      rejections: [],
+      rejections: independentRoutePieces.map((piece) => ({
+        pieceId: piece.id,
+        reasonCode: timeFrom(piece.payload)
+          ? ("independent_time" as const)
+          : ("independent_booking" as const),
+        title: stringValue(piece.payload, "title") ?? "Untitled activity",
+      })),
       source: "resolver_containment",
     });
   }
@@ -10959,6 +11265,9 @@ function createCanonicalContainmentAuthority({
           ) {
             evidence.push("source_hierarchy");
           }
+          if (extension.has(piece)) {
+            evidence.push("source_bounded_extension");
+          }
           if (membership.addressMember(piece)) evidence.push("verified_address");
           else if (membership.evidenceFor(piece) === "geo") evidence.push("verified_geo");
           return containmentMemberDecision({ evidence, observationById, piece });
@@ -11103,6 +11412,93 @@ function createCanonicalContainmentAuthority({
     }
   }
 
+  // Source-free fallback: the old late grouping pass used to discover
+  // verified same-site visits and area walks after identity. Keeping that
+  // pass would leave two decision writers. Instead, run its evidence
+  // calculation here, admit only participants that genuinely lack the
+  // route-equivalent source-position trace, and freeze the result into this
+  // non-mutating containment ledger. Grouping later only maps and executes.
+  const sourceFreeProposals = createSourceFreeContainmentFallbackProposals({
+    existingDecisions,
+    missingDetails,
+    observations,
+    pieces,
+  }).decisions;
+  for (const proposal of sourceFreeProposals) {
+    const proposalPieces = Array.from(
+      new Set(
+        proposal.candidateIds
+          .map(candidatePiece)
+          .filter((piece): piece is CanonicalEvidencePiece => Boolean(piece))
+      )
+    );
+    if (
+      proposalPieces.length < 2 ||
+      proposalPieces.some(
+        (piece) =>
+          containmentSourcePosition(piece, observationById) !== null ||
+          claimedPieceIds.has(piece.id)
+      )
+    ) {
+      continue;
+    }
+    const sameSite = /^same-site visit:/i.test(proposal.claim);
+    const walk = /^discovered walk:/i.test(proposal.claim);
+    if (!sameSite && !walk) continue;
+    const parent = sameSite
+      ? candidatePiece(
+          proposal.containerCandidateId ?? proposal.parentCandidateId
+        )
+      : null;
+    if (sameSite && !parent) continue;
+    const memberPieces = proposalPieces.filter(
+      (piece) => !parent || piece !== parent
+    );
+    if (memberPieces.length < 2) continue;
+    const membership = parent
+      ? createSiteMembershipContext({
+          candidates: memberPieces,
+          container: parent,
+          excludedContainerTokens,
+          geocodeLaneRan,
+        })
+      : null;
+    const members = memberPieces.map((piece) => {
+      const evidence: ContainmentEvidenceKind[] = walk
+        ? ["source_area", "source_order", "verified_geo"]
+        : ["source_order"];
+      if (membership) {
+        if (membership.sourceHierarchyMember(piece)) {
+          evidence.push("source_hierarchy");
+        }
+        if (membership.addressMember(piece)) {
+          evidence.push("verified_address");
+        } else if (membership.evidenceFor(piece) === "geo") {
+          evidence.push("verified_geo");
+        }
+      }
+      return containmentMemberDecision({ evidence, observationById, piece });
+    });
+    addDecision({
+      callPolicy: proposal.callRequired === false ? "silent" : "required",
+      containerObservationIds: parent ? [...parent.observationIds] : [],
+      containerPieceId: parent?.id ?? null,
+      containerTitle:
+        stringValue(parent?.payload ?? {}, "title") ?? proposal.parentTitle,
+      date:
+        stringValue((parent ?? memberPieces[0]).payload, "date") ?? "",
+      decisionId: `containment-${sameSite ? "site" : "walk"}-${stableHash({
+        members: members.map((member) => member.pieceId),
+        parent: parent?.id ?? null,
+        proposal: proposal.decisionId,
+      })}`,
+      members,
+      relationType: sameSite ? "same_site" : "source_area_walk",
+      rejections: [],
+      source: "deterministic_containment",
+    });
+  }
+
   return {
     doNotMerge: (left, right) =>
       ledger.doNotMerge(
@@ -11113,7 +11509,7 @@ function createCanonicalContainmentAuthority({
   };
 }
 
-function createDeterministicGeoGroupingDecisions({
+function createSourceFreeContainmentFallbackProposals({
   existingDecisions = [],
   missingDetails,
   observations,
@@ -11152,7 +11548,6 @@ function createDeterministicGeoGroupingDecisions({
     const candidateId =
       stringValue(observation.payload, "_resolverCandidateId") ??
       observation.id;
-    observation.payload._resolverCandidateId = candidateId;
     return candidateId;
   };
 
@@ -14566,6 +14961,7 @@ export function clusterExtractedEvidence({
     ["containmentLedger[]"],
     () => createCanonicalContainmentAuthority({
       existingDecisions: groupingDecisions,
+      missingDetails,
       observations,
       pieces,
     })
@@ -14589,25 +14985,18 @@ export function clusterExtractedEvidence({
       pieces,
     })
   );
-  const deterministicGrouping = runPieceWriter(
+  const groupingAuthority = runPieceWriter(
     "grouping",
-    "createDeterministicGeoGroupingDecisions",
-    ["groupingDecisions[]", "groupingClaims"],
-    () => createDeterministicGeoGroupingDecisions({
-      existingDecisions: groupingDecisions,
-      missingDetails,
-      observations,
+    "compileCanonicalGroupingAuthority",
+    ["groupingExecution[]"],
+    () => compileCanonicalGroupingAuthority({
+      containment: containmentAuthority.telemetry,
       pieces,
     })
   );
-  const combinedGroupingDecisions = [
-    ...groupingDecisions,
-    ...deterministicGrouping.decisions,
-  ];
-  runPieceWriter("grouping", "executeCanonicalGroupingDecisions", ["pieces[].payload", "pieces[].outputEligible", "pieces[].actions"], () =>
-    executeCanonicalGroupingDecisions({
-      decisions: combinedGroupingDecisions,
-      observations,
+  runPieceWriter("grouping", "executeCanonicalGroupingAuthority", ["pieces[].payload", "pieces[].actions"], () =>
+    executeCanonicalGroupingAuthority({
+      authority: groupingAuthority,
       pieces,
     })
   );
@@ -14677,7 +15066,7 @@ export function clusterExtractedEvidence({
     "review",
     "createCanonicalGroupingCalls",
     ["reviewDetails[]"],
-    () => createCanonicalGroupingCalls(combinedGroupingDecisions, pieces)
+    () => createCanonicalGroupingCalls(groupingAuthority.decisions, pieces)
   );
   const canonicalDuplicateFoldCalls = runPieceWriter(
     "review",
@@ -14932,7 +15321,8 @@ export function clusterExtractedEvidence({
           .flatMap((piece) => piece.observationIds)
       ).size,
       containmentLedger: containmentAuthority.telemetry,
-      groupingClaims: deterministicGrouping.telemetry,
+      groupingClaims: groupingClaimTelemetryFromAuthority(groupingAuthority),
+      groupingExecution: groupingAuthority,
       identityLedger: identityAuthority,
       intentBlocks: {
         blocks: intentClassification.blocks,

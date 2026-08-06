@@ -1230,7 +1230,7 @@ export default async function run() {
     );
   });
 
-  await test("explicit same-site grouping preserves ordered children and independently timed stops", () => {
+  await test("same-site grouping is refused when a timed stop leaves only one child", () => {
     const decisionId = "group_test_schonbrunn";
     const result = clusterExtractedEvidence({
       groupingDecisions: [{
@@ -1304,12 +1304,10 @@ export default async function run() {
         "Apple Strudel Show",
         "Hundertwasser House",
         "Schönbrunn Palace complex",
+        "Schönbrunn gardens",
       ].sort()
     );
-    assert.deepEqual(
-      children.map((item) => item.title),
-      ["Schönbrunn gardens"]
-    );
+    assert.deepEqual(children, []);
     assert.equal(
       String(roots.find((item) => item.title === "Schönbrunn Palace complex")?.description ?? "")
         .includes("Walk the gardens"),
@@ -1317,7 +1315,7 @@ export default async function run() {
     );
     assert.equal(
       draft.missingDetails.filter((item) => /one activity card/i.test(item.prompt ?? "")).length,
-      1
+      0
     );
   });
 

@@ -410,7 +410,7 @@ export default function run() {
     );
   });
 
-  test("canonical system grouping survives assembly as one visible FYI Call", () => {
+  test("a one-child grouping proposal is refused before assembly", () => {
     const decisionId = "group_test_schonbrunn_assembly";
     const clustered = clusterExtractedEvidence({
       groupingDecisions: [{
@@ -473,35 +473,25 @@ export default function run() {
       fallbackTripName: "Central Europe",
       tripId: "canonical-grouping-call",
     });
-    const call = records.reviewQuestions.find((question) =>
-      /We made Schönbrunn Palace complex one activity card with 1 included stop/.test(
-        question.prompt
-      )
-    );
-
     assert.deepEqual(records.items.map((item) => item.title), [
       "Schönbrunn Palace complex",
       "Schönbrunn gardens",
     ]);
-    assert.equal(records.items.filter((item) => !item.parentItemId).length, 1);
-    assert.deepEqual(
-      records.items
-        .filter((item) => item.parentItemId)
-        .map((item) => item.title),
-      ["Schönbrunn gardens"]
-    );
+    assert.equal(records.items.filter((item) => !item.parentItemId).length, 2);
+    assert.equal(records.items.filter((item) => item.parentItemId).length, 0);
     const traveler = createTravelerAppViewModel(records);
     const activityCards = traveler.days.flatMap((day) => day.cards);
-    assert.equal(activityCards.length, 1);
-    assert.deepEqual(
-      activityCards[0]?.stops.map((stop) => stop.title),
-      ["Schönbrunn gardens"]
-    );
+    assert.equal(activityCards.length, 2);
+    assert.deepEqual(activityCards.flatMap((card) => card.stops), []);
     const fingerprints = createTripExtractionFingerprints(records);
-    assert.equal(fingerprints.counts.activeActivities, 1);
-    assert.equal(fingerprints.counts.groupedStops, 1);
-    assert.ok(call);
-    assert.equal(call.status, "noted");
+    assert.equal(fingerprints.counts.activeActivities, 2);
+    assert.equal(fingerprints.counts.groupedStops, 0);
+    assert.equal(
+      records.reviewQuestions.some((question) =>
+        /one activity card with 1 included stop/.test(question.prompt)
+      ),
+      false
+    );
     assert.equal(
       records.reviewQuestions.filter((question) => question.status === "open").length,
       0
@@ -521,16 +511,6 @@ export default function run() {
         (observation) => observation.title === "Schönbrunn gardens"
       )
     );
-
-    assert.ok(groupedLineage);
-    assert.ok(
-      groupedLineage.actions.some((action) => action.type === "grouped")
-    );
-    assert.ok(
-      groupedLineage.actions
-        .filter((action) => action.type === "grouped")
-        .every((action) => action.decisionId === decisionId)
-    );
-    assert.equal(groupedLineage.finalRecords.length, 1);
+    assert.equal(groupedLineage, undefined);
   });
 }

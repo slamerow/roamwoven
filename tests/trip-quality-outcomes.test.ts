@@ -52,6 +52,7 @@ function report(
       dispositionCount: 0,
       // G4.4: structured telemetry, absent on a synthetic report.
       containmentLedger: null,
+      groupingExecution: null,
       identityLedger: null,
       groupingClaims: null,
       stageWriterTrace: [],

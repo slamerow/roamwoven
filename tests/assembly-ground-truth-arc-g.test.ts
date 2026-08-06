@@ -402,6 +402,16 @@ export default async function run() {
       )?.decisionDomain,
       "identity"
     );
+    assert.deepEqual(
+      result.summary.stageWriterTrace
+        .filter((entry) => entry.decisionDomain === "grouping")
+        .map((entry) => entry.writer),
+      [
+        "compileCanonicalGroupingAuthority",
+        "executeCanonicalGroupingAuthority",
+      ],
+      "one compiler and one executor own grouping; no late discovery writer remains"
+    );
     assert.equal(
       ledger.decisions.some((decision) =>
         decision.members.some((member) =>

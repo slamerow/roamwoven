@@ -38,6 +38,7 @@ export type ContainmentRelationType =
 export type ContainmentEvidenceKind =
   | "resolver_source_relationship"
   | "source_area"
+  | "source_bounded_extension"
   | "source_hierarchy"
   | "source_order"
   | "verified_address"

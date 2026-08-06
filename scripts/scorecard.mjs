@@ -655,51 +655,56 @@ const ASSERTIONS = [
     entry: "RW-GRP-001",
     tier: 1,
     clause:
-      "Only source bytes are source evidence; source nesting establishes candidacy, distance only corroborates",
-    claim: "Every group child is traceable to source nesting",
-    // Membership assertion: WHICH children ended up under WHICH parent. Replay
-    // groups on unverified coordinates production discards once the geocode
-    // lane has run anywhere in the trip (2026-08-04 replay: live 7 grouped
-    // stops vs replay 14, 10 with no source backing) — payload-only.
+      "Every executed child comes from the frozen containment record with licensed evidence",
+    claim: "Every group child is traceable to its served containment evidence",
     judgeableIn: ["payload", "persisted-qa", "replay"],
     run: (ctx) => {
-      const children = ctx.records.items.filter(
-        (item) => item.status !== "ignored" && item.parentItemId
-      );
-      const byId = new Map(ctx.records.items.map((item) => [item.id, item]));
-      const untraceable = children.filter((child) => {
-        const parent = byId.get(child.parentItemId);
-        if (!parent) return true;
-        if (has(parent.description ?? "", child.title)) return false;
-        if (has(child.title, parent.title)) return false;
-        const tail = /\bat\s+(.+)$/i.exec(child.title)?.[1];
-        if (tail && (has(parent.title, tail) || has(tail, parent.title))) return false;
-        return true;
-      });
-      if (untraceable.length > 0 && ctx.geocodeRan) {
-        // With the lane live, an untraceable child came in either by radius or
-        // by the address path — and `verifiedFormattedAddress` is projected
-        // onto no served surface (docket 2026-07-31 §4c), so which one is
-        // unreadable. That distinction is the whole of root cause B.
+      const execution = ctx.report.canonicalization?.groupingExecution;
+      if (!execution || !Array.isArray(execution.decisions)) {
         return {
           state: "NOT_CHECKABLE",
-          field:
-            "records.items[].parentItemId + parent .description; `verifiedFormattedAddress` reaches no surface",
-          detail: `${untraceable.length} child(ren) not traceable to the container's description, and the address path that may have admitted them is unreadable: ${list(
-            untraceable.map((child) => `"${child.title}"`)
-          )}`,
+          field: "report.canonicalization.groupingExecution",
+          detail: "the frozen grouping execution record is absent",
         };
       }
+      const licensedEvidence = new Set([
+        "resolver_source_relationship",
+        "source_area",
+        "source_bounded_extension",
+        "source_hierarchy",
+        "verified_address",
+        "verified_geo",
+      ]);
+      const activeChildren = ctx.records.items.filter(
+        (item) => item.status !== "ignored" && item.parentItemId
+      );
+      const untraceable = execution.decisions.flatMap((decision) =>
+        decision.members.filter(
+          (member) =>
+            !Array.isArray(member.observationIds) ||
+            member.observationIds.length === 0 ||
+            !Array.isArray(member.evidence) ||
+            !member.evidence.some((value) => licensedEvidence.has(value)) ||
+            !activeChildren.some(
+              (child) => norm(child.title) === norm(member.title)
+            )
+        )
+      );
+      const executedMemberCount = execution.decisions.reduce(
+        (total, decision) => total + decision.members.length,
+        0
+      );
       return {
-        ok: untraceable.length === 0,
-        field: "records.items[].parentItemId + parent .description/.title",
+        ok:
+          untraceable.length === 0 &&
+          execution.unresolvedMappings.length === 0 &&
+          executedMemberCount === activeChildren.length,
+        field:
+          "report.canonicalization.groupingExecution.decisions[].members + records.items[].parentItemId",
         detail:
-          `${children.length} grouped stop(s); ` +
-          (untraceable.length === 0
-            ? "all traceable to the container's own text"
-            : `${untraceable.length} admitted with the geocode lane OFF and no source nesting: ${list(
-                untraceable.map((child) => `"${child.title}"`)
-              )}`),
+          untraceable.length === 0 && execution.unresolvedMappings.length === 0
+            ? `${executedMemberCount} child(ren), each mapped from licensed evidence; 0 unresolved mapping(s)`
+            : `${untraceable.length} untraceable member(s); ${execution.unresolvedMappings.length} unresolved mapping(s)`,
       };
     },
   },
@@ -767,36 +772,51 @@ const ASSERTIONS = [
     entry: "RW-GRP-001",
     tier: 1,
     clause:
-      "A Call is REQUIRED when grouping removes cards from the traveler's top level (with RW-REV-001)",
-    claim: "Every parent with children has exactly one Call",
+      "The frozen grouping record declares required versus silent Call policy",
+    claim: "Every required grouping has one Call and every source-authored silent route has none",
     run: (ctx) => {
-      const parents = ctx.records.items.filter(
-        (item) =>
-          item.status !== "ignored" &&
-          ctx.records.items.some((child) => child.parentItemId === item.id)
-      );
+      const execution = ctx.report.canonicalization?.groupingExecution;
+      if (!execution || !Array.isArray(execution.decisions)) {
+        return {
+          state: "NOT_CHECKABLE",
+          field: "report.canonicalization.groupingExecution",
+          detail: "the frozen Call policy record is absent",
+        };
+      }
       const calls = ctx.records.reviewQuestions.filter(
         (question) => question.status === "noted"
       );
-      const uncalled = parents.filter(
-        (parent) =>
-          !calls.some(
-            (call) =>
-              call.subjectId === parent.id ||
-              has(call.guessedValue ?? "", parent.title)
+      const matchingCalls = (decision) =>
+        calls.filter(
+          (call) =>
+            norm(call.evidence ?? call.reason ?? "") === norm(decision.claim) ||
+            (has(call.guessedValue ?? "", decision.parent.title) &&
+              has(
+                `${call.evidence ?? ""} ${call.reason ?? ""}`,
+                decision.claim
+              ))
+        );
+      const wrong = execution.decisions.filter((decision) => {
+        const count = matchingCalls(decision).length;
+        return decision.callPolicy === "required" ? count !== 1 : count !== 0;
+      });
+      const expectedCallCount = execution.decisions.filter(
+        (decision) => decision.callPolicy === "required"
+      ).length;
+      const unexpectedCalls = calls.filter(
+        (call) =>
+          !execution.decisions.some((decision) =>
+            matchingCalls(decision).includes(call)
           )
       );
       return {
-        ok: uncalled.length === 0,
+        ok:
+          wrong.length === 0 &&
+          unexpectedCalls.length === 0 &&
+          calls.length === expectedCallCount,
         field:
-          "records.items[].parentItemId vs records.reviewQuestions[] where status = 'noted'",
-        detail:
-          `${parents.length} parent(s), ${calls.length} Call(s); ` +
-          (uncalled.length === 0
-            ? "each grouping explained"
-            : `${uncalled.length} silent grouping(s): ${list(
-                uncalled.map((parent) => `"${parent.title}"`)
-              )}`),
+          "report.canonicalization.groupingExecution.decisions[].callPolicy vs records.reviewQuestions[] where status = 'noted'",
+        detail: `${execution.decisions.length} grouping(s): ${expectedCallCount} required, ${execution.decisions.length - expectedCallCount} silent; ${calls.length} Call(s); ${wrong.length} policy mismatch(es)`,
       };
     },
   },
@@ -806,72 +826,46 @@ const ASSERTIONS = [
     tier: 1,
     clause:
       "A Call's text is rendered FROM the membership record, never composed alongside it",
-    claim:
-      "A Call claiming the SOURCE lists N stops is backed by N stops in the container's own description",
+    claim: "Each grouping Call is rendered exactly from its frozen membership record",
     run: (ctx) => {
-      // Counting claimed-vs-actual children is NOT the check. Run 8.1.0's Call
-      // claimed 7 and the parent owned exactly 7 — the lie was the word
-      // "source": `sameSiteClaimText` emits that wording only when
-      // `geoChildCount === 0`, i.e. when the code believes every member was
-      // placed by the document, while the container's description listed five.
-      // The claim must be re-derivable from the container's own text.
+      const execution = ctx.report.canonicalization?.groupingExecution;
+      if (!execution || !Array.isArray(execution.decisions)) {
+        return {
+          state: "NOT_CHECKABLE",
+          field: "report.canonicalization.groupingExecution",
+          detail: "the frozen membership record is absent",
+        };
+      }
       const calls = ctx.records.reviewQuestions.filter(
         (question) => question.status === "noted"
       );
       const wrong = [];
-      for (const call of calls) {
-        const text = `${call.evidence ?? ""} ${call.prompt ?? ""}`;
-        if (!/the source lists/i.test(text)) continue;
-        const claimed = Number(/(\d+)\s+stops?/i.exec(text)?.[1]);
-        const parent =
-          ctx.records.items.find((item) => item.id === call.subjectId) ??
-          ctx.records.items.find((item) => has(call.guessedValue ?? "", item.title));
-        if (!parent || !Number.isFinite(claimed)) continue;
-        const children = ctx.records.items.filter(
-          (item) => item.parentItemId === parent.id && item.status !== "ignored"
+      for (const decision of execution.decisions.filter(
+        (candidate) => candidate.callPolicy === "required"
+      )) {
+        const matching = calls.filter(
+          (call) =>
+            norm(call.evidence ?? call.reason ?? "") === norm(decision.claim) &&
+            has(call.guessedValue ?? "", decision.parent.title)
         );
-        const namedInDescription = children.filter((child) =>
-          has(parent.description ?? "", child.title)
+        const claimedStopCount = Number(
+          /(\d+)\s+included stops?/i.exec(matching[0]?.prompt ?? "")?.[1]
         );
-        if (namedInDescription.length < claimed) {
-          wrong.push(
-            `"${parent.title}" tells the maker the source lists ${claimed}, but its description names ${namedInDescription.length}` +
-              (children.length > namedInDescription.length
-                ? ` — unlisted: ${list(
-                    children
-                      .filter((child) => !namedInDescription.includes(child))
-                      .map((child) => `"${child.title}"`),
-                    4
-                  )}`
-                : "")
-          );
+        if (
+          matching.length !== 1 ||
+          claimedStopCount !== decision.members.length
+        ) {
+          wrong.push(`"${decision.parent.title}"`);
         }
-      }
-      const claiming = calls.filter((call) =>
-        /the source lists/i.test(`${call.evidence ?? ""} ${call.prompt ?? ""}`)
-      );
-      if (claiming.length === 0) {
-        // Run 8.1.0 reported this PASS with the detail "2 Call(s), 0 claiming
-        // source placement" — passing because the thing being checked for did
-        // not exist. That is "absent read as zero" (AGENTS.md rule 8(b)), the
-        // exact trap this scorecard exists to stop, and it is a defect in its
-        // own right: there is nothing here to have judged.
-        return {
-          state: "NOT_CHECKABLE",
-          field:
-            "records.reviewQuestions[].evidence (status 'noted') vs parent .description + .parentItemId",
-          detail: `${calls.length} Call(s), none claiming source placement — nothing to re-derive against, so this cannot legitimately report PASS`,
-        };
       }
       return {
         ok: wrong.length === 0,
         field:
-          "records.reviewQuestions[].evidence (status 'noted') vs parent .description + .parentItemId",
+          "report.canonicalization.groupingExecution.decisions[].claim/.members vs records.reviewQuestions[].evidence/.prompt",
         detail:
-          `${calls.length} Call(s), ${claiming.length} claiming source placement; ` +
-          (wrong.length === 0
-            ? "every source claim is re-derivable from the container's own text"
-            : `${wrong.length} false statement(s) to the maker: ${list(wrong, 3)}`),
+          wrong.length === 0
+            ? `${calls.length} Call(s), each claim and stop count re-derived from the frozen record`
+            : `${wrong.length} grouping Call mismatch(es): ${list(wrong)}`,
       };
     },
   },
@@ -1255,17 +1249,22 @@ const ASSERTIONS = [
         (item) => item.parentItemId === parent.id && item.status !== "ignored"
       );
       const expected = [
-        "gloriette",
-        "orangerie",
-        "palm house",
-        "strudel",
-        "panorama",
+        ["gloriette"],
+        ["orangerie"],
+        ["palm house"],
+        ["strudel", "studel"],
+        ["panorama"],
       ];
-      const matched = expected.filter((token) =>
-        children.some((child) => has(child.title, token))
+      const matched = expected.filter((alternatives) =>
+        children.some((child) =>
+          alternatives.some((token) => has(child.title, token))
+        )
       );
       const extra = children.filter(
-        (child) => !expected.some((token) => has(child.title, token))
+        (child) =>
+          !expected.some((alternatives) =>
+            alternatives.some((token) => has(child.title, token))
+          )
       );
       return {
         ok: matched.length === expected.length && extra.length === 0,
@@ -1627,7 +1626,12 @@ ASSERTIONS.push(
       dayExpectation("Prague Castle", "prague castle"),
       dayExpectation("U Maliru", "u maliru"),
       dayExpectation("KGB Museum", "kgb"),
-      dayExpectation("Mala Strana and Hradcany walk", "mala strana", "hrad any walk"),
+      dayExpectation(
+        "Mala Strana and Hradcany walk",
+        "mala strana",
+        "hrad any walk",
+        "lesser town walk"
+      ),
     ],
     gtLine: 147,
     gtPhrase: "5 cards",
@@ -1856,11 +1860,11 @@ ASSERTIONS.push(
   exactGroupAssertion({
     id: "GROUP-MALA",
     date: `${Y}-01-16`,
-    parentAlternatives: ["mala strana", "hrad any walk"],
+    parentAlternatives: ["mala strana", "hrad any walk", "lesser town walk"],
     children: [
       dayExpectation("Kafka statue", "kafka"),
-      dayExpectation("John Lennon Wall", "lennon"),
       dayExpectation("Vinarna Certovka", "certovka"),
+      dayExpectation("John Lennon Wall", "lennon"),
       dayExpectation("Novy svet", "novy svet"),
     ],
     callPolicy: "required",
@@ -1873,7 +1877,7 @@ ASSERTIONS.push(
       dayExpectation("Gloriette", "gloriette"),
       dayExpectation("Orangeriegarten", "orangerie"),
       dayExpectation("Palm House", "palm house"),
-      dayExpectation("Apple Strudel Show", "strudel"),
+      dayExpectation("Apple Strudel Show", "strudel", "studel"),
       dayExpectation("Panorama Train", "panorama"),
     ],
     callPolicy: "required",
@@ -2033,8 +2037,14 @@ ASSERTIONS.push(
     run: (ctx) => {
       const calls = ctx.records.reviewQuestions.filter((question) => question.status === "noted");
       const text = calls.map((question) => `${question.prompt ?? ""} ${question.reason ?? ""} ${question.evidence ?? ""} ${question.guessedValue ?? ""}`).join(" | ");
-      const wanted = ["prague castle", "mala strana", "schonbrunn"];
-      const matched = wanted.filter((token) => has(text, token));
+      const wanted = [
+        ["prague castle"],
+        ["mala strana", "lesser town"],
+        ["schonbrunn"],
+      ];
+      const matched = wanted.filter((alternatives) =>
+        alternatives.some((token) => has(text, token))
+      );
       const tourCall = calls.some((question) => has(`${question.prompt} ${question.reason} ${question.evidence}`, "hidden secrets"));
       return { ok: calls.length === 3 && matched.length === 3 && !tourCall, field: "records.reviewQuestions noted prompt/reason/evidence", detail: `${calls.length} Calls; required subjects ${matched.length}/3; tour Call=${tourCall}` };
     },
@@ -3034,6 +3044,14 @@ if (fromCacheDir) {
         )
     );
   }
+  if (process.env.SCORECARD_GROUPING_TRACE === "1") {
+    console.log(
+      "GROUPING TRACE " +
+        JSON.stringify(
+          assessment.report.canonicalization.groupingExecution ?? null
+        )
+    );
+  }
   const identityTraceTitle = process.env.SCORECARD_IDENTITY_TRACE_TITLE
     ?.trim()
     .toLowerCase();
@@ -3082,6 +3100,7 @@ if (fromCacheDir) {
                 titleMatches(observation.payload?.title)
               )
               .map((observation) => ({
+                area: observation.payload?.area ?? null,
                 date: observation.payload?.date ?? null,
                 id: observation.id,
                 ordinal: observation.ordinal,

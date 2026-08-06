@@ -187,6 +187,74 @@ export default function run() {
     assert.equal(summary.containmentLedger?.doNotMergePairCount, 3);
   });
 
+  test("RW-GRP-001 frozen grouping execution and unresolved mappings are served", () => {
+    const summary = createCanonicalizationSummary({
+      evidence: {
+        groupingExecution: {
+          decisions: [{
+            callPolicy: "required",
+            claim: "Same-site visit: two supported stops share one visit.",
+            date: "2019-01-19",
+            decisionId: "containment-site-1",
+            members: [
+              {
+                evidence: ["source_hierarchy"],
+                observationIds: ["obs-one"],
+                pieceId: "piece-one",
+                sourceOrder: 0,
+                title: "First stop",
+              },
+              {
+                evidence: ["verified_address"],
+                observationIds: ["obs-two"],
+                pieceId: "piece-two",
+                sourceOrder: 1,
+                title: "Second stop",
+              },
+            ],
+            parent: {
+              observationIds: ["obs-parent"],
+              pieceId: "piece-parent",
+              synthetic: false,
+              title: "Site visit",
+            },
+            provenance: {
+              containmentDecisionId: "containment-site-1",
+              relationType: "same_site",
+              source: "deterministic_containment",
+            },
+            rejections: [],
+          }],
+          unresolvedMappings: [{
+            containmentDecisionId: "containment-site-dropped",
+            observationIds: ["obs-missing"],
+            pieceId: "piece-missing",
+            role: "member",
+          }],
+          version: 1,
+        },
+      },
+    });
+
+    assert.deepEqual(
+      summary.groupingExecution?.decisions[0]?.members.map(
+        (member) => member.title
+      ),
+      ["First stop", "Second stop"]
+    );
+    assert.deepEqual(summary.groupingExecution?.decisions[0]?.provenance, {
+      containmentDecisionId: "containment-site-1",
+      relationType: "same_site",
+      source: "deterministic_containment",
+    });
+    assert.deepEqual(summary.groupingExecution?.unresolvedMappings, [{
+      containmentDecisionId: "containment-site-dropped",
+      observationIds: ["obs-missing"],
+      pieceId: "piece-missing",
+      role: "member",
+    }]);
+  });
+
   test("RW-CAN-001 identity carriers and fact acceptance survive the served audit whitelist", () => {
     const summary = createCanonicalizationSummary({
       evidence: {

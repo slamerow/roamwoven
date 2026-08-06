@@ -344,7 +344,7 @@ export default async function run() {
     assert.equal(draft.missingDetails.length, 0);
   });
 
-  await test("an independently timed child stays outside a continuous grouping", () => {
+  await test("a route proposal is refused when removing a timed stop leaves one child", () => {
     const titles = ["Old Town walking tour", "Klementinum tour", "Old Town Square"];
     const input = stage(
       titles,
@@ -367,17 +367,17 @@ export default async function run() {
     const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
     const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
     assert.deepEqual(
-      roots.map((item) => item.title).sort(),
-      [titles[0], titles[1]].sort()
+      roots.map((item) => item.title),
+      titles
     );
     assert.equal(
       roots.find((item) => item.title === titles[1])?.startTime,
       "14:30"
     );
-    assert.deepEqual(stops.map((item) => item.title), [titles[2]]);
+    assert.deepEqual(stops, []);
     assert.equal(
       draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? "")).length,
-      1
+      0
     );
   });
 
@@ -526,7 +526,7 @@ export default async function run() {
     proposal.sourceSectionType = "dated_itinerary";
     const stopsStage = stage(["Charles Bridge", "Old Town Square"], sourceText);
     stopsStage.sourceUploadId = "old-town-source";
-    const draft = cluster(applyCanonicalEvidenceResolution(
+    const routeApplication = applyCanonicalEvidenceResolution(
       [proposalStage, stopsStage],
       {
         groupings: [{
@@ -538,7 +538,8 @@ export default async function run() {
         }],
         roleDecisions: noRoleDecisions,
       }
-    ));
+    );
+    const draft = cluster(routeApplication);
 
     assert.equal(
       draft.activities.filter((item) => !item._canonicalParentPieceId).length,

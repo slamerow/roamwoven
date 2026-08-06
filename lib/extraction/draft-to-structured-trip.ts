@@ -633,6 +633,12 @@ function createItemRecords({
     const leg = itemType === "note" ? null : candidateLeg;
     const categoryId = exactCanonicalCategoryId(activity);
     const parentCanonicalId = getString(activity, "_canonicalParentPieceId");
+    const frozenGroupOrder =
+      typeof activity._canonicalGroupOrder === "number" &&
+      Number.isInteger(activity._canonicalGroupOrder) &&
+      activity._canonicalGroupOrder >= 0
+        ? activity._canonicalGroupOrder
+        : null;
     // Notes use their source city/date only to derive a canonical city key.
     // The persisted note owns neither a leg nor a day. An unplaceable note or
     // a source date outside the trip window remains review-visible instead of
@@ -664,7 +670,10 @@ function createItemRecords({
         ? `${tripId}-item-${parentCanonicalId}`
         : null,
       reviewRequired: flagged,
-      sortOrder: index,
+      sortOrder:
+        parentCanonicalId && frozenGroupOrder !== null
+          ? frozenGroupOrder
+          : index,
       sourceConfidence: "medium",
       startTime: itemType === "note" ? null : startTime,
       status: flagged ? "needs_review" : "draft",

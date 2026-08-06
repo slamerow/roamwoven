@@ -242,6 +242,44 @@ export type TripExtractionAuditReport = {
       rejectedCandidateCount: number;
       version: 1;
     } | null;
+    groupingExecution: {
+      decisions: Array<{
+        callPolicy: "required" | "silent";
+        claim: string;
+        date: string;
+        decisionId: string;
+        members: Array<{
+          evidence: string[];
+          observationIds: string[];
+          pieceId: string;
+          sourceOrder: number;
+          title: string;
+        }>;
+        parent: {
+          observationIds: string[];
+          pieceId: string;
+          synthetic: boolean;
+          title: string;
+        };
+        provenance: {
+          containmentDecisionId: string;
+          relationType: "authored_route" | "same_site" | "source_area_walk";
+          source: "deterministic_containment" | "resolver_containment";
+        };
+        rejections: Array<{
+          pieceId: string;
+          reasonCode: string;
+          title: string;
+        }>;
+      }>;
+      unresolvedMappings: Array<{
+        containmentDecisionId: string;
+        observationIds: string[];
+        pieceId: string | null;
+        role: "member" | "parent";
+      }>;
+      version: 1;
+    } | null;
     identityLedger: {
       decisions: Array<{
         acceptedFactDigests: string[];

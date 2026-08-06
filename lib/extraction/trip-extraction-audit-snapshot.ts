@@ -331,6 +331,118 @@ export function createCanonicalizationSummary(
         version: 1 as const,
       };
     })(),
+    groupingExecution: (() => {
+      const ledger = asRecord(evidence.groupingExecution);
+      if (Object.keys(ledger).length === 0) return null;
+      const stringList = (value: unknown) =>
+        Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === "string")
+          : [];
+      const decisions = Array.isArray(ledger.decisions)
+        ? ledger.decisions.flatMap((value) => {
+            const decision = asRecord(value);
+            const parent = asRecord(decision.parent);
+            const provenance = asRecord(decision.provenance);
+            const relationType = provenance.relationType;
+            const source = provenance.source;
+            const callPolicy = decision.callPolicy;
+            if (
+              typeof decision.claim !== "string" ||
+              typeof decision.date !== "string" ||
+              typeof decision.decisionId !== "string" ||
+              (callPolicy !== "required" && callPolicy !== "silent") ||
+              typeof parent.pieceId !== "string" ||
+              typeof parent.title !== "string" ||
+              typeof provenance.containmentDecisionId !== "string" ||
+              (relationType !== "authored_route" &&
+                relationType !== "same_site" &&
+                relationType !== "source_area_walk") ||
+              (source !== "deterministic_containment" &&
+                source !== "resolver_containment")
+            ) {
+              return [];
+            }
+            const members = Array.isArray(decision.members)
+              ? decision.members.flatMap((value) => {
+                  const member = asRecord(value);
+                  if (
+                    typeof member.pieceId !== "string" ||
+                    typeof member.title !== "string"
+                  ) {
+                    return [];
+                  }
+                  return [{
+                    evidence: stringList(member.evidence),
+                    observationIds: stringList(member.observationIds),
+                    pieceId: member.pieceId,
+                    sourceOrder: Number(member.sourceOrder) || 0,
+                    title: member.title,
+                  }];
+                })
+              : [];
+            const rejections = Array.isArray(decision.rejections)
+              ? decision.rejections.flatMap((value) => {
+                  const rejection = asRecord(value);
+                  if (
+                    typeof rejection.pieceId !== "string" ||
+                    typeof rejection.reasonCode !== "string" ||
+                    typeof rejection.title !== "string"
+                  ) {
+                    return [];
+                  }
+                  return [{
+                    pieceId: rejection.pieceId,
+                    reasonCode: rejection.reasonCode,
+                    title: rejection.title,
+                  }];
+                })
+              : [];
+            return [{
+              callPolicy: callPolicy as "required" | "silent",
+              claim: decision.claim,
+              date: decision.date,
+              decisionId: decision.decisionId,
+              members,
+              parent: {
+                observationIds: stringList(parent.observationIds),
+                pieceId: parent.pieceId,
+                synthetic: parent.synthetic === true,
+                title: parent.title,
+              },
+              provenance: {
+                containmentDecisionId: provenance.containmentDecisionId,
+                relationType: relationType as
+                  | "authored_route"
+                  | "same_site"
+                  | "source_area_walk",
+                source: source as
+                  | "deterministic_containment"
+                  | "resolver_containment",
+              },
+              rejections,
+            }];
+          })
+        : [];
+      const unresolvedMappings = Array.isArray(ledger.unresolvedMappings)
+        ? ledger.unresolvedMappings.flatMap((value) => {
+            const mapping = asRecord(value);
+            if (
+              typeof mapping.containmentDecisionId !== "string" ||
+              (mapping.role !== "member" && mapping.role !== "parent")
+            ) {
+              return [];
+            }
+            return [{
+              containmentDecisionId: mapping.containmentDecisionId,
+              observationIds: stringList(mapping.observationIds),
+              pieceId:
+                typeof mapping.pieceId === "string" ? mapping.pieceId : null,
+              role: mapping.role as "member" | "parent",
+            }];
+          })
+        : [];
+      return { decisions, unresolvedMappings, version: 1 as const };
+    })(),
     identityLedger: (() => {
       const ledger = asRecord(evidence.identityLedger);
       if (Object.keys(ledger).length === 0) return null;
