@@ -16,6 +16,7 @@ Ownership is part of the schema, not just app code:
 - `trip_material_ocr_batches` stores resumable page ranges, completion status, model/config, usage, and full batch text so incomplete OCR cannot masquerade as text-ready.
 - `trip_evidence_observations` stores each source sighting from spine/chunk/source-anchor extraction.
 - `trip_canonical_pieces` stores the canonical Lego pieces, field-level provenance, conflicts, and output eligibility that assembly consumes.
+- `trip_extraction_fact_sets` stores one immutable, source-derived shadow fact set per processing run and schema version. It is append-only and has no authenticated update path.
 - `trip_draft_snapshots` stores raw parser JSON drafts before those drafts are converted into editable trip records.
 - `published_trip_private_details` stores server-only protected values for active traveler snapshots; public snapshot JSON should stay redacted.
 
@@ -37,3 +38,4 @@ The prototype must keep building without Supabase env vars. In that mode, maker 
 - `production-sql-2026-06-19-material-extraction-checkpoints.sql`: additive patch for `trip_material_extractions`. Run this before deploying code that checkpoints uploaded materials during extraction.
 - `production-sql-2026-07-08-processing-transactions-and-events.sql`: additive patch for queryable processing events plus transactional extraction completion/failure and publish snapshot commits. Run this before deploying the matching transaction/RPC application code.
 - `production-sql-2026-07-10-ocr-evidence-foundations.sql`: additive patch for durable OCR page batches, evidence observations, and canonical pieces. Run this before deploying the P0 OCR/evidence code.
+- `production-sql-2026-08-07-source-fact-ledger.sql`: additive patch for the append-only Source Fact Ledger V1 shadow table. Run this before enabling `EXTRACTION_FACT_LEDGER_SHADOW=1`.
