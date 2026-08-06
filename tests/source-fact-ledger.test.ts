@@ -132,8 +132,33 @@ export default function run() {
   assert.deepEqual(rejectedResolver.payload.rejectionCodes, [
     "resolver_policy_rejected",
   ]);
+  const rejectedWithOverlappingAppliedGroup = buildSourceFactLedgerV1({
+    groupingDecisions: [
+      {
+        candidateIds: ["candidate-castle", "candidate-st-vitus"],
+        claim: "A separate accepted group with overlapping members.",
+        decisionId: "group-overlap-negative-control",
+        parentCandidateId: "candidate-castle",
+        parentTitle: "Prague Castle",
+        source: "canonical_resolver",
+      },
+    ],
+    index: fixture.index,
+    resolverMetadata: fixture.resolverMetadata,
+    stages: [fixture.stage],
+  }).factSet.facts.find(
+    (fact) =>
+      fact.kind === "relationship" &&
+      fact.producer === "resolver" &&
+      fact.payload.claimDigest === "resolver-claim-digest-sanitized"
+  );
+  assert.equal(
+    rejectedWithOverlappingAppliedGroup?.payload.status,
+    "rejected",
+    "a rejected resolver claim cannot be reclassified by an overlapping group"
+  );
 
-  const knownSpanIds = new Set(sourceSpans.map((span) => span.spanId));
+  const knownSpanIds = new Set(sourceSpans.map(([spanId]) => spanId));
   const knownFactIds = new Set(facts.map((fact) => fact.factId));
   for (const fact of facts) {
     assert.ok(

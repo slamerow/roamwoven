@@ -686,12 +686,29 @@ path is bypassed.
   booking values, or other private content. A build or persistence failure is
   an internal fail-soft event; the existing usable draft continues with no
   maker Question or technical recovery state.
-- Evidence: The deterministic source index is implemented first. Fact, coverage,
-  persistence, served telemetry, scale, replay, and route evidence are added by
-  the five ordered commits in the V1 work order. Coverage remains `PARTIAL`
-  until the shadow route and saved-corpus gates are all green; shadow evidence
-  does not make the ledger authoritative for assembly behavior.
-- Tests: `tests/source-document-index.test.ts`
+- Evidence: The five ordered Source Fact Ledger V1 commits are implemented.
+  The parser builds one deterministic source index before chunking and, only
+  when the default-off shadow flag is enabled, builds the fact, coverage, and
+  non-invoking recovery ledgers after existing parser/recovery/resolver evidence
+  is available. The route performs at most one authenticated append-only insert
+  and serves only the audit allowlist. Candidate 8.6 and fresh 8.7 offline
+  replays prove identical shadow-off/shadow-on traveler semantics, zero added
+  calls/lookups/retries, and the required time/size ceilings. The fresh 8.7
+  replay also reproduces its persisted production semantic fingerprint; its
+  pre-existing ground-truth failures are unchanged by shadow execution.
+
+  Enforcement remains `PARTIAL`: the additive production migration has not
+  been applied and the flag remains off, as required. Shadow evidence does not
+  make the ledger authoritative for assembly behavior. See
+  `docs/source-fact-ledger-v1-closure-2026-08-07.md`.
+- Tests: `tests/source-document-index.test.ts`,
+  `tests/source-fact-ledger.test.ts`,
+  `tests/source-coverage-v4.test.ts`,
+  `tests/source-fact-ledger-scale.test.ts`,
+  `tests/source-fact-ledger-store.test.ts`,
+  `tests/source-fact-ledger-sql.test.ts`,
+  `tests/extraction-route-recovery.test.ts`,
+  `tests/arc-f-telemetry.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 

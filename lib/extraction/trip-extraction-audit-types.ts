@@ -437,6 +437,42 @@ export type TripExtractionAuditReport = {
       recoveredLineCount: number;
       residualUncoveredLineCount: number;
     } | null;
+    sourceFactLedger: {
+      additionalGeocodingLookupCount: number;
+      additionalModelCallCount: number;
+      additionalRetryCount: number;
+      candidateToSpanAmbiguityCount: number;
+      coverageCounts: {
+        ambiguous: number;
+        carried: number;
+        context_only: number;
+        excluded: number;
+        structural_only: number;
+        uncovered: number;
+      };
+      coverageHash: string | null;
+      factCounts: {
+        decision: number;
+        entity: number;
+        exclusion: number;
+        intent: number;
+        relationship: number;
+      };
+      failureClass: string | null;
+      ledgerBuildMilliseconds: number;
+      ledgerHash: string | null;
+      outputFingerprintAfter: string | null;
+      outputFingerprintBefore: string | null;
+      recoveryBatchCount: number;
+      recoveryPlanHash: string | null;
+      recoveryUncoveredClauseCount: number;
+      schemaVersion: number;
+      serializedByteSize: number;
+      sourceClauseCount: number;
+      sourceFingerprint: string | null;
+      status: string;
+      unresolvedRelationshipMemberCount: number;
+    } | null;
     geocodeVerification: {
       budget: number;
       // G4.4 (docket §C, field 4): per-candidate rank + outcome. Without

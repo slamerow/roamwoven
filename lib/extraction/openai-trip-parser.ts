@@ -4,7 +4,10 @@ import {
 } from "@/lib/ai/openai";
 import { getGeocodeVerificationConfig, getOpenAIConfig } from "@/lib/env";
 import { runGeocodeVerification } from "@/lib/extraction/geocode-verification";
-import { resolveCanonicalEvidenceStages } from "@/lib/extraction/canonical-evidence-resolver";
+import {
+  resolveCanonicalEvidenceStages,
+  type CanonicalEvidenceResolverMetadata,
+} from "@/lib/extraction/canonical-evidence-resolver";
 import {
   clusterExtractedEvidence,
   type CanonicalEvidencePiece,
@@ -19,9 +22,21 @@ import {
 import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
 import {
   buildSourceDocumentIndexV1,
+  hashStableValue,
   sourceSpanIdsForMaterialTextV1,
   type SourceDocumentIndexV1,
 } from "@/lib/extraction/source-document-index";
+import {
+  buildShadowRecoveryPlanV1,
+  buildSourceCoverageV4,
+  type ShadowRecoveryPlanV1,
+  type SourceCoverageV4,
+} from "@/lib/extraction/source-coverage-v4";
+import {
+  buildSourceFactLedgerV1,
+  isSourceFactLedgerShadowEnabled,
+  type SourceFactLedgerBuildResultV1,
+} from "@/lib/extraction/source-fact-ledger";
 import {
   runBoundedSourceRecovery,
   SOURCE_RECOVERY_SYSTEM_PROMPT,
@@ -46,8 +61,25 @@ export type TripExtractionResult = {
     pieces: CanonicalEvidencePiece[];
   };
   model: string;
+  sourceFactLedger: SourceFactLedgerShadowResultV1 | null;
   usage: unknown;
 };
+
+export type SourceFactLedgerShadowResultV1 =
+  | {
+      coverage: SourceCoverageV4;
+      ledger: SourceFactLedgerBuildResultV1;
+      outputFingerprintAfter: string;
+      outputFingerprintBefore: string;
+      recoveryPlan: ShadowRecoveryPlanV1;
+      status: "built";
+    }
+  | {
+      failureClass: "ledger_build_failed";
+      outputFingerprintAfter: string;
+      outputFingerprintBefore: string;
+      status: "failed";
+    };
 
 export type ActivityExtractionChunk = {
   charCount: number;
@@ -1512,7 +1544,7 @@ export async function extractTripDraftWithOpenAI({
 
   let resolvedEvidenceStages = {
     groupingDecisions: [] as CanonicalGroupingDecision[],
-    metadata: null as unknown,
+    metadata: null as CanonicalEvidenceResolverMetadata | null,
     stages: evidenceStages,
     usage: null as unknown,
   };
@@ -1545,6 +1577,69 @@ export async function extractTripDraftWithOpenAI({
   });
   const combinedDraft = evidence.draft;
   const canonicalDraft = createDraftAuditSnapshot(combinedDraft);
+  const outputFingerprintBefore = hashStableValue(combinedDraft);
+  let sourceFactLedger: SourceFactLedgerShadowResultV1 | null = null;
+  if (isSourceFactLedgerShadowEnabled()) {
+    try {
+      const ledger = buildSourceFactLedgerV1({
+        groupingDecisions: resolvedEvidenceStages.groupingDecisions,
+        index: sourceDocumentIndex,
+        resolverMetadata: resolvedEvidenceStages.metadata,
+        stages: resolvedEvidenceStages.stages,
+      });
+      const coverage = buildSourceCoverageV4({
+        factSet: ledger.factSet,
+        index: sourceDocumentIndex,
+      });
+      const recoveryPlan = buildShadowRecoveryPlanV1({
+        coverage,
+        index: sourceDocumentIndex,
+      });
+      const outputFingerprintAfter = hashStableValue(combinedDraft);
+      if (outputFingerprintBefore !== outputFingerprintAfter) {
+        throw new Error("Source fact ledger shadow mutated parser output.");
+      }
+      sourceFactLedger = {
+        coverage,
+        ledger,
+        outputFingerprintAfter,
+        outputFingerprintBefore,
+        recoveryPlan,
+        status: "built",
+      };
+    } catch (error) {
+      console.error("trip_source_fact_ledger_build_failed", {
+        failureClass: "ledger_build_failed",
+        name: error instanceof Error ? error.name : "UnknownError",
+      });
+      sourceFactLedger = {
+        failureClass: "ledger_build_failed",
+        outputFingerprintAfter: hashStableValue(combinedDraft),
+        outputFingerprintBefore,
+        status: "failed",
+      };
+    }
+  }
+
+  const sourceFactLedgerUsage =
+    sourceFactLedger?.status === "built"
+      ? {
+          ...sourceFactLedger.ledger.metrics,
+          additionalGeocodingLookupCount: 0,
+          additionalModelCallCount: 0,
+          additionalRetryCount: 0,
+          coverageCounts: sourceFactLedger.coverage.counts,
+          coverageHash: sourceFactLedger.coverage.coverageHash,
+          outputFingerprintAfter: sourceFactLedger.outputFingerprintAfter,
+          outputFingerprintBefore: sourceFactLedger.outputFingerprintBefore,
+          recoveryBatchCount: sourceFactLedger.recoveryPlan.batchCount,
+          recoveryPlanHash: sourceFactLedger.recoveryPlan.planHash,
+          recoveryUncoveredClauseCount:
+            sourceFactLedger.recoveryPlan.uncoveredClauseCount,
+          sourceFingerprint: sourceFactLedger.ledger.factSet.sourceFingerprint,
+          status: sourceFactLedger.status,
+        }
+      : sourceFactLedger;
 
   return {
     draft: combinedDraft,
@@ -1553,6 +1648,7 @@ export async function extractTripDraftWithOpenAI({
       pieces: evidence.pieces,
     },
     model: activityResults.at(-1)?.result.model ?? spineResult.model,
+    sourceFactLedger,
     usage: {
       activityChunks: {
         count: activityChunks.length,
@@ -1598,8 +1694,9 @@ export async function extractTripDraftWithOpenAI({
       // repaired or cleared, and the anchor it used. Never maker-facing.
       transportFieldRepairs: evidence.transportFieldRepairs,
       sourceCoverage,
+      sourceFactLedger: sourceFactLedgerUsage,
       geocodeVerification: geocodeVerification.usage,
-    sourceRecovery: recovery.usage,
+      sourceRecovery: recovery.usage,
       sourceAnchors: {
         transport: sourceTransportAnchors,
       },

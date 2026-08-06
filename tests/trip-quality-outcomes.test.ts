@@ -88,7 +88,7 @@ function report(
       stays: [],
       transport: [],
     },
-    extraction: { activityChunks: null, extractionSampling: null, geocodeVerification: null, sourceCoverage: null, sourceRecovery: null, staged: true },
+    extraction: { activityChunks: null, extractionSampling: null, geocodeVerification: null, sourceCoverage: null, sourceFactLedger: null, sourceRecovery: null, staged: true },
     fingerprints: {
       hash: "fingerprint",
       sections: {},

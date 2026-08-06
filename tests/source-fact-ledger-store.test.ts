@@ -91,6 +91,9 @@ export default async function run() {
     outputFingerprintBefore: "before-hash",
   });
   assert.deepEqual(Object.keys(telemetry).sort(), [
+    "additionalGeocodingLookupCount",
+    "additionalModelCallCount",
+    "additionalRetryCount",
     "candidateToSpanAmbiguityCount",
     "coverageCounts",
     "factCounts",

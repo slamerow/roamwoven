@@ -5,11 +5,9 @@ import type {
 } from "@/lib/extraction/evidence-clustering";
 import {
   hashStableValue,
-  sourceSpanRefsV1,
   stableJsonStringify,
   type SourceDocumentIndexV1,
   type SourceDocumentSpanV1,
-  type SourceSpanRefV1,
 } from "@/lib/extraction/source-document-index";
 import { distinctiveLineTokens } from "@/lib/extraction/source-coverage";
 import { isExcludedPlanningCostLine } from "@/lib/extraction/source-coverage";
@@ -20,6 +18,14 @@ import {
 } from "@/lib/trip-card-taxonomy";
 
 export const SOURCE_FACT_LEDGER_SCHEMA_VERSION = 1 as const;
+
+export function isSourceFactLedgerShadowEnabled(
+  env: { EXTRACTION_FACT_LEDGER_SHADOW?: string } = process.env as {
+    EXTRACTION_FACT_LEDGER_SHADOW?: string;
+  }
+) {
+  return env.EXTRACTION_FACT_LEDGER_SHADOW === "1";
+}
 
 export type SourceFactKindV1 =
   | "entity"
@@ -49,10 +55,28 @@ export type SourceCarrierEdgeV1 = {
     | "context_only";
 };
 
+// Compact named tuples prevent the same JSON field names and source hashes
+// from being repeated hundreds of times per trip. Schema V1 fixes the order.
+export type SourceFactSourceRefV1 = [
+  sourceRefId: string,
+  sourceIdentityHash: string,
+  materialFingerprint: string,
+  sourceUploadId: string | null,
+];
+
+export type SourceFactSpanRefV1 = [
+  spanId: string,
+  sourceRefId: string,
+  lineOccurrence: number,
+  clauseOrdinal: number,
+  excerptDigest160: string,
+];
+
 export type SourceFactSetV1 = {
   schemaVersion: typeof SOURCE_FACT_LEDGER_SCHEMA_VERSION;
   sourceFingerprint: string;
-  sourceSpans: SourceSpanRefV1[];
+  sources: SourceFactSourceRefV1[];
+  sourceSpans: SourceFactSpanRefV1[];
   facts: SourceFactV1[];
   carrierEdges: SourceCarrierEdgeV1[];
 };
@@ -328,7 +352,7 @@ function carrierFor(
 
 function alignmentPayload(alignment: SourceAlignmentV1) {
   return alignment.status === "aligned"
-    ? { method: alignment.method, status: alignment.status }
+    ? { method: alignment.method }
     : {
         ambiguityCount: alignment.plausibleSpanIds.length,
         plausibleSpanIds: alignment.plausibleSpanIds,
@@ -344,7 +368,7 @@ function semanticIdentityDigest(
   return hashStableValue({
     sourceSpanIds: alignment.sourceSpanIds,
     title: normalizeText(candidateTitle(record)),
-  });
+  }).slice(0, 20);
 }
 
 function createFact(
@@ -361,7 +385,7 @@ function createFact(
     producer: normalized.producer,
     sourceSpanIds: normalized.sourceSpanIds,
     version: SOURCE_FACT_LEDGER_SCHEMA_VERSION,
-  }).slice(0, 32)}`;
+  }).slice(0, 24)}`;
   const fact = { ...normalized, factId };
   const existing = facts.get(factId);
   if (existing && stableJsonStringify(existing) !== stableJsonStringify(fact)) {
@@ -583,6 +607,52 @@ function addEdges(
   }
 }
 
+function compactSourceRefs(index: SourceDocumentIndexV1) {
+  const sourcesByIdentity = new Map<
+    string,
+    {
+      materialFingerprint: string;
+      sourceIdentityHash: string;
+      sourceRefId: string;
+      sourceUploadId: string | null;
+    }
+  >();
+  for (const span of index.spans) {
+    if (!sourcesByIdentity.has(span.sourceIdentityHash)) {
+      sourcesByIdentity.set(span.sourceIdentityHash, {
+        materialFingerprint: span.materialFingerprint,
+        sourceIdentityHash: span.sourceIdentityHash,
+        sourceRefId: `source_${hashStableValue({
+          materialFingerprint: span.materialFingerprint,
+          sourceIdentityHash: span.sourceIdentityHash,
+          sourceUploadId: span.sourceUploadId,
+        }).slice(0, 20)}`,
+        sourceUploadId: span.sourceUploadId,
+      });
+    }
+  }
+  const sourceRows = [...sourcesByIdentity.values()].sort((left, right) =>
+    left.sourceRefId.localeCompare(right.sourceRefId)
+  );
+  const sources: SourceFactSourceRefV1[] = sourceRows.map((source) => [
+    source.sourceRefId,
+    source.sourceIdentityHash,
+    source.materialFingerprint,
+    source.sourceUploadId,
+  ]);
+  const sourceRefIdByIdentity = new Map(
+    sourceRows.map((source) => [source.sourceIdentityHash, source.sourceRefId])
+  );
+  const sourceSpans: SourceFactSpanRefV1[] = index.spans.map((span) => [
+    span.spanId,
+    sourceRefIdByIdentity.get(span.sourceIdentityHash)!,
+    span.lineOccurrence,
+    span.clauseOrdinal,
+    span.excerptDigest.slice(0, 40),
+  ]);
+  return { sources, sourceSpans };
+}
+
 export function buildSourceFactLedgerV1({
   groupingDecisions = [],
   index,
@@ -705,6 +775,7 @@ export function buildSourceFactLedgerV1({
   for (const candidate of candidates) {
     if (!candidate.primaryFactId || candidate.candidateClass === "decision") continue;
     const intent = intentFor(candidate.record);
+    if (intent.intent === "unspecified") continue;
     const fact = createFact(facts, {
       kind: "intent",
       payload: {
@@ -715,16 +786,12 @@ export function buildSourceFactLedgerV1({
       producer: candidate.producer,
       sourceSpanIds: candidate.alignment.sourceSpanIds,
     });
-    addEdges(edges, fact, candidate.carrierClass);
   }
 
   const candidateByResolverId = new Map(
     candidates
       .filter((candidate) => candidate.resolverCandidateId)
       .map((candidate) => [candidate.resolverCandidateId!, candidate])
-  );
-  const acceptedCandidateSets = groupingDecisions.map(
-    (decision) => new Set(decision.candidateIds)
   );
   for (const evaluation of resolverMetadata?.claimEvaluations ?? []) {
     const mapped = evaluation.candidateIds
@@ -757,16 +824,27 @@ export function buildSourceFactLedgerV1({
     const missingCandidateCount = evaluation.candidateIds.length - mapped.length;
     const rejectionCodes: string[] = [...evaluation.rejectionCodes];
     if (missingCandidateCount > 0) rejectionCodes.push("unresolved_source_member");
-    const accepted = acceptedCandidateSets.some((candidateSet) =>
-      evaluation.candidateIds.every(
+    const evaluatedExecutionIds = evaluation.candidateIds
+      .filter(
         (candidateId) =>
-          candidateSet.has(candidateId) ||
           stringValue(
             candidateByResolverId.get(candidateId)?.record ?? {},
             "evidenceRole"
-          ) === "grouping_proposal"
+          ) !== "grouping_proposal"
       )
-    );
+      .sort();
+    const accepted =
+      evaluation.status === "accepted" &&
+      groupingDecisions.some((decision) => {
+        const appliedIds = [...decision.candidateIds].sort();
+        return (
+          appliedIds.length === evaluatedExecutionIds.length &&
+          appliedIds.every(
+            (candidateId, index) =>
+              candidateId === evaluatedExecutionIds[index]
+          )
+        );
+      });
     const sourceSpanIds = mapped.flatMap(
       (candidate) => candidate.alignment.sourceSpanIds
     );
@@ -823,12 +901,14 @@ export function buildSourceFactLedgerV1({
   const carrierEdges = [...edges.values()].sort((left, right) =>
     stableJsonStringify(left).localeCompare(stableJsonStringify(right))
   );
+  const sourceRefs = compactSourceRefs(index);
   const factSet: SourceFactSetV1 = {
     carrierEdges,
     facts: factList,
     schemaVersion: SOURCE_FACT_LEDGER_SCHEMA_VERSION,
     sourceFingerprint: index.sourceFingerprint,
-    sourceSpans: sourceSpanRefsV1(index),
+    sourceSpans: sourceRefs.sourceSpans,
+    sources: sourceRefs.sources,
   };
   const serialized = stableJsonStringify(factSet);
   const factCounts: Record<SourceFactKindV1, number> = {

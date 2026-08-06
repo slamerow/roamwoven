@@ -3,11 +3,15 @@ import {
   stableJsonStringify,
 } from "@/lib/extraction/source-document-index";
 import type { SourceFactLedgerBuildResultV1 } from "@/lib/extraction/source-fact-ledger";
+export { isSourceFactLedgerShadowEnabled } from "@/lib/extraction/source-fact-ledger";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const SOURCE_FACT_LEDGER_MAX_BYTES = 1024 * 1024;
 
 export type SourceFactLedgerTelemetryV1 = {
+  additionalGeocodingLookupCount: 0;
+  additionalModelCallCount: 0;
+  additionalRetryCount: 0;
   schemaVersion: number;
   ledgerHash: string;
   sourceFingerprint: string;
@@ -55,14 +59,6 @@ export type SourceFactSetStoreClient = {
   };
 };
 
-export function isSourceFactLedgerShadowEnabled(
-  env: { EXTRACTION_FACT_LEDGER_SHADOW?: string } = process.env as {
-    EXTRACTION_FACT_LEDGER_SHADOW?: string;
-  }
-) {
-  return env.EXTRACTION_FACT_LEDGER_SHADOW === "1";
-}
-
 export function createSourceFactLedgerTelemetryV1({
   coverage,
   ledger,
@@ -75,6 +71,9 @@ export function createSourceFactLedgerTelemetryV1({
   outputFingerprintBefore?: string | null;
 }): SourceFactLedgerTelemetryV1 {
   return {
+    additionalGeocodingLookupCount: 0,
+    additionalModelCallCount: 0,
+    additionalRetryCount: 0,
     candidateToSpanAmbiguityCount:
       ledger.metrics.candidateToSpanAmbiguityCount,
     coverageCounts: coverage.counts,

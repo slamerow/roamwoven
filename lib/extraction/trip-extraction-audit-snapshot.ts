@@ -844,6 +844,7 @@ export function createExtractionSummary(usage: unknown) {
   const openai = findOpenAIUsage(usage);
   const activityChunks = asRecord(openai.activityChunks);
   const sourceCoverage = asRecord(openai.sourceCoverage);
+  const sourceFactLedger = asRecord(openai.sourceFactLedger);
 
   return {
     activityChunks:
@@ -893,6 +894,96 @@ export function createExtractionSummary(usage: unknown) {
                   });
                 })
               : [],
+          }
+        : null,
+    // Source Fact Ledger V1 is shadow-only support telemetry. Only the
+    // explicit counts, versions, hashes, byte size, and duration allowlist
+    // reaches audit/QA surfaces; facts and source excerpts never do.
+    sourceFactLedger:
+      Object.keys(sourceFactLedger).length > 0
+        ? {
+            additionalGeocodingLookupCount:
+              Number(sourceFactLedger.additionalGeocodingLookupCount) || 0,
+            additionalModelCallCount:
+              Number(sourceFactLedger.additionalModelCallCount) || 0,
+            additionalRetryCount:
+              Number(sourceFactLedger.additionalRetryCount) || 0,
+            candidateToSpanAmbiguityCount:
+              Number(sourceFactLedger.candidateToSpanAmbiguityCount) || 0,
+            coverageCounts: {
+              ambiguous:
+                Number(asRecord(sourceFactLedger.coverageCounts).ambiguous) ||
+                0,
+              carried:
+                Number(asRecord(sourceFactLedger.coverageCounts).carried) || 0,
+              context_only:
+                Number(
+                  asRecord(sourceFactLedger.coverageCounts).context_only
+                ) || 0,
+              excluded:
+                Number(asRecord(sourceFactLedger.coverageCounts).excluded) || 0,
+              structural_only:
+                Number(
+                  asRecord(sourceFactLedger.coverageCounts).structural_only
+                ) || 0,
+              uncovered:
+                Number(asRecord(sourceFactLedger.coverageCounts).uncovered) || 0,
+            },
+            coverageHash:
+              typeof sourceFactLedger.coverageHash === "string"
+                ? sourceFactLedger.coverageHash
+                : null,
+            factCounts: {
+              decision:
+                Number(asRecord(sourceFactLedger.factCounts).decision) || 0,
+              entity: Number(asRecord(sourceFactLedger.factCounts).entity) || 0,
+              exclusion:
+                Number(asRecord(sourceFactLedger.factCounts).exclusion) || 0,
+              intent: Number(asRecord(sourceFactLedger.factCounts).intent) || 0,
+              relationship:
+                Number(asRecord(sourceFactLedger.factCounts).relationship) || 0,
+            },
+            failureClass:
+              typeof sourceFactLedger.failureClass === "string"
+                ? sourceFactLedger.failureClass
+                : null,
+            ledgerBuildMilliseconds:
+              Number(sourceFactLedger.ledgerBuildMilliseconds) || 0,
+            ledgerHash:
+              typeof sourceFactLedger.ledgerHash === "string"
+                ? sourceFactLedger.ledgerHash
+                : null,
+            outputFingerprintAfter:
+              typeof sourceFactLedger.outputFingerprintAfter === "string"
+                ? sourceFactLedger.outputFingerprintAfter
+                : null,
+            outputFingerprintBefore:
+              typeof sourceFactLedger.outputFingerprintBefore === "string"
+                ? sourceFactLedger.outputFingerprintBefore
+                : null,
+            recoveryBatchCount:
+              Number(sourceFactLedger.recoveryBatchCount) || 0,
+            recoveryPlanHash:
+              typeof sourceFactLedger.recoveryPlanHash === "string"
+                ? sourceFactLedger.recoveryPlanHash
+                : null,
+            recoveryUncoveredClauseCount:
+              Number(sourceFactLedger.recoveryUncoveredClauseCount) || 0,
+            schemaVersion: Number(sourceFactLedger.schemaVersion) || 0,
+            serializedByteSize:
+              Number(sourceFactLedger.serializedByteSize) || 0,
+            sourceClauseCount:
+              Number(sourceFactLedger.sourceClauseCount) || 0,
+            sourceFingerprint:
+              typeof sourceFactLedger.sourceFingerprint === "string"
+                ? sourceFactLedger.sourceFingerprint
+                : null,
+            status:
+              typeof sourceFactLedger.status === "string"
+                ? sourceFactLedger.status
+                : "unknown",
+            unresolvedRelationshipMemberCount:
+              Number(sourceFactLedger.unresolvedRelationshipMemberCount) || 0,
           }
         : null,
     // What the extraction requests ACTUALLY SENT for sampling (run-2 handoff

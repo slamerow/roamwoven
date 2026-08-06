@@ -39,6 +39,11 @@ import {
 } from "@/lib/extraction/processing-runs";
 import { recordTripProcessingEvent } from "@/lib/extraction/processing-events";
 import {
+  SourceFactLedgerPersistenceError,
+  createSourceFactLedgerTelemetryV1,
+  persistSourceFactSetV1,
+} from "@/lib/extraction/source-fact-ledger-store";
+import {
   createTripExtractionMaterialsIdempotencyKey,
   getTripExtractionMaterialsWithSummary,
   getTripExtractionMaterialSourceUploadIds,
@@ -103,6 +108,24 @@ function withRunInputEstimate(
     estimatedRunInputTokens:
       summary.estimatedInputTokens * estimatedInputPassCount,
   };
+}
+
+async function recordSourceFactLedgerEventFailSoft(
+  event: Parameters<typeof recordTripProcessingEvent>[0]
+) {
+  try {
+    await recordTripProcessingEvent(event);
+  } catch (error) {
+    // Shadow observability may never turn an otherwise usable extraction into
+    // a failed run. If the event store itself is unavailable, retain only
+    // aggregate identifiers in the server log and continue.
+    console.error("trip_source_fact_ledger_event_failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      processingRunId: event.processingRunId,
+      status: event.status,
+      tripId: event.tripId,
+    });
+  }
 }
 
 function summarizeMaterialCheckpoints(
@@ -443,6 +466,71 @@ export async function POST(
         (extractionUsage as Record<string, unknown>).extractionPinning =
           pinningOutcome;
       }
+    }
+    if (result.sourceFactLedger?.status === "built") {
+      const shadow = result.sourceFactLedger;
+      const telemetry = createSourceFactLedgerTelemetryV1({
+        coverage: shadow.coverage,
+        ledger: shadow.ledger,
+        outputFingerprintAfter: shadow.outputFingerprintAfter,
+        outputFingerprintBefore: shadow.outputFingerprintBefore,
+      });
+      try {
+        const persistence = await persistSourceFactSetV1({
+          coverage: shadow.coverage,
+          ledger: shadow.ledger,
+          outputFingerprintAfter: shadow.outputFingerprintAfter,
+          outputFingerprintBefore: shadow.outputFingerprintBefore,
+          processingRunId: run.id,
+          tripId,
+        });
+        await recordSourceFactLedgerEventFailSoft({
+          details: {
+            ...telemetry,
+            persistenceStatus: persistence.status,
+            recoveryBatchCount: shadow.recoveryPlan.batchCount,
+            recoveryPlanHash: shadow.recoveryPlan.planHash,
+            recoveryUncoveredClauseCount:
+              shadow.recoveryPlan.uncoveredClauseCount,
+          },
+          processingRunId: run.id,
+          stage: "source_fact_ledger",
+          status: "completed",
+          tripId,
+        });
+      } catch (error) {
+        const failureClass =
+          error instanceof SourceFactLedgerPersistenceError
+            ? error.failureClass
+            : "fact_set_persistence_failed";
+        console.error("trip_source_fact_ledger_persistence_failed", {
+          failureClass,
+          name: error instanceof Error ? error.name : "UnknownError",
+          runId: run.id,
+          tripId,
+        });
+        await recordSourceFactLedgerEventFailSoft({
+          details: { ...telemetry, failureClass },
+          processingRunId: run.id,
+          stage: "source_fact_ledger",
+          status: "failed",
+          tripId,
+        });
+      }
+    } else if (result.sourceFactLedger?.status === "failed") {
+      await recordSourceFactLedgerEventFailSoft({
+        details: {
+          failureClass: result.sourceFactLedger.failureClass,
+          outputFingerprintAfter:
+            result.sourceFactLedger.outputFingerprintAfter,
+          outputFingerprintBefore:
+            result.sourceFactLedger.outputFingerprintBefore,
+        },
+        processingRunId: run.id,
+        stage: "source_fact_ledger",
+        status: "failed",
+        tripId,
+      });
     }
     await recordTripProcessingEvent({
       details: {

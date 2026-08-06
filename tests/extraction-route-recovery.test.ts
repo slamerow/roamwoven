@@ -7,6 +7,13 @@ import {
 } from "@/lib/extraction/evidence-clustering";
 import { readStructuredTripSnapshot } from "@/lib/extraction/structured-trip-snapshot";
 import type { TripExtractionResult } from "@/lib/extraction/openai-trip-parser";
+import {
+  buildShadowRecoveryPlanV1,
+  buildSourceCoverageV4,
+} from "@/lib/extraction/source-coverage-v4";
+import { buildSourceFactLedgerV1 } from "@/lib/extraction/source-fact-ledger";
+import { SourceFactLedgerPersistenceError } from "@/lib/extraction/source-fact-ledger-store";
+import { sourceFactFixture } from "@/tests/fixtures/source-fact-ledger-v1";
 
 async function test(name: string, fn: () => void | Promise<void>) {
   try {
@@ -75,6 +82,7 @@ function createParserResult(): TripExtractionResult {
       pieces: evidence.pieces,
     },
     model: "route-recovery-model",
+    sourceFactLedger: null,
     usage: {
       activityChunks: {
         count: 1,
@@ -135,11 +143,38 @@ function createSingleCityNoteParserResult(): TripExtractionResult {
       pieces: evidence.pieces,
     },
     model: "route-recovery-model",
+    sourceFactLedger: null,
     usage: {
       evidence: evidence.summary,
       sourceAnchors: { transport: [] },
       staged: true,
     },
+  };
+}
+
+function createSourceFactLedgerShadow(): NonNullable<
+  TripExtractionResult["sourceFactLedger"]
+> {
+  const fixture = sourceFactFixture();
+  const ledger = buildSourceFactLedgerV1({
+    index: fixture.index,
+    resolverMetadata: fixture.resolverMetadata,
+    stages: [fixture.stage],
+  });
+  const coverage = buildSourceCoverageV4({
+    factSet: ledger.factSet,
+    index: fixture.index,
+  });
+  return {
+    coverage,
+    ledger,
+    outputFingerprintAfter: "same-output-fingerprint",
+    outputFingerprintBefore: "same-output-fingerprint",
+    recoveryPlan: buildShadowRecoveryPlanV1({
+      coverage,
+      index: fixture.index,
+    }),
+    status: "built",
   };
 }
 
@@ -172,6 +207,9 @@ export default async function run() {
   const persistedDispositionCounts: number[] = [];
   const persistedPieceIds: string[][] = [];
   const persistedPieceEligibility: boolean[][] = [];
+  const sourceFactPersistenceCalls: Array<Record<string, unknown>> = [];
+  let sourceFactEventFails = false;
+  let sourceFactPersistenceFails = false;
   const restore = [
     patchModule("@/lib/env", {
       getOpenAIConfig: () => ({ maxInputChars: 100_000 }),
@@ -226,6 +264,18 @@ export default async function run() {
     patchModule("@/lib/extraction/openai-trip-parser", {
       extractTripDraftWithOpenAI: async () => parserResult,
     }),
+    patchModule("@/lib/extraction/source-fact-ledger-store", {
+      persistSourceFactSetV1: async (input: Record<string, unknown>) => {
+        sourceFactPersistenceCalls.push(input);
+        if (sourceFactPersistenceFails) {
+          throw new SourceFactLedgerPersistenceError(
+            "fact_set_insert_failed",
+            "sanitized test failure"
+          );
+        }
+        return { ledgerHash: "ledger-hash", status: "inserted" };
+      },
+    }),
     patchModule("@/lib/extraction/evidence-artifacts", {
       persistEvidenceArtifacts: async ({
         observations,
@@ -253,6 +303,9 @@ export default async function run() {
     }),
     patchModule("@/lib/extraction/processing-events", {
       recordTripProcessingEvent: async (event: Record<string, unknown>) => {
+        if (sourceFactEventFails && event.stage === "source_fact_ledger") {
+          throw new Error("sanitized source fact event failure");
+        }
         events.push(clone(event));
       },
     }),
@@ -279,6 +332,97 @@ export default async function run() {
         context: { params: Promise<{ tripId: string }> }
       ) => Promise<Response>;
     };
+
+    await test("source fact shadow persists once and emits aggregate telemetry", async () => {
+      parserResult = createParserResult();
+      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
+      sourceFactEventFails = false;
+      sourceFactPersistenceFails = false;
+      sourceFactPersistenceCalls.length = 0;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-source-facts/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-source-facts" }) }
+      );
+      const ledgerEvents = events.filter(
+        (event) => event.stage === "source_fact_ledger"
+      );
+      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
+      assert.equal(sourceFactPersistenceCalls.length, 1);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      assert.deepEqual(
+        ledgerEvents.map((event) => event.status),
+        ["completed"]
+      );
+      const details = JSON.stringify(ledgerEvents[0]?.details ?? {});
+      assert.doesNotMatch(details, /Prague Castle|Vinárna|Write postcards/i);
+      assert.match(details, /ledgerHash/);
+    });
+
+    await test("source fact persistence failure is one internal event and never aborts extraction", async () => {
+      parserResult = createParserResult();
+      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
+      sourceFactEventFails = false;
+      sourceFactPersistenceFails = true;
+      sourceFactPersistenceCalls.length = 0;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-source-facts-fail/data/extract"
+        ),
+        { params: Promise.resolve({ tripId: "route-source-facts-fail" }) }
+      );
+      const ledgerEvents = events.filter(
+        (event) => event.stage === "source_fact_ledger"
+      );
+      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
+      assert.equal(sourceFactPersistenceCalls.length, 1);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      assert.equal(ledgerEvents.length, 1);
+      assert.equal(ledgerEvents[0]?.status, "failed");
+      assert.equal(
+        (ledgerEvents[0]?.details as Record<string, unknown>).failureClass,
+        "fact_set_insert_failed"
+      );
+      sourceFactPersistenceFails = false;
+    });
+
+    await test("source fact event-store failure never aborts extraction", async () => {
+      parserResult = createParserResult();
+      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
+      sourceFactEventFails = true;
+      sourceFactPersistenceFails = false;
+      sourceFactPersistenceCalls.length = 0;
+      completedCalls.length = 0;
+      failedCalls.length = 0;
+      events.length = 0;
+
+      const response = await POST(
+        new NextRequest(
+          "http://localhost/maker/trips/route-source-fact-event-fail/data/extract"
+        ),
+        {
+          params: Promise.resolve({
+            tripId: "route-source-fact-event-fail",
+          }),
+        }
+      );
+      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
+      assert.equal(sourceFactPersistenceCalls.length, 1);
+      assert.equal(completedCalls.length, 1);
+      assert.equal(failedCalls.length, 0);
+      sourceFactEventFails = false;
+    });
 
     await test("extraction route repairs identity before completing assembly", async () => {
       const broken = clone(createParserResult());

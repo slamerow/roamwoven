@@ -1216,13 +1216,29 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     }));
 
   const applied = applyCanonicalEvidenceResolution(stages, resolution);
+  const evaluationCandidateById = new Map(
+    candidates.map((candidate) => [candidate.candidateId, candidate])
+  );
   const claimEvaluations = resolution.groupings.map((grouping) => {
     const candidateIds = [...new Set(grouping.candidateIds)].sort();
-    const accepted = applied.groupingDecisions.some((decision) =>
-      decision.candidateIds.every((candidateId) =>
-        candidateIds.includes(candidateId)
-      )
+    const executionCandidateIds = candidateIds.filter(
+      (candidateId) =>
+        evaluationCandidateById.get(candidateId)?.evidenceRole !==
+        "grouping_proposal"
     );
+    const accepted =
+      grouping.confidence === "high" &&
+      applied.groupingDecisions.some((decision) => {
+        const acceptedIds = [...decision.candidateIds].sort();
+        return (
+          normalizeText(decision.claim) === normalizeText(grouping.claim) &&
+          acceptedIds.length === executionCandidateIds.length &&
+          acceptedIds.every(
+            (candidateId, index) =>
+              candidateId === executionCandidateIds[index]
+          )
+        );
+      });
     const rejectionCodes: CanonicalEvidenceResolverMetadata["claimEvaluations"][number]["rejectionCodes"] = [];
     if (grouping.confidence !== "high") rejectionCodes.push("low_confidence");
     if (

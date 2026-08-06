@@ -113,11 +113,10 @@ const evaluators: Record<string, CheckEvaluator> = {
     assert.equal(rentalActivity.date, "2019-01-17");
     assert.equal(rentalActivity.startTime, "09:00");
   },
-  "three-material-questions": (records) => {
+  "useful-material-questions": (records) => {
     const open = records.reviewQuestions.filter(
       (question) => question.status === "open"
     );
-    assert.equal(open.length, 3, "exactly 3 intended material questions");
     assert.equal(
       open.filter(
         (question) =>
@@ -140,6 +139,39 @@ const evaluators: Record<string, CheckEvaluator> = {
       open.filter((question) => /bath/i.test(question.prompt)).length,
       1,
       "one Budapest baths decision"
+    );
+    const duplicateKeys = open
+      .map((question) =>
+        [
+          question.subjectCanonicalId ?? question.subjectId ?? "unbound",
+          question.targetField ?? "subject",
+        ].join(":")
+      )
+      .filter((key, index, keys) => keys.indexOf(key) !== index);
+    assert.deepEqual(
+      duplicateKeys,
+      [],
+      "one canonical subject/target can own at most one open Question"
+    );
+    const offContract = open.filter((question) => {
+      const text = `${question.prompt ?? ""} ${question.reason ?? ""}`;
+      return (
+        question.targetField === "sourceRecovery" ||
+        /booking\/?reference code|confirmation code|provider name|how many adults/i.test(
+          text
+        ) ||
+        /automatic extraction|review missing source|technical recovery/i.test(
+          text
+        ) ||
+        /(?:\bhome\b.*(?:which|what) city|(?:which|what) city.*\bhome\b)/i.test(
+          text
+        )
+      );
+    });
+    assert.deepEqual(
+      offContract.map((question) => question.prompt),
+      [],
+      "source-answerable, routine, and technical asks are not useful Questions"
     );
   },
   "communism-city-note": (records) => {

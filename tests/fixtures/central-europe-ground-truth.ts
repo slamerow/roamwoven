@@ -1136,7 +1136,7 @@ export const groundTruthChecks: GroundTruthCheck[] = [
   { contract: "RW-TRV-001", id: "stay-night-coverage", label: "Rome 1 stay spans Jan 13-14; no fabricated Jan 12 stay", status: "enforced" },
   { contract: "RW-TRV-001", id: "eight-travel-cards", label: "8 per-segment travel cards, connections never merged", status: "enforced" },
   { contract: "RW-TRV-001", id: "rental-car-is-activity", label: "Same-day rental car is a timed activity, not transport", status: "enforced" },
-  { contract: "RW-REV-001", id: "three-material-questions", label: "Exactly the 3 intended material Questions are open", status: "enforced" },
+  { contract: "RW-QUE-001", id: "useful-material-questions", label: "Required material Questions exist; source-answerable, duplicate, routine, and technical asks do not", status: "enforced" },
   { contract: "RW-CLS-001", id: "communism-city-note", label: "Museum of Communism: no activity card (never committed)", status: "enforced" },
   { contract: "RW-CLS-001", id: "r2d2-demoted", label: "R2D2 '(far away)' doubt marker: no activity card", status: "enforced" },
   { contract: "RW-CLS-001", id: "pinball-city-note", label: "Pinball Museum twice uncommitted: no activity card", status: "enforced" },

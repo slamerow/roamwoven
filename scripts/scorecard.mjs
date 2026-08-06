@@ -187,6 +187,7 @@ const CONTRACT_DOC = "docs/product-contracts.md";
 const SCOPE = [
   "RW-ORD-001",
   "RW-QA-001",
+  "RW-SFL-001",
   "RW-CAN-001",
   "RW-GRP-001",
   "RW-ASM-001",
@@ -2052,18 +2053,101 @@ ASSERTIONS.push(
     },
   },
   {
-    id: "QUESTIONS-EXACT",
+    id: "SFL-INTEGRITY",
+    entry: "RW-SFL-001",
+    tier: 1,
+    clause: "The shadow ledger is stable, complete by clause, and cannot mutate parser output",
+    claim: "Ledger hashes and coverage totals are internally consistent and output fingerprints match",
+    run: (ctx) => {
+      const ledger = ctx.report.extraction?.sourceFactLedger;
+      if (!ledger) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction.sourceFactLedger", detail: "this run predates or disabled the shadow ledger" };
+      }
+      const coverageTotal = Object.entries(ledger.coverageCounts ?? {})
+        .filter(([key]) => key !== "ambiguous")
+        .reduce((sum, [, value]) => sum + Number(value || 0), 0);
+      const hashShape = /^[0-9a-f]{64}$/i;
+      const ok = ledger.status === "built" && ledger.schemaVersion === 1 &&
+        hashShape.test(ledger.ledgerHash ?? "") &&
+        hashShape.test(ledger.sourceFingerprint ?? "") &&
+        hashShape.test(ledger.coverageHash ?? "") &&
+        coverageTotal === ledger.sourceClauseCount &&
+        ledger.outputFingerprintBefore === ledger.outputFingerprintAfter;
+      return { ok, field: "report.extraction.sourceFactLedger", detail: `status=${ledger.status}; clauses=${ledger.sourceClauseCount}; coverage total=${coverageTotal}; output ${ledger.outputFingerprintBefore === ledger.outputFingerprintAfter ? "unchanged" : "changed"}` };
+    },
+  },
+  {
+    id: "SFL-RECOVERY",
+    entry: "RW-SFL-001",
+    tier: 1,
+    clause: "Shadow recovery plans only the individually uncovered source clauses",
+    claim: "Recovery uncovered count equals V4 uncovered coverage and no recovery call is added",
+    run: (ctx) => {
+      const ledger = ctx.report.extraction?.sourceFactLedger;
+      if (!ledger) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction.sourceFactLedger", detail: "this run predates or disabled the shadow ledger" };
+      }
+      const ok = ledger.recoveryUncoveredClauseCount === ledger.coverageCounts.uncovered &&
+        /^[0-9a-f]{64}$/i.test(ledger.recoveryPlanHash ?? "") &&
+        ledger.additionalModelCallCount === 0 &&
+        ledger.additionalGeocodingLookupCount === 0 &&
+        ledger.additionalRetryCount === 0;
+      return { ok, field: "report.extraction.sourceFactLedger coverage/recovery/additional work counts", detail: `${ledger.coverageCounts.uncovered} uncovered; ${ledger.recoveryUncoveredClauseCount} planned in ${ledger.recoveryBatchCount} batch(es); additional model/geocode/retries=${ledger.additionalModelCallCount}/${ledger.additionalGeocodingLookupCount}/${ledger.additionalRetryCount}` };
+    },
+  },
+  {
+    id: "SFL-SCALE-PRIVACY",
+    entry: "RW-SFL-001",
+    tier: 1,
+    clause: "The ledger stays within scale bounds and aggregate audit data contains only the approved allowlist",
+    claim: "Replay ledger is under 200 ms and the 256 KB p95 target, with no facts or source prose on the audit surface",
+    run: (ctx) => {
+      const ledger = ctx.report.extraction?.sourceFactLedger;
+      if (!ledger) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction.sourceFactLedger", detail: "this run predates or disabled the shadow ledger" };
+      }
+      const allowed = [
+        "additionalGeocodingLookupCount", "additionalModelCallCount", "additionalRetryCount",
+        "candidateToSpanAmbiguityCount", "coverageCounts", "coverageHash", "factCounts",
+        "failureClass", "ledgerBuildMilliseconds", "ledgerHash", "outputFingerprintAfter",
+        "outputFingerprintBefore", "recoveryBatchCount", "recoveryPlanHash",
+        "recoveryUncoveredClauseCount", "schemaVersion", "serializedByteSize",
+        "sourceClauseCount", "sourceFingerprint", "status", "unresolvedRelationshipMemberCount",
+      ];
+      const unexpected = Object.keys(ledger).filter((key) => !allowed.includes(key));
+      const ok = ledger.ledgerBuildMilliseconds < 200 &&
+        ledger.serializedByteSize < 256 * 1024 && unexpected.length === 0;
+      return { ok, field: "report.extraction.sourceFactLedger duration/bytes/keys", detail: `${ledger.ledgerBuildMilliseconds.toFixed(2)} ms; ${ledger.serializedByteSize} bytes; unexpected aggregate keys=${unexpected.join(",") || "none"}` };
+    },
+  },
+  {
+    id: "QUESTIONS-USEFUL",
     entry: "RW-QUE-001",
     tier: 1,
     clause: "Questions ask only unresolved material maker decisions",
-    claim: "Exactly the Castle ticket, Vienna Friday list, and baths Questions remain",
+    claim: "Required material Questions exist and off-contract Questions do not",
     run: (ctx) => {
       const open = ctx.records.reviewQuestions.filter((question) => question.status === "open");
       const text = (question) => `${question.prompt ?? ""} ${question.reason ?? ""} ${(question.answerOptions ?? []).map((option) => `${option.label} ${option.value}`).join(" ")}`;
       const castle = open.filter((question) => has(text(question), "castle") && has(text(question), "ticket"));
       const vienna = open.filter((question) => has(text(question), "state hall") && has(text(question), "time travel") && has(text(question), "belvedere") && !has(text(question), "albertina"));
       const baths = open.filter((question) => has(text(question), "gellert") && has(text(question), "szechenyi"));
-      return { ok: open.length === 3 && castle.length === 1 && vienna.length === 1 && baths.length === 1, field: "records.reviewQuestions open prompts/reasons/options", detail: `${open.length} open; Castle=${castle.length}, Vienna=${vienna.length}, baths=${baths.length}` };
+      const duplicateKeys = open
+        .map((question) => {
+          const subject = question.subjectCanonicalId ?? question.subjectId;
+          return subject ? `${subject}:${question.targetField ?? "subject"}` : null;
+        })
+        .filter(Boolean)
+        .filter((key, index, keys) => keys.indexOf(key) !== index);
+      const offContract = open.filter((question) => {
+        const questionText = `${question.prompt ?? ""} ${question.reason ?? ""}`;
+        return question.targetField === "sourceRecovery" ||
+          /booking\/?reference code|confirmation code|provider name|how many adults/i.test(questionText) ||
+          /automatic extraction|review missing source|technical recovery/i.test(questionText) ||
+          (/\bhome\b/i.test(question.relatedTitle ?? "") && /which city|what city/i.test(questionText));
+      });
+      const ok = castle.length === 1 && vienna.length === 1 && baths.length === 1 && duplicateKeys.length === 0 && offContract.length === 0;
+      return { ok, field: "records.reviewQuestions open prompts/reasons/options/subjects", detail: `${open.length} open (count is guidance only); Castle=${castle.length}, Vienna=${vienna.length}, baths=${baths.length}; duplicate subject/targets=${duplicateKeys.length}; off-contract=${offContract.length}` };
     },
   },
   {

@@ -449,6 +449,55 @@ export default function run() {
     assert.equal(summary.extractionSampling?.strippedCallCount, 9);
   });
 
+  test("Loop 8 source fact ledger telemetry survives the audit allowlist without facts", () => {
+    const summary = createExtractionSummary({
+      sourceFactLedger: {
+        additionalGeocodingLookupCount: 0,
+        additionalModelCallCount: 0,
+        additionalRetryCount: 0,
+        candidateToSpanAmbiguityCount: 2,
+        coverageCounts: {
+          ambiguous: 2,
+          carried: 10,
+          context_only: 3,
+          excluded: 1,
+          structural_only: 4,
+          uncovered: 2,
+        },
+        coverageHash: "coverage-hash",
+        factCounts: {
+          decision: 1,
+          entity: 10,
+          exclusion: 1,
+          intent: 8,
+          relationship: 4,
+        },
+        facts: [{ title: "must not survive" }],
+        ledgerBuildMilliseconds: 17,
+        ledgerHash: "ledger-hash",
+        outputFingerprintAfter: "output-hash",
+        outputFingerprintBefore: "output-hash",
+        recoveryBatchCount: 1,
+        recoveryPlanHash: "recovery-hash",
+        recoveryUncoveredClauseCount: 2,
+        schemaVersion: 1,
+        serializedByteSize: 4096,
+        sourceClauseCount: 22,
+        sourceExcerpt: "must not survive",
+        sourceFingerprint: "source-hash",
+        status: "built",
+        unresolvedRelationshipMemberCount: 4,
+      },
+    });
+    assert.equal(summary.sourceFactLedger?.coverageCounts.structural_only, 4);
+    assert.equal(summary.sourceFactLedger?.outputFingerprintBefore, "output-hash");
+    assert.doesNotMatch(JSON.stringify(summary), /must not survive/i);
+    assert.equal(
+      "facts" in (summary.sourceFactLedger as Record<string, unknown>),
+      false
+    );
+  });
+
   test("8.3 a dismissed detail becomes a dismissed question record carrying its reason", () => {
     const questions = createReviewQuestions({
       draft: {
