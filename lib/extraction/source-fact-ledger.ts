@@ -12,6 +12,7 @@ import {
   type SourceSpanRefV1,
 } from "@/lib/extraction/source-document-index";
 import { distinctiveLineTokens } from "@/lib/extraction/source-coverage";
+import { isExcludedPlanningCostLine } from "@/lib/extraction/source-coverage";
 import { normalizeText } from "@/lib/extraction/traveler-text";
 import {
   hasCommitmentLanguage,
@@ -330,6 +331,7 @@ function alignmentPayload(alignment: SourceAlignmentV1) {
     ? { method: alignment.method, status: alignment.status }
     : {
         ambiguityCount: alignment.plausibleSpanIds.length,
+        plausibleSpanIds: alignment.plausibleSpanIds,
         reason: alignment.reason,
         status: alignment.status,
       };
@@ -425,33 +427,57 @@ function relationshipTypeFor(
   return "contains";
 }
 
-function sameSourceSection(
-  index: SourceDocumentIndexV1,
-  left: CandidateRecord,
-  right: CandidateRecord
-) {
-  const leftSpans = left.alignment.sourceSpanIds
-    .map((spanId) => index.lookups.spanById.get(spanId))
-    .filter((span): span is SourceDocumentSpanV1 => Boolean(span));
-  const rightSpans = right.alignment.sourceSpanIds
-    .map((spanId) => index.lookups.spanById.get(spanId))
-    .filter((span): span is SourceDocumentSpanV1 => Boolean(span));
-  return leftSpans.some((leftSpan) =>
-    rightSpans.some(
-      (rightSpan) =>
-        leftSpan.sourceIdentityHash === rightSpan.sourceIdentityHash &&
-        leftSpan.normalizedSectionLabel === rightSpan.normalizedSectionLabel
-    )
-  );
+type RelationshipCandidateLookups = {
+  candidatesBySectionToken: Map<string, CandidateRecord[]>;
+  candidatesBySpanId: Map<string, CandidateRecord[]>;
+};
+
+function sourceSectionKey(span: SourceDocumentSpanV1) {
+  return `${span.sourceIdentityHash}:${span.normalizedSectionLabel ?? ""}`;
+}
+
+function buildRelationshipCandidateLookups({
+  candidates,
+  facts,
+  index,
+}: {
+  candidates: CandidateRecord[];
+  facts: Map<string, SourceFactV1>;
+  index: SourceDocumentIndexV1;
+}): RelationshipCandidateLookups {
+  const candidatesBySectionToken = new Map<string, CandidateRecord[]>();
+  const candidatesBySpanId = new Map<string, CandidateRecord[]>();
+  for (const candidate of candidates) {
+    const fact = candidate.primaryFactId
+      ? facts.get(candidate.primaryFactId)
+      : null;
+    if (fact?.kind !== "entity") continue;
+    for (const spanId of candidate.alignment.sourceSpanIds) {
+      const span = index.lookups.spanById.get(spanId);
+      if (!span) continue;
+      candidatesBySpanId.set(spanId, [
+        ...(candidatesBySpanId.get(spanId) ?? []),
+        candidate,
+      ]);
+      for (const token of new Set(distinctiveLineTokens(candidate.normalizedTitle))) {
+        const key = `${sourceSectionKey(span)}:${token}`;
+        candidatesBySectionToken.set(key, [
+          ...(candidatesBySectionToken.get(key) ?? []),
+          candidate,
+        ]);
+      }
+    }
+  }
+  return { candidatesBySectionToken, candidatesBySpanId };
 }
 
 function relationMembersForProposal({
-  candidates,
   index,
+  lookups,
   proposal,
 }: {
-  candidates: CandidateRecord[];
   index: SourceDocumentIndexV1;
+  lookups: RelationshipCandidateLookups;
   proposal: CandidateRecord;
 }) {
   const proposalText = normalizeText(
@@ -463,24 +489,39 @@ function relationMembersForProposal({
       .filter(Boolean)
       .join(" ")
   );
-  const allowedSpanIds = stageSpanIds(index, proposal.stage);
-  const describedSpanIds = allowedSpanIds.filter((spanId) => {
-    const clause = index.lookups.spanById.get(spanId)?.normalizedClause ?? "";
-    return clause.length >= 3 && proposalText.includes(clause);
-  });
+  const allowedSpanIds = new Set(stageSpanIds(index, proposal.stage));
+  const describedSpanIds = [
+    ...new Set(
+      distinctiveLineTokens(proposalText).flatMap((token) =>
+        (index.lookups.spanIdsByToken.get(token) ?? []).filter((spanId) => {
+          if (!allowedSpanIds.has(spanId)) return false;
+          const clause =
+            index.lookups.spanById.get(spanId)?.normalizedClause ?? "";
+          return clause.length >= 3 && proposalText.includes(clause);
+        })
+      )
+    ),
+  ];
+  const proposalSectionKeys = new Set(
+    proposal.alignment.sourceSpanIds
+      .map((spanId) => index.lookups.spanById.get(spanId))
+      .filter((span): span is SourceDocumentSpanV1 => Boolean(span))
+      .map(sourceSectionKey)
+  );
   const entityCandidates = [
     ...new Map(
-      candidates
-        .filter(
-          (candidate) =>
-            candidate !== proposal &&
-            candidate.primaryFactId &&
-            candidate.candidateClass !== "decision" &&
-            candidate.candidateClass !== "protected_detail" &&
-            stringValue(candidate.record, "evidenceRole") !==
-              "grouping_proposal" &&
-            sameSourceSection(index, proposal, candidate)
+      [
+        ...describedSpanIds.flatMap(
+          (spanId) => lookups.candidatesBySpanId.get(spanId) ?? []
+        ),
+        ...distinctiveLineTokens(proposal.normalizedTitle).flatMap((token) =>
+          [...proposalSectionKeys].flatMap(
+            (sectionKey) =>
+              lookups.candidatesBySectionToken.get(`${sectionKey}:${token}`) ?? []
+          )
         )
+      ]
+        .filter((candidate) => candidate.primaryFactId)
         .map((candidate) => [candidate.primaryFactId!, candidate])
     ).values(),
   ];
@@ -621,12 +662,21 @@ export function buildSourceFactLedgerV1({
   }
 
   // Structural proposals are facts of relationship, never entity aliases.
+  const relationshipLookups = buildRelationshipCandidateLookups({
+    candidates,
+    facts,
+    index,
+  });
   for (const proposal of candidates.filter(
     (candidate) =>
       candidate.candidateClass === "activity" &&
       stringValue(candidate.record, "evidenceRole") === "grouping_proposal"
   )) {
-    const members = relationMembersForProposal({ candidates, index, proposal });
+    const members = relationMembersForProposal({
+      index,
+      lookups: relationshipLookups,
+      proposal,
+    });
     const fact = createFact(facts, {
       kind: "relationship",
       payload: {
@@ -736,6 +786,35 @@ export function buildSourceFactLedgerV1({
       sourceSpanIds,
     });
     addEdges(edges, fact, "structural_only");
+  }
+
+  // Shared deterministic source rules own exclusions and structural day
+  // context. They observe source meaning without inventing traveler entities.
+  for (const span of index.spans) {
+    if (isExcludedPlanningCostLine(span.normalizedClause)) {
+      createFact(facts, {
+        kind: "exclusion",
+        payload: {
+          exclusionCode: "planning_cost",
+          rule: "shared_planning_cost_predicate",
+        },
+        producer: "deterministic_source",
+        sourceSpanIds: [span.spanId],
+      });
+      continue;
+    }
+    if (span.isDayHeading) {
+      const fact = createFact(facts, {
+        kind: "relationship",
+        payload: {
+          relationshipType: "attribute_of",
+          status: "source_declared_section_context",
+        },
+        producer: "deterministic_source",
+        sourceSpanIds: [span.spanId],
+      });
+      addEdges(edges, fact, "context_only");
+    }
   }
 
   const factList = [...facts.values()].sort((left, right) =>

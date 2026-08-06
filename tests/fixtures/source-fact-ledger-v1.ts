@@ -25,6 +25,9 @@ export const sourceFactFixtureMaterial = {
     "Apple Strudel Show",
     "Panorama Train",
     "maybe Museum of Communism",
+    "Old tram colors",
+    "Budget: $900",
+    "Write postcards before leaving",
   ].join("\n"),
   type: "note",
 } as const;
@@ -115,6 +118,9 @@ export function sourceFactFixture(
       "maybe Museum of Communism",
       vienna
     ),
+    activity("Old tram colors", "Old tram colors", vienna, {
+      evidenceRole: "context",
+    }),
   ];
   const allSpanIds = index.spans.map((span) => span.spanId);
   const stage: EvidenceStageInput = {

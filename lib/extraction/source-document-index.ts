@@ -31,6 +31,7 @@ export type SourceSpanRefV1 = {
 
 export type SourceDocumentSpanV1 = SourceSpanRefV1 & {
   /** In-memory alignment value. Never copy this field into the persisted ledger. */
+  isDayHeading: boolean;
   normalizedClause: string;
   normalizedDocumentIdentity: string;
   normalizedSectionLabel: string | null;
@@ -180,6 +181,7 @@ export function buildSourceDocumentIndexV1(
         spans.push({
           clauseOrdinal,
           excerptDigest,
+          isDayHeading: isDayHeadingLine(cleanLine),
           lineOccurrence,
           materialFingerprint: row.materialFingerprint,
           normalizedClause,
@@ -266,6 +268,7 @@ export function sourceSpanRefsV1(
 ): SourceSpanRefV1[] {
   return index.spans.map(
     ({
+      isDayHeading: _isDayHeading,
       normalizedClause: _normalizedClause,
       normalizedDocumentIdentity: _normalizedDocumentIdentity,
       normalizedSectionLabel: _normalizedSectionLabel,
