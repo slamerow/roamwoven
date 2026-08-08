@@ -1,8 +1,17 @@
 # Roamwoven Product Contracts
 
-Ledger version: 31
+Ledger version: 32
 
-Ledger date: 2026-08-07 (Source Fact Ledger V1 contract and Question-quality
+Ledger date: 2026-08-09 (Assembly Decision & Carrier Ledger V1 contract. The
+approved Loop 9 companion ledger observes the existing canonical pipeline from
+source fact through assembly decision to a final hash-only carrier or explicit
+type-valid terminal state. It is shadow-only, append-only, default-off, and
+dependent on an exactly matching persisted Source Fact Ledger V1 row. It may
+not change traveler output, canonical authority, model or recovery requests,
+geocoding, or live-call volume. Source Fact Ledger V1 remains immutable. Work
+order: `docs/assembly-decision-carrier-ledger-v1-work-order-2026-08-07.md`.)
+
+Prior: ledger version 31 (2026-08-07) — (Source Fact Ledger V1 contract and Question-quality
 correction. Source facts become an immutable, source-derived boundary before
 classification, containment, identity, grouping, review, or publication can
 reinterpret them. V1 is shadow-only: it may compute, persist, audit, and score
@@ -709,6 +718,71 @@ path is bypassed.
   `tests/source-fact-ledger-sql.test.ts`,
   `tests/extraction-route-recovery.test.ts`,
   `tests/arc-f-telemetry.test.ts`
+
+## RW-ADL-001 — Assembly decisions terminate in checkable carriers or states
+
+- Status: `LOCKED`
+- Decision date: `2026-08-09`
+- Enforcement: `PARTIAL`
+- Contract: Source Fact Ledger V1 is immutable. A separate append-only
+  `AssemblyDecisionCarrierLedgerV1` observes the current canonical authority
+  without changing it and joins `source span → source fact → assembly decision
+  → final carrier or explicit terminal state`.
+
+  Every raw resolver role proposal is retained exactly once as `applied`,
+  `supporting`, or `rejected`. A consistent duplicate is supporting evidence,
+  not a false rejection. Conflicts, low confidence, unknown candidates, and
+  unresolved source bindings stay explicit. Raw reason prose and transient
+  candidate, stage, chunk, parser-array, observation, and mutable canonical
+  identifiers are in-memory joins only and may never become durable identity.
+
+  Decisions cover classification, containment, identity, grouping, review, and
+  publish projection in the locked RW-ORD-001 order. Stable decision identity
+  is content-addressed from source fact/span references, domain, outcome,
+  producer, and writer version. Resolver response order, chunk order, overlap,
+  split size, and concurrency may not change durable IDs or hashes.
+
+  Every V1 source fact has exactly one type-valid terminal disposition. Entity
+  facts terminate as `carried`, `evidence_only`, or `unresolved`; relationship
+  facts as `applied`, `rejected`, or `unresolved`; intent facts as `applied`,
+  `superseded`, or `unresolved`; decision facts as `review`,
+  `resolved_silently`, `dismissed`, or `unresolved`; and exclusion facts as
+  `excluded`. A group child keeps its own carrier. A suppressed duplicate
+  forwards to a survivor or records an explicit non-carrier reason. No later
+  decision domain may silently delete a fact justified by an earlier domain.
+
+  Final carriers use class-specific hash-only anchors. Persisted and aggregate
+  event data contain no title, excerpt, person, address, protected value,
+  booking value, model reason, or transient candidate ID. The runtime builder
+  is an indexed linear pass; exhaustive resolver ablation is an offline release
+  gate and never runs on a customer route.
+
+  The companion is default-off behind
+  `ASSEMBLY_DECISION_LEDGER_SHADOW=1`. It requires
+  `EXTRACTION_FACT_LEDGER_SHADOW=1` and an inserted or hash-confirmed matching
+  source-fact row. A missing/failed dependency, construction mismatch, or
+  persistence failure emits one privacy-safe internal event, performs no
+  orphan insert, makes no Question or Call, and leaves the usable draft exact.
+  It never silently enables either flag. The complete shadow path adds one
+  decision-set insert after assembly, for two bounded append-only writes total.
+
+  This ledger does not authorize resolver removal. An authority switch requires
+  a later behavior loop that proves every behavior-bearing judgment from source
+  facts, reaches zero unresolved behavior-bearing decisions, preserves every
+  carrier and ground-truth relationship/intent outcome, and reproduces the
+  current route-equivalent output before removing the resolver in that same
+  bounded loop.
+- Evidence: Loop 8 exit audit found 161 accepted resolver role decisions on the
+  8.6 candidate and 113 on fresh 8.7, with 223 and 150 raw proposals
+  respectively. Individual offline ablation found 18 and 5 behavior-bearing
+  decisions. Disabling the resolver changed both semantic hashes and materially
+  reduced grouping/Calls while geocode candidate pools stayed exact. Loop 9.1
+  locks the companion schema, stable-ID rules, privacy allowlist, terminal
+  outcome families, immutable Source Fact V1 fixture hash, and those sanitized
+  baselines. Runtime construction, reconciliation, offline counterfactual gates,
+  and append-only persistence remain to be completed in commits 9.2–9.5; the
+  enforcement label is therefore honestly `PARTIAL`.
+- Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
