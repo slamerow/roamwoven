@@ -92,6 +92,7 @@
 // line they came from, and the harness verifies the citation still resolves to
 // the expected text. A disputed FAIL is settled by reading one line.
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
@@ -2121,6 +2122,79 @@ ASSERTIONS.push(
     },
   },
   {
+    id: "ADL-INTEGRITY",
+    entry: "RW-ADL-001",
+    tier: 1,
+    clause: "Every source fact terminates once in a stable decision/carrier graph",
+    claim: "Decision hashes, fact dispositions, and output fingerprints are internally consistent",
+    run: (ctx) => {
+      const decision = ctx.report.extraction?.assemblyDecisionLedger;
+      const source = ctx.report.extraction?.sourceFactLedger;
+      if (!decision) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction.assemblyDecisionLedger", detail: "this run predates or disabled the decision ledger" };
+      }
+      const sourceFactCount = source
+        ? Object.values(source.factCounts ?? {}).reduce((sum, value) => sum + Number(value || 0), 0)
+        : 0;
+      const dispositionCount = Object.values(decision.countsByDisposition ?? {})
+        .reduce((sum, value) => sum + Number(value || 0), 0);
+      const hashShape = /^[0-9a-f]{64}$/i;
+      const ok = decision.status === "built" && decision.schemaVersion === 1 &&
+        decision.writerVersion === 1 && hashShape.test(decision.decisionSetHash ?? "") &&
+        hashShape.test(decision.sourceFactLedgerHash ?? "") &&
+        dispositionCount === sourceFactCount &&
+        decision.outputFingerprintBefore === decision.outputFingerprintAfter;
+      return { ok, field: "report.extraction.assemblyDecisionLedger hashes/dispositions/output", detail: `status=${decision.status}; dispositions=${dispositionCount}/${sourceFactCount}; output ${decision.outputFingerprintBefore === decision.outputFingerprintAfter ? "unchanged" : "changed"}` };
+    },
+  },
+  {
+    id: "ADL-DEPENDENCY-ZERO-WORK",
+    entry: "RW-ADL-001",
+    tier: 1,
+    clause: "The companion requires the exact Source Fact ledger and adds no model, geocode, or retry work",
+    claim: "Decision dependency hash matches and all added external-work counters are zero",
+    run: (ctx) => {
+      const decision = ctx.report.extraction?.assemblyDecisionLedger;
+      const source = ctx.report.extraction?.sourceFactLedger;
+      if (!decision || !source) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction assembly/source ledgers", detail: "one or both shadow ledgers are disabled" };
+      }
+      const ok = decision.sourceFactLedgerHash === source.ledgerHash &&
+        decision.additionalModelCallCount === 0 &&
+        decision.additionalGeocodingLookupCount === 0 &&
+        decision.additionalRetryCount === 0;
+      return { ok, field: "report.extraction.assemblyDecisionLedger dependency/additional work", detail: `dependency=${decision.sourceFactLedgerHash === source.ledgerHash ? "exact" : "mismatch"}; additional model/geocode/retries=${decision.additionalModelCallCount}/${decision.additionalGeocodingLookupCount}/${decision.additionalRetryCount}` };
+    },
+  },
+  {
+    id: "ADL-SCALE-PRIVACY",
+    entry: "RW-ADL-001",
+    tier: 1,
+    clause: "Terminal reconciliation stays within commercial bounds and exposes aggregate telemetry only",
+    claim: "Decision build is under 100 ms, compact bytes are under 256 KiB, combined bytes under 512 KiB, and QA keys are allowlisted",
+    run: (ctx) => {
+      const decision = ctx.report.extraction?.assemblyDecisionLedger;
+      const source = ctx.report.extraction?.sourceFactLedger;
+      if (!decision || !source) {
+        return { state: "NOT_CHECKABLE", field: "report.extraction assembly/source ledgers", detail: "one or both shadow ledgers are disabled" };
+      }
+      const allowed = [
+        "additionalGeocodingLookupCount", "additionalModelCallCount", "additionalRetryCount",
+        "ambiguousCount", "buildMilliseconds", "byteSize", "countsByDecisionDomain",
+        "countsByDisposition", "countsByProducer", "countsByReconciliationOutcome",
+        "countsByRejectionCode", "countsBySourceLane", "decisionSetHash", "failureClass",
+        "outputFingerprintAfter", "outputFingerprintBefore", "persistenceStatus",
+        "schemaVersion", "sourceFactLedgerHash", "status", "unresolvedCount", "writerVersion",
+      ];
+      const unexpected = Object.keys(decision).filter((key) => !allowed.includes(key));
+      const combinedBytes = decision.byteSize + source.serializedByteSize;
+      const ok = decision.buildMilliseconds < 100 && decision.byteSize < 256 * 1024 &&
+        decision.byteSize < 1024 * 1024 && combinedBytes < 512 * 1024 &&
+        unexpected.length === 0;
+      return { ok, field: "report.extraction.assemblyDecisionLedger duration/bytes/keys", detail: `${decision.buildMilliseconds.toFixed(2)} ms; ${decision.byteSize} decision bytes; ${combinedBytes} combined bytes; unexpected aggregate keys=${unexpected.join(",") || "none"}` };
+    },
+  },
+  {
     id: "QUESTIONS-USEFUL",
     entry: "RW-QUE-001",
     tier: 1,
@@ -3004,6 +3078,63 @@ async function runExtractionAndAssembly({
     sourceEvidenceArtifacts: result.evidenceArtifacts,
     tripId,
   });
+  if (
+    process.env.ASSEMBLY_DECISION_LEDGER_SHADOW === "1" &&
+    process.env.EXTRACTION_FACT_LEDGER_SHADOW === "1" &&
+    result.sourceFactLedger?.status === "built"
+  ) {
+    const decisionBuilder = require2(
+      path.join(
+        rootDir,
+        "lib/extraction/assembly-decision-carrier-builder.ts"
+      )
+    );
+    const decisionStore = require2(
+      path.join(
+        rootDir,
+        "lib/extraction/assembly-decision-carrier-ledger-store.ts"
+      )
+    );
+    const sourceIndex = require2(
+      path.join(rootDir, "lib/extraction/source-document-index.ts")
+    );
+    const shadow = result.sourceFactLedger;
+    const outputFingerprintBefore = sourceIndex.hashStableValue({
+      draft: corridor.assembly.draft,
+      records: corridor.assembly.records,
+    });
+    const build = decisionBuilder.buildAssemblyDecisionCarrierLedgerV1({
+      index: shadow.companionContext.sourceDocumentIndex,
+      observations: corridor.observations,
+      pieces: corridor.pieces,
+      records: corridor.assembly.records,
+      recoverySourceBindings:
+        shadow.companionContext.recoverySourceBindings,
+      resolverMetadata: shadow.companionContext.resolverMetadata,
+      sourceLedger: shadow.ledger,
+      stages: shadow.companionContext.stages,
+    });
+    const outputFingerprintAfter = sourceIndex.hashStableValue({
+      draft: corridor.assembly.draft,
+      records: corridor.assembly.records,
+    });
+    assert.equal(
+      outputFingerprintAfter,
+      outputFingerprintBefore,
+      "scorecard decision-ledger dry run may not mutate terminal output"
+    );
+    const telemetry = decisionStore.createAssemblyDecisionLedgerTelemetryV1({
+      build,
+      outputFingerprintAfter,
+      outputFingerprintBefore,
+    });
+    corridor.assessment.report.extraction.assemblyDecisionLedger = {
+      ...telemetry,
+      failureClass: null,
+      persistenceStatus: "dry_run",
+      status: "built",
+    };
+  }
   return {
     assembly: corridor.assembly,
     assessment: corridor.assessment,

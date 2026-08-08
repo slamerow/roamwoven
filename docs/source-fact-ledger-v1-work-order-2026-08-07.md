@@ -1,8 +1,8 @@
 # Roamwoven next coding loop: Source Fact Ledger V1
 
-Date: 2026-08-07 (Asia/Tokyo)  
-Starting commit: `c6f81d6720b15f193e101644fe249a1668918e2c`  
-Scope: extraction boundary and observability  
+Date: 2026-08-07 (Asia/Tokyo)
+Starting commit: `c6f81d6720b15f193e101644fe249a1668918e2c`
+Scope: extraction boundary and observability
 Production behavior: unchanged in this loop
 
 ## CTO decision

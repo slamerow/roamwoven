@@ -409,6 +409,30 @@ export type TripExtractionAuditReport = {
       rescued: number;
       succeeded: number;
     } | null;
+    assemblyDecisionLedger: {
+      additionalGeocodingLookupCount: number;
+      additionalModelCallCount: number;
+      additionalRetryCount: number;
+      ambiguousCount: number;
+      buildMilliseconds: number;
+      byteSize: number;
+      countsByDecisionDomain: Record<string, number>;
+      countsByDisposition: Record<string, number>;
+      countsByProducer: Record<string, number>;
+      countsByReconciliationOutcome: Record<string, number>;
+      countsByRejectionCode: Record<string, number>;
+      countsBySourceLane: Record<string, number>;
+      decisionSetHash: string | null;
+      failureClass: string | null;
+      outputFingerprintAfter: string | null;
+      outputFingerprintBefore: string | null;
+      persistenceStatus: string | null;
+      schemaVersion: number;
+      sourceFactLedgerHash: string | null;
+      status: string;
+      unresolvedCount: number;
+      writerVersion: number;
+    } | null;
     sourceCoverage: {
       crossStageCoveredLineCount: number;
       daySectionCount: number;

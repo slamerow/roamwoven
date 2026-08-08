@@ -12,6 +12,7 @@ import {
   createResolverRoleEvaluationIdV1,
   digestResolverReasonV1,
   finalizeAssemblyDecisionCarrierSetV1,
+  resolverRoleEvaluationBindingStatusV1,
   type AssemblyDecisionCarrierSetV1,
   type AssemblyDecisionV1,
   type FactTerminalDispositionV1,
@@ -135,6 +136,44 @@ export default function run() {
   };
   const evaluationId = createResolverRoleEvaluationIdV1(evaluationInput);
   assert.equal(evaluationId, createResolverRoleEvaluationIdV1(evaluationInput));
+  assert.notEqual(
+    evaluationId,
+    createResolverRoleEvaluationIdV1({
+      ...evaluationInput,
+      indistinguishableOccurrenceOrdinal: 1,
+    }),
+    "indistinguishable raw proposals retain deterministic multiplicity"
+  );
+  assert.equal(
+    resolverRoleEvaluationBindingStatusV1({
+      subjectFactIds: [firstFact.factId],
+      unresolvedSourceSpanIds: [],
+    }),
+    "source_fact"
+  );
+  assert.equal(
+    resolverRoleEvaluationBindingStatusV1({
+      subjectFactIds: [],
+      unresolvedSourceSpanIds: [fixture.index.spans[0].spanId],
+    }),
+    "source_span"
+  );
+  assert.equal(
+    resolverRoleEvaluationBindingStatusV1({
+      subjectFactIds: [],
+      unresolvedSourceSpanIds: [],
+    }),
+    "unresolved",
+    "no invented reference is an explicit unresolved binding"
+  );
+  assert.throws(
+    () =>
+      resolverRoleEvaluationBindingStatusV1({
+        subjectFactIds: [firstFact.factId],
+        unresolvedSourceSpanIds: [fixture.index.spans[0].spanId],
+      }),
+    /mixes fact and unresolved-span bindings/
+  );
 
   const decisions: AssemblyDecisionV1[] = sourceLedger.factSet.facts.map(
     (fact) => {

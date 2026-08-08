@@ -329,6 +329,14 @@ function buildResolverEvaluations({
         : []
     )
   );
+  // Two raw proposals can become intentionally indistinguishable after their
+  // forbidden transient candidate IDs are dropped (for example, overlapping
+  // chunks that resolve to the same source fact). Preserve the raw
+  // multiplicity with a deterministic ordinal over the durable identity. The
+  // entries are otherwise identical, so response order can only exchange
+  // which transient proposal receives an ordinal; it cannot change the
+  // persisted ID set or hash.
+  const occurrenceOrdinalByDurableIdentity = new Map<string, number>();
 
   return (resolverMetadata?.roleEvaluations ?? [])
     .map((evaluation): ResolverRoleEvaluationV1 => {
@@ -366,9 +374,20 @@ function buildResolverEvaluations({
         subjectFactIds,
         unresolvedSourceSpanIds,
       };
+      const durableIdentity = stableJsonStringify(input);
+      const indistinguishableOccurrenceOrdinal =
+        occurrenceOrdinalByDurableIdentity.get(durableIdentity) ?? 0;
+      occurrenceOrdinalByDurableIdentity.set(
+        durableIdentity,
+        indistinguishableOccurrenceOrdinal + 1
+      );
+      const evaluationId = createResolverRoleEvaluationIdV1({
+        ...input,
+        indistinguishableOccurrenceOrdinal,
+      });
       return {
         confidence: input.confidence,
-        evaluationId: createResolverRoleEvaluationIdV1(input),
+        evaluationId,
         proposedRole: input.proposedRole,
         reasonDigest,
         reconciliationOutcome: input.reconciliationOutcome,

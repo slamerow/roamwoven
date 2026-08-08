@@ -43,6 +43,11 @@ export type ResolverRoleEvaluationV1 = {
   sourceLane: ResolverSourceLaneV1;
 };
 
+export type ResolverRoleEvaluationBindingStatusV1 =
+  | "source_fact"
+  | "source_span"
+  | "unresolved";
+
 export type AssemblyDecisionV1 = {
   decisionId: string;
   domain: AssemblyDecisionDomainV1;
@@ -165,9 +170,34 @@ export function digestResolverReasonV1(reason: string) {
   return hashStableValue({ reason }).slice(0, 40);
 }
 
+/**
+ * The persisted arrays encode one of three mutually exclusive binding states.
+ * Keeping this derived avoids a redundant field that could drift from the
+ * actual references while still making a no-safe-reference outcome explicit.
+ */
+export function resolverRoleEvaluationBindingStatusV1(
+  evaluation: Pick<
+    ResolverRoleEvaluationV1,
+    "subjectFactIds" | "unresolvedSourceSpanIds"
+  >
+): ResolverRoleEvaluationBindingStatusV1 {
+  if (
+    evaluation.subjectFactIds.length > 0 &&
+    evaluation.unresolvedSourceSpanIds.length > 0
+  ) {
+    throw new Error(
+      "Assembly decision resolver evaluation mixes fact and unresolved-span bindings."
+    );
+  }
+  if (evaluation.subjectFactIds.length > 0) return "source_fact";
+  if (evaluation.unresolvedSourceSpanIds.length > 0) return "source_span";
+  return "unresolved";
+}
+
 export function createResolverRoleEvaluationIdV1({
   confidence,
   duplicateOrdinal,
+  indistinguishableOccurrenceOrdinal = 0,
   proposedRole,
   reasonDigest,
   reconciliationOutcome,
@@ -178,11 +208,13 @@ export function createResolverRoleEvaluationIdV1({
   unresolvedSourceSpanIds,
 }: Omit<ResolverRoleEvaluationV1, "evaluationId"> & {
   duplicateOrdinal: number;
+  indistinguishableOccurrenceOrdinal?: number;
   stableWindowDigest: string;
 }) {
   return `evaluation_${hashStableValue({
     confidence,
     duplicateOrdinal,
+    indistinguishableOccurrenceOrdinal,
     proposedRole,
     reasonDigest,
     reconciliationOutcome,
@@ -340,6 +372,7 @@ export function assertAssemblyDecisionCarrierSetV1({
       throw new Error("Assembly decision ledger contains a duplicate evaluation id.");
     }
     evaluationIds.add(evaluation.evaluationId);
+    resolverRoleEvaluationBindingStatusV1(evaluation);
     for (const factId of evaluation.subjectFactIds) {
       if (!factById.has(factId)) {
         throw new Error("Assembly decision ledger contains a dangling evaluation fact.");

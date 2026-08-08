@@ -498,6 +498,58 @@ export default function run() {
     );
   });
 
+  test("Loop 9 assembly decision telemetry survives the audit allowlist without private or candidate data", () => {
+    const summary = createExtractionSummary({
+      assemblyDecisionLedger: {
+        additionalGeocodingLookupCount: 0,
+        additionalModelCallCount: 0,
+        additionalRetryCount: 0,
+        ambiguousCount: 2,
+        buildMilliseconds: 19,
+        byteSize: 8192,
+        candidateId: "candidate-must-not-survive",
+        countsByDecisionDomain: {
+          classification: 10,
+          "Private Museum Title": 999,
+        },
+        countsByDisposition: { "entity:carried": 8 },
+        countsByProducer: { deterministic_assembly: 12, resolver: 3 },
+        countsByReconciliationOutcome: {
+          applied: 2,
+          rejected: 1,
+          supporting: 0,
+        },
+        countsByRejectionCode: { low_confidence: 1 },
+        countsBySourceLane: { chunk: 2, recovery: 1, spine: 0 },
+        decisionSetHash: "decision-hash",
+        failureClass: null,
+        modelReason: "reason-must-not-survive",
+        outputFingerprintAfter: "same-output-hash",
+        outputFingerprintBefore: "same-output-hash",
+        persistenceStatus: "inserted",
+        schemaVersion: 1,
+        sourceExcerpt: "excerpt-must-not-survive",
+        sourceFactLedgerHash: "source-ledger-hash",
+        status: "built",
+        unresolvedCount: 1,
+        writerVersion: 1,
+      },
+    });
+    assert.equal(
+      summary.assemblyDecisionLedger?.countsByDecisionDomain.classification,
+      10
+    );
+    assert.equal(summary.assemblyDecisionLedger?.byteSize, 8192);
+    assert.equal(
+      summary.assemblyDecisionLedger?.outputFingerprintBefore,
+      "same-output-hash"
+    );
+    assert.doesNotMatch(
+      JSON.stringify(summary),
+      /candidate-must-not-survive|reason-must-not-survive|excerpt-must-not-survive|Private Museum Title/i
+    );
+  });
+
   test("8.3 a dismissed detail becomes a dismissed question record carrying its reason", () => {
     const questions = createReviewQuestions({
       draft: {

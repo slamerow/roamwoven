@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { createAssemblyCarrierConservationReportV1 } from "@/lib/extraction/assembly-carrier-conservation";
 import { buildAssemblyDecisionCarrierLedgerV1 } from "@/lib/extraction/assembly-decision-carrier-builder";
+import { compactAssemblyDecisionByteSizeV1 } from "@/lib/extraction/assembly-decision-carrier-ledger-store";
 import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import { computeDaySectionSourceCoverage } from "@/lib/extraction/source-coverage";
@@ -325,10 +326,12 @@ export default function run() {
     for (const fixture of HETEROGENEOUS_ASSEMBLY_FIXTURES) {
       const result = buildFixture(fixture);
       durations.push(result.decisionLedger.metrics.ledgerBuildMilliseconds);
-      decisionBytes.push(result.decisionLedger.metrics.serializedByteSize);
+      const compactDecisionBytes = compactAssemblyDecisionByteSizeV1(
+        result.decisionLedger
+      );
+      decisionBytes.push(compactDecisionBytes);
       combinedBytes.push(
-        result.decisionLedger.metrics.serializedByteSize +
-          result.sourceLedger.metrics.serializedByteSize
+        compactDecisionBytes + result.sourceLedger.metrics.serializedByteSize
       );
     }
   }

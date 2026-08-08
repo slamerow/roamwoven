@@ -113,6 +113,12 @@ const travelerTextModule = requireFromRepo("@/lib/extraction/traveler-text");
 const decisionBuilderModule = requireFromRepo(
   "@/lib/extraction/assembly-decision-carrier-builder"
 );
+const decisionLedgerModule = requireFromRepo(
+  "@/lib/extraction/assembly-decision-carrier-ledger"
+);
+const decisionStoreModule = requireFromRepo(
+  "@/lib/extraction/assembly-decision-carrier-ledger-store"
+);
 
 let capturedResolution = null;
 let resolverInvocationCount = 0;
@@ -173,27 +179,43 @@ function subjectFactId(sourceFactSet, index, subject) {
     record: subject.record,
     stage: subject.stage,
   });
-  const title =
-    subject.record.title ??
-    subject.record.name ??
-    subject.record.routeLabel ??
-    subject.record.relatedTitle ??
-    subject.record.prompt ??
-    "";
+  const title = [
+    subject.record.title,
+    subject.record.name,
+    subject.record.routeLabel,
+    subject.record.relatedTitle,
+    subject.record.prompt,
+  ].find((value) => typeof value === "string" && value.trim().length > 0) ?? "";
   const digest = sourceIndexModule.hashStableValue({
     sourceSpanIds: alignment.sourceSpanIds,
     title: travelerTextModule.normalizeText(title),
   }).slice(0, 20);
-  const matches = sourceFactSet.facts.filter(
-    (fact) =>
-      fact.kind === "entity" &&
-      fact.payload?.recordClass === "activity" &&
-      fact.payload?.semanticIdentityDigest === digest
+  const groupingProposal =
+    subject.record.evidenceRole === "grouping_proposal";
+  const relationshipSpanIds = [
+    ...new Set([
+      ...alignment.sourceSpanIds,
+      ...alignment.plausibleSpanIds,
+    ]),
+  ];
+  const matches = sourceFactSet.facts.filter((fact) =>
+    groupingProposal
+      ? relationshipSpanIds.length > 0 &&
+        fact.kind === "relationship" &&
+        relationshipSpanIds.every((spanId) =>
+          fact.sourceSpanIds.includes(spanId)
+        )
+      : fact.kind === "entity" &&
+        fact.payload?.recordClass === "activity" &&
+        fact.payload?.semanticIdentityDigest === digest
   );
   return {
     alignment:
       alignment.status === "aligned" ? alignment.method : alignment.reason,
+    digest,
     factId: matches.length === 1 ? matches[0].factId : null,
+    matchCount: matches.length,
+    sourceSpanIds: alignment.sourceSpanIds,
   };
 }
 
@@ -277,22 +299,141 @@ const decisions = capturedResolution.metadata?.roleDecisions ?? [];
 const appliedEvaluations = decisionLedger.decisionSet.resolverRoleEvaluations.filter(
   (evaluation) => evaluation.reconciliationOutcome === "applied"
 );
+const appliedEvaluationKey = ({
+  factId,
+  proposedRole,
+  reasonDigest,
+  sourceLane,
+}) => JSON.stringify({ factId, proposedRole, reasonDigest, sourceLane });
+const appliedEvaluationPools = new Map();
+for (const evaluation of appliedEvaluations) {
+  const key = appliedEvaluationKey({
+    factId:
+      evaluation.subjectFactIds.length === 1
+        ? evaluation.subjectFactIds[0]
+        : null,
+    proposedRole: evaluation.proposedRole,
+    reasonDigest: evaluation.reasonDigest,
+    sourceLane: evaluation.sourceLane,
+  });
+  appliedEvaluationPools.set(key, [
+    ...(appliedEvaluationPools.get(key) ?? []),
+    evaluation,
+  ]);
+}
+for (const evaluations of appliedEvaluationPools.values()) {
+  evaluations.sort((left, right) =>
+    left.evaluationId.localeCompare(right.evaluationId)
+  );
+}
 const index = sourceIndexModule.buildSourceDocumentIndexV1(materials);
-const audits = [];
-const startedAt = performance.now();
-
-for (const decision of decisions) {
+const matchedDecisions = decisions.map((decision) => {
   const originalSubject = decisionRecord(
     capturedResolution.stages,
     decision.candidateId
   );
+  const ledgerSubject = decisionRecord(context.stages, decision.candidateId);
+  const rawAppliedEvaluations = (
+    capturedResolution.metadata?.roleEvaluations ?? []
+  ).filter(
+    (evaluation) =>
+      evaluation.candidateId === decision.candidateId &&
+      evaluation.classification === decision.classification &&
+      evaluation.reconciliationOutcome === "applied"
+  );
+  assert.equal(
+    rawAppliedEvaluations.length,
+    1,
+    "each accepted resolver decision must have one raw applied evaluation"
+  );
+  const binding = originalSubject
+    ? subjectFactId(shadow.ledger.factSet, index, originalSubject)
+    : {
+        alignment: "unbound",
+        digest: null,
+        factId: null,
+        matchCount: 0,
+        sourceSpanIds: [],
+      };
+  const ledgerBinding = ledgerSubject
+    ? subjectFactId(
+        shadow.ledger.factSet,
+        context.sourceDocumentIndex,
+        ledgerSubject
+      )
+    : null;
+  const sourceLane = originalSubject ? stageLane(originalSubject.stage) : "chunk";
+  const evaluationKey = appliedEvaluationKey({
+    factId: binding.factId,
+    proposedRole: decision.classification,
+    reasonDigest: decisionLedgerModule.digestResolverReasonV1(
+      rawAppliedEvaluations[0].reason
+    ),
+    sourceLane,
+  });
+  const evaluationPool = appliedEvaluationPools.get(evaluationKey) ?? [];
+  return {
+    binding,
+    decision,
+    evaluationKey,
+    ledgerEvaluation: evaluationPool.shift() ?? null,
+    ledgerBinding,
+    originalSubject,
+    sourceLane,
+  };
+});
+const unmatchedDecisions = matchedDecisions
+  .filter((match) => !match.ledgerEvaluation)
+  .map((match) => ({
+    ...JSON.parse(match.evaluationKey),
+    binding: match.binding,
+    candidateId: match.decision.candidateId,
+    ledgerBinding: match.ledgerBinding,
+  }));
+const sourceFactById = new Map(
+  shadow.ledger.factSet.facts.map((fact) => [fact.factId, fact])
+);
+const remainingEvaluations = [...appliedEvaluationPools.entries()].flatMap(
+  ([key, evaluations]) =>
+    evaluations.map((evaluation) => ({
+      ...JSON.parse(key),
+      evaluationId: evaluation.evaluationId,
+      sourceFact: evaluation.subjectFactIds.length === 1
+        ? sourceFactById.get(evaluation.subjectFactIds[0]) ?? null
+        : null,
+    }))
+);
+assert.equal(
+  unmatchedDecisions.length + remainingEvaluations.length,
+  0,
+  `resolver decision/evaluation mismatch: ${JSON.stringify({
+    remainingEvaluations,
+    unmatchedDecisions,
+  })}`
+);
+
+const audits = [];
+const startedAt = performance.now();
+
+for (const {
+  binding,
+  decision,
+  ledgerEvaluation,
+  originalSubject,
+  sourceLane,
+} of matchedDecisions) {
   if (!originalSubject) {
     audits.push({
       alignment: "unbound",
       behaviorBearing: false,
       classification: decision.classification,
+      bindingStatus: ledgerEvaluation
+        ? decisionLedgerModule.resolverRoleEvaluationBindingStatusV1(
+            ledgerEvaluation
+          )
+        : "missing",
       lane: "unbound",
-      ledgerLinked: false,
+      ledgerLinked: Boolean(ledgerEvaluation),
     });
     continue;
   }
@@ -318,20 +459,18 @@ for (const decision of decisions) {
     },
   });
   const candidate = assemble({ evidence, trip, usage: parserResult.usage });
-  const binding = subjectFactId(shadow.ledger.factSet, index, originalSubject);
-  const ledgerLinked = binding.factId
-    ? appliedEvaluations.some(
-        (evaluation) =>
-          evaluation.proposedRole === decision.classification &&
-          evaluation.subjectFactIds.includes(binding.factId)
+  const bindingStatus = ledgerEvaluation
+    ? decisionLedgerModule.resolverRoleEvaluationBindingStatusV1(
+        ledgerEvaluation
       )
-    : false;
+    : "missing";
   audits.push({
     alignment: binding.alignment,
     behaviorBearing: candidate.fingerprint.hash !== baseline.fingerprint.hash,
+    bindingStatus,
     classification: decision.classification,
-    lane: stageLane(originalSubject.stage),
-    ledgerLinked,
+    lane: sourceLane,
+    ledgerLinked: Boolean(ledgerEvaluation),
   });
 }
 
@@ -351,6 +490,10 @@ const summary = {
     behaviorBearing,
     (audit) => audit.classification
   ),
+  behaviorBearingByBindingStatus: countsBy(
+    behaviorBearing,
+    (audit) => audit.bindingStatus
+  ),
   behaviorBearingByLaneAndAlignment: countsBy(
     behaviorBearing,
     (audit) => `${audit.lane}:${audit.alignment}`
@@ -358,6 +501,14 @@ const summary = {
   modelCallCacheHitCount: parseCache.hits,
   modelCallMissCount: parseCache.misses,
   geocodeCandidateCount: geocodeCache.actualCandidateCount,
+  decisionBuildMilliseconds:
+    decisionLedger.metrics.ledgerBuildMilliseconds,
+  decisionPayloadByteSize:
+    decisionStoreModule.compactAssemblyDecisionByteSizeV1(decisionLedger),
+  sourceFactPayloadByteSize: shadow.ledger.metrics.serializedByteSize,
+  combinedLedgerPayloadByteSize:
+    decisionStoreModule.compactAssemblyDecisionByteSizeV1(decisionLedger) +
+    shadow.ledger.metrics.serializedByteSize,
   ablationMilliseconds: performance.now() - startedAt,
 };
 
@@ -375,11 +526,15 @@ assert.equal(
 assert.equal(
   summary.behaviorBearingLedgerLinkedCount,
   expected.behaviorBearingDecisionCount,
-  "every behavior-bearing decision must reach a durable source fact and applied evaluation"
+  "every behavior-bearing decision must reach one applied evaluation with a fact, span, or explicit unresolved binding"
 );
 assert.equal(summary.modelCallCacheHitCount, expected.modelCallCacheHitCount);
 assert.equal(summary.modelCallMissCount, 0);
 assert.equal(summary.geocodeCandidateCount, expected.geocodeCandidateCount);
+assert.ok(summary.decisionBuildMilliseconds < 100);
+assert.ok(summary.decisionPayloadByteSize < 256 * 1024);
+assert.ok(summary.decisionPayloadByteSize < 1024 * 1024);
+assert.ok(summary.combinedLedgerPayloadByteSize < 512 * 1024);
 
 const serialized = `${JSON.stringify(summary, null, 2)}\n`;
 if (outPath) fs.writeFileSync(path.resolve(outPath), serialized);

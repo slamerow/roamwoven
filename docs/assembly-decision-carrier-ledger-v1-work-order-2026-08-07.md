@@ -1,9 +1,9 @@
 # Roamwoven Loop 9 work order: Assembly Decision & Carrier Ledger V1
 
-Date: 2026-08-07 (Asia/Tokyo)  
-Starting commit: `6e0282fd69b617207dfc3cd46e021f46efbf7c03`  
-Scope: shadow assembly provenance and resolver-replacement proof  
-Traveler behavior: unchanged  
+Date: 2026-08-07 (Asia/Tokyo)
+Starting commit: `6e0282fd69b617207dfc3cd46e021f46efbf7c03`
+Scope: shadow assembly provenance and resolver-replacement proof
+Traveler behavior: unchanged
 External work: zero new model, geocoding, recovery, or other network calls
 
 ## CTO decision

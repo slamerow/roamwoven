@@ -371,6 +371,65 @@ export default function run() {
   assert.deepEqual(rebuilt.decisionSet, built.decisionSet, "durable identity is input-order independent");
   assert.equal(rebuilt.metrics.decisionSetHash, built.metrics.decisionSetHash);
 
+  const duplicateStage = structuredClone(fixture.stage);
+  const duplicateActivity = (
+    (duplicateStage.stage as Record<string, unknown>).activities as Array<
+      Record<string, unknown>
+    >
+  )[0];
+  duplicateActivity._resolverCandidateId = "candidate-museum-overlap";
+  const overlappingMetadata: CanonicalEvidenceResolverMetadata = {
+    ...fixture.metadata,
+    roleDecisions: [],
+    roleEvaluations: [
+      {
+        ...fixture.metadata.roleEvaluations[0],
+        windowCandidateIds: ["candidate-museum"],
+      },
+      {
+        ...fixture.metadata.roleEvaluations[0],
+        candidateId: "candidate-museum-overlap",
+        windowCandidateIds: ["candidate-museum-overlap"],
+      },
+    ],
+  };
+  const overlapping = buildAssemblyDecisionCarrierLedgerV1({
+    index: fixture.index,
+    observations: fixture.clustered.observations,
+    pieces: fixture.clustered.pieces,
+    records: fixture.records,
+    resolverMetadata: overlappingMetadata,
+    sourceLedger: fixture.sourceLedger,
+    stages: [fixture.stage, duplicateStage],
+  });
+  assert.equal(overlapping.decisionSet.resolverRoleEvaluations.length, 2);
+  assert.equal(
+    new Set(
+      overlapping.decisionSet.resolverRoleEvaluations.map(
+        (evaluation) => evaluation.evaluationId
+      )
+    ).size,
+    2,
+    "overlapping raw proposals that resolve to one durable fact remain distinct"
+  );
+  const overlappingReordered = buildAssemblyDecisionCarrierLedgerV1({
+    index: fixture.index,
+    observations: fixture.clustered.observations,
+    pieces: fixture.clustered.pieces,
+    records: fixture.records,
+    resolverMetadata: {
+      ...overlappingMetadata,
+      roleEvaluations: [...overlappingMetadata.roleEvaluations].reverse(),
+    },
+    sourceLedger: fixture.sourceLedger,
+    stages: [duplicateStage, fixture.stage],
+  });
+  assert.deepEqual(
+    overlappingReordered.decisionSet,
+    overlapping.decisionSet,
+    "overlap and resolver response order cannot change durable evaluation identity"
+  );
+
   const serialized = JSON.stringify(built.decisionSet);
   for (const forbidden of [
     "SAMPLE42",

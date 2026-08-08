@@ -843,8 +843,16 @@ export function createCanonicalizationSummary(
 export function createExtractionSummary(usage: unknown) {
   const openai = findOpenAIUsage(usage);
   const activityChunks = asRecord(openai.activityChunks);
+  const assemblyDecisionLedger = asRecord(openai.assemblyDecisionLedger);
   const sourceCoverage = asRecord(openai.sourceCoverage);
   const sourceFactLedger = asRecord(openai.sourceFactLedger);
+
+  const aggregateCounts = (value: unknown, allowedKeys: readonly string[]) => {
+    const record = asRecord(value);
+    return Object.fromEntries(
+      allowedKeys.map((key) => [key, Number(record[key]) || 0])
+    );
+  };
 
   return {
     activityChunks:
@@ -854,6 +862,112 @@ export function createExtractionSummary(usage: unknown) {
             failed: Number(activityChunks.failed) || 0,
             rescued: Number(activityChunks.rescued) || 0,
             succeeded: Number(activityChunks.succeeded) || 0,
+          }
+        : null,
+    // Loop 9 support telemetry is deliberately aggregate-only. The fixed key
+    // sets below prevent an injected title, excerpt, candidate id, or model
+    // reason from entering the served audit snapshot even as an object key.
+    assemblyDecisionLedger:
+      Object.keys(assemblyDecisionLedger).length > 0
+        ? {
+            additionalGeocodingLookupCount:
+              Number(
+                assemblyDecisionLedger.additionalGeocodingLookupCount
+              ) || 0,
+            additionalModelCallCount:
+              Number(assemblyDecisionLedger.additionalModelCallCount) || 0,
+            additionalRetryCount:
+              Number(assemblyDecisionLedger.additionalRetryCount) || 0,
+            ambiguousCount:
+              Number(assemblyDecisionLedger.ambiguousCount) || 0,
+            buildMilliseconds:
+              Number(assemblyDecisionLedger.buildMilliseconds) || 0,
+            byteSize: Number(assemblyDecisionLedger.byteSize) || 0,
+            countsByDecisionDomain: aggregateCounts(
+              assemblyDecisionLedger.countsByDecisionDomain,
+              [
+                "classification",
+                "containment",
+                "identity",
+                "grouping",
+                "review",
+                "publish_projection",
+              ]
+            ),
+            countsByDisposition: aggregateCounts(
+              assemblyDecisionLedger.countsByDisposition,
+              [
+                "decision:dismissed",
+                "decision:resolved_silently",
+                "decision:review",
+                "decision:unresolved",
+                "entity:carried",
+                "entity:evidence_only",
+                "entity:unresolved",
+                "exclusion:excluded",
+                "intent:applied",
+                "intent:superseded",
+                "intent:unresolved",
+                "relationship:applied",
+                "relationship:rejected",
+                "relationship:unresolved",
+              ]
+            ),
+            countsByProducer: aggregateCounts(
+              assemblyDecisionLedger.countsByProducer,
+              ["deterministic_assembly", "resolver"]
+            ),
+            countsByReconciliationOutcome: aggregateCounts(
+              assemblyDecisionLedger.countsByReconciliationOutcome,
+              ["applied", "rejected", "supporting"]
+            ),
+            countsByRejectionCode: aggregateCounts(
+              assemblyDecisionLedger.countsByRejectionCode,
+              [
+                "conflicting_classification",
+                "duplicate_proposal",
+                "low_confidence",
+                "unknown_candidate",
+              ]
+            ),
+            countsBySourceLane: aggregateCounts(
+              assemblyDecisionLedger.countsBySourceLane,
+              ["chunk", "recovery", "spine"]
+            ),
+            decisionSetHash:
+              typeof assemblyDecisionLedger.decisionSetHash === "string"
+                ? assemblyDecisionLedger.decisionSetHash
+                : null,
+            failureClass:
+              typeof assemblyDecisionLedger.failureClass === "string"
+                ? assemblyDecisionLedger.failureClass
+                : null,
+            outputFingerprintAfter:
+              typeof assemblyDecisionLedger.outputFingerprintAfter === "string"
+                ? assemblyDecisionLedger.outputFingerprintAfter
+                : null,
+            outputFingerprintBefore:
+              typeof assemblyDecisionLedger.outputFingerprintBefore === "string"
+                ? assemblyDecisionLedger.outputFingerprintBefore
+                : null,
+            persistenceStatus:
+              typeof assemblyDecisionLedger.persistenceStatus === "string"
+                ? assemblyDecisionLedger.persistenceStatus
+                : null,
+            schemaVersion:
+              Number(assemblyDecisionLedger.schemaVersion) || 0,
+            sourceFactLedgerHash:
+              typeof assemblyDecisionLedger.sourceFactLedgerHash === "string"
+                ? assemblyDecisionLedger.sourceFactLedgerHash
+                : null,
+            status:
+              typeof assemblyDecisionLedger.status === "string"
+                ? assemblyDecisionLedger.status
+                : "unknown",
+            unresolvedCount:
+              Number(assemblyDecisionLedger.unresolvedCount) || 0,
+            writerVersion:
+              Number(assemblyDecisionLedger.writerVersion) || 0,
           }
         : null,
     // Deterministic day-section coverage (wave 2 + Arc A calibration,

@@ -735,6 +735,10 @@ path is bypassed.
   unresolved source bindings stay explicit. Raw reason prose and transient
   candidate, stage, chunk, parser-array, observation, and mutable canonical
   identifiers are in-memory joins only and may never become durable identity.
+  Binding state is derived without a redundant field: a fact reference means
+  `source_fact`, a span reference means `source_span`, and both arrays empty
+  means explicitly `unresolved`; fact and unresolved-span references may never
+  coexist on one evaluation.
 
   Decisions cover classification, containment, identity, grouping, review, and
   publish projection in the locked RW-ORD-001 order. Stable decision identity
@@ -788,14 +792,22 @@ path is bypassed.
   behavior-bearing baselines; proves durable source-fact linkage for the fresh
   production-shaped replay; adds semantic booking, recommendation, spreadsheet,
   and freeform fixtures; and keeps V3 lines, V1 facts, RW-ORD observations, and
-  final records as four separate conservation denominators. Append-only
-  persistence remains to be completed in commit 9.5; the enforcement label is
-  therefore honestly `PARTIAL`.
+  final records as four separate conservation denominators. Loop 9.5 adds a
+  reversible compact tuple/dictionary representation, append-only persistence,
+  an exact composite Source Fact foreign key, idempotent same-hash confirmation,
+  terminal-route integration behind both default-off flags, aggregate-only QA
+  telemetry, and one-event fail-soft recovery. No migration was applied and no
+  shadow flag was enabled. Closure evidence:
+  `docs/assembly-decision-carrier-ledger-v1-closure-2026-08-09.md`.
 - Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`,
   `tests/resolver-role-evaluations.test.ts`,
   `tests/recovery-source-binding.test.ts`,
-  `tests/assembly-decision-carrier-reconciliation.test.ts`, and
-  `tests/assembly-decision-heterogeneous-parity.test.ts`
+  `tests/assembly-decision-carrier-reconciliation.test.ts`,
+  `tests/assembly-decision-heterogeneous-parity.test.ts`,
+  `tests/assembly-decision-carrier-ledger-store.test.ts`,
+  `tests/assembly-decision-carrier-ledger-sql.test.ts`,
+  `tests/extraction-route-recovery.test.ts`, and
+  `tests/arc-f-telemetry.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 

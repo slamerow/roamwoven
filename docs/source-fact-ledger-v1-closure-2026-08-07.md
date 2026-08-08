@@ -1,8 +1,8 @@
 # Source Fact Ledger V1 closure
 
-Date: 2026-08-07  
-Contract: RW-SFL-001  
-Base: `c6f81d6720b15f193e101644fe249a1668918e2c`  
+Date: 2026-08-07
+Contract: RW-SFL-001
+Base: `c6f81d6720b15f193e101644fe249a1668918e2c`
 Activation: `EXTRACTION_FACT_LEDGER_SHADOW=1`; default off
 
 ## Outcome
