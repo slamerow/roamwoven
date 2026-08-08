@@ -41,6 +41,10 @@ import {
   runBoundedSourceRecovery,
   SOURCE_RECOVERY_SYSTEM_PROMPT,
 } from "@/lib/extraction/source-recovery";
+import {
+  buildRecoverySourceBindingSidecarV1,
+  type RecoverySourceBindingSidecarV1,
+} from "@/lib/extraction/recovery-source-binding";
 import { isDayHeadingLine } from "@/lib/extraction/parser-artifact-normalization";
 import { createDraftAuditSnapshot } from "@/lib/extraction/trip-extraction-audit";
 import { TRIP_CATEGORY_IDS } from "@/lib/trip-categories";
@@ -67,6 +71,12 @@ export type TripExtractionResult = {
 
 export type SourceFactLedgerShadowResultV1 =
   | {
+      companionContext: {
+        recoverySourceBindings: RecoverySourceBindingSidecarV1;
+        resolverMetadata: CanonicalEvidenceResolverMetadata | null;
+        sourceDocumentIndex: SourceDocumentIndexV1;
+        stages: EvidenceStageInput[];
+      };
       coverage: SourceCoverageV4;
       ledger: SourceFactLedgerBuildResultV1;
       outputFingerprintAfter: string;
@@ -1559,13 +1569,22 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
+  // Loop 9 raw proposal evidence is private, in-memory companion input. Keep
+  // the pre-Loop-9 resolver metadata exact on the existing draft and usage
+  // surfaces; neither raw candidate ids nor model reason prose may leak there.
+  const existingResolverMetadata = resolvedEvidenceStages.metadata
+    ? (({ roleEvaluations: _roleEvaluations, ...metadata }) => metadata)(
+        resolvedEvidenceStages.metadata
+      )
+    : null;
+
   // Reported coverage is reconciled against the recovery output: recovered
   // lines clear, residual drops stay flagged (the quiet P2 advisory keeps
   // firing on what is still missing).
   const sourceCoverage = recovery.coverage;
   const evidence = clusterExtractedEvidence({
     groupingDecisions: resolvedEvidenceStages.groupingDecisions,
-    resolverMetadata: resolvedEvidenceStages.metadata,
+    resolverMetadata: existingResolverMetadata,
     sourceTransportAnchors,
     stages: resolvedEvidenceStages.stages,
     tripOverview: spineRecord.tripOverview ?? {
@@ -1595,11 +1614,32 @@ export async function extractTripDraftWithOpenAI({
         coverage,
         index: sourceDocumentIndex,
       });
+      const recoverySourceBindings = buildRecoverySourceBindingSidecarV1({
+        index: sourceDocumentIndex,
+        plan: recovery.plan,
+        recoveryStage:
+          resolvedEvidenceStages.stages.find((stageInput) => {
+            const stage =
+              stageInput.stage &&
+              typeof stageInput.stage === "object" &&
+              !Array.isArray(stageInput.stage)
+                ? (stageInput.stage as Record<string, unknown>)
+                : {};
+            return stage._sourceRecovery === true;
+          }) ?? null,
+        stages: resolvedEvidenceStages.stages,
+      });
       const outputFingerprintAfter = hashStableValue(combinedDraft);
       if (outputFingerprintBefore !== outputFingerprintAfter) {
         throw new Error("Source fact ledger shadow mutated parser output.");
       }
       sourceFactLedger = {
+        companionContext: {
+          recoverySourceBindings,
+          resolverMetadata: resolvedEvidenceStages.metadata,
+          sourceDocumentIndex,
+          stages: resolvedEvidenceStages.stages,
+        },
         coverage,
         ledger,
         outputFingerprintAfter,
@@ -1669,7 +1709,7 @@ export async function extractTripDraftWithOpenAI({
         usage: result.usage ?? null,
       })),
       canonicalResolver: {
-        metadata: resolvedEvidenceStages.metadata,
+        metadata: existingResolverMetadata,
         usage: resolvedEvidenceStages.usage,
       },
       activityFailures: activityFailures.map(({ attempts, chunk, error }) => ({

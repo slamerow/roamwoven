@@ -13,6 +13,7 @@ import {
 } from "@/lib/extraction/source-coverage-v4";
 import { buildSourceFactLedgerV1 } from "@/lib/extraction/source-fact-ledger";
 import { SourceFactLedgerPersistenceError } from "@/lib/extraction/source-fact-ledger-store";
+import { buildRecoverySourceBindingSidecarV1 } from "@/lib/extraction/recovery-source-binding";
 import { sourceFactFixture } from "@/tests/fixtures/source-fact-ledger-v1";
 
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -166,6 +167,17 @@ function createSourceFactLedgerShadow(): NonNullable<
     index: fixture.index,
   });
   return {
+    companionContext: {
+      recoverySourceBindings: buildRecoverySourceBindingSidecarV1({
+        index: fixture.index,
+        plan: null,
+        recoveryStage: null,
+        stages: [fixture.stage],
+      }),
+      resolverMetadata: fixture.resolverMetadata,
+      sourceDocumentIndex: fixture.index,
+      stages: [fixture.stage],
+    },
     coverage,
     ledger,
     outputFingerprintAfter: "same-output-fingerprint",

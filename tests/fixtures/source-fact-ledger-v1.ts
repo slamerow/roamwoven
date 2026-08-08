@@ -155,6 +155,7 @@ export function sourceFactFixture(
     lookupKey: null,
     resolvedAt: null,
     roleDecisions: [],
+    roleEvaluations: [],
     sources: [],
     version: 7,
     windowCount: 1,

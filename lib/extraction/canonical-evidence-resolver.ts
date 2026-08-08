@@ -91,10 +91,30 @@ export type CanonicalEvidenceResolverMetadata = {
     classification: "city_note" | "keep_activity";
     reason: string;
   }>;
+  // Complete raw proposal evidence for the shadow companion ledger. Candidate
+  // ids and model reason prose are ephemeral in-memory joins and are removed
+  // before the companion set is serialized or exposed in aggregate telemetry.
+  roleEvaluations: CanonicalResolverRoleEvaluation[];
   resolvedAt: string | null;
   sources: Array<{ title: string | null; url: string }>;
   version: number;
   windowCount: number;
+};
+
+export type CanonicalResolverRoleEvaluation = {
+  candidateId: string;
+  classification: "city_note" | "keep_activity";
+  confidence: "high" | "medium" | "low";
+  duplicateOrdinal: number;
+  reason: string;
+  reconciliationOutcome: "applied" | "supporting" | "rejected";
+  rejectionCodes: Array<
+    | "low_confidence"
+    | "conflicting_classification"
+    | "unknown_candidate"
+    | "duplicate_proposal"
+  >;
+  windowCandidateIds: string[];
 };
 
 export type CanonicalEvidenceResolverPlan = {
@@ -809,6 +829,89 @@ function reconcileRoleDecisions(
   );
 }
 
+type WindowedResolverRoleProposal =
+  CanonicalEvidenceResolution["roleDecisions"][number] & {
+    windowCandidateIds: string[];
+  };
+
+function stableRoleProposalKey(proposal: WindowedResolverRoleProposal) {
+  return JSON.stringify({
+    candidateId: proposal.candidateId,
+    classification: proposal.classification,
+    confidence: proposal.confidence,
+    reasonDigest: createHash("sha256")
+      .update(normalizeText(proposal.reason))
+      .digest("hex"),
+    windowCandidateIds: [...new Set(proposal.windowCandidateIds)].sort(),
+  });
+}
+
+export function evaluateCanonicalResolverRoleProposals({
+  knownCandidateIds,
+  proposals,
+}: {
+  knownCandidateIds: string[];
+  proposals: WindowedResolverRoleProposal[];
+}): CanonicalResolverRoleEvaluation[] {
+  const known = new Set(knownCandidateIds);
+  const highClassificationsByCandidate = new Map<string, Set<string>>();
+  for (const proposal of proposals) {
+    if (!known.has(proposal.candidateId) || proposal.confidence !== "high") {
+      continue;
+    }
+    const classifications =
+      highClassificationsByCandidate.get(proposal.candidateId) ?? new Set();
+    classifications.add(proposal.classification);
+    highClassificationsByCandidate.set(proposal.candidateId, classifications);
+  }
+
+  // Sorting by content, rather than response/window order, means the same raw
+  // proposals produce the same applied/supporting identities under concurrency.
+  const ordered = proposals
+    .map((proposal) => ({ proposal, stableKey: stableRoleProposalKey(proposal) }))
+    .sort((left, right) => left.stableKey.localeCompare(right.stableKey));
+  const duplicateOrdinalByKey = new Map<string, number>();
+  const eligibleCountByCandidate = new Map<string, number>();
+
+  return ordered.map(({ proposal, stableKey }) => {
+    const duplicateOrdinal = duplicateOrdinalByKey.get(stableKey) ?? 0;
+    duplicateOrdinalByKey.set(stableKey, duplicateOrdinal + 1);
+    const rejectionCodes: CanonicalResolverRoleEvaluation["rejectionCodes"] = [];
+    const candidateKnown = known.has(proposal.candidateId);
+    const conflicting =
+      (highClassificationsByCandidate.get(proposal.candidateId)?.size ?? 0) > 1;
+
+    if (!candidateKnown) rejectionCodes.push("unknown_candidate");
+    if (proposal.confidence !== "high") rejectionCodes.push("low_confidence");
+    if (candidateKnown && conflicting) {
+      rejectionCodes.push("conflicting_classification");
+    }
+
+    let reconciliationOutcome: CanonicalResolverRoleEvaluation["reconciliationOutcome"] =
+      "rejected";
+    if (rejectionCodes.length === 0) {
+      const eligibleCount =
+        eligibleCountByCandidate.get(proposal.candidateId) ?? 0;
+      reconciliationOutcome = eligibleCount === 0 ? "applied" : "supporting";
+      eligibleCountByCandidate.set(proposal.candidateId, eligibleCount + 1);
+      if (reconciliationOutcome === "supporting") {
+        rejectionCodes.push("duplicate_proposal");
+      }
+    }
+
+    return {
+      candidateId: proposal.candidateId,
+      classification: proposal.classification,
+      confidence: proposal.confidence,
+      duplicateOrdinal,
+      reason: proposal.reason,
+      reconciliationOutcome,
+      rejectionCodes,
+      windowCandidateIds: [...new Set(proposal.windowCandidateIds)].sort(),
+    };
+  });
+}
+
 function reconcileGroupings(
   groupings: CanonicalEvidenceResolution["groupings"]
 ) {
@@ -1153,6 +1256,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     lookupKey: null,
     resolvedAt: null,
     roleDecisions: [],
+    roleEvaluations: [],
     sources: [],
     version: CANONICAL_RESOLVER_VERSION,
     windowCount: windows.length,
@@ -1170,7 +1274,15 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     const cached = resolverCache.get(windowKey);
 
     if (cached) {
-      return { ...cached, cacheHit: true, lookupKey: windowKey, usage: null };
+      return {
+        ...cached,
+        cacheHit: true,
+        lookupKey: windowKey,
+        usage: null,
+        windowCandidateIds: windowCandidates.map(
+          (candidate) => candidate.candidateId
+        ),
+      };
     }
 
     const result = await createOpenAIStructuredResponse({
@@ -1193,6 +1305,9 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       resolvedAt,
       sources: result.sources,
       usage: result.usage,
+      windowCandidateIds: windowCandidates.map(
+        (candidate) => candidate.candidateId
+      ),
     };
   });
 
@@ -1214,6 +1329,15 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
       classification: decision.classification,
       reason: decision.reason,
     }));
+  const roleEvaluations = evaluateCanonicalResolverRoleProposals({
+    knownCandidateIds: candidates.map((candidate) => candidate.candidateId),
+    proposals: windowResults.flatMap((result) =>
+      result.resolution.roleDecisions.map((proposal) => ({
+        ...proposal,
+        windowCandidateIds: result.windowCandidateIds,
+      }))
+    ),
+  });
 
   const applied = applyCanonicalEvidenceResolution(stages, resolution);
   const evaluationCandidateById = new Map(
@@ -1283,6 +1407,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
         .digest("hex"),
       resolvedAt: windowResults.map((result) => result.resolvedAt).sort().at(-1) ?? null,
       roleDecisions: acceptedRoleDecisions,
+      roleEvaluations,
       sources,
     },
     stages: applied.stages,

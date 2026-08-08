@@ -629,6 +629,7 @@ export async function runBoundedSourceRecovery({
   stages: EvidenceStageInput[];
 }): Promise<{
   coverage: SourceCoverageSummary;
+  plan: SourceRecoveryPlan | null;
   stage: EvidenceStageInput | null;
   usage: SourceRecoveryUsage;
 }> {
@@ -677,6 +678,7 @@ export async function runBoundedSourceRecovery({
   if (!plan) {
     return {
       coverage,
+      plan: null,
       stage: null,
       usage: { ...baseUsage, outcome: "no_uncovered_lines" },
     };
@@ -703,6 +705,7 @@ export async function runBoundedSourceRecovery({
 
     return {
       coverage: reconciled.coverage,
+      plan,
       stage,
       usage: {
         ...baseUsage,
@@ -724,6 +727,7 @@ export async function runBoundedSourceRecovery({
     // one precise maker Question and separate telemetry, nothing else.
     return {
       coverage,
+      plan,
       stage: buildSourceRecoveryFailureStage(coverage),
       usage: {
         ...baseUsage,
