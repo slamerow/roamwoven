@@ -711,6 +711,7 @@ function buildFactToPieceIds({
 function terminalPiecesFor(
   piece: CanonicalEvidencePiece,
   pieceById: Map<string, CanonicalEvidencePiece>,
+  pieceByPriorId: Map<string, CanonicalEvidencePiece>,
   visiting = new Set<string>()
 ): { pieces: CanonicalEvidencePiece[]; terminal: boolean; unresolved: boolean } {
   if (visiting.has(piece.id)) {
@@ -731,11 +732,11 @@ function terminalPiecesFor(
   }
   const nextVisiting = new Set(visiting).add(piece.id);
   const outcomes = survivorIds.map((survivorId) => {
-    const survivor = pieceById.get(survivorId);
+    const survivor = pieceById.get(survivorId) ?? pieceByPriorId.get(survivorId);
     if (!survivor) {
       throw new Error("Assembly decision ledger found a dangling survivor carrier.");
     }
-    return terminalPiecesFor(survivor, pieceById, nextVisiting);
+    return terminalPiecesFor(survivor, pieceById, pieceByPriorId, nextVisiting);
   });
   return {
     pieces: outcomes.flatMap((outcome) => outcome.pieces),
@@ -858,6 +859,21 @@ function resolveEntities({
   sourceLedger: SourceFactLedgerBuildResultV1;
 }) {
   const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
+  const pieceByPriorId = new Map<string, CanonicalEvidencePiece>();
+  for (const piece of pieces) {
+    const priorIds = Array.isArray(piece.payload._canonicalPriorPieceIds)
+      ? piece.payload._canonicalPriorPieceIds.filter(
+          (value): value is string => typeof value === "string" && Boolean(value)
+        )
+      : [];
+    for (const priorId of priorIds) {
+      const existing = pieceByPriorId.get(priorId);
+      if (existing && existing.id !== piece.id) {
+        throw new Error("Assembly decision ledger found ambiguous prior-id forwarding.");
+      }
+      pieceByPriorId.set(priorId, piece);
+    }
+  }
   const recordIndexes = createRecordIndexes(records);
   const sourceCarrierClassesByFactId = new Map<string, Set<string>>();
   for (const edge of sourceLedger.factSet.carrierEdges) {
@@ -870,7 +886,7 @@ function resolveEntities({
     const terminalPieces = (factToPieceIds.get(fact.factId) ?? []).map((pieceId) => {
       const piece = pieceById.get(pieceId);
       if (!piece) throw new Error("Assembly decision ledger found a dangling fact piece.");
-      return terminalPiecesFor(piece, pieceById);
+      return terminalPiecesFor(piece, pieceById, pieceByPriorId);
     });
     const carrierTargets = terminalPieces.flatMap((outcome) =>
       outcome.pieces.flatMap((piece) => {

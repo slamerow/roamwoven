@@ -427,4 +427,30 @@ export default function run() {
     /later-stage carrier deletion/,
     "an output-eligible piece cannot disappear silently in final projection"
   );
+
+  const forwardingFixture = groupCarrierFixture();
+  const forwardedPiece = forwardingFixture.pieces[0];
+  const priorId = forwardedPiece.id;
+  const nextId = `${priorId}-forwarded`;
+  forwardedPiece.id = nextId;
+  forwardedPiece.payload._canonicalPriorPieceIds = [priorId];
+  forwardingFixture.records.items = forwardingFixture.records.items.map((record) =>
+    record.canonicalId === priorId
+      ? { ...record, canonicalId: nextId, id: `${record.id}-forwarded` }
+      : record
+  );
+  const suppressed = forwardingFixture.pieces[1];
+  suppressed.outputEligible = false;
+  suppressed.disposition = { kind: "survivor", survivorId: priorId };
+  assert.doesNotThrow(() =>
+    buildAssemblyDecisionCarrierLedgerV1({
+      index: forwardingFixture.fixture.index,
+      observations: forwardingFixture.observations,
+      pieces: forwardingFixture.pieces,
+      records: forwardingFixture.records,
+      resolverMetadata: forwardingFixture.fixture.resolverMetadata,
+      sourceLedger: forwardingFixture.sourceLedger,
+      stages: [forwardingFixture.fixture.stage],
+    })
+  );
 }

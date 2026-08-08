@@ -783,13 +783,19 @@ path is bypassed.
   bindings without changing resolver application or recovery requests. Loop 9.3
   adds the indexed terminal reconciliation, all six decision domains,
   class-specific hash-only carriers, exact per-fact terminal coverage, group-child
-  conservation, and later-stage deletion guards. Offline counterfactual and
-  heterogeneous parity gates plus append-only persistence remain to be completed
-  in commits 9.4–9.5; the enforcement label is therefore honestly `PARTIAL`.
+  conservation, and later-stage deletion guards. Loop 9.4 checks in the
+  network-disabled, capture-once role-ablation gate; locks the 18/161 and 5/113
+  behavior-bearing baselines; proves durable source-fact linkage for the fresh
+  production-shaped replay; adds semantic booking, recommendation, spreadsheet,
+  and freeform fixtures; and keeps V3 lines, V1 facts, RW-ORD observations, and
+  final records as four separate conservation denominators. Append-only
+  persistence remains to be completed in commit 9.5; the enforcement label is
+  therefore honestly `PARTIAL`.
 - Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`,
   `tests/resolver-role-evaluations.test.ts`,
-  `tests/recovery-source-binding.test.ts`, and
-  `tests/assembly-decision-carrier-reconciliation.test.ts`
+  `tests/recovery-source-binding.test.ts`,
+  `tests/assembly-decision-carrier-reconciliation.test.ts`, and
+  `tests/assembly-decision-heterogeneous-parity.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 
