@@ -779,10 +779,17 @@ path is bypassed.
   reduced grouping/Calls while geocode candidate pools stayed exact. Loop 9.1
   locks the companion schema, stable-ID rules, privacy allowlist, terminal
   outcome families, immutable Source Fact V1 fixture hash, and those sanitized
-  baselines. Runtime construction, reconciliation, offline counterfactual gates,
-  and append-only persistence remain to be completed in commits 9.2–9.5; the
-  enforcement label is therefore honestly `PARTIAL`.
-- Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`
+  baselines. Loop 9.2 captures every resolver role proposal plus recovery-source
+  bindings without changing resolver application or recovery requests. Loop 9.3
+  adds the indexed terminal reconciliation, all six decision domains,
+  class-specific hash-only carriers, exact per-fact terminal coverage, group-child
+  conservation, and later-stage deletion guards. Offline counterfactual and
+  heterogeneous parity gates plus append-only persistence remain to be completed
+  in commits 9.4–9.5; the enforcement label is therefore honestly `PARTIAL`.
+- Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`,
+  `tests/resolver-role-evaluations.test.ts`,
+  `tests/recovery-source-binding.test.ts`, and
+  `tests/assembly-decision-carrier-reconciliation.test.ts`
 
 ## RW-GRP-001 — Routes and same-site visits preserve the traveler's mental model
 

@@ -276,23 +276,60 @@ export function assertAssemblyDecisionCarrierSetV1({
   ) {
     throw new Error("Assembly decision ledger dependency metadata is invalid.");
   }
+  if (decisionSet.sourceFactLedgerHash !== hashStableValue(sourceFactSet)) {
+    throw new Error("Assembly decision ledger source-fact hash is invalid.");
+  }
 
   const factById = new Map(sourceFactSet.facts.map((fact) => [fact.factId, fact]));
+  const domainOrdinal = new Map(
+    ASSEMBLY_DECISION_DOMAINS_V1.map((domain, index) => [domain, index])
+  );
   const decisionIds = new Set<string>();
+  const decisionById = new Map<string, AssemblyDecisionV1>();
   for (const decision of decisionSet.decisions) {
     if (decisionIds.has(decision.decisionId)) {
       throw new Error("Assembly decision ledger contains a duplicate decision id.");
     }
     decisionIds.add(decision.decisionId);
+    decisionById.set(decision.decisionId, decision);
     if (!ASSEMBLY_DECISION_DOMAINS_V1.includes(decision.domain)) {
       throw new Error("Assembly decision ledger contains an unknown decision domain.");
     }
     if (decision.writerVersion !== ASSEMBLY_DECISION_WRITER_VERSION) {
       throw new Error("Assembly decision ledger contains an unknown writer version.");
     }
+    if (
+      decision.decisionId !==
+      createAssemblyDecisionIdV1({
+        applied: decision.applied,
+        domain: decision.domain,
+        inputDecisionIds: decision.inputDecisionIds,
+        outcomeCode: decision.outcomeCode,
+        producer: decision.producer,
+        subjectFactIds: decision.subjectFactIds,
+        unresolvedSourceSpanIds: decision.unresolvedSourceSpanIds,
+        writerVersion: decision.writerVersion,
+      })
+    ) {
+      throw new Error("Assembly decision ledger contains an invalid decision id.");
+    }
     for (const factId of decision.subjectFactIds) {
       if (!factById.has(factId)) {
         throw new Error("Assembly decision ledger contains a dangling subject fact.");
+      }
+    }
+  }
+  for (const decision of decisionSet.decisions) {
+    for (const inputDecisionId of decision.inputDecisionIds) {
+      const input = decisionById.get(inputDecisionId);
+      if (!input) {
+        throw new Error("Assembly decision ledger contains a dangling input decision.");
+      }
+      if (
+        (domainOrdinal.get(input.domain) ?? Number.MAX_SAFE_INTEGER) >
+        (domainOrdinal.get(decision.domain) ?? -1)
+      ) {
+        throw new Error("Assembly decision ledger contains a backwards decision edge.");
       }
     }
   }
@@ -340,6 +377,15 @@ export function assertAssemblyDecisionCarrierSetV1({
         disposition.carrierAnchorHashes.length === 0);
     if (!validOutcome) {
       throw new Error("Assembly decision ledger contains an invalid terminal outcome.");
+    }
+    if (
+      disposition.factKind === "entity" &&
+      ((disposition.outcome === "carried" &&
+        disposition.carrierAnchorHashes.length === 0) ||
+        (disposition.outcome !== "carried" &&
+          disposition.carrierAnchorHashes.length > 0))
+    ) {
+      throw new Error("Assembly decision ledger contains an invalid entity carrier state.");
     }
   }
 
