@@ -790,7 +790,12 @@ path is bypassed.
   The final Loop 10 candidate must also correct the source-backed root causes
   confirmed in fresh 8.7 while preserving every existing pass and negative
   control. Only the improved candidate—not the defective parity state—may earn
-  deployment and one authorized fresh extraction.
+  deployment and one authorized fresh extraction. The private QA snapshot must
+  expose the authority status, version, aggregate decision counts, unresolved
+  behavior count, and authority hash through a fixed privacy allowlist. A fresh
+  run is not valid Loop 10 evidence unless authority status is `applied` and
+  unresolved behavior is zero; a fail-soft `fallback` run may remain usable but
+  may never be mistaken for authority proof.
 - Evidence: Loop 8 exit audit found 161 accepted resolver role decisions on the
   8.6 candidate and 113 on fresh 8.7, with 223 and 150 raw proposals
   respectively. Individual offline ablation found 18 and 5 behavior-bearing

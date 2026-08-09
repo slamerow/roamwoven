@@ -845,6 +845,9 @@ export function createExtractionSummary(usage: unknown) {
   const activityChunks = asRecord(openai.activityChunks);
   const assemblyDecisionLedger = asRecord(openai.assemblyDecisionLedger);
   const sourceCoverage = asRecord(openai.sourceCoverage);
+  const sourceFactAssemblyAuthority = asRecord(
+    openai.sourceFactAssemblyAuthority
+  );
   const sourceFactLedger = asRecord(openai.sourceFactLedger);
 
   const aggregateCounts = (value: unknown, allowedKeys: readonly string[]) => {
@@ -1008,6 +1011,71 @@ export function createExtractionSummary(usage: unknown) {
                   });
                 })
               : [],
+          }
+        : null,
+    // Loop 10 authority is a production release gate, not traveler content.
+    // Keep its outcome visible in the private QA snapshot so a fail-soft run
+    // cannot be mistaken for evidence that the new authority path executed.
+    // The fixed allowlist excludes candidate diagnostics and source content.
+    sourceFactAssemblyAuthority:
+      Object.keys(sourceFactAssemblyAuthority).length > 0
+        ? {
+            authorityHash:
+              typeof sourceFactAssemblyAuthority.authorityHash === "string"
+                ? sourceFactAssemblyAuthority.authorityHash
+                : null,
+            behaviorSignalCandidateCount:
+              Number(
+                sourceFactAssemblyAuthority.behaviorSignalCandidateCount
+              ) || 0,
+            candidateCount:
+              Number(sourceFactAssemblyAuthority.candidateCount) || 0,
+            compositePlanRecoveredCandidateCount:
+              Number(
+                sourceFactAssemblyAuthority.compositePlanRecoveredCandidateCount
+              ) || 0,
+            failureClass:
+              typeof sourceFactAssemblyAuthority.failureClass === "string"
+                ? sourceFactAssemblyAuthority.failureClass
+                : null,
+            mappedCandidateCount:
+              Number(sourceFactAssemblyAuthority.mappedCandidateCount) || 0,
+            relationshipDecisionCount:
+              Number(
+                sourceFactAssemblyAuthority.relationshipDecisionCount
+              ) || 0,
+            relationshipRecoveredCandidateCount:
+              Number(
+                sourceFactAssemblyAuthority.relationshipRecoveredCandidateCount
+              ) || 0,
+            relationshipRecoveryStageCount:
+              Number(
+                sourceFactAssemblyAuthority.relationshipRecoveryStageCount
+              ) || 0,
+            relationshipUnresolvedCount:
+              Number(
+                sourceFactAssemblyAuthority.relationshipUnresolvedCount
+              ) || 0,
+            roleDecisionCount:
+              Number(sourceFactAssemblyAuthority.roleDecisionCount) || 0,
+            schemaVersion:
+              Number(sourceFactAssemblyAuthority.schemaVersion) || 0,
+            status:
+              typeof sourceFactAssemblyAuthority.status === "string"
+                ? sourceFactAssemblyAuthority.status
+                : "unknown",
+            tailReferenceRecoveredCandidateCount:
+              Number(
+                sourceFactAssemblyAuthority.tailReferenceRecoveredCandidateCount
+              ) || 0,
+            unresolvedBehaviorCandidateCount:
+              Number(
+                sourceFactAssemblyAuthority.unresolvedBehaviorCandidateCount
+              ) || 0,
+            unresolvedSourceBindingCount:
+              Number(
+                sourceFactAssemblyAuthority.unresolvedSourceBindingCount
+              ) || 0,
           }
         : null,
     // Source Fact Ledger V1 is shadow-only support telemetry. Only the
