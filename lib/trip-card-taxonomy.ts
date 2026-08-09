@@ -12,7 +12,7 @@ const CITY_TIP_HEADER_PATTERN =
   /\b(notes?\s*&\s*tips?|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|local notes?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|also noted|where to eat|food list|restaurant list|restaurants to consider|cafes to consider|bars to consider|beer halls to consider|check out foods like|good beer halls|beer halls are|food options|drink options|shopping ideas|local tips?)\b/i;
 
 const CITY_TIP_SIGNAL_PATTERN =
-  /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?|also noted|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i;
+  /\b(notes?\s*&\s*tips?|tips?|ideas?|recommendations?|(?:food|restaurant|dining|bar|cafe|shopping)\s+recs?|also noted|eat\s*:|food\s*:|drinks?\s*&\s*nightlife\s*:|possible sights?\s*:|bars?\s*:|beer halls?\s*:|cafes?\s*:|restaurants?\s*:|shopping\s*:|where to eat|food list|restaurants?|cafes?|bars?|beer halls?|check out foods like|food options|drink options|shopping ideas|local notes?)\b/i;
 
 const DAY_SPECIFIC_CLUSTER_PATTERN =
   /\b(first[-\s]?day|second[-\s]?day|third[-\s]?day|day \d+|for the .* day|morning|afternoon|evening)\b/i;
@@ -403,6 +403,12 @@ export function hasWeakRecommendationLanguage(
   value: string | null | undefined
 ) {
   return WEAK_RECOMMENDATION_PATTERN.test(normalizeText(value));
+}
+
+export function hasExplicitRecommendationVerb(
+  value: string | null | undefined
+) {
+  return /\brecommend(?:s|ed|ing)?\b/.test(normalizeText(value));
 }
 
 export function hasLooseTipVocabulary(value: string | null | undefined) {

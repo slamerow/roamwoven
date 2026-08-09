@@ -220,6 +220,18 @@ function unresolvedAlignment(plausibleSpanIds: string[]): SourceAlignmentV1 {
   };
 }
 
+function isRecoveryCandidate(
+  stage: EvidenceStageInput,
+  record: Record<string, unknown>
+) {
+  const stageRecord = asRecord(stage.stage);
+  return Boolean(
+    stageRecord._sourceRecovery === true ||
+      record._sourceRecovery === true ||
+      normalizeText(stage.label).startsWith("source recovery")
+  );
+}
+
 export function alignSourceCandidateV1({
   index,
   record,
@@ -234,9 +246,9 @@ export function alignSourceCandidateV1({
   const evidence = normalizeText(stringValue(record, "evidence"));
 
   if (evidence) {
-    const exactEvidence = (
-      index.lookups.spanIdsByNormalizedClause.get(evidence) ?? []
-    ).filter(allowedMatch);
+    const indexedExactEvidence =
+      index.lookups.spanIdsByNormalizedClause.get(evidence) ?? [];
+    const exactEvidence = indexedExactEvidence.filter(allowedMatch);
     if (exactEvidence.length === 1) {
       return {
         method: "exact_evidence",
@@ -246,6 +258,30 @@ export function alignSourceCandidateV1({
       };
     }
     if (exactEvidence.length > 1) return unresolvedAlignment(exactEvidence);
+    // The legacy recovery stage did not retain the source upload id. It may
+    // still bind deterministically when its verbatim evidence is a unique
+    // clause in the immutable trip source index. No fuzzy or title-only
+    // trip-wide lookup is allowed here, and duplicate clauses remain
+    // ambiguous.
+    if (
+      allowed.size === 0 &&
+      isRecoveryCandidate(stage, record) &&
+      indexedExactEvidence.length === 1
+    ) {
+      return {
+        method: "exact_evidence",
+        plausibleSpanIds: indexedExactEvidence,
+        sourceSpanIds: indexedExactEvidence,
+        status: "aligned",
+      };
+    }
+    if (
+      allowed.size === 0 &&
+      isRecoveryCandidate(stage, record) &&
+      indexedExactEvidence.length > 1
+    ) {
+      return unresolvedAlignment(indexedExactEvidence);
+    }
   }
 
   const title = normalizeText(candidateTitle(record));
@@ -321,8 +357,7 @@ export function alignSourceCandidateV1({
 }
 
 function producerFor(stage: EvidenceStageInput, record: Record<string, unknown>) {
-  const stageRecord = asRecord(stage.stage);
-  return stageRecord._sourceRecovery === true || record._sourceRecovery === true
+  return isRecoveryCandidate(stage, record)
     ? ("recovery" as const)
     : ("parser" as const);
 }
@@ -514,7 +549,38 @@ function relationMembersForProposal({
       .join(" ")
   );
   const allowedSpanIds = new Set(stageSpanIds(index, proposal.stage));
-  const describedSpanIds = [
+  const proposalSectionLabel = normalizeText(
+    stringValue(proposal.record, "sourceSectionLabel")
+  );
+  const proposalEvidenceLines = (
+    stringValue(proposal.record, "evidence") ??
+    stringValue(proposal.record, "description") ??
+    ""
+  )
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line.length >= 3 &&
+        // Availability is an attribute of the preceding venue, never a
+        // relationship member in its own right.
+        !/^(?:open(?:ing)?|hours?)\b/i.test(normalizeText(line))
+    );
+  const exactLineSpanIds = proposalEvidenceLines.flatMap((line) => {
+    const normalizedLine = normalizeText(line);
+    const matches = index.spans.filter(
+      (span) =>
+        allowedSpanIds.has(span.spanId) &&
+        span.normalizedClause === normalizedLine &&
+        (!proposalSectionLabel ||
+          span.normalizedSectionLabel === proposalSectionLabel)
+    );
+    // Duplicate identical source lines are not enough to choose a stable
+    // relationship occurrence. Leave them to the existing conservative
+    // alignment fallback instead of spending the wrong copy.
+    return matches.length === 1 ? [matches[0].spanId] : [];
+  });
+  const tokenDescribedSpanIds = [
     ...new Set(
       distinctiveLineTokens(proposalText).flatMap((token) =>
         (index.lookups.spanIdsByToken.get(token) ?? []).filter((spanId) => {
@@ -524,6 +590,20 @@ function relationMembersForProposal({
           return clause.length >= 3 && proposalText.includes(clause);
         })
       )
+    ),
+  ];
+  // Multi-line evidence already declares its exact local boundary. Prefer
+  // those source lines over token search, which can pull flattened document
+  // duplicates and same-token lines from elsewhere in the chunk into one
+  // relationship fact. Single-line/flattened proposals retain the legacy
+  // path so existing supported shapes do not lose coverage.
+  const usesExactMultiLineBoundary =
+    proposalEvidenceLines.length >= 2 && exactLineSpanIds.length >= 2;
+  const describedSpanIds = [
+    ...new Set(
+      usesExactMultiLineBoundary
+        ? exactLineSpanIds
+        : tokenDescribedSpanIds
     ),
   ];
   const proposalSectionKeys = new Set(
@@ -584,7 +664,12 @@ function relationMembersForProposal({
   const proposalSpans = new Set(proposal.alignment.sourceSpanIds);
   const unresolvedMemberSpanIds = describedSpanIds.filter(
     (spanId) =>
-      !proposalSpans.has(spanId) &&
+      // A structural proposal does not spend one of the exact entity lines
+      // it quotes. Its fuzzy alignment can land on a member (for example,
+      // "Explore Example Palace area" aligning to "Palm House at Example
+      // Palace"); that member is still unresolved until an atomic carrier
+      // exists. Legacy single-line proposals retain the old exclusion.
+      (usesExactMultiLineBoundary || !proposalSpans.has(spanId)) &&
       (entityFactIdsBySpan.get(spanId) ?? []).length === 0
   );
 

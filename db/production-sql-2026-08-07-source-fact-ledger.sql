@@ -29,7 +29,7 @@ create table if not exists trip_extraction_fact_sets (
 
 alter table trip_extraction_fact_sets enable row level security;
 
-revoke all on trip_extraction_fact_sets from anon, authenticated;
+revoke all on trip_extraction_fact_sets from anon, authenticated, service_role;
 grant select, insert on trip_extraction_fact_sets to authenticated, service_role;
 
 create index if not exists trip_extraction_fact_sets_trip_created_idx
@@ -43,11 +43,12 @@ drop policy if exists "Trip owners can read extraction fact sets"
 create policy "Trip owners can read extraction fact sets"
   on trip_extraction_fact_sets
   for select
+  to authenticated
   using (
     exists (
       select 1 from trips
       where trips.id = trip_extraction_fact_sets.trip_id
-        and trips.owner_user_id = auth.uid()
+        and trips.owner_user_id = (select auth.uid())
     )
   );
 
@@ -56,11 +57,12 @@ drop policy if exists "Trip owners can append extraction fact sets"
 create policy "Trip owners can append extraction fact sets"
   on trip_extraction_fact_sets
   for insert
+  to authenticated
   with check (
     exists (
       select 1 from trips
       where trips.id = trip_extraction_fact_sets.trip_id
-        and trips.owner_user_id = auth.uid()
+        and trips.owner_user_id = (select auth.uid())
     )
     and exists (
       select 1 from trip_processing_runs

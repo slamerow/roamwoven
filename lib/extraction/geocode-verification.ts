@@ -774,6 +774,9 @@ export async function runGeocodeVerification({
         row.containerTitle = candidate.containerTitle;
         row.containerSourceSupported = candidate.containerSourceSupported;
       }
+      if (candidate.record._sourceFactRelationshipRecovery === true) {
+        candidate.record._sourceFactGeocodeOutcome = row?.outcome ?? "missing";
+      }
       const attachment = replay.entries.get(candidate.candidateId);
       if (!attachment) continue;
       matched.add(candidate.candidateId);
@@ -818,6 +821,9 @@ export async function runGeocodeVerification({
         provider: attachment.provider,
         query: attachment.query,
       };
+      if (candidate.record._sourceFactRelationshipRecovery === true) {
+        candidate.record._sourceFactGeocodeOutcome = "resolved";
+      }
       accepted.add(candidate.candidateId);
     }
     replay.hits = accepted.size;
@@ -846,6 +852,11 @@ export async function runGeocodeVerification({
 
   const withinBudget = candidates.slice(0, Math.max(0, config.maxLookups));
   usage.skippedOverBudgetCount = candidates.length - withinBudget.length;
+  for (const candidate of candidates.slice(withinBudget.length)) {
+    if (candidate.record._sourceFactRelationshipRecovery === true) {
+      candidate.record._sourceFactGeocodeOutcome = "skipped_over_budget";
+    }
+  }
 
   // G4.4: one telemetry row per candidate, in rank order, INCLUDING the
   // ones that never got a lookup — "why did this stop not resolve?" is a
@@ -1003,18 +1014,27 @@ export async function runGeocodeVerification({
     const row = telemetryByCandidate.get(candidate);
     if (!result) {
       if (row) row.outcome = "failed";
+      if (candidate.record._sourceFactRelationshipRecovery === true) {
+        candidate.record._sourceFactGeocodeOutcome = "failed";
+      }
       return;
     }
     if (row) row.granularity = result.granularity;
     if (result.granularity === "venue") {
       if (row) row.outcome = "resolved";
       attachResult(candidate, result, candidate.query);
+      if (candidate.record._sourceFactRelationshipRecovery === true) {
+        candidate.record._sourceFactGeocodeOutcome = "resolved";
+      }
       return;
     }
     // G4.2: a place, not a venue. NOT an error, and NOT attached — this is
     // the branch that stops the Prague centroid being stamped verified.
     usage.localityRejectedCount += 1;
     if (row) row.outcome = "rejected_locality";
+    if (candidate.record._sourceFactRelationshipRecovery === true) {
+      candidate.record._sourceFactGeocodeOutcome = "rejected_locality";
+    }
     if (
       candidate.containerTitle &&
       candidate.containerSourceSupported === false &&
@@ -1047,6 +1067,9 @@ export async function runGeocodeVerification({
     }
     if (!result) {
       if (row) row.outcome = "failed";
+      if (pending.candidate.record._sourceFactRelationshipRecovery === true) {
+        pending.candidate.record._sourceFactGeocodeOutcome = "failed";
+      }
       return;
     }
     if (row) row.granularity = result.granularity;
@@ -1058,11 +1081,18 @@ export async function runGeocodeVerification({
     if (!retryIsWithinCityBounds(pending.localityResult, result)) {
       usage.retryOutOfCityCount += 1;
       if (row) row.outcome = "rejected_out_of_city";
+      if (pending.candidate.record._sourceFactRelationshipRecovery === true) {
+        pending.candidate.record._sourceFactGeocodeOutcome =
+          "rejected_out_of_city";
+      }
       return;
     }
     usage.retryAcceptedCount += 1;
     if (row) row.outcome = "resolved";
     attachResult(pending.candidate, result, pending.query);
+    if (pending.candidate.record._sourceFactRelationshipRecovery === true) {
+      pending.candidate.record._sourceFactGeocodeOutcome = "resolved";
+    }
   });
 
   if (!retriesCompleted) {

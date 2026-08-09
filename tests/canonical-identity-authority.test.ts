@@ -71,6 +71,146 @@ function timedPeer(title: string, date: string, startTime: string) {
 }
 
 export default async function run() {
+  await test("an exact day-plan occurrence replaces only its explicitly linked reference note", () => {
+    const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    try {
+      const result = clusterExtractedEvidence({
+        sourceTransportAnchors: [],
+        stages: [
+          stage("Wednesday, April 2nd", [
+            activity({
+              category: "art_culture",
+              date: "2031-04-02",
+              description: "Sample Cathedral.",
+              evidenceRole: "city_note_candidate",
+              itemType: "note",
+              sourceHeadingPath: ["City ideas"],
+              sourceSectionLabel: "City ideas",
+              sourceSectionType: "city_reference",
+              title: "Sample Cathedral",
+            }),
+          ]),
+          stage("Thursday, April 3rd", [
+            activity({
+              _canonicalSourceOccurrences: [
+                {
+                  date: "2031-04-02",
+                  line: 20,
+                  sequencedDay: true,
+                  sourceIdentityHash: "sanitized-source",
+                  stageIndex: 0,
+                },
+                {
+                  date: "2031-04-03",
+                  line: 6,
+                  sequencedDay: false,
+                  sourceIdentityHash: "sanitized-source",
+                  stageIndex: 1,
+                },
+              ],
+              category: "art_culture",
+              date: "2031-04-03",
+              description: "Sample Cathedral.",
+              sourceHeadingPath: ["Thursday, April 3rd"],
+              sourceSectionLabel: "Thursday, April 3rd",
+              sourceSectionType: "dated_itinerary",
+              title: "Sample Cathedral",
+            }),
+          ]),
+        ],
+        tripOverview: { dateRange: "April 1-5, 2031" },
+      });
+      const draft = result.draft as {
+        activities: Array<Record<string, unknown>>;
+      };
+      const homes = draft.activities.filter((item) =>
+        /sample cathedral/i.test(
+          `${String(item.title)} ${String(item.description ?? "")}`
+        )
+      );
+
+      assert.equal(
+        homes.filter((item) => item.itemType === "activity").length,
+        1
+      );
+      assert.equal(
+        homes.find((item) => item.itemType === "activity")?.date,
+        "2031-04-03",
+        "the exact planned copy wins the specific earlier reference-note copy"
+      );
+      assert.equal(
+        homes.filter((item) => item.itemType === "note").length,
+        0,
+        "the replaced reference note does not keep a second home"
+      );
+    } finally {
+      if (priorFlag === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
+      }
+    }
+  });
+
+  await test("a later plan without a reference-note link cannot overrule an earlier sequenced occurrence", () => {
+    const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    try {
+      const result = clusterExtractedEvidence({
+        sourceTransportAnchors: [],
+        stages: [
+          stage("Thursday, April 3rd", [
+            activity({
+              _canonicalSourceOccurrences: [
+                {
+                  date: "2031-04-02",
+                  line: 18,
+                  sequencedDay: true,
+                  sourceIdentityHash: "sanitized-source",
+                  stageIndex: 0,
+                },
+                {
+                  date: "2031-04-03",
+                  line: 7,
+                  sequencedDay: false,
+                  sourceIdentityHash: "sanitized-source",
+                  stageIndex: 1,
+                },
+              ],
+              category: "art_culture",
+              date: "2031-04-03",
+              description: "Sample Market Hall.",
+              sourceHeadingPath: ["Thursday, April 3rd"],
+              sourceSectionLabel: "Thursday, April 3rd",
+              sourceSectionType: "dated_itinerary",
+              title: "Sample Market Hall",
+            }),
+          ]),
+        ],
+        tripOverview: { dateRange: "April 1-5, 2031" },
+      });
+      const draft = result.draft as {
+        activities: Array<Record<string, unknown>>;
+      };
+      const market = draft.activities.find(
+        (item) => item.itemType === "activity" && /market hall/i.test(String(item.title))
+      );
+
+      assert.equal(
+        market?.date,
+        "2031-04-02",
+        "without an explicit reference-note relationship, the existing sequenced-date rule remains authoritative"
+      );
+    } finally {
+      if (priorFlag === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
+      }
+    }
+  });
+
   await test("identity keeps one same-day venue alias while a next-day component remains distinct", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],

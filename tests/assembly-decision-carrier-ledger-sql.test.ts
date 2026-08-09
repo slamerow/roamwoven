@@ -24,9 +24,22 @@ export default function run() {
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /for select/i);
   assert.match(sql, /for insert/i);
+  assert.match(sql, /for select\s+to authenticated/i);
+  assert.match(sql, /for insert\s+to authenticated/i);
+  assert.match(
+    sql,
+    /revoke all on trip_assembly_decision_sets from anon, authenticated, service_role/i
+  );
+  assert.match(
+    sql,
+    /create index if not exists trip_assembly_decision_sets_source_fact_dependency_idx[\s\S]*trip_id,[\s\S]*processing_run_id,[\s\S]*source_fact_ledger_schema_version,[\s\S]*source_fact_ledger_hash/i
+  );
+  assert.match(sql, /owner_user_id = \(select auth\.uid\(\)\)/i);
+  assert.doesNotMatch(sql, /owner_user_id = auth\.uid\(\)/i);
   assert.match(sql, /grant select, insert .* authenticated/i);
   assert.doesNotMatch(sql, /grant[^;]*\bupdate\b/i);
   assert.doesNotMatch(sql, /grant[^;]*\bdelete\b/i);
+  assert.doesNotMatch(sql, /grant[^;]*\btruncate\b/i);
   assert.doesNotMatch(sql, /for update/i);
   assert.doesNotMatch(sql, /for delete/i);
   assert.doesNotMatch(sql, /using gin/i);

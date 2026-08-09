@@ -9,6 +9,7 @@ import {
   normalizeText,
   normalizeTripDate,
 } from "@/lib/extraction/traveler-text";
+import { isSourceFactAssemblyAuthorityEnabled } from "@/lib/extraction/source-fact-assembly-config";
 
 const CANONICAL_RESOLVER_VERSION = 7;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
@@ -23,7 +24,7 @@ const resolverCache = new Map<
   }
 >();
 
-type ResolverCandidate = {
+export type ResolverCandidate = {
   candidateId: string;
   city: string | null;
   date: string | null;
@@ -56,10 +57,13 @@ export type CanonicalEvidenceResolution = {
     confidence: "high" | "medium" | "low";
     parentCandidateId: string | null;
     parentTitle: string;
+    relationshipType?: "contains" | "ordered_route";
+    sourceAuthority?: "source_fact";
+    sourceFactId?: string;
   }>;
   roleDecisions: Array<{
     candidateId: string;
-    classification: "city_note" | "keep_activity";
+    classification: "accessory" | "city_note" | "keep_activity";
     confidence: "high" | "medium" | "low";
     reason: string;
   }>;
@@ -367,13 +371,26 @@ function sourcePosition(title: string, sourceText: string | null | undefined) {
 // changing the resolver's existing semantic choices.
 function containmentSourceLine(
   title: string,
-  sourceText: string | null | undefined
+  sourceText: string | null | undefined,
+  evidence: string | null = null
 ) {
   if (!sourceText?.trim()) return null;
+  const lines = sourceText.split(/\r?\n/);
+  const normalizedEvidence = normalizeText(evidence);
+  if (normalizedEvidence) {
+    const exactEvidenceLines = lines
+      .map((rawLine, index) => ({
+        line: index + 1,
+        normalized: normalizeText(rawLine),
+      }))
+      .filter((entry) => entry.normalized === normalizedEvidence);
+    if (exactEvidenceLines.length === 1) {
+      return exactEvidenceLines[0].line;
+    }
+  }
   const titleTokens = new Set(normalizeText(title).split(/\s+/).filter(Boolean));
   return (
-    sourceText
-      .split(/\r?\n/)
+    lines
       .map((rawLine, index) => {
         const line = rawLine.trim();
         if (!line || !sourceLineMatchesTitle(title, line)) return null;
@@ -507,7 +524,7 @@ function buildSourceBlockWitnesses(stages: EvidenceStageInput[]) {
   return [...witnesses.values()];
 }
 
-function buildCandidates(stages: EvidenceStageInput[]) {
+export function buildCanonicalEvidenceCandidates(stages: EvidenceStageInput[]) {
   const sourceBlocks = buildSourceBlockWitnesses(stages);
   const candidates = stages.flatMap((stageInput, stageIndex) => {
     const stage = asRecord(stageInput.stage);
@@ -788,7 +805,7 @@ function buildResolutionWindows(candidates: ResolverCandidate[]) {
 export function inspectCanonicalEvidenceResolutionPlan(
   stages: EvidenceStageInput[]
 ): CanonicalEvidenceResolverPlan {
-  const candidates = buildCandidates(stages);
+  const candidates = buildCanonicalEvidenceCandidates(stages);
   const windows = buildResolutionWindows(candidates);
 
   return {
@@ -829,8 +846,20 @@ function reconcileRoleDecisions(
   );
 }
 
-type WindowedResolverRoleProposal =
-  CanonicalEvidenceResolution["roleDecisions"][number] & {
+type ResolverModelRoleDecision = Omit<
+  CanonicalEvidenceResolution["roleDecisions"][number],
+  "classification"
+> & {
+  classification: "city_note" | "keep_activity";
+};
+
+function isResolverModelRoleDecision(
+  decision: CanonicalEvidenceResolution["roleDecisions"][number]
+): decision is ResolverModelRoleDecision {
+  return decision.classification !== "accessory";
+}
+
+type WindowedResolverRoleProposal = ResolverModelRoleDecision & {
     windowCandidateIds: string[];
   };
 
@@ -1066,7 +1095,13 @@ function applyResolution({
       item._resolverCandidateId = candidate.candidateId;
       item._canonicalSourcePosition = {
         blockIds: [...candidate.sourceBlockIds],
-        line: containmentSourceLine(candidate.title, stageInput?.sourceText),
+        line: containmentSourceLine(
+          candidate.title,
+          stageInput?.sourceText,
+          isSourceFactAssemblyAuthorityEnabled()
+            ? stringValue(item, "evidence")
+            : null
+        ),
         relationshipSignal: candidate.sourceRelationshipSignal,
         sourceIdentityHash,
         stageIndex: candidate.stageIndex,
@@ -1148,14 +1183,20 @@ function applyResolution({
     const independentlyProvenRelationship =
       executionCandidates.some((candidate) => candidate.sourceRelationshipSignal) ||
       nestedUnderRequestedParent;
+    const sourceFactAuthority =
+      grouping.sourceAuthority === "source_fact" &&
+      typeof grouping.sourceFactId === "string" &&
+      grouping.sourceFactId.startsWith("fact_") &&
+      (grouping.relationshipType === "contains" ||
+        grouping.relationshipType === "ordered_route");
 
     if (
       groupCandidates.length !== uniqueIds.length ||
       executionCandidates.length < 2 ||
       dates.size !== 1 ||
-      sharedSourceBlocks.length === 0 ||
+      (!sourceFactAuthority && sharedSourceBlocks.length === 0) ||
       !isConclusiveGroupingClaim(grouping.claim) ||
-      !independentlyProvenRelationship ||
+      (!sourceFactAuthority && !independentlyProvenRelationship) ||
       isGenericGroupingParent(grouping.parentTitle, executionCandidates) ||
       groupCandidates.some((candidate) => isCitywidePassTask(candidate.title)) ||
       executionCandidates.some((candidate) =>
@@ -1193,12 +1234,18 @@ function applyResolution({
     }
 
     const decisionId = `group_${createHash("sha256")
-      .update(JSON.stringify({
-        candidateIds: uniqueIds.slice().sort(),
-        claim: grouping.claim,
-        parentCandidateId: parentCandidate?.candidateId,
-        version: CANONICAL_RESOLVER_VERSION,
-      }))
+      .update(JSON.stringify(sourceFactAuthority
+        ? {
+            relationshipType: grouping.relationshipType,
+            sourceFactId: grouping.sourceFactId,
+            version: CANONICAL_RESOLVER_VERSION,
+          }
+        : {
+            candidateIds: uniqueIds.slice().sort(),
+            claim: grouping.claim,
+            parentCandidateId: parentCandidate?.candidateId,
+            version: CANONICAL_RESOLVER_VERSION,
+          }))
       .digest("hex")
       .slice(0, 24)}`;
     parent._canonicalGroupingDecisionIds = [
@@ -1209,12 +1256,14 @@ function applyResolution({
     ];
     parent._canonicalRoleDecision = "keep_activity";
     groupingDecisions.push({
-      callRequired: !groupCandidates.some(
-        (candidate) =>
-          candidate.evidenceRole === "grouping_proposal" &&
-          candidate.sectionType === "dated_itinerary" &&
-          candidate.sourceLine !== null
-      ),
+      callRequired: sourceFactAuthority
+        ? grouping.relationshipType !== "ordered_route"
+        : !groupCandidates.some(
+            (candidate) =>
+              candidate.evidenceRole === "grouping_proposal" &&
+              candidate.sectionType === "dated_itinerary" &&
+              candidate.sourceLine !== null
+          ),
       candidateIds: executionCandidates.map((candidate) => candidate.candidateId),
       claim: grouping.claim,
       containerCandidateId:
@@ -1224,7 +1273,7 @@ function applyResolution({
       decisionId,
       parentCandidateId: parentCandidate?.candidateId ?? uniqueIds[0],
       parentTitle: grouping.parentTitle,
-      source: "canonical_resolver",
+      source: sourceFactAuthority ? "source_fact" : "canonical_resolver",
     });
     executionCandidates.forEach((candidate) =>
       groupedCandidateIds.add(candidate.candidateId)
@@ -1239,14 +1288,14 @@ export function applyCanonicalEvidenceResolution(
   resolution: CanonicalEvidenceResolution
 ) {
   return applyResolution({
-    candidates: buildCandidates(stages),
+    candidates: buildCanonicalEvidenceCandidates(stages),
     resolution,
     stages,
   });
 }
 
 export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[]) {
-  const candidates = buildCandidates(stages);
+  const candidates = buildCanonicalEvidenceCandidates(stages);
   const windows = buildResolutionWindows(candidates);
   const emptyMetadata: CanonicalEvidenceResolverMetadata = {
     cacheHit: false,
@@ -1323,6 +1372,7 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
     ).values()
   );
   const acceptedRoleDecisions = resolution.roleDecisions
+    .filter(isResolverModelRoleDecision)
     .filter((decision) => decision.confidence === "high")
     .map((decision) => ({
       candidateId: decision.candidateId,
@@ -1332,10 +1382,12 @@ export async function resolveCanonicalEvidenceStages(stages: EvidenceStageInput[
   const roleEvaluations = evaluateCanonicalResolverRoleProposals({
     knownCandidateIds: candidates.map((candidate) => candidate.candidateId),
     proposals: windowResults.flatMap((result) =>
-      result.resolution.roleDecisions.map((proposal) => ({
-        ...proposal,
-        windowCandidateIds: result.windowCandidateIds,
-      }))
+      result.resolution.roleDecisions
+        .filter(isResolverModelRoleDecision)
+        .map((proposal) => ({
+          ...proposal,
+          windowCandidateIds: result.windowCandidateIds,
+        }))
     ),
   });
 

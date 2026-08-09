@@ -14,6 +14,19 @@ const rootDir = path.resolve(
   ".."
 );
 const originalResolveFilename = Module._resolveFilename;
+const asynchronousFailures = [];
+
+// Several suites use node:test internally while this repository's outer
+// runner invokes exported test functions. An assertion scheduled by an
+// inner suite can otherwise fire after that suite reports complete and Node
+// may print the uncaught error while still returning success. A dark-factory
+// gate must turn every such late failure into a non-zero result.
+process.on("uncaughtException", (error) => {
+  asynchronousFailures.push(error);
+});
+process.on("unhandledRejection", (error) => {
+  asynchronousFailures.push(error);
+});
 
 Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
   if (request.startsWith("@/")) {
@@ -110,6 +123,16 @@ for (const file of testFiles) {
       await run();
     }
   }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+if (asynchronousFailures.length > 0) {
+  for (const failure of asynchronousFailures) {
+    console.error(failure instanceof Error ? failure.stack : failure);
+  }
+  throw new Error(
+    `${asynchronousFailures.length} asynchronous test failure(s) escaped their suite.`
+  );
 }
 
 console.log(`Passed ${testFiles.length} test file${testFiles.length === 1 ? "" : "s"}.`);

@@ -99,6 +99,7 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 import { classifySensitiveText } from "@/lib/trip-privacy-policy";
+import { isSourceFactAssemblyAuthorityEnabled } from "@/lib/extraction/source-fact-assembly-config";
 
 export const EVIDENCE_CLUSTER_VERSION = 20;
 
@@ -163,7 +164,7 @@ export type CanonicalGroupingDecision = {
   decisionId: string;
   parentCandidateId: string;
   parentTitle: string;
-  source: "canonical_resolver";
+  source: "canonical_resolver" | "source_fact";
 };
 
 export type CanonicalGroupingExecutionDecision = {
@@ -821,6 +822,12 @@ export function canonicalPiecePublicPayload(
     _canonicalSourceDecisions,
     _canonicalSourceOccurrences,
     _canonicalSourcePosition,
+    _sourceFactAuthorityDecision,
+    _sourceFactCityNoteRecovery,
+    _sourceFactCompositePlanRecovery,
+    _sourceFactGeocodeOutcome,
+    _sourceFactRelationshipRecovery,
+    _sourceFactSourcePosition,
     // Arc G.3a: the geocoder's formatted address is grouping evidence and
     // nothing else. RW-GRP-001's lane posture says results are consumed
     // ONLY by proximity checks, so a postal address must not ride into the
@@ -1153,6 +1160,9 @@ function timeFrom(record: Record<string, unknown>) {
 }
 
 function isRentalPickup(record: Record<string, unknown>) {
+  if (isSourceFactAssemblyAuthorityEnabled()) {
+    return isRentalCarPickupCandidate(record);
+  }
   return /\b(?:pick\s*up|pickup).{0,30}\b(?:rental\s*)?car\b|\brental\s*car.{0,30}\b(?:pick\s*up|pickup)\b/.test(
     normalizeText(
       [record.title, record.description].filter(Boolean).join(" ")
@@ -1167,6 +1177,27 @@ function activityMatchReason(
   const leftTime = timeFrom(left);
   const rightTime = timeFrom(right);
   const datesMatch = sameOrMissingDate(left, right);
+
+  if (
+    isSourceFactAssemblyAuthorityEnabled() &&
+    datesMatch &&
+    (!leftTime || !rightTime || leftTime === rightTime) &&
+    isRentalPickup(left) &&
+    isRentalPickup(right)
+  ) {
+    const leftRentalConfirmation = confirmationFrom(left);
+    const rightRentalConfirmation = confirmationFrom(right);
+    const leftCity = normalizedComparable(stringValue(left, "city"));
+    const rightCity = normalizedComparable(stringValue(right, "city"));
+    if (
+      (!leftRentalConfirmation ||
+        !rightRentalConfirmation ||
+        leftRentalConfirmation === rightRentalConfirmation) &&
+      (!leftCity || !rightCity || leftCity === rightCity)
+    ) {
+      return "same rental-car pickup";
+    }
+  }
 
   if (
     containmentTitleConflict(
@@ -1188,7 +1219,12 @@ function activityMatchReason(
     return "shared booking identity";
   }
 
-  if (datesMatch && isRentalPickup(left) && isRentalPickup(right)) {
+  if (
+    !isSourceFactAssemblyAuthorityEnabled() &&
+    datesMatch &&
+    isRentalPickup(left) &&
+    isRentalPickup(right)
+  ) {
     return "same rental-car pickup";
   }
 
@@ -2004,6 +2040,17 @@ function mergeObservationIntoPiece(
     );
   }
 
+  if (
+    isSourceFactAssemblyAuthorityEnabled() &&
+    reason === "same rental-car pickup"
+  ) {
+    // The source-backed identity is one rental pickup even when parser copies
+    // alternate between "car pickup" and "pick up car". Use one stable,
+    // traveler-readable canonical title instead of allowing the last copy to
+    // win by wording length.
+    next.title = "Pick up rental car";
+  }
+
   piece.payload = next;
   piece.conflicts = conflicts;
   piece.observationIds = Array.from(
@@ -2271,9 +2318,62 @@ function gateOffContractQuestions(
     const targetField = stringValue(record, "targetField") ?? "";
     const guessed = stringValue(record, "guessedValue");
     const evidence = stringValue(record, "evidence") ?? "";
+    const prompt = stringValue(record, "prompt") ?? "";
+    const reason = stringValue(record, "reason") ?? "";
     const subject = eligiblePieceById.get(
       stringValue(record, "relatedCanonicalPieceId") ?? ""
     );
+    if (isSourceFactAssemblyAuthorityEnabled()) {
+      const sourceAlreadyAnswers =
+        /\b(?:explicitly stated|is present|are present|source (?:states|provides|lists|names))\b/i.test(
+          `${reason} ${evidence}`
+        );
+      if (
+        /^(?:address|confirmation|name|provider)$/i.test(targetField) &&
+        sourceAlreadyAnswers
+      ) {
+        dismiss(
+          record,
+          "the question says the source already provides this metadata; source-answerable fields are assembly work, not maker decisions (RW-QUE-001)"
+        );
+        continue;
+      }
+      if (
+        /^provider$/i.test(targetField) &&
+        !guessed &&
+        /\b(?:provider|company)\b[^.]{0,60}\b(?:is not|isn't|not|was not|wasn't) (?:named|provided|stated)\b|\bmissing (?:the )?(?:provider|company)\b/i.test(
+          reason
+        )
+      ) {
+        dismiss(
+          record,
+          "an optional provider label that the source does not name is left blank; completing absent metadata is not a maker decision (RW-QUE-001)"
+        );
+        continue;
+      }
+      if (
+        /\bhome\b/i.test(prompt) &&
+        /\b(?:which|what) city\b|\bassociated with\b/i.test(prompt)
+      ) {
+        dismiss(
+          record,
+          "a standalone Home fragment is identity cleanup, not a material maker decision (RW-QUE-001)"
+        );
+        continue;
+      }
+      if (
+        /\bwhat specific\b[^?]{0,80}\b(?:activity|venue|plan)\b/i.test(prompt) &&
+        /\b(?:broad placeholder|no concrete (?:activity|venue|plan)|source (?:does not|doesn't) (?:name|provide|specify))\b/i.test(
+          reason
+        )
+      ) {
+        dismiss(
+          record,
+          "the source contains only a broad placeholder; asking the maker to invent missing source content is technical recovery, not a material decision (RW-QUE-001)"
+        );
+        continue;
+      }
+    }
     if (
       /address.?visibility/i.test(targetField) &&
       normalizeText(guessed) === "public" &&
@@ -2810,6 +2910,22 @@ function mergeCanonicalPieceInto({
   );
   target.actions = [...target.actions, ...source.actions];
 
+  // Note evidence is semantic input, not disposable parser metadata. A
+  // same-note identity merge can happen before the canonical City Note is
+  // rendered; preserve both source-backed evidence bodies so later section,
+  // privacy, and carrier classification sees every recommendation instead
+  // of only the winning parser summary.
+  if (
+    isSourceFactAssemblyAuthorityEnabled() &&
+    target.kind === "note" &&
+    source.kind === "note"
+  ) {
+    target.payload.evidence = uniqueDescription(
+      target.payload.evidence,
+      source.payload.evidence
+    );
+  }
+
   for (const [field, observationIds] of Object.entries(source.fieldSources)) {
     target.fieldSources[field] = Array.from(
       new Set([...(target.fieldSources[field] ?? []), ...observationIds])
@@ -2861,6 +2977,19 @@ function mergeCanonicalPieceInto({
     if (source.payload._ownTextFixedCommitment === true) {
       target.payload._ownTextFixedCommitment = true;
     }
+  }
+  if (
+    isSourceFactAssemblyAuthorityEnabled() &&
+    target.kind === "activity" &&
+    source.kind === "activity" &&
+    isRentalCarPickupCandidate(target.payload) &&
+    isRentalCarPickupCandidate(source.payload) &&
+    sameOrMissingDate(target.payload, source.payload)
+  ) {
+    // Reclassification can merge two already-canonical rental-pickup pieces
+    // after the observation-level merge has selected its stable title. Keep
+    // that same source-backed identity at this later merge boundary as well.
+    target.payload.title = "Pick up rental car";
   }
   if (!preserveTargetIdentity) {
     refreshCanonicalPieceId(target);
@@ -9287,9 +9416,32 @@ function sourceSequencedIdentityDate(
     }
     return types;
   };
-  const occurrences = sourceOccurrencesForPiece(piece, observationById, {
+  const allOccurrences = sourceOccurrencesForPiece(piece, observationById, {
     identityTitleOnly: true,
-  }).filter((occurrence) => occurrence.sequencedDay);
+  });
+  // A short deliberate list may have no sequence words at all. When its
+  // exact occurrence was independently classified as BLOCK_PLAN and the
+  // candidacy decision names the earlier copy as a reference note, that plan
+  // outranks the note even if only the earlier mention carries sequencedDay
+  // telemetry. The explicit note link is required: without it, this would
+  // incorrectly re-date independent planned occurrences such as a venue that
+  // appears on two itinerary days.
+  const candidacy = canonicalCandidacyDecision(piece);
+  const classifiedDate = stringValue(candidacy, "classifiedDate");
+  const exactPlannedOccurrence =
+    isSourceFactAssemblyAuthorityEnabled() &&
+    piece.observationIds.length === 1 &&
+    stringValue(candidacy, "reasonCode") === "BLOCK_PLAN" &&
+    Boolean(stringValue(candidacy, "referenceNoteObservationId")) &&
+    classifiedDate
+      ? allOccurrences.find(
+          (occurrence) => occurrence.date === classifiedDate
+        ) ?? null
+      : null;
+  if (exactPlannedOccurrence) return exactPlannedOccurrence.date;
+  const occurrences = allOccurrences.filter(
+    (occurrence) => occurrence.sequencedDay
+  );
   // A deliberate plan occurrence outranks an earlier reference-list
   // occurrence. Only when no occurrence was classified as a plan do we
   // fall back to the earliest sequenced mention that was not ideas-only.
@@ -10672,6 +10824,57 @@ function applyIntentBlockClassification({
     );
     const localObservations =
       blockObservations.length > 0 ? blockObservations : ownObservations;
+    // Source Fact authority may carry two same-date parser observations for
+    // one identity: an exact authored-route occurrence plus a broad summary
+    // copy whose prose looks note-like. The summary may contribute facts,
+    // but it cannot demote the exact route member. Require the occurrence to
+    // match its own source position exactly and to carry an independently
+    // detected source relationship; a merely sequenced list mention (for
+    // example an idea-list venue) is intentionally insufficient.
+    const hasExactSourceRelationshipPlanOccurrence = Boolean(
+      isSourceFactAssemblyAuthorityEnabled() &&
+        localObservations.some((observation) => {
+          const position = asRecord(
+            observation.payload._canonicalSourcePosition
+          );
+          const line = Number(position.line);
+          const stageIndex = Number(position.stageIndex);
+          const sourceIdentityHash = stringValue(
+            position,
+            "sourceIdentityHash"
+          );
+          const occurrences = observation.payload._canonicalSourceOccurrences;
+          const ownRelationshipText = [
+            stringValue(observation.payload, "title"),
+            stringValue(observation.payload, "description"),
+            stringValue(observation.payload, "evidence"),
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return Boolean(
+            position.relationshipSignal === true &&
+              /\b(?:near|next to|inside|within|walk (?:to|from|between)|walking distance|\d+\s*(?:min|minute)s?\s+walk)\b/i.test(
+                ownRelationshipText
+              ) &&
+              observation.sourceStructure.sectionType === "dated_itinerary" &&
+              Number.isFinite(line) &&
+              Number.isFinite(stageIndex) &&
+              sourceIdentityHash &&
+              Array.isArray(occurrences) &&
+              occurrences.some((rawOccurrence) => {
+                const occurrence = asRecord(rawOccurrence);
+                return (
+                  stringValue(occurrence, "date") === date &&
+                  occurrence.sequencedDay === true &&
+                  Number(occurrence.line) === line &&
+                  Number(occurrence.stageIndex) === stageIndex &&
+                  stringValue(occurrence, "sourceIdentityHash") ===
+                    sourceIdentityHash
+                );
+              })
+          );
+        })
+    );
     const primaryCandidates = localObservations
       .filter(
         (observation) =>
@@ -10963,6 +11166,7 @@ function applyIntentBlockClassification({
         classification.hasAvailabilityMarker,
       hasSequencedDayPlan,
       hasSourceSupportedPlan:
+        hasExactSourceRelationshipPlanOccurrence ||
         sourceIntent.hasExplicitPlanMention ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
@@ -11040,6 +11244,10 @@ function applyIntentBlockClassification({
       confirmationFrom(piece.payload) ? "confirmation" : null,
       canonicalSourceDecisions(piece.payload).length > 0
         ? "source_ticket_choice"
+        : null,
+      isSourceFactAssemblyAuthorityEnabled() &&
+      piece.payload._canonicalRoleDecision === "keep_activity"
+        ? "source_fact_authority"
         : null,
       pieceNamedInDayHeading(piece) ? "day_heading" : null,
       sourceCommittedDaySlotPieceIds.has(piece.id)
@@ -11225,11 +11433,16 @@ const CROWDED_DAY_VISIBLE_CARDS = 6;
 export const SAME_SITE_CONTAINER_PATTERN = SITE_CONTAINER_NOUN_PATTERN;
 
 function pieceIsSourceNarratedRouteStop(piece: CanonicalEvidencePiece) {
-  return /\b(?:walk (?:by|past|to|across|over|along)|stop by|on the (?:hour|way)|head (?:to|over|down)|then (?:walk|go|head))\b/i.test(
-    [
-      stringValue(piece.payload, "title") ?? "",
-      stringValue(piece.payload, "description") ?? "",
-    ].join(" ")
+  const text = [
+    stringValue(piece.payload, "title") ?? "",
+    stringValue(piece.payload, "description") ?? "",
+  ].join(" ");
+  return (
+    /\b(?:walk (?:by|past|to|across|over|along)|stop by|on the (?:hour|way)|head (?:to|over|down)|then (?:walk|go|head))\b/i.test(
+      text
+    ) ||
+    (isSourceFactAssemblyAuthorityEnabled() &&
+      /\bwalk from\b/i.test(text))
   );
 }
 
@@ -11531,6 +11744,7 @@ function createSiteMembershipContext({
     const childTitle = normalizedComparable(childRawTitle);
     if (!childTitle) return false;
     if (
+      piece.payload._sourceFactRelationshipRecovery !== true &&
       childRawTitle &&
       containerListsComponent(containerDescription, childRawTitle)
     ) {
@@ -11668,6 +11882,9 @@ function containmentObservationPositions(
     .sort(
       (left, right) =>
         right.stageIndex - left.stageIndex ||
+        (isSourceFactAssemblyAuthorityEnabled()
+          ? Number(right.relationshipSignal) - Number(left.relationshipSignal)
+          : 0) ||
         left.line - right.line ||
         left.ordinal - right.ordinal
     );
@@ -11678,6 +11895,43 @@ function containmentSourcePosition(
   observationById: Map<string, EvidenceObservation>
 ) {
   return containmentObservationPositions(piece, observationById)[0] ?? null;
+}
+
+function recoveredRelationshipSourcePosition(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  return piece.observationIds
+    .map((id) => observationById.get(id))
+    .filter(
+      (observation): observation is EvidenceObservation =>
+        Boolean(observation) &&
+        observation?.payload._sourceFactRelationshipRecovery === true
+    )
+    .flatMap((observation) => {
+      const position = asRecord(observation.payload._canonicalSourcePosition);
+      const line = Number(position.line);
+      const stageIndex = Number(position.stageIndex);
+      const sourceIdentityHash = stringValue(position, "sourceIdentityHash");
+      return Number.isFinite(line) &&
+        Number.isFinite(stageIndex) &&
+        sourceIdentityHash
+        ? [{
+            line,
+            observationId: observation.id,
+            ordinal: observation.ordinal,
+            relationshipSignal: position.relationshipSignal === true,
+            sourceIdentityHash,
+            stageIndex,
+          } satisfies ContainmentSourcePosition]
+        : [];
+    })
+    .sort(
+      (left, right) =>
+        right.stageIndex - left.stageIndex ||
+        left.line - right.line ||
+        left.ordinal - right.ordinal
+    )[0] ?? null;
 }
 
 function containmentParticipant(piece: CanonicalEvidencePiece) {
@@ -12294,12 +12548,107 @@ function createCanonicalContainmentAuthority({
         containerPosition?.relationshipSignal === true;
       if (!hasSourceNesting) continue;
 
+      // Classification may already have routed a verified off-site recovery
+      // row to City Notes. Its traveler-facing home changes, but its frozen
+      // source position and geocode still define the containment boundary.
+      // Read that structural evidence from all pieces; membership below still
+      // selects only eligible Activity pieces.
+      const recoveredRelationshipEntries = pieces
+        .filter(
+          (piece) =>
+            piece.payload._sourceFactRelationshipRecovery === true &&
+            stringValue(piece.payload, "date") === date
+        )
+        .flatMap((piece) => {
+          const position =
+            containmentSourcePosition(piece, observationById) ??
+            recoveredRelationshipSourcePosition(piece, observationById);
+          return position &&
+            containerPosition &&
+            position.sourceIdentityHash === containerPosition.sourceIdentityHash &&
+            position.stageIndex === containerPosition.stageIndex
+            ? [{ piece, position }]
+            : [];
+        });
+      const recoveredGeocodeComplete = recoveredRelationshipEntries.every(
+        ({ piece }) =>
+          piece.payload._sourceFactGeocodeOutcome === "resolved" ||
+          piece.payload._sourceFactGeocodeOutcome === "rejected_locality"
+      );
+      const recoveredVerifiedBoundary =
+        recoveredRelationshipEntries.length > 0 &&
+        membership.originCoords?.verified
+          ? recoveredRelationshipEntries.find(({ piece }) => {
+              const coords = membership.radiusCoordinates(piece);
+              return Boolean(
+                coords?.verified &&
+                  membership.originCoords &&
+                  haversineKm(membership.originCoords, coords) >
+                    SITE_FOOTPRINT_MAX_KM
+              );
+            }) ?? null
+          : null;
+      // A recovered line proves that the source named a stop, not that every
+      // adjacent line belongs to the site. Source-bounded extension is
+      // licensed only when every recovered candidate reached a terminal
+      // geocode outcome and a verified off-site record supplies the stopping
+      // boundary. Without that proof, explicit "at/inside/within" hierarchy
+      // can still form a conservative group, but unknown neighbors stay out.
+      const recoveredExtensionLicensed =
+        recoveredRelationshipEntries.length === 0 ||
+        (recoveredGeocodeComplete && Boolean(recoveredVerifiedBoundary));
+
+      // A timed sub-stop can be named generically ("Changing of the Guard")
+      // and fail geocoding even though the surrounding source sequence puts
+      // it inside a declared site visit. Admit that narrow bridge only when
+      // a later row is independently verified as part of the site, the
+      // parent carries a source relationship signal, and the bridge is a
+      // sightseeing stop. This deliberately excludes timed meals and other
+      // logistics between the parent and the verified site member.
+      const firstVerifiedSiteMember = containerPosition?.relationshipSignal
+        && isSourceFactAssemblyAuthorityEnabled()
+        ? positioned.find(({ piece, position }) =>
+            position.line > containerPosition.line &&
+            membership.evidenceFor(piece) !== null
+          ) ?? null
+        : null;
+      const timedSourceBridges = new Set(
+        firstVerifiedSiteMember && containerPosition
+          ? positioned
+              .filter(({ piece, position }) =>
+                position.line > containerPosition.line &&
+                position.line < firstVerifiedSiteMember.position.line &&
+                (containmentSemanticKind(piece) === "sight" ||
+                  (normalizedComparable(
+                    stringValue(piece.payload, "category")
+                  ) === "tours tickets" &&
+                    !confirmationFrom(piece.payload) &&
+                    !/\b(?:tour|ticket)\b/i.test(
+                      stringValue(piece.payload, "title") ?? ""
+                    ))) &&
+                Boolean(timeFrom(piece.payload)) &&
+                membership.radiusCoordinates(piece) === null &&
+                piece.payload._sourceFactRelationshipRecovery !== true &&
+                !PASSING_MENTION_TITLE_PATTERN.test(
+                  `${stringValue(piece.payload, "title") ?? ""} ${
+                    stringValue(piece.payload, "description") ?? ""
+                  }`
+                )
+              )
+              .map(({ piece }) => piece)
+          : []
+      );
+
       // A source-bounded site run may extend beyond explicitly named
       // "X at Site" rows only after two such rows anchor the structure.
       // The first source gap larger than one normal row ends the run.
       const rejections: ContainmentRejection[] = [];
       const extension = new Set<CanonicalEvidencePiece>();
-      if (containerPosition && explicitMembers.length >= 2) {
+      if (
+        containerPosition &&
+        explicitMembers.length >= 2 &&
+        recoveredExtensionLicensed
+      ) {
         let previousLine = containerPosition.line;
         for (const entry of positioned) {
           if (entry.position.line <= containerPosition.line) continue;
@@ -12341,13 +12690,24 @@ function createCanonicalContainmentAuthority({
         const relationshipMember = Boolean(
           containerPosition?.relationshipSignal && corroboration
         );
-        if (!hierarchy && !extension.has(piece) && !relationshipMember) continue;
+        const timedSourceBridge = timedSourceBridges.has(piece);
+        if (
+          !hierarchy &&
+          !extension.has(piece) &&
+          !relationshipMember &&
+          !timedSourceBridge
+        ) continue;
         const title = stringValue(piece.payload, "title") ?? "Untitled activity";
         if (confirmationFrom(piece.payload) && !hierarchy && !relationshipMember) {
           rejections.push({ pieceId: piece.id, reasonCode: "independent_booking", title });
           continue;
         }
-        if (timeFrom(piece.payload) && !hierarchy && !relationshipMember) {
+        if (
+          timeFrom(piece.payload) &&
+          !hierarchy &&
+          !relationshipMember &&
+          !timedSourceBridge
+        ) {
           rejections.push({ pieceId: piece.id, reasonCode: "independent_time", title });
           continue;
         }
@@ -12404,6 +12764,9 @@ function createCanonicalContainmentAuthority({
             evidence.push("source_hierarchy");
           }
           if (extension.has(piece)) {
+            evidence.push("source_bounded_extension");
+          }
+          if (timedSourceBridges.has(piece)) {
             evidence.push("source_bounded_extension");
           }
           if (membership.addressMember(piece)) evidence.push("verified_address");
@@ -12523,10 +12886,73 @@ function createCanonicalContainmentAuthority({
         left[0].position.line - right[0].position.line
     )[0];
     if (best) {
+      const bestIds = new Set(best.map(({ piece }) => piece.id));
+      const first = best[0];
+      const last = best[best.length - 1];
+      const area = normalizedComparable(stringValue(first.piece.payload, "area"));
+      const boundedNamedVenueExtensions =
+        isSourceFactAssemblyAuthorityEnabled()
+          ? dayPieces
+              .filter(
+                (piece) =>
+                  !claimedPieceIds.has(piece.id) &&
+                  !bestIds.has(piece.id) &&
+                  normalizedComparable(
+                    stringValue(piece.payload, "category")
+                  ) === "food dining" &&
+                  !timeFrom(piece.payload) &&
+                  !confirmationFrom(piece.payload) &&
+                  !pieceHasHedgeMarker(piece) &&
+                  !/\b(?:breakfast|brunch|lunch|dinner|meal)\b/i.test(
+                    stringValue(piece.payload, "title") ?? ""
+                  ) &&
+                  normalizedComparable(
+                    stringValue(piece.payload, "area")
+                  ) === area &&
+                  sourceAreaSupportedForContainment(piece)
+              )
+              .flatMap((piece) => {
+                const position = containmentSourcePosition(piece, observationById);
+                const coords = precisePieceCoordinates(piece);
+                if (
+                  !position ||
+                  !coords?.verified ||
+                  position.sourceIdentityHash !==
+                    first.position.sourceIdentityHash ||
+                  position.stageIndex !== first.position.stageIndex ||
+                  position.line <= first.position.line ||
+                  position.line >= last.position.line
+                ) {
+                  return [];
+                }
+                return [{ coords, piece, position }];
+              })
+          : [];
+      const expanded = [...best, ...boundedNamedVenueExtensions].sort(
+        (left, right) => left.position.line - right.position.line
+      );
+      const routeEntries = expanded.every((entry, index) =>
+        index === 0 ||
+        haversineKm(expanded[index - 1].coords, entry.coords) <= WALK_RADIUS_KM
+      )
+        ? expanded
+        : best;
+      const extensionIds = new Set(
+        routeEntries
+          .filter(({ piece }) => !bestIds.has(piece.id))
+          .map(({ piece }) => piece.id)
+      );
       const areaLabel = stringValue(best[0].piece.payload, "area") ?? "Walking";
-      const members = best.map(({ piece }) =>
+      const members = routeEntries.map(({ piece }) =>
         containmentMemberDecision({
-          evidence: ["source_area", "source_order", "verified_geo"],
+          evidence: extensionIds.has(piece.id)
+            ? [
+                "source_area",
+                "source_order",
+                "source_bounded_extension",
+                "verified_geo",
+              ]
+            : ["source_area", "source_order", "verified_geo"],
           observationById,
           piece,
         })
@@ -13707,6 +14133,8 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
       !resolverKeepRefusedByInput;
     const approvedCityNote =
       observation.payload._canonicalRoleDecision === "city_note";
+    const approvedAccessory =
+      observation.payload._canonicalRoleDecision === "accessory";
 
     // A grouping proposal is structural input until containment licenses an
     // actual group. The older resolver `keep_activity` stamp cannot turn an
@@ -13717,7 +14145,11 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
         inputEvidenceRole === "grouping_proposal") &&
       !approvedGrouping;
 
-    if ((approvedKeepActivity && !unlicensedGroupingProposal) || approvedCityNote) {
+    if (
+      (approvedKeepActivity && !unlicensedGroupingProposal) ||
+      approvedCityNote ||
+      approvedAccessory
+    ) {
       stampObservationDecision(
         observation,
         activityCandidacyDecisionForPayload(observation.payload, {
@@ -13728,7 +14160,9 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
                 ),
                 "inputEvidenceRole"
               ) as EvidenceRole | null)
-            : "city_note_candidate",
+            : approvedCityNote
+              ? "city_note_candidate"
+              : "accessory_detail",
           hasAuditedCommitment: approvedKeepActivity,
         })
       );

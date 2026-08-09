@@ -1,8 +1,19 @@
 # Roamwoven Product Contracts
 
-Ledger version: 32
+Ledger version: 33
 
-Ledger date: 2026-08-09 (Assembly Decision & Carrier Ledger V1 contract. The
+Ledger date: 2026-08-09 (Loop 10 authority and quality-gate clarification.
+Route-equivalent output under source-fact authority is an intermediate
+anti-regression proof, not the release result. The model resolver may be
+removed from the production authority path only after the source-fact engine
+can account for every behavior-bearing judgment. The same bounded loop must
+then correct the known fresh-8.7 source-backed classification, containment,
+identity, grouping, and normalization defects while preserving every existing
+pass and negative control. Only that improved state can authorize one fresh
+extraction. No defective parity state may be deployed as the final Loop 10
+candidate.)
+
+Prior: ledger version 32 (2026-08-09) — (Assembly Decision & Carrier Ledger V1 contract. The
 approved Loop 9 companion ledger observes the existing canonical pipeline from
 source fact through assembly decision to a final hash-only carrier or explicit
 type-valid terminal state. It is shadow-only, append-only, default-off, and
@@ -775,7 +786,11 @@ path is bypassed.
   facts, reaches zero unresolved behavior-bearing decisions, preserves every
   carrier and ground-truth relationship/intent outcome, and reproduces the
   current route-equivalent output before removing the resolver in that same
-  bounded loop.
+  bounded loop. That reproduction is only the intermediate authority proof.
+  The final Loop 10 candidate must also correct the source-backed root causes
+  confirmed in fresh 8.7 while preserving every existing pass and negative
+  control. Only the improved candidate—not the defective parity state—may earn
+  deployment and one authorized fresh extraction.
 - Evidence: Loop 8 exit audit found 161 accepted resolver role decisions on the
   8.6 candidate and 113 on fresh 8.7, with 223 and 150 raw proposals
   respectively. Individual offline ablation found 18 and 5 behavior-bearing

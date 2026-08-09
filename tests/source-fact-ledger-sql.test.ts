@@ -18,8 +18,17 @@ export default function run() {
   assert.match(sql, /enable row level security/i);
   assert.match(sql, /for select/i);
   assert.match(sql, /for insert/i);
+  assert.match(sql, /for select\s+to authenticated/i);
+  assert.match(sql, /for insert\s+to authenticated/i);
+  assert.match(
+    sql,
+    /revoke all on trip_extraction_fact_sets from anon, authenticated, service_role/i
+  );
+  assert.match(sql, /owner_user_id = \(select auth\.uid\(\)\)/i);
+  assert.doesNotMatch(sql, /owner_user_id = auth\.uid\(\)/i);
   assert.match(sql, /grant select, insert .* authenticated/i);
   assert.doesNotMatch(sql, /grant[^;]*\bupdate\b/i);
+  assert.doesNotMatch(sql, /grant[^;]*\btruncate\b/i);
   assert.doesNotMatch(sql, /for update/i);
   assert.doesNotMatch(sql, /using gin/i);
   assert.equal(

@@ -59,22 +59,31 @@ create table if not exists trip_assembly_decision_sets (
 
 alter table trip_assembly_decision_sets enable row level security;
 
-revoke all on trip_assembly_decision_sets from anon, authenticated;
+revoke all on trip_assembly_decision_sets from anon, authenticated, service_role;
 grant select, insert on trip_assembly_decision_sets to authenticated, service_role;
 
 create index if not exists trip_assembly_decision_sets_trip_created_idx
   on trip_assembly_decision_sets(trip_id, created_at desc);
+
+create index if not exists trip_assembly_decision_sets_source_fact_dependency_idx
+  on trip_assembly_decision_sets(
+    trip_id,
+    processing_run_id,
+    source_fact_ledger_schema_version,
+    source_fact_ledger_hash
+  );
 
 drop policy if exists "Trip owners can read assembly decision sets"
   on trip_assembly_decision_sets;
 create policy "Trip owners can read assembly decision sets"
   on trip_assembly_decision_sets
   for select
+  to authenticated
   using (
     exists (
       select 1 from trips
       where trips.id = trip_assembly_decision_sets.trip_id
-        and trips.owner_user_id = auth.uid()
+        and trips.owner_user_id = (select auth.uid())
     )
   );
 
@@ -83,11 +92,12 @@ drop policy if exists "Trip owners can append assembly decision sets"
 create policy "Trip owners can append assembly decision sets"
   on trip_assembly_decision_sets
   for insert
+  to authenticated
   with check (
     exists (
       select 1 from trips
       where trips.id = trip_assembly_decision_sets.trip_id
-        and trips.owner_user_id = auth.uid()
+        and trips.owner_user_id = (select auth.uid())
     )
     and exists (
       select 1 from trip_processing_runs
