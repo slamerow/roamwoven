@@ -3279,7 +3279,8 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
     (piece) =>
       piece.kind !== "decision" &&
       piece.role === "accessory_detail" &&
-      !piece.outputEligible
+      !piece.outputEligible &&
+      !piece.disposition
   );
   const places = pieces.filter(
     (piece) => piece.kind === "place" && piece.outputEligible
@@ -3288,6 +3289,8 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
 
+  // Preserve the established matching behavior first. The conservation pass
+  // below handles only records this pass cannot already place.
   for (const accessory of accessories) {
     const text = activityText(accessory.payload);
     const rawAccessoryProse = [
@@ -3307,7 +3310,8 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
     const titleTokens = identityTokens(accessory.payload.title);
     const candidates = pieces.filter((candidate) => {
       if (!candidate.outputEligible || candidate === accessory) return false;
-      const candidateDate = stringValue(candidate.payload, "date") ??
+      const candidateDate =
+        stringValue(candidate.payload, "date") ??
         stringValue(candidate.payload, "checkIn");
       if (
         accessoryDate &&
@@ -3316,23 +3320,23 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
       ) {
         return false;
       }
-
       if (candidate.kind === accessory.kind) {
-        return Boolean(matchReason(candidate.kind, candidate.payload, accessory.payload));
+        return Boolean(
+          matchReason(candidate.kind, candidate.payload, accessory.payload)
+        );
       }
 
-      const candidateText = activityText(candidate.payload);
       const candidateTokens = identityTokens(
-        [candidate.payload.title, candidate.payload.name].filter(Boolean).join(" ")
+        [candidate.payload.title, candidate.payload.name]
+          .filter(Boolean)
+          .join(" ")
       );
-      const tokenMatch = overlapCount(titleTokens, candidateTokens) >= Math.min(
-        2,
-        Math.max(1, titleTokens.length)
-      );
+      const tokenMatch =
+        overlapCount(titleTokens, candidateTokens) >=
+        Math.min(2, Math.max(1, titleTokens.length));
       const timeMatch = Boolean(
         accessoryTime && timeFrom(candidate.payload) === accessoryTime
       );
-
       if (
         candidate.kind === "transport" &&
         /\b(?:bus|ferry|flight|train|transfer)\b/.test(text)
@@ -3344,7 +3348,6 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
             text.includes(routeEndpoint(candidate.payload, "arrival")))
         );
       }
-
       if (candidate.kind === "stay") {
         if (stayAccessShaped) {
           const accessoryCity = normalizedComparable(
@@ -3364,36 +3367,23 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
           );
         }
       }
-
       return candidate.kind === "activity" && (tokenMatch || timeMatch);
     });
-
-    if (candidates.length !== 1) {
-      addCanonicalAction(accessory, {
-        absorbedTitles: [],
-        observationIds: [...accessory.observationIds],
-        reason: "accessory evidence remained non-output because it had no unique canonical owner",
-        type: "rejected",
-      });
-      continue;
-    }
+    if (candidates.length !== 1) continue;
 
     const target = candidates[0];
-    const accessoryProse = stringValue(accessory.payload, "description") ??
+    const attachment =
+      stringValue(accessory.payload, "description") ??
       stringValue(accessory.payload, "title");
-    if (
-      target.kind === "stay" &&
-      accessoryProse &&
-      stayAccessShaped
-    ) {
+    if (target.kind === "stay" && attachment && stayAccessShaped) {
       target.payload.accessInstructions = uniqueDescription(
         target.payload.accessInstructions,
-        accessoryProse
+        attachment
       );
     } else {
       target.payload.description = uniqueDescription(
         target.payload.description,
-        accessoryProse
+        attachment
       );
     }
     mergeCanonicalPieceInto({
@@ -3401,6 +3391,175 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
       source: accessory,
       target,
     });
+  }
+
+  const tripYear = guessYearFromPieces(pieces);
+  for (const accessory of accessories.filter((piece) => !piece.disposition)) {
+    const prose = [
+      stringValue(accessory.payload, "title"),
+      stringValue(accessory.payload, "description"),
+      stringValue(accessory.payload, "evidence"),
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const headingPath = Array.isArray(accessory.payload.sourceHeadingPath)
+      ? accessory.payload.sourceHeadingPath.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    const accessoryDate = [
+      stringValue(accessory.payload, "date"),
+      stringValue(accessory.payload, "sourceSectionLabel"),
+      ...headingPath,
+    ].reduce<string | null>(
+      (date, value) => date ?? (value ? normalizeTripDate(value, tripYear) : null),
+      null
+    );
+    const stayDetail = Boolean(
+      STAY_ACCESS_INSTRUCTION_PATTERN.test(prose) ||
+        isArrivalDirectionsProse(prose) ||
+        /\b(?:access details?|arrival directions|due upon arrival|getting there|lock\s*box|wi-?fi|password|buzzer|door code)\b/i.test(
+          prose
+        )
+    );
+    const rentalDetail = Boolean(
+      stringValue(accessory.payload, "itemType") === "admin" &&
+        /\b(?:car|fuel type|pick[ -]?up|reservation number|return|selected car|shift)\b/i.test(
+          prose
+        )
+    );
+    const candidates = pieces.filter((candidate) => {
+      if (!candidate.outputEligible || candidate === accessory) return false;
+      const candidateDate =
+        stringValue(candidate.payload, "date") ??
+        stringValue(candidate.payload, "checkIn");
+      if (
+        accessoryDate &&
+        candidateDate &&
+        !tripDatesMatch(accessoryDate, candidateDate)
+      ) {
+        return false;
+      }
+      if (candidate.kind === "stay" && stayDetail) {
+        const city = normalizedComparable(
+          stringValue(accessory.payload, "city")
+        );
+        return Boolean(
+          (accessoryDate &&
+            candidateDate &&
+            tripDatesMatch(accessoryDate, candidateDate)) ||
+            (city &&
+              normalizedComparable(stayCity(candidate, places)) === city) ||
+            stayTargets.length === 1
+        );
+      }
+      return Boolean(
+        candidate.kind === "activity" &&
+          rentalDetail &&
+          isRentalCarPickupCandidate(candidate.payload)
+      );
+    });
+    const target = candidates.length === 1 ? candidates[0] : null;
+    if (target) {
+      if (target.kind === "stay" && stayDetail) {
+        target.payload.accessInstructions = uniqueDescription(
+          target.payload.accessInstructions,
+          stringValue(accessory.payload, "description") ??
+            stringValue(accessory.payload, "title")
+        );
+      }
+      const reason =
+        "accessory source detail routed to its uniquely proven structured owner";
+      addCanonicalAction(target, {
+        absorbedTitles: [
+          stringValue(accessory.payload, "title") ?? "Untitled source detail",
+        ],
+        observationIds: [...accessory.observationIds],
+        reason,
+        type: "attached",
+      });
+      suppressCanonicalPiece(accessory, reason, {
+        kind: "survivor",
+        survivorId: target.id,
+      });
+      continue;
+    }
+
+    if (
+      isPlanningCostMaterial({
+        label: stringValue(accessory.payload, "sourceSectionLabel"),
+        lines: [
+          stringValue(accessory.payload, "evidence"),
+          stringValue(accessory.payload, "title"),
+          stringValue(accessory.payload, "description"),
+        ],
+      })
+    ) {
+      suppressCanonicalPiece(
+        accessory,
+        "planning-cost detail has no traveler-card home (approved source-content exclusion)",
+        { kind: "terminal", code: "PLANNING_COST_SECTION_LINE" }
+      );
+    } else if (accessory.payload._parserArtifactTicketCopy === true) {
+      suppressCanonicalPiece(
+        accessory,
+        "parser-marked receipt or field copy is evidence for another record, not a standalone traveler entity",
+        { kind: "terminal", code: "UNSUPPORTED_MODEL_INVENTION" }
+      );
+    } else if (
+      accessory.payload._sourceSupport === "supported" &&
+      stringValue(accessory.payload, "itemType") === "activity" &&
+      stringValue(accessory.payload, "sourceSectionType") !== "booking_detail" &&
+      stringValue(accessory.payload, "title")
+    ) {
+      accessory.kind = "activity";
+      accessory.role = "atomic_candidate";
+      accessory.outputEligible = true;
+      accessory.payload.date =
+        stringValue(accessory.payload, "date") ?? accessoryDate;
+      addCanonicalAction(accessory, {
+        absorbedTitles: [],
+        observationIds: [...accessory.observationIds],
+        reason:
+          "source-supported standalone activity kept visible because no duplicate or structured owner was proven",
+        type: "recovered",
+      });
+    } else if (stayDetail) {
+      suppressCanonicalPiece(
+        accessory,
+        "protected stay detail had no uniquely proven structured stay, so it remains non-public",
+        { kind: "terminal", code: "PRIVATE_STAY_ACCESS_NO_COMPATIBLE_STAY" }
+      );
+    } else {
+      suppressCanonicalPiece(
+        accessory,
+        "source fragment does not identify a standalone traveler record and no structured owner is provable",
+        { kind: "terminal", code: "ISOLATED_TERM_NO_SOURCE_SUPPORT" }
+      );
+    }
+  }
+
+  const finalPieceIds = new Set(pieces.map((piece) => piece.id));
+  for (const accessory of accessories) {
+    if (
+      accessory.disposition?.kind !== "survivor" ||
+      finalPieceIds.has(accessory.disposition.survivorId)
+    ) {
+      continue;
+    }
+    const owners = pieces.filter(
+      (candidate) =>
+        candidate.outputEligible &&
+        accessory.observationIds.every((id) =>
+          candidate.observationIds.includes(id)
+        )
+    );
+    if (owners.length === 1) {
+      accessory.disposition = {
+        kind: "survivor",
+        survivorId: owners[0].id,
+      };
+    }
   }
 }
 
@@ -16646,7 +16805,7 @@ export function clusterExtractedEvidence({
   runPieceWriter("pre_classification_mutation", "mergeReclassifiedCanonicalPieces:travel", ["pieces[].outputEligible", "pieces[].observationIds", "pieces[].actions"], () =>
     mergeReclassifiedCanonicalPieces(pieces)
   );
-  runPieceWriter("pre_classification_mutation", "attachCanonicalAccessoryDetails", ["pieces[].payload", "pieces[].actions"], () =>
+  runPieceWriter("pre_classification_mutation", "attachCanonicalAccessoryDetails", ["pieces[].kind", "pieces[].role", "pieces[].payload", "pieces[].outputEligible", "pieces[].disposition", "pieces[].actions"], () =>
     attachCanonicalAccessoryDetails(pieces)
   );
   runPieceWriter("pre_classification_mutation", "suppressRedundantTransportParents", ["pieces[].outputEligible", "pieces[].disposition"], () =>
