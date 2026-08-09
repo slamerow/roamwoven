@@ -128,7 +128,23 @@ export default function run() {
     isSourceFactAssemblyAuthorityEnabled({
       SOURCE_FACT_ASSEMBLY_AUTHORITY: "1",
     }),
+    false
+  );
+  assert.equal(
+    isSourceFactAssemblyAuthorityEnabled({
+      NODE_ENV: "test",
+      SOURCE_FACT_ASSEMBLY_AUTHORITY: "1",
+      SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT: "1",
+    }),
     true
+  );
+  assert.equal(
+    isSourceFactAssemblyAuthorityEnabled({
+      NODE_ENV: "production",
+      SOURCE_FACT_ASSEMBLY_AUTHORITY: "1",
+      SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT: "1",
+    }),
+    false
   );
   const authoritySource = fs.readFileSync(
     path.join(

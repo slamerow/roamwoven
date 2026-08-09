@@ -228,7 +228,10 @@ function gateReasonFor(details: Detail[], pattern: RegExp) {
 export default async function run() {
   test("source authority dismisses source-answerable metadata, identity cleanup, and missing-source completion asks", () => {
     const previous = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    const previousOfflineAudit =
+      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
     process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
     try {
       const details = draftDetails([
         SOURCE_ANSWERABLE_REFERENCE_QUESTION,
@@ -264,6 +267,11 @@ export default async function run() {
         delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
       } else {
         process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = previous;
+      }
+      if (previousOfflineAudit === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = previousOfflineAudit;
       }
     }
   });

@@ -93,7 +93,10 @@ Module._extensions[".ts"] = function compileTypeScript(module, filename) {
 process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
 process.env.OPENAI_API_KEY = "offline-source-fact-authority-must-not-call";
 process.env.ROAMWOVEN_ENABLE_AI_EXTRACTION = "true";
-delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+// Reproduce the currently configured production switch. Without the separate
+// offline-audit key, it must be inert and the saved resolver control must run.
+process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
 delete process.env.GEOCODE_VERIFICATION_API_KEY;
 globalThis.fetch = async () => {
   throw new Error("offline source-fact authority audit attempted network access");
@@ -351,7 +354,10 @@ assert.equal(
 // authority application, so enabling it only for clustering is not route
 // equivalent even when every authority decision hash agrees.
 const priorSourceAuthorityFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+const priorSourceAuthorityOfflineAudit =
+  process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
 process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
 const sourceDocumentIndex = sourceIndexModule.buildSourceDocumentIndexV1(materials);
 const relationshipRecovery =
   sourceAuthorityModule.recoverMissingSourceFactRelationshipMembersV1({
@@ -540,6 +546,12 @@ try {
     delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
   } else {
     process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorSourceAuthorityFlag;
+  }
+  if (priorSourceAuthorityOfflineAudit === undefined) {
+    delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
+  } else {
+    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT =
+      priorSourceAuthorityOfflineAudit;
   }
 }
 let parserAuthorityCandidate = null;

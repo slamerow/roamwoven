@@ -38,14 +38,6 @@ import {
   type SourceFactLedgerBuildResultV1,
 } from "@/lib/extraction/source-fact-ledger";
 import {
-  applySourceFactAssemblyAuthorityV1,
-  isSourceFactAssemblyAuthorityEnabled,
-  recoverMissingSourceFactCityNoteMembersV1,
-  recoverMissingSourceFactCompositePlanMembersV1,
-  recoverMissingSourceFactRelationshipMembersV1,
-  type SourceFactAssemblyAuthorityMetricsV1,
-} from "@/lib/extraction/source-fact-assembly-authority";
-import {
   runBoundedSourceRecovery,
   SOURCE_RECOVERY_SYSTEM_PROMPT,
 } from "@/lib/extraction/source-recovery";
@@ -1490,7 +1482,7 @@ export async function extractTripDraftWithOpenAI({
       };
     }
   );
-  let evidenceStages: EvidenceStageInput[] = [
+  const evidenceStages: EvidenceStageInput[] = [
     {
       label: "trip spine",
       source: "model_spine",
@@ -1545,24 +1537,6 @@ export async function extractTripDraftWithOpenAI({
     evidenceStages.push(recovery.stage);
   }
 
-  // Source Fact Authority can deterministically recover atomic members that
-  // a source-authored same-site proposal names line by line but the parser
-  // omitted. This must happen before the ordinary geocode lane: verified
-  // location is what lets containment accept the site run and stop before
-  // the first adjacent off-site venue. Flags-off behavior stays byte-for-byte
-  // on the legacy path.
-  if (isSourceFactAssemblyAuthorityEnabled()) {
-    evidenceStages = recoverMissingSourceFactRelationshipMembersV1({
-      index: sourceDocumentIndex,
-      stages: evidenceStages,
-    }).stages;
-    evidenceStages = recoverMissingSourceFactCityNoteMembersV1({
-      index: sourceDocumentIndex,
-      materials: usableMaterials,
-      stages: evidenceStages,
-    }).stages;
-  }
-
   // Geocoding verification lane (Arc B): env-keyed, hard-budgeted,
   // fail-soft. Verified coordinates attach to the stage records in place
   // and are consumed only by grouping-proximity checks downstream.
@@ -1578,63 +1552,20 @@ export async function extractTripDraftWithOpenAI({
     });
   }
 
-  if (isSourceFactAssemblyAuthorityEnabled()) {
-    evidenceStages = recoverMissingSourceFactCompositePlanMembersV1({
-      index: sourceDocumentIndex,
-      stages: evidenceStages,
-    }).stages;
-  }
-
   let resolvedEvidenceStages = {
     groupingDecisions: [] as CanonicalGroupingDecision[],
     metadata: null as CanonicalEvidenceResolverMetadata | null,
     stages: evidenceStages,
     usage: null as unknown,
   };
-  let authoritativeSourceLedger: SourceFactLedgerBuildResultV1 | null = null;
-  let sourceFactAuthorityUsage:
-    | ({ status: "applied" } & SourceFactAssemblyAuthorityMetricsV1)
-    | { failureClass: "authority_build_failed"; status: "fallback" }
-    | null = null;
-
-  if (isSourceFactAssemblyAuthorityEnabled()) {
-    try {
-      const authority = applySourceFactAssemblyAuthorityV1({
-        index: sourceDocumentIndex,
-        stages: evidenceStages,
-      });
-      authoritativeSourceLedger = authority.sourceLedger;
-      resolvedEvidenceStages = {
-        groupingDecisions: authority.groupingDecisions,
-        metadata: null,
-        stages: authority.stages,
-        usage: null,
-      };
-      sourceFactAuthorityUsage = { ...authority.metrics, status: "applied" };
-    } catch (error) {
-      // A source-authority defect may not reactivate the model resolver. The
-      // usable parser/recovery graph continues through the existing
-      // conservative deterministic assembly path and the failure stays loud.
-      console.error("trip_source_fact_assembly_authority_failed", {
-        failureClass: "authority_build_failed",
-        name: error instanceof Error ? error.name : "UnknownError",
-        tripName,
-      });
-      sourceFactAuthorityUsage = {
-        failureClass: "authority_build_failed",
-        status: "fallback",
-      };
-    }
-  } else {
-    try {
-      resolvedEvidenceStages = await resolveCanonicalEvidenceStages(evidenceStages);
-    } catch (error) {
-      console.error("trip_canonical_evidence_resolver_failed", {
-        message: error instanceof Error ? error.message : "Unknown error.",
-        name: error instanceof Error ? error.name : "UnknownError",
-        tripName,
-      });
-    }
+  try {
+    resolvedEvidenceStages = await resolveCanonicalEvidenceStages(evidenceStages);
+  } catch (error) {
+    console.error("trip_canonical_evidence_resolver_failed", {
+      message: error instanceof Error ? error.message : "Unknown error.",
+      name: error instanceof Error ? error.name : "UnknownError",
+      tripName,
+    });
   }
 
   // Loop 9 raw proposal evidence is private, in-memory companion input. Keep
@@ -1668,14 +1599,12 @@ export async function extractTripDraftWithOpenAI({
   let sourceFactLedger: SourceFactLedgerShadowResultV1 | null = null;
   if (isSourceFactLedgerShadowEnabled()) {
     try {
-      const ledger =
-        authoritativeSourceLedger ??
-        buildSourceFactLedgerV1({
-          groupingDecisions: resolvedEvidenceStages.groupingDecisions,
-          index: sourceDocumentIndex,
-          resolverMetadata: resolvedEvidenceStages.metadata,
-          stages: resolvedEvidenceStages.stages,
-        });
+      const ledger = buildSourceFactLedgerV1({
+        groupingDecisions: resolvedEvidenceStages.groupingDecisions,
+        index: sourceDocumentIndex,
+        resolverMetadata: resolvedEvidenceStages.metadata,
+        stages: resolvedEvidenceStages.stages,
+      });
       const coverage = buildSourceCoverageV4({
         factSet: ledger.factSet,
         index: sourceDocumentIndex,
@@ -1782,9 +1711,6 @@ export async function extractTripDraftWithOpenAI({
         metadata: existingResolverMetadata,
         usage: resolvedEvidenceStages.usage,
       },
-      ...(sourceFactAuthorityUsage
-        ? { sourceFactAssemblyAuthority: sourceFactAuthorityUsage }
-        : {}),
       activityFailures: activityFailures.map(({ attempts, chunk, error }) => ({
         attempts,
         chunkId: chunk.id,

@@ -1001,7 +1001,10 @@ export default async function run() {
 
   await test("same-day car-pickup aliases fold into one rental activity", () => {
     const previous = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    const previousOfflineAudit =
+      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
     process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
     try {
       const draft = cluster(emptyStage({
         activities: [
@@ -1035,6 +1038,11 @@ export default async function run() {
         delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
       } else {
         process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = previous;
+      }
+      if (previousOfflineAudit === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = previousOfflineAudit;
       }
     }
   });

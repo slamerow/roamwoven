@@ -73,7 +73,10 @@ function timedPeer(title: string, date: string, startTime: string) {
 export default async function run() {
   await test("an exact day-plan occurrence replaces only its explicitly linked reference note", () => {
     const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    const priorOfflineAudit =
+      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
     process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
     try {
       const result = clusterExtractedEvidence({
         sourceTransportAnchors: [],
@@ -150,12 +153,20 @@ export default async function run() {
       } else {
         process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
       }
+      if (priorOfflineAudit === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = priorOfflineAudit;
+      }
     }
   });
 
   await test("a later plan without a reference-note link cannot overrule an earlier sequenced occurrence", () => {
     const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
+    const priorOfflineAudit =
+      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
     process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
+    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
     try {
       const result = clusterExtractedEvidence({
         sourceTransportAnchors: [],
@@ -207,6 +218,11 @@ export default async function run() {
         delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
       } else {
         process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
+      }
+      if (priorOfflineAudit === undefined) {
+        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
+      } else {
+        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = priorOfflineAudit;
       }
     }
   });
