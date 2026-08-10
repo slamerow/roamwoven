@@ -171,13 +171,16 @@ export default async function run() {
     });
     const draft = result.draft as Draft;
 
-    // Grouping structure survives: the container and its source-hierarchy
-    // members ship as dated cards (ship-bar floor: survive AND group).
+    // The source commits the site family to the day plan, so every member
+    // survives as a dated card even though the source does not author enough
+    // containment to nest them.
     for (const pattern of [
       /^schönbrunn palace$/i,
       /gloriette/i,
       /orangeriegarten/i,
       /palm house/i,
+      /apple strudel show/i,
+      /panorama train pass/i,
     ]) {
       const matches = cards(draft, pattern);
       assert.equal(
@@ -203,22 +206,15 @@ export default async function run() {
       );
     }
 
-    // Survive AND group: the components parent under the container-named
-    // site via source hierarchy (at-site titles + container description).
-    const palace = cards(draft, /^schönbrunn palace$/i)[0];
+    // Loop 4: coordinates, shared date, and a container description do not
+    // prove nesting. Lossless fallback leaves the six valid cards top-level.
     const children = draft.activities.filter(
       (item) => item._canonicalParentPieceId
     );
-    assert.ok(
-      children.length >= 2,
-      `at least two stops join the Schönbrunn visit (got ${children.length})`
-    );
-    assert.ok(
-      palace._canonicalGroupRole === "parent" ||
-        children.every(
-          (child) => child._canonicalParentPieceId === palace._canonicalPieceId
-        ),
-      "the palace is the visit's parent"
+    assert.equal(
+      children.length,
+      0,
+      "unsupported containment stays ungrouped"
     );
 
     // Loop 3: the reference note is one MIXED, comma-authored source block.

@@ -607,17 +607,44 @@ export default function run() {
       const siteDecision = safeCluster.summary.containmentLedger?.decisions.find(
         (decision) => decision.containerTitle.includes("Example Palace")
       );
-      assert.ok(siteDecision, "the recovered same-site visit is assembled");
+      assert.equal(
+        siteDecision,
+        undefined,
+        "source recovery does not authorize containment"
+      );
+      const safeDraft = safeCluster.draft as {
+        activities: Array<Record<string, unknown>>;
+      };
       assert.deepEqual(
-        siteDecision.members.map((member) => member.title).sort(),
+        safeDraft.activities
+          .filter((activity) => activity.itemType !== "note")
+          .map((activity) => activity.title)
+          .sort(),
         [
+          "Explore Example Palace area",
           "Cooking Show",
           "North Gallery",
           "Orangery at Example Palace",
           "Panorama Train pass",
           "Palm House at Example Palace",
         ].sort(),
-        "verified off-site boundary stops a recovered source run before the Ferris wheel"
+        "every source-supported site-plan record survives top-level"
+      );
+      assert.equal(
+        safeDraft.activities.filter(
+          (activity) => activity._canonicalParentPieceId
+        ).length,
+        0,
+        "the recovered source run remains ungrouped"
+      );
+      assert.match(
+        JSON.stringify(
+          safeDraft.activities.filter(
+            (activity) => activity.itemType === "note"
+          )
+        ),
+        /ferris wheel/i,
+        "the off-site boundary keeps Ferris wheel in City Notes"
       );
     }
 

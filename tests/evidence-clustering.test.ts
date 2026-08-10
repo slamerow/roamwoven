@@ -1417,7 +1417,7 @@ export default async function run() {
     );
   });
 
-  await test("a booked same-site parent keeps its booking while owning untimed stops", () => {
+  await test("a booked parent keeps its booking without resolver-inferred children", () => {
     const decisionId = "group_booked_parent";
     const result = clusterExtractedEvidence({
       groupingDecisions: [{
@@ -1471,10 +1471,9 @@ export default async function run() {
     assert.equal(parent?._canonicalParentPieceId, undefined);
     assert.equal(parent?.startTime, "09:30");
     assert.equal(parent?.confirmation, "PALACE123");
-    assert.deepEqual(
-      children.map((item) => item.title),
-      ["River Palace gardens", "River Palace gallery"]
-    );
+    assert.deepEqual(children, []);
+    assert.match(JSON.stringify(draft.activities), /river palace gardens/i);
+    assert.match(JSON.stringify(draft.activities), /river palace gallery/i);
   });
 
   await test("canonical notes create one collection per city across repeated city legs", () => {
@@ -2384,11 +2383,10 @@ export default async function run() {
     assert.equal(stayShadows.length, 0, "bare stay-name activity suppressed");
   });
 
-  await test("same-site stops group under the site container; spread day-trip sights never group", () => {
-    // Grouping doctrine v3 (2026-07-17): Prague Castle owns the stops inside
-    // its grounds (~300 m), keeping its own source title, timed child allowed.
-    // Kutná Hora's sights are kilometres apart on a 4-card day: 3 discrete
-    // activities, no group (density gate + geo verification).
+  await test("coordinates never create a castle group or a spread day-trip group", () => {
+    // Loop 4: proximity and a shared day are not containment evidence. This
+    // source-poor fixture deliberately supplies no authored route or member
+    // relationship; only the independently timed record is committed.
     const locatedActivity = (
       title: string,
       date: string,
@@ -2422,38 +2420,21 @@ export default async function run() {
       activities: Array<Record<string, unknown>>;
       missingDetails: Array<Record<string, unknown>>;
     };
-    const castleParent = draft.activities.find(
-      (item) => String(item.title) === "Prague Castle complex"
-    );
     const guard = draft.activities.find((item) =>
       /changing of the guard/i.test(String(item.title))
     );
-    const vitus = draft.activities.find((item) =>
-      /st\. vitus/i.test(String(item.title))
-    );
-    const kutnaHora = draft.activities.filter((item) =>
-      /sedlec|barbara|silver/i.test(String(item.title))
-    );
 
-    assert.ok(castleParent, "castle container survives with its source title");
-    assert.ok(guard && vitus, "castle stops survive as children");
-    assert.equal(guard._canonicalParentPieceId, castleParent._canonicalPieceId);
-    assert.equal(vitus._canonicalParentPieceId, castleParent._canonicalPieceId);
+    assert.ok(guard, "the independently timed guard survives");
     assert.equal(
-      kutnaHora.filter((item) => item._canonicalParentPieceId).length,
+      draft.activities.filter((item) => item._canonicalParentPieceId).length,
       0,
-      "Kutná Hora sights stay 3 discrete ungrouped activities"
+      "coordinates create no parent/child relationship"
     );
     const groupingCall = draft.missingDetails.find(
       (item) => item._canonicalReviewDisposition === "call" &&
         /included stop/i.test(String(item.prompt ?? ""))
     );
-    assert.ok(groupingCall, "grouping produces one statement-style call");
-    assert.match(
-      String(groupingCall.reason ?? ""),
-      /same-site visit/i,
-      "the call states the actual rule that fired"
-    );
+    assert.equal(groupingCall, undefined, "no unsupported grouping Call is created");
   });
 
   await test("cross-city note content routes to its owning entity and codes never reach note prose", () => {

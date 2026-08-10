@@ -131,15 +131,23 @@ export default async function run() {
       "the 'Explore Vienna' heading fragment never ships as a card"
     );
 
-    // The palace groups its stops: Gloriette via precise coordinates,
-    // "X at Schonbrunn" components via container-token membership.
+    // Loop 4: these source-backed records survive independently. The source
+    // does not author a complete parent/member relationship, so proximity
+    // and title similarity cannot nest them.
     const children = draft.activities.filter(
       (item) => item._canonicalGroupRole === "child"
     );
-    assert.ok(
-      children.length >= 2,
-      `palace visit owns at least 2 stops (got ${children.length})`
+    assert.equal(
+      children.length,
+      0,
+      "no inferred same-site group is created"
     );
+    for (const expected of [/gloriette/i, /palm house/i, /orangeriegarten/i]) {
+      assert.ok(
+        titles.some((title) => expected.test(title)),
+        `lossless ungrouping preserves ${expected}`
+      );
+    }
 
     // The orphaned-component leak: no planned-or-ideas question may hold
     // "X at Site" component titles hostage (7.18.2 shipped Orangeriegarten
@@ -276,7 +284,7 @@ export default async function run() {
     assert.ok(bridge, "the timed Chain Bridge crossing stays standalone");
   });
 
-  await test("ground truth run5 (PB-4, RW-GRP-001): walk members need a source-supported area label; invented areas stay out", () => {
+  await test("Loop 4: broad area labels never synthesize a walk", () => {
     const oldTownHeading = "Tuesday, January 15th // Old Town wandering";
     const newTownHeading = "Tuesday, January 15th // New Town stops";
     const walker = (
@@ -327,21 +335,25 @@ export default async function run() {
       tripOverview: TRIP_OVERVIEW,
     });
     const draft = result.draft as Draft;
-    const parent = draft.activities.find(
-      (item) =>
-        item._canonicalGroupRole === "parent" &&
-        /old town walk/i.test(String(item.title))
-    );
-    assert.ok(parent, "the Old Town walk forms from source-supported members");
-
-    const children = draft.activities.filter(
-      (item) => item._canonicalGroupRole === "child"
-    );
-    const childTitles = children.map((item) => String(item.title));
     assert.equal(
-      childTitles.some((title) => /dancing house|lucerna/i.test(title)),
+      draft.activities.some(
+        (item) =>
+          item._canonicalGroupRole === "parent" ||
+          item._canonicalGroupRole === "child"
+      ),
       false,
-      `New Town sights never join the Old Town walk (got ${childTitles.join(", ")})`
+      "neither source area nor proximity authorizes a group"
     );
+    const visible = draft.activities.map((item) => String(item.title));
+    for (const expected of [
+      /old town square/i,
+      /astronomical clock/i,
+      /church of our lady/i,
+      /powder tower/i,
+      /dancing house/i,
+      /lucerna arcade/i,
+    ]) {
+      assert.ok(visible.some((title) => expected.test(title)), `preserves ${expected}`);
+    }
   });
 }

@@ -218,13 +218,15 @@ const evaluators: Record<string, CheckEvaluator> = {
       assert.equal(matches.length, 1, `${pattern} appears exactly once`);
       return matches[0];
     });
-    const parentIds = new Set(stops.map((stop) => stop.parentItemId));
-    assert.equal(parentIds.size, 1, "all four stops share one parent");
-    const parentId = [...parentIds][0];
-    assert.ok(parentId, "stops must be parented (system-created group)");
-    const parent = records.items.find((item) => item.id === parentId);
-    assert.ok(parent, "group parent card exists");
-    assert.equal(parent.date, "2019-01-16");
+    assert.ok(
+      stops.every((stop) => !stop.parentItemId),
+      "all four stops remain top-level when the source does not author a route"
+    );
+    assert.equal(
+      activityCards(records, /^lesser town walk$/i).length,
+      0,
+      "assembly does not invent a walk parent"
+    );
   },
   "museum-source-separate-notes": (records) => {
     const cards = records.items.filter(
@@ -278,23 +280,30 @@ const evaluators: Record<string, CheckEvaluator> = {
     const vitus = activityCards(records, /st\.? vitus/i);
     assert.equal(guard.length, 1);
     assert.equal(vitus.length, 1);
-    assert.equal(guard[0].parentItemId, castle.id, "guard is a castle child");
-    assert.equal(vitus[0].parentItemId, castle.id, "St. Vitus is a castle child");
+    assert.equal(guard[0].parentItemId, null, "guard remains top-level");
+    assert.equal(vitus[0].parentItemId, null, "St. Vitus remains top-level");
   },
   "schonbrunn-all-stops": (records) => {
-    const parent = activityCards(records, /schonbrunn palace/i).find(
+    const palace = activityCards(records, /schonbrunn palace/i).find(
       (item) => !item.parentItemId
     );
-    assert.ok(parent, "Schönbrunn parent exists");
-    for (const stop of [/gloriette/i, /orangeriegarten/i, /apple strudel/i, /panorama train/i]) {
+    assert.ok(palace, "Schönbrunn Palace survives as a top-level card");
+    for (const stop of [/gloriette/i, /orangeriegarten/i, /panorama train/i]) {
       const cards = activityCards(records, stop);
       assert.equal(cards.length, 1, `${stop} appears exactly once`);
       assert.equal(
         cards[0].parentItemId,
-        parent.id,
-        `${stop} is owned by the Schönbrunn visit`
+        null,
+        `${stop} remains top-level without source-authored containment`
       );
     }
+    assert.match(
+      records.items
+        .map((item) => `${item.title} ${item.description ?? ""}`)
+        .join("\n"),
+      /apple strudel show/i,
+      "the source-poor fixture still preserves Apple Strudel Show content"
+    );
   },
   "silver-mines-placement": (records) => {
     const cards = activityCards(records, /silver mines/i);

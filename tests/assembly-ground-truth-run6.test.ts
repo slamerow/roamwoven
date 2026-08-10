@@ -439,7 +439,7 @@ export default async function run() {
     );
   });
 
-  await test("ground truth run6 (RW-GRP-001): verified geocode coordinates satisfy the precision gate that 2-decimal parser coords fail", () => {
+  await test("Loop 4: verified coordinates do not authorize same-site grouping", () => {
     const VIENNA_HEADING = "Saturday, January 19th // Schonbrunn Palace";
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
@@ -447,9 +447,7 @@ export default async function run() {
         stage("Saturday, January 19th", emptyStage({
           activities: [
             {
-              // 2-decimal parser coords are radius-ineligible on their own
-              // (run5 calibration); the geocoding lane attached verified
-              // coordinates with provenance.
+              // Even verified coordinates describe location, not ownership.
               _geoVerified: true,
               approxLatitude: 48.18,
               approxLongitude: 16.31,
@@ -503,13 +501,15 @@ export default async function run() {
       tripOverview: TRIP_OVERVIEW,
     });
     const draft = result.draft as Draft;
-    const children = draft.activities.filter(
-      (item) => item._canonicalGroupRole === "child"
+    assert.equal(
+      draft.activities.filter((item) => item._canonicalGroupRole === "child").length,
+      0,
+      "verified proximity creates no parent/child claim"
     );
-    assert.ok(
-      children.length >= 2,
-      `verified coordinates support the same-site group (got ${children.length} children)`
-    );
+    const visible = draft.activities.map((item) => String(item.title));
+    assert.ok(visible.some((title) => /schonbrunn/i.test(title)));
+    assert.ok(visible.some((title) => /gloriette/i.test(title)));
+    assert.ok(visible.some((title) => /roman ruin/i.test(title)));
   });
 
   await test("ground truth run6 (RW-CLS-001): 'if you want' is a hedge — Buda hills loop demotes without a question", () => {

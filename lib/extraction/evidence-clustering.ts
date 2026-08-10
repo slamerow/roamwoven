@@ -21,7 +21,6 @@ import {
 import type {
   ContainmentDecision,
   ContainmentEvidenceKind,
-  ContainmentLedger,
   ContainmentLedgerTelemetry,
   ContainmentMemberDecision,
   ContainmentRejection,
@@ -31,7 +30,6 @@ import type {
 import {
   containmentTitleConflict,
   createContainmentLedger,
-  createGroupingClaimLedger,
 } from "@/lib/extraction/grouping-claim-ledger";
 import { routeCanonicalAccessoryEvidence } from "@/lib/extraction/canonical-accessory-routing";
 import {
@@ -7214,23 +7212,7 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
 
 function groupingClaimFromContainment(decision: ContainmentDecision) {
   const count = decision.members.length;
-  if (decision.relationType === "authored_route") {
-    return `The source defines one route containing these ${count} stops in this order.`;
-  }
-  if (decision.relationType === "source_area_walk") {
-    return `The source places these ${count} untimed stops in one area route; the frozen source order is preserved.`;
-  }
-  const evidence = new Set(
-    decision.members.flatMap((member) => member.evidence)
-  );
-  const basis = evidence.has("source_hierarchy")
-    ? "source hierarchy"
-    : evidence.has("verified_address")
-      ? "source order and verified site address"
-      : evidence.has("verified_geo")
-        ? "source order and verified site coordinates"
-        : "source order";
-  return `Same-site visit: the containment ledger places these ${count} stops inside one ${decision.containerTitle} visit using ${basis}.`;
+  return `The source defines one route containing these ${count} stops in this order.`;
 }
 
 function compileCanonicalGroupingAuthority({
@@ -9159,6 +9141,122 @@ function sourceOccurrencesForPiece(
   );
 }
 
+// Classification may use a source-authored sequence to decide that records
+// belong to the day's plan without claiming that they belong inside one
+// traveler card. This is deliberately narrower than grouping:
+//
+// - the source must contain a named site container;
+// - at least two later titles must literally say "at/inside/within <site>";
+// - an unqualified tail is admitted only when the source itself closes the
+//   run with an independently researched/available next record;
+// - no coordinate, address, shared-day density, or model grouping proposal
+//   participates.
+//
+// The result protects lossless ungrouping. For example, a flat source list
+// can keep every planned palace stop as a top-level Activity even when the
+// source does not prove enough membership to nest those stops under the
+// palace.
+function sourceSequencedSiteVisitPlanPieceIds(
+  pieces: CanonicalEvidencePiece[],
+  observationById: Map<string, EvidenceObservation>
+) {
+  type SequencedEntry = {
+    line: number;
+    piece: CanonicalEvidencePiece;
+  };
+  const lanes = new Map<string, SequencedEntry[]>();
+
+  for (const piece of pieces) {
+    if (
+      piece.kind !== "activity" ||
+      !piece.outputEligible ||
+      !stringValue(piece.payload, "date")
+    ) {
+      continue;
+    }
+    for (const occurrence of sourceOccurrencesForPiece(
+      piece,
+      observationById,
+      { identityTitleOnly: true }
+    )) {
+      if (!occurrence.sequencedDay) continue;
+      const key = [
+        occurrence.date,
+        occurrence.sourceIdentityHash,
+        occurrence.stageIndex,
+      ].join("|");
+      const lane = lanes.get(key) ?? [];
+      if (
+        !lane.some(
+          (entry) => entry.piece.id === piece.id && entry.line === occurrence.line
+        )
+      ) {
+        lane.push({ line: occurrence.line, piece });
+        lanes.set(key, lane);
+      }
+    }
+  }
+
+  const planned = new Set<string>();
+  for (const lane of lanes.values()) {
+    lane.sort(
+      (left, right) =>
+        left.line - right.line || left.piece.id.localeCompare(right.piece.id)
+    );
+    for (let containerIndex = 0; containerIndex < lane.length; containerIndex += 1) {
+      const container = lane[containerIndex];
+      const containerTitle = stringValue(container.piece.payload, "title");
+      if (!containerTitle || !SITE_CONTAINER_NOUN_PATTERN.test(containerTitle)) {
+        continue;
+      }
+      const explicitMembers = lane
+        .slice(containerIndex + 1)
+        .filter((entry) =>
+          containmentTitleConflict(
+            containerTitle,
+            stringValue(entry.piece.payload, "title")
+          )
+        );
+      const explicitLines = new Set(explicitMembers.map((entry) => entry.line));
+      if (explicitLines.size < 2) continue;
+
+      const lastExplicitLine = Math.max(...explicitLines);
+      const boundary = lane.find((entry) => {
+        if (entry.line <= lastExplicitLine) return false;
+        const ownText = [
+          stringValue(entry.piece.payload, "title"),
+          stringValue(entry.piece.payload, "description"),
+          stringValue(entry.piece.payload, "evidence"),
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const classification = classifyDraftActivityCard(
+          activityInput(entry.piece.payload)
+        );
+        return Boolean(
+          /\b(?:open(?:ing)?(?: hours?)?|closes?|closed|last (?:entry|tour)|until|hours?:)\b/i.test(
+            ownText
+          ) ||
+            classification.hasWeakRecommendationMarker ||
+            hasLooseTipVocabulary(ownText)
+        );
+      });
+      const exclusiveEndLine = boundary?.line ?? lastExplicitLine + 1;
+
+      for (const entry of lane) {
+        if (
+          entry.line >= container.line &&
+          entry.line < exclusiveEndLine
+        ) {
+          planned.add(entry.piece.id);
+        }
+      }
+    }
+  }
+
+  return planned;
+}
+
 function sourceSequencedIdentityDate(
   piece: CanonicalEvidencePiece,
   observationById: Map<string, EvidenceObservation>
@@ -9239,6 +9337,7 @@ function sourceSequencedIdentityDate(
 // Jan 20 card.
 const DAY_PLAN_SECTION_LABEL_PATTERN =
   /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}/i;
+const PRICE_MARKER_PATTERN = PRICE_SIGNAL_PATTERN;
 
 function pieceObservationLabels(
   piece: CanonicalEvidencePiece,
@@ -9870,6 +9969,45 @@ function reconcileCardsAgainstCityNotes(
         .filter(Boolean)
         .join(" ")
     );
+  const noteListsMultipleActivityIdentities = (
+    note: CanonicalEvidencePiece
+  ) => {
+    const text = ` ${noteText(note)} `;
+    const city = noteCity(note);
+    const identities = new Set<string>();
+    for (const candidate of pieces) {
+      if (
+        !candidate.outputEligible ||
+        candidate.kind !== "activity" ||
+        stringValue(candidate.payload, "itemType") === "note"
+      ) {
+        continue;
+      }
+      const candidateCities = citiesForDate(
+        stringValue(candidate.payload, "date")
+      );
+      const explicitCity = normalizedComparable(
+        stringValue(candidate.payload, "city")
+      );
+      if (explicitCity) candidateCities.add(explicitCity);
+      if (city && candidateCities.size > 0 && !candidateCities.has(city)) {
+        continue;
+      }
+      const identity = mentionComparableTitle(
+        stringValue(candidate.payload, "title")
+      )
+        .replace(
+          /^(?:visit|tour|walk|stroll)\s+|\s+(?:visit|tour|walk|stroll)$/g,
+          ""
+        )
+        .trim();
+      if (identity.length >= 4 && text.includes(` ${identity} `)) {
+        identities.add(identity);
+      }
+      if (identities.size >= 2) return true;
+    }
+    return false;
+  };
 
   for (const piece of pieces) {
     if (!committedMentionPieceCandidate(piece)) continue;
@@ -9915,11 +10053,21 @@ function reconcileCardsAgainstCityNotes(
       candidateNotes[0] ??
       null;
     if (!matchingNote) continue;
-    const authoritativePlanCopy = activityHasIdentityWinningEvidence({
-      note: matchingNote,
-      observationById,
-      piece,
-    });
+    const authoritativePlanCopy = Boolean(
+      activityHasIdentityWinningEvidence({
+        note: matchingNote,
+        observationById,
+        piece,
+      }) ||
+        // A source-authored aggregate note is context for several distinct
+        // identities, not an atomic identity twin of each one. It may still
+        // keep ambiguous/uncommitted ideas in City Notes, but it cannot
+        // overrule the classifier's explicit plan decision for a named card.
+        // This replaces the accidental protection grouping used to provide:
+        // lossless ungrouping must not make planned site records disappear.
+        (authoritativeActivityCommitment(piece) === "sequenced" &&
+          noteListsMultipleActivityIdentities(matchingNote))
+    );
 
     // Deliberate day-plan membership counts as the planned sighting (ground
     // truth v2 dedup: planned copy wins) when the note copy comes from a
@@ -10567,6 +10715,8 @@ function applyIntentBlockClassification({
     string,
     ReturnType<typeof sourceIntentSignalsForPiece>
   >();
+  const sourceSequencedSiteVisitPieceIds =
+    sourceSequencedSiteVisitPlanPieceIds(pieces, observationById);
   const sourceSupportedVenueAddressPieceIds = new Set<string>();
   const sourceCommittedDaySlotPieceIds = new Set<string>();
   const entries: IntentBlockEntry[] = [];
@@ -10934,6 +11084,7 @@ function applyIntentBlockClassification({
       hasSequencedDayPlan,
       hasSourceSupportedPlan:
         hasExactSourceRelationshipPlanOccurrence ||
+        sourceSequencedSiteVisitPieceIds.has(piece.id) ||
         sourceIntent.hasExplicitPlanMention ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
@@ -11036,6 +11187,10 @@ function applyIntentBlockClassification({
         : null,
       sourceSupportedVenueAddressPieceIds.has(piece.id)
         ? "source_supported_venue_address"
+        : null,
+      sourceSequencedSiteVisitPieceIds.has(piece.id) ||
+      pieceHasSourceSupportedPeerPlanShape(piece, pieces)
+        ? "source_supported_site_plan"
         : null,
     ].filter((value): value is string => Boolean(value));
     const hasAuditedCommitment = commitmentSignals.length > 0;
@@ -11168,154 +11323,10 @@ function demoteHedgedSingleUncommittedMentions(
   }
 }
 
-// --- Deterministic geo grouping v3 (RW-GRP-001, defect docket 2026-07-17) ---
-//
-// Grouping happens because it is the clean interpretation, and expects a
-// HANDFUL of groups per trip. Two modes, both geographically verified with
-// parser-emitted approximate coordinates:
-//
-// SAME-SITE VISIT (~300 m): a named site (castle/palace/complex) owns the
-// stops inside its grounds — timed sub-stops allowed (Changing of the Guard
-// inside Prague Castle), title stays the site's own source title.
-//
-// DISCOVERED WALK (~1.5 km ≈ 15-18 min): only on crowded (>6 visible cards),
-// UNSEQUENCED days (<3 timed stops), only untimed/unbooked/hedge-free
-// sights, at most one walk per day, named by the shared source-derived area
-// label — no label, no group. Day pressure is the reason to look;
-// coordinates are only the permission.
-//
-// Area labels equal to a trip city never group (a day-trip town is not a
-// walking route). Calls state the actual rule that fired.
-
-const SAME_SITE_RADIUS_KM = 0.3;
-// Calibrated to the approved Malá Strana & Hradčany ruling (max pairwise
-// ~1.57 km) plus parser-coordinate fuzz; the crowded-day and unsequenced-day
-// gates carry the discrimination burden, not this radius.
-const WALK_RADIUS_KM = 1.8;
-const CROWDED_DAY_VISIBLE_CARDS = 6;
-// Exported (Phase 1, audit B4) so audit detectors share the container-noun
-// vocabulary instead of hand-rolling a subset.
-// Defined in the unified classifier so the site↔component merge refusal and
-// same-site grouping share one vocabulary (Arc B).
+// Container nouns remain a shared audit and identity vocabulary. They no longer authorize grouping.
 export const SAME_SITE_CONTAINER_PATTERN = SITE_CONTAINER_NOUN_PATTERN;
 
-function pieceIsSourceNarratedRouteStop(piece: CanonicalEvidencePiece) {
-  const text = [
-    stringValue(piece.payload, "title") ?? "",
-    stringValue(piece.payload, "description") ?? "",
-  ].join(" ");
-  return (
-    /\b(?:walk (?:by|past|to|across|over|along)|stop by|on the (?:hour|way)|head (?:to|over|down)|then (?:walk|go|head))\b/i.test(
-      text
-    ) ||
-    (isSourceFactAssemblyAuthorityEnabled() &&
-      /\bwalk from\b/i.test(text))
-  );
-}
-
-// Source-listing membership requires a COMPONENT-LIST shape, not a substring
-// of narrative prose (live-run 7.18.1: "Fisherman's Bastion to Castle Hill"
-// carried the whole day's walking narrative in its description, which made
-// every venue it mentioned — including St. Stephen's Basilica across the
-// river — look source-listed). A component is a delimited list entry equal
-// to the child title, or the child title plus a short qualifier ("KGB museum
-// for 1 hour", "Changing of the Guard - 12:00 PM").
-function containerListsComponent(
-  containerDescription: string | null,
-  childTitle: string
-) {
-  if (!containerDescription) return false;
-  const child = normalizedComparable(childTitle);
-  if (!child || child.length < 6) return false;
-  return containerDescription
-    .split(/[,;:•·]|(?:\r?\n)+/)
-    .map((segment) => normalizedComparable(segment.replace(/[.()]/g, " ")))
-    .filter(Boolean)
-    .some(
-      (segment) =>
-        segment === child ||
-        (segment.startsWith(child) && segment.length - child.length <= 24)
-    );
-}
-
-function pieceCoordinates(piece: CanonicalEvidencePiece) {
-  // Verified coordinates from the geocoding lane (Arc B) outrank parser
-  // approximations. They are attached with provenance and consumed only
-  // here — grouping proximity — per the standing CEO decision.
-  const verifiedLat = piece.payload.verifiedLatitude;
-  const verifiedLng = piece.payload.verifiedLongitude;
-  if (
-    piece.payload._geoVerified === true &&
-    typeof verifiedLat === "number" &&
-    typeof verifiedLng === "number" &&
-    Number.isFinite(verifiedLat) &&
-    Number.isFinite(verifiedLng) &&
-    (verifiedLat !== 0 || verifiedLng !== 0)
-  ) {
-    return { lat: verifiedLat, lng: verifiedLng, verified: true };
-  }
-  const lat = piece.payload.approxLatitude;
-  const lng = piece.payload.approxLongitude;
-
-  return typeof lat === "number" &&
-    typeof lng === "number" &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    (lat !== 0 || lng !== 0)
-    ? { lat, lng, verified: false }
-    : null;
-}
-
-// Run5 geo calibration (live run 7.18.2, PB-4): 2-decimal model coordinates
-// quantize to ~1.1 km, which collapsed half of central Pest onto shared
-// rounded points and let a "Quick look inside the Gresham Palace" card claim
-// St. Istvan's Basilica (~650 m away) "within 300 m". Coordinates below
-// 3-decimal precision are ineligible for any geo-radius rule; they can still
-// support membership through source hierarchy (listing / "X at Site").
-const COORDINATE_MIN_DECIMALS = 3;
-
-function coordinateDecimals(value: number) {
-  const text = String(value);
-
-  if (text.includes("e") || text.includes("E")) {
-    return 0;
-  }
-
-  const dot = text.indexOf(".");
-
-  return dot === -1 ? 0 : text.length - dot - 1;
-}
-
-function precisePieceCoordinates(piece: CanonicalEvidencePiece) {
-  const coords = pieceCoordinates(piece);
-
-  // Verified lookup results are precise by construction — the decimals
-  // gate only defends against model quantization.
-  if (coords?.verified) {
-    return coords;
-  }
-
-  // Quantization hits BOTH components at once; a single round-number
-  // component (50.09, 14.4106) is not quantization evidence, and JSON
-  // numbers cannot preserve trailing zeros ("50.090" parses to 50.09).
-  return coords &&
-    (coordinateDecimals(coords.lat) >= COORDINATE_MIN_DECIMALS ||
-      coordinateDecimals(coords.lng) >= COORDINATE_MIN_DECIMALS)
-    ? coords
-    : null;
-}
-
-// A same-site container must be an actual site-visit card (run5 PB-4): a
-// passing mention ("Quick look inside the Gresham Palace") never owns other
-// stops as a visit container.
-const PASSING_MENTION_TITLE_PATTERN =
-  /\b(?:quick (?:look|peek|stop)|peek (?:inside|at)|glimpse|pass(?:ing)? by|walk (?:past|by)|drive by|photo (?:stop|op)|look (?:inside|at)|view (?:of|from)|from (?:the )?outside)\b/i;
-
-// A discovered walk's members must match the walk's area label from their
-// OWN source context (run5 PB-4: "Old Town walk" absorbed Dancing House and
-// Lucerna Arcade, which are in Nové Město — the parser invented their area).
-// The contract already requires area to come from the source day title or
-// heading; this verifies it per piece instead of trusting the model field.
+// Area support is classification evidence only; it never creates a walk or containment relation.
 function pieceAreaSourceSupported(piece: CanonicalEvidencePiece) {
   const area = stringValue(piece.payload, "area");
 
@@ -11346,254 +11357,6 @@ function pieceAreaSourceSupported(piece: CanonicalEvidencePiece) {
   );
 
   return areaComparable.length > 0 && corpus.includes(areaComparable);
-}
-
-function haversineKm(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number }
-) {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-
-  return 2 * 6371 * Math.asin(Math.sqrt(h));
-}
-
-function maxPairwiseKm(coords: Array<{ lat: number; lng: number }>) {
-  let max = 0;
-  for (let i = 0; i < coords.length; i += 1) {
-    for (let j = i + 1; j < coords.length; j += 1) {
-      max = Math.max(max, haversineKm(coords[i], coords[j]));
-    }
-  }
-  return max;
-}
-
-// --- Arc G.3a: site membership evidence, in ONE place -----------------------
-//
-// Membership used to be judged twice with two subtly different rule sets:
-// the lane matched container tokens on WHOLE WORDS and downgraded
-// unverified coordinates once the geocode lane had run, while the executor
-// re-verified with a SUBSTRING match and no downgrade. Two copies of a rule
-// are two rules. Everything below is the single source of truth, and both
-// callers keep only their own surrounding vetoes.
-//
-// Three kinds of proof, in strength order:
-//   1. COMPONENT LIST — the container's own description lists the child.
-//   2. TITLE TOKEN — "Palm House at Schönbrunn" carries the site's name.
-//   3. FORMATTED ADDRESS (new) — the geocoder's own answer for the child
-//      names the site ("Schönbrunner Schloßstraße 47, 1130 Wien"). This is
-//      the evidence that finally reaches Schönbrunn's Gloriette: it is
-//      ~800 m from the palace and the locked ~300 m radius refuses it BY
-//      DESIGN, but its address is inside the estate.
-//   4. RADIUS — proximity alone, the weakest claim and the only contestable
-//      one.
-//
-// FOOTPRINT EXTENSION: a site whose own confirmed members demonstrably
-// spread out is allowed to admit untimed neighbours across that measured
-// extent instead of a fixed 300 m. Deliberately hard to trigger — it needs
-// at least two source/address-confirmed members carrying VERIFIED
-// coordinates, admits only untimed pieces on verified coordinates, and is
-// capped. Live-run 7.21.0 is the cautionary case: the parser fabricated
-// precise-looking coordinates for a whole day and a "peek inside the
-// Gresham Palace" card nearly swallowed Budapest.
-const SITE_FOOTPRINT_MAX_KM = 1.2;
-const SITE_FOOTPRINT_MIN_CONFIRMED_MEMBERS = 2;
-
-function pieceVerifiedAddress(piece: CanonicalEvidencePiece) {
-  return piece.payload._geoVerified === true
-    ? stringValue(piece.payload, "verifiedFormattedAddress")
-    : null;
-}
-
-// Tokens that can identify a SITE, used by both the title path and the
-// address path. Generic site nouns and trip city names are excluded: an
-// address containing "palace" says nothing, "Prague" says only that we are
-// in Prague, and neither is containment.
-//
-// This filter used to apply to the address path only, and the asymmetry was
-// a live false-grouping generator: `SOURCE_SUPPORT_STOPWORDS` happens to
-// contain "castle" and "museum" but NOT "palace", "complex", "grounds",
-// "citadel", "fortress", "abbey" or "monastery" — every one of them a
-// SAME_SITE_CONTAINER_PATTERN noun of five or more characters. "Belvedere
-// Palace" therefore read as a source-confirmed member of the Schönbrunn
-// Palace visit five kilometres away, and G.3b would have recorded that as
-// HIERARCHY strength — permanently uncontestable.
-function siteIdentifyingTokens(
-  containerTitle: string,
-  excludedTokens: Set<string>
-) {
-  return distinctiveTitleTokens(containerTitle).filter(
-    (token) =>
-      token.length >= 5 &&
-      !SAME_SITE_CONTAINER_PATTERN.test(token) &&
-      !excludedTokens.has(token)
-  );
-}
-
-function addressNamesSite(address: string | null, tokens: string[]) {
-  if (!address || tokens.length === 0) return false;
-  const folded = foldForSourceSupport(address);
-  // Substring, not whole word: German and Czech addresses inflect the site
-  // name ("Schönbrunner Schloßstraße" for Schönbrunn), and a >=5-character
-  // distinctive token is specific enough to carry it.
-  return tokens.some((token) => folded.includes(token));
-}
-
-export type SiteMembershipEvidence = "geo" | "hierarchy";
-
-// Live-run 7.21.0: when the geocode lane ran on this build, radius rules
-// trust ONLY verified coordinates (the parser fabricates precise-looking
-// ones). Without the lane (no key), the precise-parser fallback stands —
-// the env-keyed contract promises no behavior change when disabled.
-function groupingGeocodeLaneRan(pieces: CanonicalEvidencePiece[]) {
-  return pieces.some((piece) => piece.payload._geoVerified === true);
-}
-
-function tripCityAddressTokens(pieces: CanonicalEvidencePiece[]) {
-  return new Set(
-    pieces
-      .filter((piece) => piece.kind === "place")
-      .flatMap((piece) =>
-        foldForSourceSupport(stringValue(piece.payload, "city") ?? "").split(
-          /\s+/
-        )
-      )
-      .filter(Boolean)
-  );
-}
-
-function createSiteMembershipContext({
-  candidates,
-  container,
-  geocodeLaneRan,
-  excludedContainerTokens = new Set<string>(),
-}: {
-  candidates: CanonicalEvidencePiece[];
-  container: CanonicalEvidencePiece;
-  geocodeLaneRan: boolean;
-  excludedContainerTokens?: Set<string>;
-}) {
-  const containerTitle = stringValue(container.payload, "title") ?? "";
-  const containerTokens = siteIdentifyingTokens(
-    containerTitle,
-    excludedContainerTokens
-  );
-  const addressTokens = containerTokens;
-  const containerCategory = stringValue(container.payload, "category");
-  const containerDescription = stringValue(container.payload, "description");
-
-  const radiusCoordinates = (piece: CanonicalEvidencePiece) => {
-    const coords = precisePieceCoordinates(piece);
-    if (!coords) return null;
-    // Live-run 7.21.0: when the geocode lane ran, radius rules trust ONLY
-    // verified coordinates — the parser fabricates precise-looking ones.
-    return geocodeLaneRan && !coords.verified ? null : coords;
-  };
-  const originCoords = radiusCoordinates(container);
-
-  // Filtering generic nouns and city names out of the token list is what
-  // stops "Belvedere Palace" reading as part of "Schönbrunn Palace" — but
-  // it would also strip EVERY token from containers like "Prague Castle"
-  // (city + generic noun), which would lose the source-hierarchy path they
-  // legitimately use. A child naming the container's FULL title is
-  // unambiguous containment whatever its tokens are, so that path is kept
-  // alongside.
-  const containerFullTitle = normalizedComparable(containerTitle);
-  const containerFullTitleUsable =
-    containerFullTitle.length >= 6 && containerFullTitle.includes(" ");
-
-  const sourceHierarchyMember = (piece: CanonicalEvidencePiece) => {
-    const childRawTitle = stringValue(piece.payload, "title");
-    const childTitle = normalizedComparable(childRawTitle);
-    if (!childTitle) return false;
-    if (
-      piece.payload._sourceFactRelationshipRecovery !== true &&
-      childRawTitle &&
-      containerListsComponent(containerDescription, childRawTitle)
-    ) {
-      return true;
-    }
-    if (
-      containerFullTitleUsable &&
-      childTitle !== containerFullTitle &&
-      childTitle.includes(containerFullTitle)
-    ) {
-      return true;
-    }
-    if (
-      containerTokens.some((token) => ` ${childTitle} `.includes(` ${token} `))
-    ) {
-      return true;
-    }
-    return false;
-  };
-
-  const addressMember = (piece: CanonicalEvidencePiece) =>
-    addressNamesSite(pieceVerifiedAddress(piece), addressTokens);
-  const hierarchyMember = (piece: CanonicalEvidencePiece) =>
-    sourceHierarchyMember(piece) || addressMember(piece);
-
-  const confirmedMembers = candidates.filter(
-    (piece) => piece !== container && hierarchyMember(piece)
-  );
-  const confirmedCoords = confirmedMembers
-    .map((piece) => radiusCoordinates(piece))
-    .filter(
-      (value): value is { lat: number; lng: number; verified: boolean } =>
-        Boolean(value?.verified)
-    );
-
-  let footprintKm = SAME_SITE_RADIUS_KM;
-  if (
-    originCoords?.verified &&
-    confirmedCoords.length >= SITE_FOOTPRINT_MIN_CONFIRMED_MEMBERS
-  ) {
-    for (const coords of confirmedCoords) {
-      footprintKm = Math.max(footprintKm, haversineKm(originCoords, coords));
-    }
-    footprintKm = Math.min(footprintKm, SITE_FOOTPRINT_MAX_KM);
-  }
-
-  const timedCategoryOk = (piece: CanonicalEvidencePiece) =>
-    !timeFrom(piece.payload) ||
-    (Boolean(stringValue(piece.payload, "category")) &&
-      stringValue(piece.payload, "category") === containerCategory);
-
-  const evidenceFor = (
-    piece: CanonicalEvidencePiece
-  ): SiteMembershipEvidence | null => {
-    if (piece === container) return null;
-    if (hierarchyMember(piece)) return "hierarchy";
-    if (!timedCategoryOk(piece)) return null;
-    const coords = radiusCoordinates(piece);
-    if (!originCoords || !coords) return null;
-    const distanceKm = haversineKm(originCoords, coords);
-    if (distanceKm <= SAME_SITE_RADIUS_KM) return "geo";
-    // Extension zone: verified coordinates and untimed only.
-    if (
-      distanceKm <= footprintKm &&
-      coords.verified &&
-      !timeFrom(piece.payload)
-    ) {
-      return "geo";
-    }
-    return null;
-  };
-
-  return {
-    addressTokens,
-    addressMember,
-    evidenceFor,
-    footprintKm,
-    hierarchyMember,
-    originCoords,
-    radiusCoordinates,
-    sourceHierarchyMember,
-  };
 }
 
 type ContainmentSourcePosition = {
@@ -11664,64 +11427,12 @@ function containmentSourcePosition(
   return containmentObservationPositions(piece, observationById)[0] ?? null;
 }
 
-function recoveredRelationshipSourcePosition(
-  piece: CanonicalEvidencePiece,
-  observationById: Map<string, EvidenceObservation>
-) {
-  return piece.observationIds
-    .map((id) => observationById.get(id))
-    .filter(
-      (observation): observation is EvidenceObservation =>
-        Boolean(observation) &&
-        observation?.payload._sourceFactRelationshipRecovery === true
-    )
-    .flatMap((observation) => {
-      const position = asRecord(observation.payload._canonicalSourcePosition);
-      const line = Number(position.line);
-      const stageIndex = Number(position.stageIndex);
-      const sourceIdentityHash = stringValue(position, "sourceIdentityHash");
-      return Number.isFinite(line) &&
-        Number.isFinite(stageIndex) &&
-        sourceIdentityHash
-        ? [{
-            line,
-            observationId: observation.id,
-            ordinal: observation.ordinal,
-            relationshipSignal: position.relationshipSignal === true,
-            sourceIdentityHash,
-            stageIndex,
-          } satisfies ContainmentSourcePosition]
-        : [];
-    })
-    .sort(
-      (left, right) =>
-        right.stageIndex - left.stageIndex ||
-        left.line - right.line ||
-        left.ordinal - right.ordinal
-    )[0] ?? null;
-}
-
 function containmentParticipant(piece: CanonicalEvidencePiece) {
   return {
     observationIds: [...piece.observationIds],
     pieceId: piece.id,
     title: stringValue(piece.payload, "title") ?? "Untitled activity",
   };
-}
-
-function containmentMemberIdentityTitle(title: string) {
-  return normalizedComparable(title)
-    .replace(/\s+(?:at|inside|within)\s+.+$/, "")
-    .replace(/\s+(?:pass|ticket|visit)$/, "")
-    .trim();
-}
-
-function containmentSemanticKind(piece: CanonicalEvidencePiece) {
-  const category = normalizedComparable(stringValue(piece.payload, "category"));
-  if (/^(?:art culture|nature outdoors|sightseeing)$/.test(category)) {
-    return "sight";
-  }
-  return category || "unknown";
 }
 
 function containmentMemberDecision({
@@ -11749,14 +11460,10 @@ function containmentMemberDecision({
   };
 }
 
-function createCanonicalContainmentAuthority({
-  existingDecisions,
-  missingDetails,
+function createSourceAuthoredContainmentAuthority({
   observations,
   pieces,
 }: {
-  existingDecisions: CanonicalGroupingDecision[];
-  missingDetails: unknown[];
   observations: EvidenceObservation[];
   pieces: CanonicalEvidencePiece[];
 }): CanonicalContainmentAuthority {
@@ -11764,7 +11471,6 @@ function createCanonicalContainmentAuthority({
   const observationById = new Map(
     observations.map((observation) => [observation.id, observation])
   );
-  const claimedPieceIds = new Set<string>();
   const activityPieces = pieces.filter(
     (piece) =>
       piece.kind === "activity" &&
@@ -11772,9 +11478,9 @@ function createCanonicalContainmentAuthority({
       Boolean(stringValue(piece.payload, "date"))
   );
 
-  // Title drift after a merge must not let a component collapse into its
-  // container. Register every observed activity title, not only the current
-  // payload winner.
+  // Identity may never fold a source-supported site container into a named
+  // component. This is a negative constraint only; it does not authorize a
+  // group or suppress either record.
   for (let leftIndex = 0; leftIndex < activityPieces.length; leftIndex += 1) {
     const left = activityPieces[leftIndex];
     const leftTitles = [
@@ -11806,368 +11512,11 @@ function createCanonicalContainmentAuthority({
     }
   }
 
-  const addDecision = (decision: ContainmentDecision) => {
-    const added = ledger.addDecision(decision);
-    if (added) {
-      if (decision.containerPieceId) {
-        claimedPieceIds.add(decision.containerPieceId);
-      }
-      for (const member of decision.members) claimedPieceIds.add(member.pieceId);
-    }
-    return added;
-  };
-
-  const candidatePiece = (candidateId: string) =>
-    activityPieces.find((piece) =>
-      piece.observationIds.some((observationId) => {
-        const observation = observationById.get(observationId);
-        return (
-          observation &&
-          (stringValue(observation.payload, "_resolverCandidateId") ??
-            observation.id) === candidateId
-        );
-      })
-    ) ?? null;
-  const candidateObservation = (candidateId: string) =>
-    observations.find(
-      (observation) =>
-        (stringValue(observation.payload, "_resolverCandidateId") ??
-          observation.id) === candidateId
-    ) ?? null;
-
-  // Resolver decisions are admitted only as source-authored routes here.
-  // Site and proximity decisions are rebuilt below under the typed rules so
-  // an older grouping proposal cannot silently become containment authority.
-  for (const decision of existingDecisions) {
-    const resolved = Array.from(
-      new Set(
-        decision.candidateIds
-          .map(candidatePiece)
-          .filter((piece): piece is CanonicalEvidencePiece => Boolean(piece))
-      )
-    );
-    const routeSignal = [
-      decision.claim,
-      decision.parentTitle,
-      ...resolved.flatMap((piece) => [
-        stringValue(piece.payload, "title") ?? "",
-        ...piece.observationIds.flatMap((id) => {
-          const observation = observationById.get(id);
-          return observation
-            ? [
-                observation.sourceStructure.sectionLabel ?? "",
-                ...observation.sourceStructure.headingPath,
-              ]
-            : [];
-        }),
-      ]),
-    ].join(" ");
-    const routeLike = /\b(?:tour|route|walk(?:ing)?)\b/i.test(routeSignal);
-    const requestedParent = candidatePiece(decision.parentCandidateId);
-    const requestedContainer = decision.containerCandidateId
-      ? candidatePiece(decision.containerCandidateId)
-      : null;
-    const requestedContainerObservation = decision.containerCandidateId
-      ? candidateObservation(decision.containerCandidateId)
-      : null;
-    const declaredContainerDidNotSurvive = Boolean(
-      decision.containerCandidateId && !requestedContainer
-    );
-    if (routeLike && declaredContainerDidNotSurvive) {
-      const containerPosition = asRecord(
-        requestedContainerObservation?.payload._canonicalSourcePosition
-      );
-      const containerSourceIdentityHash = stringValue(
-        containerPosition,
-        "sourceIdentityHash"
-      );
-      const containerIntakeDecision = asRecord(
-        requestedContainerObservation?.payload._canonicalIntakeCandidacyDecision
-      );
-      const sourceAuthoredContainer = Boolean(
-        requestedContainerObservation &&
-          (stringValue(containerIntakeDecision, "inputEvidenceRole") ??
-            originalActivityCandidacyInputs(
-              requestedContainerObservation.payload
-            ).evidenceRole) === "grouping_proposal" &&
-          stringValue(
-            requestedContainerObservation.payload,
-            "sourceSectionType"
-          ) === "dated_itinerary" &&
-          Number.isFinite(Number(containerPosition.line)) &&
-          containerSourceIdentityHash
-      );
-      const positionedMembers = resolved
-        .map((piece) => ({
-          piece,
-          position: containmentSourcePosition(piece, observationById),
-        }))
-        .filter(
-          (entry): entry is {
-            piece: CanonicalEvidencePiece;
-            position: ContainmentSourcePosition;
-          } => Boolean(entry.position)
-        );
-      if (
-        sourceAuthoredContainer &&
-        positionedMembers.length === resolved.length &&
-        positionedMembers.length >= 2 &&
-        positionedMembers.every(
-          ({ position }) =>
-            position.sourceIdentityHash === containerSourceIdentityHash
-        )
-      ) {
-        const members = positionedMembers
-          .map(({ piece }) =>
-            containmentMemberDecision({
-              evidence: [
-                "resolver_source_relationship",
-                "source_hierarchy",
-                "source_order",
-              ],
-              observationById,
-              piece,
-            })
-          )
-          .sort((left, right) => left.sourceOrder - right.sourceOrder);
-        addDecision({
-          callPolicy:
-            decision.callRequired === false ? "silent" : "required",
-          containerObservationIds: requestedContainerObservation
-            ? [requestedContainerObservation.id]
-            : [],
-          containerPieceId: null,
-          containerTitle: decision.parentTitle,
-          date: stringValue(resolved[0].payload, "date") ?? "",
-          decisionId: decision.decisionId,
-          members,
-          relationType: "authored_route",
-          rejections: [],
-          source: "resolver_containment",
-        });
-      }
-      continue;
-    }
-    if (
-      !routeLike &&
-      (!requestedParent || declaredContainerDidNotSurvive)
-    ) {
-      const positions = resolved
-        .map((piece) => containmentSourcePosition(piece, observationById))
-        .filter(
-          (position): position is ContainmentSourcePosition => Boolean(position)
-        );
-      const firstPosition = positions[0] ?? null;
-      const sharedPositionedRelationship = Boolean(
-        firstPosition &&
-          positions.length === resolved.length &&
-          positions.some((position) => position.relationshipSignal) &&
-          positions.every(
-            (position) =>
-              position.sourceIdentityHash === firstPosition.sourceIdentityHash &&
-              position.stageIndex === firstPosition.stageIndex
-          )
-      );
-      const syntheticTitle = decision.parentTitle;
-      const syntheticSameSite =
-        /\bsame[ -]?site\b|\b(?:component|complex|grounds|inside|within)\b/i.test(
-          `${decision.claim} ${syntheticTitle}`
-        ) && SAME_SITE_CONTAINER_PATTERN.test(syntheticTitle);
-      const multiSiteSynthetic =
-        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(
-          syntheticTitle
-        ) && SAME_SITE_CONTAINER_PATTERN.test(syntheticTitle);
-      if (
-        sharedPositionedRelationship &&
-        syntheticSameSite &&
-        !multiSiteSynthetic &&
-        resolved.length >= 2
-      ) {
-        const members = resolved.map((piece) =>
-          containmentMemberDecision({
-            evidence: ["resolver_source_relationship", "source_hierarchy"],
-            observationById,
-            piece,
-          })
-        );
-        addDecision({
-          callPolicy:
-            decision.callRequired === false ? "silent" : "required",
-          containerObservationIds: [],
-          containerPieceId: null,
-          containerTitle: syntheticTitle,
-          date: stringValue(resolved[0].payload, "date") ?? "",
-          decisionId: decision.decisionId,
-          members,
-          relationType: "same_site",
-          rejections: [],
-          source: "resolver_containment",
-        });
-      }
-      continue;
-    }
-    const parent = requestedParent ?? resolved[0];
-    if (!parent) continue;
-    if (!routeLike) {
-      // A resolver same-site proposal needs either a shared executable
-      // source relationship or source-free licensed membership evidence.
-      // Both paths freeze into this ledger; grouping itself never discovers
-      // or re-judges membership.
-      const sourceFree = resolved.every(
-        (piece) => containmentSourcePosition(piece, observationById) === null
-      );
-      const parentTitle = stringValue(parent.payload, "title") ?? "";
-      const parentPosition = containmentSourcePosition(parent, observationById);
-      const positionedResolverRelationship = Boolean(
-        parentPosition?.relationshipSignal &&
-          resolved
-            .filter((piece) => piece !== parent)
-            .every((piece) => {
-              const position = containmentSourcePosition(piece, observationById);
-              return (
-                position?.sourceIdentityHash ===
-                  parentPosition.sourceIdentityHash &&
-                position.stageIndex === parentPosition.stageIndex
-              );
-            })
-      );
-      const sameSiteClaim =
-        /\bsame[ -]?site\b|\b(?:component|complex|grounds|inside|within)\b/i.test(
-          `${decision.claim} ${decision.parentTitle}`
-        ) && SAME_SITE_CONTAINER_PATTERN.test(parentTitle);
-      if (
-        !sameSiteClaim ||
-        (!sourceFree && !positionedResolverRelationship)
-      ) {
-        continue;
-      }
-      const multiSiteTitle =
-        /^(.{3,}?)\s+(?:and|&|to)\s+(.{3,}?)(?:\s+visit)?$/i.test(
-          parentTitle
-        ) && SAME_SITE_CONTAINER_PATTERN.test(parentTitle);
-      if (
-        multiSiteTitle ||
-        PASSING_MENTION_TITLE_PATTERN.test(
-          `${parentTitle} ${stringValue(parent.payload, "description") ?? ""}`
-        )
-      ) {
-        continue;
-      }
-      const allResolverCandidates = resolved.filter((piece) => piece !== parent);
-      const resolverOwnsFixedStops = /\bsame[ -]?site visit\b/i.test(
-        decision.claim
-      );
-      const independentSitePieces = resolverOwnsFixedStops
-        ? []
-        : allResolverCandidates.filter((piece) =>
-            Boolean(
-              timeFrom(piece.payload) ||
-                confirmationFrom(piece.payload) ||
-                /\b(?:booked|paid|reservation|reserved|ticketed|timed|voucher)\b/i.test(
-                  activityText(piece.payload)
-                )
-            )
-          );
-      const resolverCandidates = allResolverCandidates.filter(
-        (piece) => !independentSitePieces.includes(piece)
-      );
-      const resolverMembership = sourceFree
-        ? createSiteMembershipContext({
-            candidates: resolverCandidates,
-            container: parent,
-            excludedContainerTokens: tripCityAddressTokens(pieces),
-            geocodeLaneRan:
-              decision.verificationPolicy === "strict_verified_coordinates"
-                ? groupingGeocodeLaneRan(pieces)
-                : false,
-          })
-        : null;
-      const members = resolverCandidates.flatMap((piece) => {
-        const relationship =
-          positionedResolverRelationship
-            ? "hierarchy"
-            : resolverMembership?.evidenceFor(piece) ?? null;
-        if (!relationship) return [];
-        const evidence: ContainmentEvidenceKind[] = [
-          "resolver_source_relationship",
-        ];
-        if (
-          positionedResolverRelationship ||
-          resolverMembership?.sourceHierarchyMember(piece)
-        ) {
-          evidence.push("source_hierarchy");
-        }
-        if (resolverMembership?.addressMember(piece)) {
-          evidence.push("verified_address");
-        } else if (relationship === "geo") {
-          evidence.push("verified_geo");
-        }
-        return [containmentMemberDecision({
-          evidence,
-          observationById,
-          piece,
-        })];
-      });
-      if (members.length < 2) continue;
-      addDecision({
-        callPolicy: decision.callRequired === false ? "silent" : "required",
-        containerObservationIds: [...parent.observationIds],
-        containerPieceId: parent.id,
-        containerTitle:
-          parentTitle || decision.parentTitle,
-        date: stringValue(parent.payload, "date") ?? "",
-        decisionId: decision.decisionId,
-        members,
-        relationType: "same_site",
-        rejections: independentSitePieces.map((piece) => ({
-          pieceId: piece.id,
-          reasonCode: timeFrom(piece.payload)
-            ? ("independent_time" as const)
-            : ("independent_booking" as const),
-          title: stringValue(piece.payload, "title") ?? "Untitled activity",
-        })),
-        source: "resolver_containment",
-      });
-      continue;
-    }
-    const routeCandidates = resolved.filter((piece) => piece !== parent);
-    const independentRoutePieces = routeCandidates.filter(
-      (piece) => confirmationFrom(piece.payload) || timeFrom(piece.payload)
-    );
-    const members = routeCandidates
-      .filter((piece) => !independentRoutePieces.includes(piece))
-      .map((piece) =>
-        containmentMemberDecision({
-          evidence: ["resolver_source_relationship", "source_hierarchy"],
-          observationById,
-          piece,
-        })
-      )
-      .sort((left, right) => left.sourceOrder - right.sourceOrder);
-    if (members.length < 2) continue;
-    addDecision({
-      callPolicy: decision.callRequired === false ? "silent" : "required",
-      containerObservationIds: [...parent.observationIds],
-      containerPieceId: parent.id,
-      containerTitle: stringValue(parent.payload, "title") ?? decision.parentTitle,
-      date: stringValue(parent.payload, "date") ?? "",
-      decisionId: decision.decisionId,
-      members,
-      relationType: "authored_route",
-      rejections: independentRoutePieces.map((piece) => ({
-        pieceId: piece.id,
-        reasonCode: timeFrom(piece.payload)
-          ? ("independent_time" as const)
-          : ("independent_booking" as const),
-        title: stringValue(piece.payload, "title") ?? "Untitled activity",
-      })),
-      source: "resolver_containment",
-    });
-  }
-
-  // Deterministic fallback for an authored route whose resolver grouping was
-  // lost after candidate ids merged. A route-like source section starts at
-  // its first fixed plan and stops before the next independent fixed plan.
+  // One narrow positive rule remains: a source section whose own heading
+  // says tour/route/walk may group its ordered records under the first fixed
+  // plan in that section. The route ends before the next independently timed
+  // or booked record. Shared day, area, proximity, geocoded address, and a
+  // model grouping proposal are never sufficient.
   const routeSections = new Map<
     string,
     Array<{ observation: EvidenceObservation; piece: CanonicalEvidencePiece }>
@@ -12178,27 +11527,35 @@ function createCanonicalContainmentAuthority({
       if (!observation || observation.kind !== "activity") continue;
       const section = observation.sourceStructure.sectionLabel;
       const position = asRecord(observation.payload._canonicalSourcePosition);
+      const line = Number(position.line);
       const stageIndex = Number(position.stageIndex);
+      const sourceIdentityHash = stringValue(position, "sourceIdentityHash");
       if (
         !section ||
         !/\b(?:tour|route|walk(?:ing)?)\b/i.test(section) ||
-        !Number.isFinite(stageIndex)
+        !Number.isFinite(line) ||
+        !Number.isFinite(stageIndex) ||
+        !sourceIdentityHash
       ) {
         continue;
       }
       const key = [
-        stringValue(observation.payload, "date") ?? "",
-        stringValue(position, "sourceIdentityHash") ?? "",
+        stringValue(observation.payload, "date") ??
+          stringValue(piece.payload, "date") ??
+          "",
+        sourceIdentityHash,
         stageIndex,
         normalizedComparable(section),
       ].join("|");
       const entries = routeSections.get(key) ?? [];
-      if (!entries.some((entry) => entry.piece === piece)) {
+      if (!entries.some((entry) => entry.piece.id === piece.id)) {
         entries.push({ observation, piece });
         routeSections.set(key, entries);
       }
     }
   }
+
+  const claimedPieceIds = new Set<string>();
   for (const entries of routeSections.values()) {
     const ordered = entries.sort((left, right) => {
       const leftLine = Number(
@@ -12209,16 +11566,17 @@ function createCanonicalContainmentAuthority({
       );
       return leftLine - rightLine || left.observation.ordinal - right.observation.ordinal;
     });
-    const parentIndex = ordered.findIndex(
-      ({ piece }) =>
-        Boolean(timeFrom(piece.payload) || confirmationFrom(piece.payload))
+    const parentIndex = ordered.findIndex(({ piece }) =>
+      Boolean(timeFrom(piece.payload) || confirmationFrom(piece.payload))
     );
     if (parentIndex < 0) continue;
     const parent = ordered[parentIndex].piece;
     if (claimedPieceIds.has(parent.id)) continue;
+
     const members: ContainmentMemberDecision[] = [];
     const rejections: ContainmentRejection[] = [];
     for (const entry of ordered.slice(parentIndex + 1)) {
+      if (entry.piece.id === parent.id) continue;
       if (timeFrom(entry.piece.payload) || confirmationFrom(entry.piece.payload)) {
         rejections.push({
           pieceId: entry.piece.id,
@@ -12229,6 +11587,7 @@ function createCanonicalContainmentAuthority({
         });
         break;
       }
+      if (claimedPieceIds.has(entry.piece.id)) continue;
       members.push(
         containmentMemberDecision({
           evidence: ["source_hierarchy", "source_order"],
@@ -12238,596 +11597,31 @@ function createCanonicalContainmentAuthority({
       );
     }
     if (members.length < 2) continue;
-    addDecision({
-      callPolicy: "silent",
-      containerObservationIds: [...parent.observationIds],
-      containerPieceId: parent.id,
-      containerTitle: stringValue(parent.payload, "title") ?? "Authored route",
-      date: stringValue(parent.payload, "date") ?? "",
-      decisionId: `containment-route-${stableHash({
-        date: stringValue(parent.payload, "date"),
-        members: members.map((member) => member.pieceId),
-        parent: parent.id,
-      })}`,
-      members,
-      relationType: "authored_route",
-      rejections,
-      source: "deterministic_containment",
-    });
-  }
 
-  const geocodeLaneRan = groupingGeocodeLaneRan(pieces);
-  const excludedContainerTokens = tripCityAddressTokens(pieces);
-  const byDate = new Map<string, CanonicalEvidencePiece[]>();
-  for (const piece of activityPieces) {
-    const date = stringValue(piece.payload, "date");
-    if (!date) continue;
-    byDate.set(date, [...(byDate.get(date) ?? []), piece]);
-  }
-
-  for (const [date, dayPieces] of byDate) {
-    for (const container of dayPieces) {
-      if (claimedPieceIds.has(container.id)) continue;
-      const containerTitle = stringValue(container.payload, "title") ?? "";
-      if (
-        !SAME_SITE_CONTAINER_PATTERN.test(containerTitle) ||
-        PASSING_MENTION_TITLE_PATTERN.test(
-          `${containerTitle} ${stringValue(container.payload, "description") ?? ""}`
-        )
-      ) {
-        continue;
-      }
-      const candidates = dayPieces.filter(
-        (piece) => piece !== container && !claimedPieceIds.has(piece.id)
-      );
-      const membership = createSiteMembershipContext({
-        candidates,
-        container,
-        excludedContainerTokens,
-        geocodeLaneRan,
-      });
-      const containerPosition = containmentSourcePosition(
-        container,
-        observationById
-      );
-      const positioned = candidates
-        .map((piece) => ({
-          piece,
-          position: containmentSourcePosition(piece, observationById),
-        }))
-        .filter(
-          (entry): entry is {
-            piece: CanonicalEvidencePiece;
-            position: ContainmentSourcePosition;
-          } =>
-            Boolean(entry.position) &&
-            Boolean(containerPosition) &&
-            entry.position.sourceIdentityHash ===
-              containerPosition?.sourceIdentityHash &&
-            entry.position.stageIndex === containerPosition?.stageIndex
-        )
-        .sort((left, right) => left.position.line - right.position.line);
-      const explicitMembers = positioned.filter(({ piece }) =>
-        membership.sourceHierarchyMember(piece)
-      );
-      const hasSourceNesting =
-        explicitMembers.length > 0 ||
-        containerPosition?.relationshipSignal === true;
-      if (!hasSourceNesting) continue;
-
-      // Classification may already have routed a verified off-site recovery
-      // row to City Notes. Its traveler-facing home changes, but its frozen
-      // source position and geocode still define the containment boundary.
-      // Read that structural evidence from all pieces; membership below still
-      // selects only eligible Activity pieces.
-      const recoveredRelationshipEntries = pieces
-        .filter(
-          (piece) =>
-            piece.payload._sourceFactRelationshipRecovery === true &&
-            stringValue(piece.payload, "date") === date
-        )
-        .flatMap((piece) => {
-          const position =
-            containmentSourcePosition(piece, observationById) ??
-            recoveredRelationshipSourcePosition(piece, observationById);
-          return position &&
-            containerPosition &&
-            position.sourceIdentityHash === containerPosition.sourceIdentityHash &&
-            position.stageIndex === containerPosition.stageIndex
-            ? [{ piece, position }]
-            : [];
-        });
-      const recoveredGeocodeComplete = recoveredRelationshipEntries.every(
-        ({ piece }) =>
-          piece.payload._sourceFactGeocodeOutcome === "resolved" ||
-          piece.payload._sourceFactGeocodeOutcome === "rejected_locality"
-      );
-      const recoveredVerifiedBoundary =
-        recoveredRelationshipEntries.length > 0 &&
-        membership.originCoords?.verified
-          ? recoveredRelationshipEntries.find(({ piece }) => {
-              const coords = membership.radiusCoordinates(piece);
-              return Boolean(
-                coords?.verified &&
-                  membership.originCoords &&
-                  haversineKm(membership.originCoords, coords) >
-                    SITE_FOOTPRINT_MAX_KM
-              );
-            }) ?? null
-          : null;
-      // A recovered line proves that the source named a stop, not that every
-      // adjacent line belongs to the site. Source-bounded extension is
-      // licensed only when every recovered candidate reached a terminal
-      // geocode outcome and a verified off-site record supplies the stopping
-      // boundary. Without that proof, explicit "at/inside/within" hierarchy
-      // can still form a conservative group, but unknown neighbors stay out.
-      const recoveredExtensionLicensed =
-        recoveredRelationshipEntries.length === 0 ||
-        (recoveredGeocodeComplete && Boolean(recoveredVerifiedBoundary));
-
-      // A timed sub-stop can be named generically ("Changing of the Guard")
-      // and fail geocoding even though the surrounding source sequence puts
-      // it inside a declared site visit. Admit that narrow bridge only when
-      // a later row is independently verified as part of the site, the
-      // parent carries a source relationship signal, and the bridge is a
-      // sightseeing stop. This deliberately excludes timed meals and other
-      // logistics between the parent and the verified site member.
-      const firstVerifiedSiteMember = containerPosition?.relationshipSignal
-        && isSourceFactAssemblyAuthorityEnabled()
-        ? positioned.find(({ piece, position }) =>
-            position.line > containerPosition.line &&
-            membership.evidenceFor(piece) !== null
-          ) ?? null
-        : null;
-      const timedSourceBridges = new Set(
-        firstVerifiedSiteMember && containerPosition
-          ? positioned
-              .filter(({ piece, position }) =>
-                position.line > containerPosition.line &&
-                position.line < firstVerifiedSiteMember.position.line &&
-                (containmentSemanticKind(piece) === "sight" ||
-                  (normalizedComparable(
-                    stringValue(piece.payload, "category")
-                  ) === "tours tickets" &&
-                    !confirmationFrom(piece.payload) &&
-                    !/\b(?:tour|ticket)\b/i.test(
-                      stringValue(piece.payload, "title") ?? ""
-                    ))) &&
-                Boolean(timeFrom(piece.payload)) &&
-                membership.radiusCoordinates(piece) === null &&
-                piece.payload._sourceFactRelationshipRecovery !== true &&
-                !PASSING_MENTION_TITLE_PATTERN.test(
-                  `${stringValue(piece.payload, "title") ?? ""} ${
-                    stringValue(piece.payload, "description") ?? ""
-                  }`
-                )
-              )
-              .map(({ piece }) => piece)
-          : []
-      );
-
-      // A source-bounded site run may extend beyond explicitly named
-      // "X at Site" rows only after two such rows anchor the structure.
-      // The first source gap larger than one normal row ends the run.
-      const rejections: ContainmentRejection[] = [];
-      const extension = new Set<CanonicalEvidencePiece>();
-      if (
-        containerPosition &&
-        explicitMembers.length >= 2 &&
-        recoveredExtensionLicensed
-      ) {
-        let previousLine = containerPosition.line;
-        for (const entry of positioned) {
-          if (entry.position.line <= containerPosition.line) continue;
-          if (entry.position.line - previousLine > 3) {
-            rejections.push({
-              pieceId: entry.piece.id,
-              reasonCode: "source_boundary",
-              title:
-                stringValue(entry.piece.payload, "title") ??
-                "Untitled activity",
-            });
-            break;
-          }
-          const coords = membership.radiusCoordinates(entry.piece);
-          if (
-            membership.originCoords?.verified &&
-            coords?.verified &&
-            haversineKm(membership.originCoords, coords) >
-              SITE_FOOTPRINT_MAX_KM
-          ) {
-            rejections.push({
-              pieceId: entry.piece.id,
-              reasonCode: "source_boundary",
-              title:
-                stringValue(entry.piece.payload, "title") ??
-                "Untitled activity",
-            });
-            break;
-          }
-          extension.add(entry.piece);
-          previousLine = entry.position.line;
-        }
-      }
-      const selected = new Map<string, CanonicalEvidencePiece>();
-      for (const { piece, position } of positioned) {
-        if (position.line <= (containerPosition?.line ?? -1)) continue;
-        const hierarchy = membership.sourceHierarchyMember(piece);
-        const corroboration = membership.evidenceFor(piece);
-        const relationshipMember = Boolean(
-          containerPosition?.relationshipSignal && corroboration
-        );
-        const timedSourceBridge = timedSourceBridges.has(piece);
-        if (
-          !hierarchy &&
-          !extension.has(piece) &&
-          !relationshipMember &&
-          !timedSourceBridge
-        ) continue;
-        const title = stringValue(piece.payload, "title") ?? "Untitled activity";
-        if (confirmationFrom(piece.payload) && !hierarchy && !relationshipMember) {
-          rejections.push({ pieceId: piece.id, reasonCode: "independent_booking", title });
-          continue;
-        }
-        if (
-          timeFrom(piece.payload) &&
-          !hierarchy &&
-          !relationshipMember &&
-          !timedSourceBridge
-        ) {
-          rejections.push({ pieceId: piece.id, reasonCode: "independent_time", title });
-          continue;
-        }
-        if (
-          SAME_SITE_CONTAINER_PATTERN.test(title) &&
-          !hierarchy &&
-          !relationshipMember
-        ) {
-          rejections.push({ pieceId: piece.id, reasonCode: "named_peer_site", title });
-          continue;
-        }
-        if (PASSING_MENTION_TITLE_PATTERN.test(
-          `${title} ${stringValue(piece.payload, "description") ?? ""}`
-        )) {
-          rejections.push({ pieceId: piece.id, reasonCode: "type_mismatch", title });
-          continue;
-        }
-        // Query-context coordinates within 50 m of the container are an
-        // echo, not membership proof. Explicit source hierarchy still wins.
-        const pieceCoords = membership.radiusCoordinates(piece);
-        const query = stringValue(asRecord(piece.payload._geoVerification), "query");
-        const isEcho = Boolean(
-          !hierarchy &&
-          !relationshipMember &&
-          query &&
-          normalizedComparable(query).includes(normalizedComparable(containerTitle)) &&
-          membership.originCoords &&
-          pieceCoords &&
-          haversineKm(membership.originCoords, pieceCoords) <= 0.05
-        );
-        if (isEcho) {
-          rejections.push({ pieceId: piece.id, reasonCode: "no_licensed_evidence", title });
-          continue;
-        }
-        const identity = containmentMemberIdentityTitle(title);
-        const existing = selected.get(identity);
-        if (!existing) {
-          selected.set(identity, piece);
-        } else {
-          const existingPosition = containmentSourcePosition(existing, observationById);
-          if ((existingPosition?.stageIndex ?? -1) < position.stageIndex) {
-            selected.set(identity, piece);
-          }
-        }
-      }
-      const members = [...selected.values()]
-        .map((piece) => {
-          const evidence: ContainmentEvidenceKind[] = ["source_order"];
-          if (
-            membership.sourceHierarchyMember(piece) ||
-            (containerPosition?.relationshipSignal &&
-              membership.evidenceFor(piece))
-          ) {
-            evidence.push("source_hierarchy");
-          }
-          if (extension.has(piece)) {
-            evidence.push("source_bounded_extension");
-          }
-          if (timedSourceBridges.has(piece)) {
-            evidence.push("source_bounded_extension");
-          }
-          if (membership.addressMember(piece)) evidence.push("verified_address");
-          else if (membership.evidenceFor(piece) === "geo") evidence.push("verified_geo");
-          return containmentMemberDecision({ evidence, observationById, piece });
-        })
-        .sort((left, right) => left.sourceOrder - right.sourceOrder);
-      if (members.length < 2) continue;
-      addDecision({
-        callPolicy: "required",
-        containerObservationIds: [...container.observationIds],
-        containerPieceId: container.id,
-        containerTitle,
-        date,
-        decisionId: `containment-site-${stableHash({
-          date,
-          members: members.map((member) => member.pieceId),
-          parent: container.id,
-        })}`,
+    const decisionId = `containment-route-${stableHash({
+      date: stringValue(parent.payload, "date"),
+      members: members.map((member) => member.pieceId),
+      parent: parent.id,
+    })}`;
+    if (
+      !ledger.addDecision({
+        callPolicy: "silent",
+        containerObservationIds: [...parent.observationIds],
+        containerPieceId: parent.id,
+        containerTitle:
+          stringValue(parent.payload, "title") ?? "Source-authored route",
+        date: stringValue(parent.payload, "date") ?? "",
+        decisionId,
         members,
-        relationType: "same_site",
+        relationType: "authored_route",
         rejections,
         source: "deterministic_containment",
-      });
-    }
-
-    // Discovered walks are source-selected sight chains, not radius blobs:
-    // site members are removed first; every remaining consecutive hop must
-    // pass the licensed proximity gate; errands and meals are another kind.
-    const sourceAreaSupportedForContainment = (
-      piece: CanonicalEvidencePiece
-    ) => {
-      if (pieceAreaSourceSupported(piece)) return true;
-      const area = normalizedComparable(stringValue(piece.payload, "area"));
-      const position = containmentSourcePosition(piece, observationById);
-      if (!area || !position) return false;
-      // The extractor's area label is not spent alone. Three same-source,
-      // same-day peers must independently carry the same label; source order
-      // and licensed coordinates are still required below.
-      return (
-        dayPieces.filter((candidate) => {
-          const candidatePosition = containmentSourcePosition(
-            candidate,
-            observationById
-          );
-          return (
-            normalizedComparable(stringValue(candidate.payload, "area")) === area &&
-            candidatePosition?.sourceIdentityHash === position.sourceIdentityHash &&
-            candidatePosition?.stageIndex === position.stageIndex
-          );
-        }).length >= 3
-      );
-    };
-    const walkCandidates = dayPieces
-      .filter((piece) => !claimedPieceIds.has(piece.id))
-      .filter(
-        (piece) =>
-          !timeFrom(piece.payload) &&
-          !confirmationFrom(piece.payload) &&
-          !pieceHasHedgeMarker(piece) &&
-          containmentSemanticKind(piece) === "sight" &&
-          sourceAreaSupportedForContainment(piece) &&
-          !pieceIsSourceNarratedRouteStop(piece) &&
-          !SAME_SITE_CONTAINER_PATTERN.test(
-            stringValue(piece.payload, "title") ?? ""
-          ) &&
-          !/\btour\b/i.test(stringValue(piece.payload, "title") ?? "")
-      )
-      .map((piece) => ({
-        coords: precisePieceCoordinates(piece),
-        piece,
-        position: containmentSourcePosition(piece, observationById),
-      }))
-      .filter(
-        (entry): entry is {
-          coords: { lat: number; lng: number; verified: boolean };
-          piece: CanonicalEvidencePiece;
-          position: ContainmentSourcePosition;
-        } =>
-          Boolean(entry.coords) &&
-          Boolean(entry.position) &&
-          (!geocodeLaneRan || entry.coords?.verified === true)
-      );
-    const byArea = new Map<string, typeof walkCandidates>();
-    for (const entry of walkCandidates) {
-      const area = normalizedComparable(stringValue(entry.piece.payload, "area"));
-      if (!area) continue;
-      byArea.set(area, [...(byArea.get(area) ?? []), entry]);
-    }
-    const coherentSegments: Array<typeof walkCandidates> = [];
-    for (const entries of byArea.values()) {
-      const ordered = entries.sort(
-        (left, right) =>
-          left.position.stageIndex - right.position.stageIndex ||
-          left.position.line - right.position.line
-      );
-      let segment: typeof walkCandidates = [];
-      for (const entry of ordered) {
-        const previous = segment[segment.length - 1];
-        const sameSource =
-          !previous ||
-          (previous.position.sourceIdentityHash === entry.position.sourceIdentityHash &&
-            previous.position.stageIndex === entry.position.stageIndex);
-        const closeEnough =
-          !previous || haversineKm(previous.coords, entry.coords) <= WALK_RADIUS_KM;
-        if (!sameSource || !closeEnough) {
-          if (segment.length >= 3) coherentSegments.push(segment);
-          segment = [];
-        }
-        segment.push(entry);
-      }
-      if (segment.length >= 3) coherentSegments.push(segment);
-    }
-    const best = coherentSegments.sort(
-      (left, right) =>
-        right.length - left.length ||
-        left[0].position.line - right[0].position.line
-    )[0];
-    if (best) {
-      const bestIds = new Set(best.map(({ piece }) => piece.id));
-      const first = best[0];
-      const last = best[best.length - 1];
-      const area = normalizedComparable(stringValue(first.piece.payload, "area"));
-      const boundedNamedVenueExtensions =
-        isSourceFactAssemblyAuthorityEnabled()
-          ? dayPieces
-              .filter(
-                (piece) =>
-                  !claimedPieceIds.has(piece.id) &&
-                  !bestIds.has(piece.id) &&
-                  normalizedComparable(
-                    stringValue(piece.payload, "category")
-                  ) === "food dining" &&
-                  !timeFrom(piece.payload) &&
-                  !confirmationFrom(piece.payload) &&
-                  !pieceHasHedgeMarker(piece) &&
-                  !/\b(?:breakfast|brunch|lunch|dinner|meal)\b/i.test(
-                    stringValue(piece.payload, "title") ?? ""
-                  ) &&
-                  normalizedComparable(
-                    stringValue(piece.payload, "area")
-                  ) === area &&
-                  sourceAreaSupportedForContainment(piece)
-              )
-              .flatMap((piece) => {
-                const position = containmentSourcePosition(piece, observationById);
-                const coords = precisePieceCoordinates(piece);
-                if (
-                  !position ||
-                  !coords?.verified ||
-                  position.sourceIdentityHash !==
-                    first.position.sourceIdentityHash ||
-                  position.stageIndex !== first.position.stageIndex ||
-                  position.line <= first.position.line ||
-                  position.line >= last.position.line
-                ) {
-                  return [];
-                }
-                return [{ coords, piece, position }];
-              })
-          : [];
-      const expanded = [...best, ...boundedNamedVenueExtensions].sort(
-        (left, right) => left.position.line - right.position.line
-      );
-      const routeEntries = expanded.every((entry, index) =>
-        index === 0 ||
-        haversineKm(expanded[index - 1].coords, entry.coords) <= WALK_RADIUS_KM
-      )
-        ? expanded
-        : best;
-      const extensionIds = new Set(
-        routeEntries
-          .filter(({ piece }) => !bestIds.has(piece.id))
-          .map(({ piece }) => piece.id)
-      );
-      const areaLabel = stringValue(best[0].piece.payload, "area") ?? "Walking";
-      const members = routeEntries.map(({ piece }) =>
-        containmentMemberDecision({
-          evidence: extensionIds.has(piece.id)
-            ? [
-                "source_area",
-                "source_order",
-                "source_bounded_extension",
-                "verified_geo",
-              ]
-            : ["source_area", "source_order", "verified_geo"],
-          observationById,
-          piece,
-        })
-      );
-      addDecision({
-        callPolicy: "required",
-        containerObservationIds: [],
-        containerPieceId: null,
-        containerTitle: `${areaLabel} walk`,
-        date,
-        decisionId: `containment-walk-${stableHash({
-          area: normalizedComparable(areaLabel),
-          date,
-          members: members.map((member) => member.pieceId),
-        })}`,
-        members,
-        relationType: "source_area_walk",
-        rejections: [],
-        source: "deterministic_containment",
-      });
-    }
-  }
-
-  // Source-free fallback: the old late grouping pass used to discover
-  // verified same-site visits and area walks after identity. Keeping that
-  // pass would leave two decision writers. Instead, run its evidence
-  // calculation here, admit only participants that genuinely lack the
-  // route-equivalent source-position trace, and freeze the result into this
-  // non-mutating containment ledger. Grouping later only maps and executes.
-  const sourceFreeProposals = createSourceFreeContainmentFallbackProposals({
-    existingDecisions,
-    missingDetails,
-    observations,
-    pieces,
-  }).decisions;
-  for (const proposal of sourceFreeProposals) {
-    const proposalPieces = Array.from(
-      new Set(
-        proposal.candidateIds
-          .map(candidatePiece)
-          .filter((piece): piece is CanonicalEvidencePiece => Boolean(piece))
-      )
-    );
-    if (
-      proposalPieces.length < 2 ||
-      proposalPieces.some(
-        (piece) =>
-          containmentSourcePosition(piece, observationById) !== null ||
-          claimedPieceIds.has(piece.id)
-      )
+      })
     ) {
       continue;
     }
-    const sameSite = /^same-site visit:/i.test(proposal.claim);
-    const walk = /^discovered walk:/i.test(proposal.claim);
-    if (!sameSite && !walk) continue;
-    const parent = sameSite
-      ? candidatePiece(
-          proposal.containerCandidateId ?? proposal.parentCandidateId
-        )
-      : null;
-    if (sameSite && !parent) continue;
-    const memberPieces = proposalPieces.filter(
-      (piece) => !parent || piece !== parent
-    );
-    if (memberPieces.length < 2) continue;
-    const membership = parent
-      ? createSiteMembershipContext({
-          candidates: memberPieces,
-          container: parent,
-          excludedContainerTokens,
-          geocodeLaneRan,
-        })
-      : null;
-    const members = memberPieces.map((piece) => {
-      const evidence: ContainmentEvidenceKind[] = walk
-        ? ["source_area", "source_order", "verified_geo"]
-        : ["source_order"];
-      if (membership) {
-        if (membership.sourceHierarchyMember(piece)) {
-          evidence.push("source_hierarchy");
-        }
-        if (membership.addressMember(piece)) {
-          evidence.push("verified_address");
-        } else if (membership.evidenceFor(piece) === "geo") {
-          evidence.push("verified_geo");
-        }
-      }
-      return containmentMemberDecision({ evidence, observationById, piece });
-    });
-    addDecision({
-      callPolicy: proposal.callRequired === false ? "silent" : "required",
-      containerObservationIds: parent ? [...parent.observationIds] : [],
-      containerPieceId: parent?.id ?? null,
-      containerTitle:
-        stringValue(parent?.payload ?? {}, "title") ?? proposal.parentTitle,
-      date:
-        stringValue((parent ?? memberPieces[0]).payload, "date") ?? "",
-      decisionId: `containment-${sameSite ? "site" : "walk"}-${stableHash({
-        members: members.map((member) => member.pieceId),
-        parent: parent?.id ?? null,
-        proposal: proposal.decisionId,
-      })}`,
-      members,
-      relationType: sameSite ? "same_site" : "source_area_walk",
-      rejections: [],
-      source: "deterministic_containment",
-    });
+    claimedPieceIds.add(parent.id);
+    for (const member of members) claimedPieceIds.add(member.pieceId);
   }
 
   return {
@@ -12839,469 +11633,6 @@ function createCanonicalContainmentAuthority({
     telemetry: ledger.telemetry(),
   };
 }
-
-function createSourceFreeContainmentFallbackProposals({
-  existingDecisions = [],
-  missingDetails,
-  observations,
-  pieces,
-}: {
-  existingDecisions?: CanonicalGroupingDecision[];
-  missingDetails: unknown[];
-  observations: EvidenceObservation[];
-  pieces: CanonicalEvidencePiece[];
-}): {
-  decisions: CanonicalGroupingDecision[];
-  telemetry: GroupingClaimLedgerTelemetry;
-} {
-  // Candidates the resolver has already ruled on stay with the resolver's
-  // decision — the deterministic pass never re-groups or overrides them.
-  const claimedCandidateIds = new Set(
-    existingDecisions.flatMap((decision) => decision.candidateIds)
-  );
-  const questionSubjects = reviewSubjectTitles(missingDetails);
-  const timedCounts = timedActivityCountsByDate(pieces);
-  const observationById = new Map(
-    observations.map((observation) => [observation.id, observation])
-  );
-  const tripCities = new Set(
-    pieces
-      .filter((piece) => piece.kind === "place")
-      .map((piece) => normalizedComparable(stringValue(piece.payload, "city")))
-      .filter(Boolean)
-  );
-  const candidateIdFor = (piece: CanonicalEvidencePiece) => {
-    const observationId = piece.observationIds[0];
-    const observation = observationId
-      ? observationById.get(observationId)
-      : null;
-    if (!observation) return null;
-    const candidateId =
-      stringValue(observation.payload, "_resolverCandidateId") ??
-      observation.id;
-    return candidateId;
-  };
-
-  const pieceIsClaimed = (piece: CanonicalEvidencePiece) => {
-    if (claimedCandidateIds.size === 0) return false;
-    const resolverId = stringValue(piece.payload, "_resolverCandidateId");
-    if (resolverId && claimedCandidateIds.has(resolverId)) return true;
-    return piece.observationIds.some((observationId) => {
-      const observation = observationById.get(observationId);
-      const candidateId = observation
-        ? stringValue(observation.payload, "_resolverCandidateId") ??
-          observation.id
-        : null;
-      return Boolean(candidateId && claimedCandidateIds.has(candidateId));
-    });
-  };
-
-  const byDate = new Map<string, CanonicalEvidencePiece[]>();
-  for (const piece of pieces) {
-    if (!committedMentionPieceCandidate(piece)) continue;
-    if (pieceIsClaimed(piece)) continue;
-    const date = stringValue(piece.payload, "date");
-    if (!date) continue;
-    const group = byDate.get(date);
-    if (group) group.push(piece);
-    else byDate.set(date, [piece]);
-  }
-
-  const decisions: CanonicalGroupingDecision[] = [];
-  // Arc G.3b: lane contention is a LEDGER, not statement order. See
-  // `grouping-claim-ledger.ts` for why the bare Set had to go.
-  const ledger = createGroupingClaimLedger();
-  const grouped = {
-    has: (piece: CanonicalEvidencePiece) => ledger.isClaimed(piece.id),
-  };
-  const decisionById = new Map<string, CanonicalGroupingDecision>();
-  // Everything needed to keep a same-site decision HONEST after it loses a
-  // member: the maker-facing claim states counts, so a decision that
-  // quietly drops a stop while still saying "3 stops" is a lie in the
-  // product, not just a stale variable.
-  type SiteDecisionState = {
-    childCount: number;
-    containerTitle: string;
-    geoChildCount: number;
-    // The radius that actually admitted the geo members. With the footprint
-    // extension this is not always 300 m, and a call claiming "within 300 m"
-    // about a stop 800 m out is a false statement to the maker.
-    radiusMeters: number;
-  };
-  const siteDecisionState = new Map<string, SiteDecisionState>();
-  // Address tokens that identify nothing: a Vienna address containing
-  // "Vienna" is not evidence of containment.
-  const tripCityTokens = tripCityAddressTokens(pieces);
-
-  const sameSiteClaimText = (state: SiteDecisionState) => {
-    const membershipClaim =
-      state.geoChildCount === state.childCount
-        ? `${state.childCount} stops sit inside ${state.containerTitle}'s grounds (within ${state.radiusMeters} m)`
-        : state.geoChildCount === 0
-          ? `the source lists ${state.childCount} stops inside ${state.containerTitle}'s own visit`
-          : `${state.geoChildCount} stops sit inside ${state.containerTitle}'s grounds (within ${state.radiusMeters} m) and the source places ${state.childCount - state.geoChildCount} more inside the same visit`;
-    return `same-site visit: ${membershipClaim}, so one visit card owns them`;
-  };
-
-  // A same-site visit can spare a proximity-only member as long as the
-  // visit still owns two stops — the minimum that makes it a group at all.
-  const contestable = (piece: CanonicalEvidencePiece) => {
-    const held = ledger.claimFor(piece.id);
-    if (!held) return true;
-    return (
-      held.strength === "geo" &&
-      held.lane === "same_site" &&
-      (siteDecisionState.get(held.decisionId)?.childCount ?? 0) - 1 >= 2
-    );
-  };
-
-  // Contesting is genuinely two-phase. The walk lane may LOOK at a
-  // proximity-only claim while choosing members (`contestable`), but
-  // NOTHING is released until a walk is known to form. The earlier version
-  // released inside the member filter, so a walk that then failed its
-  // >=3-member test still ejected stops from a perfectly good site visit —
-  // the exact silent consumption the ledger exists to prevent, with the
-  // added insult of being caused by the fix.
-  const planReleases = (walkers: CanonicalEvidencePiece[]) => {
-    const pending = new Map<string, number>();
-    const releasable: CanonicalEvidencePiece[] = [];
-    for (const piece of walkers) {
-      const held = ledger.claimFor(piece.id);
-      if (!held) {
-        releasable.push(piece);
-        continue;
-      }
-      if (held.strength !== "geo" || held.lane !== "same_site") continue;
-      const state = siteDecisionState.get(held.decisionId);
-      if (!state) continue;
-      const projected =
-        state.childCount - (pending.get(held.decisionId) ?? 0) - 1;
-      if (projected < 2) continue;
-      pending.set(held.decisionId, (pending.get(held.decisionId) ?? 0) + 1);
-      releasable.push(piece);
-    }
-    return releasable;
-  };
-
-  const commitRelease = (piece: CanonicalEvidencePiece) => {
-    const held = ledger.claimFor(piece.id);
-    if (!held) return true;
-    const granted = ledger.contest({
-      pieceId: piece.id,
-      survivesWithout: (claim) =>
-        claim.lane === "same_site" &&
-        (siteDecisionState.get(claim.decisionId)?.childCount ?? 0) - 1 >= 2,
-    });
-    if (!granted) return false;
-    const decision = decisionById.get(held.decisionId);
-    const candidateId = candidateIdFor(piece);
-    if (decision && candidateId) {
-      decision.candidateIds = decision.candidateIds.filter(
-        (value) => value !== candidateId
-      );
-    }
-    const state = siteDecisionState.get(held.decisionId);
-    if (state) {
-      state.childCount = Math.max(0, state.childCount - 1);
-      // Only a proximity-only member can be contested, so the geo count is
-      // the one that drops — and the claim is rewritten to match.
-      state.geoChildCount = Math.max(0, state.geoChildCount - 1);
-      if (decision) decision.claim = sameSiteClaimText(state);
-    }
-    return true;
-  };
-  const geocodeLaneRan = groupingGeocodeLaneRan(pieces);
-  const radiusCoordinates = (piece: CanonicalEvidencePiece) => {
-    const coords = precisePieceCoordinates(piece);
-    if (!coords) return null;
-    return geocodeLaneRan && !coords.verified ? null : coords;
-  };
-
-  for (const [date, dayPieces] of byDate) {
-    const located = dayPieces.filter((piece) => pieceCoordinates(piece));
-
-    // SAME-SITE VISITS: a container-named site owning stops within ~300 m,
-    // or stops the source itself places inside the container (RW-GRP-001
-    // source hierarchy: a child listed in the container's own description, or
-    // titled "<stop> at <Site>", belongs to the visit even when the parser
-    // gave that stop no coordinates — live-run 7.17.2 left Apple Strudel
-    // Show and Panorama Train outside Schönbrunn for lack of coords).
-    for (const container of dayPieces) {
-      if (grouped.has(container)) continue;
-      const containerTitle = stringValue(container.payload, "title");
-      if (
-        !containerTitle ||
-        !SAME_SITE_CONTAINER_PATTERN.test(containerTitle)
-      ) {
-        continue;
-      }
-      // Run5 PB-4: a passing mention is never a visit container. Live-run
-      // 7.21.0 (Gresham, 3rd appearance): the passing mention lived in the
-      // card's own DESCRIPTION ("Take a peek inside the Four Seasons Hotel /
-      // Gresham Palace") while the title stayed clean — judge both.
-      const containerOwnProse = [
-        containerTitle,
-        stringValue(container.payload, "description") ?? "",
-      ].join(" ");
-      if (PASSING_MENTION_TITLE_PATTERN.test(containerOwnProse)) {
-        continue;
-      }
-      // Arc G.3a: membership evidence comes from the shared context, so
-      // this lane and the executor's re-verification can never drift apart
-      // again. A booking-carrying stop is its own plan and is excluded
-      // from the candidate pool before the site ever sees it.
-      const candidatePool = dayPieces.filter(
-        (piece) =>
-          piece !== container &&
-          !grouped.has(piece) &&
-          !confirmationFrom(piece.payload)
-      );
-      const membership = createSiteMembershipContext({
-        candidates: candidatePool,
-        container,
-        excludedContainerTokens: tripCityTokens,
-        geocodeLaneRan,
-      });
-      const memberEvidence = new Map<
-        CanonicalEvidencePiece,
-        SiteMembershipEvidence
-      >();
-      for (const piece of candidatePool) {
-        const childRawTitle = stringValue(piece.payload, "title");
-        if (!childRawTitle) continue;
-        const evidence = membership.evidenceFor(piece);
-        if (!evidence) continue;
-        // Live-run 7.21.0 (Gresham, 3rd appearance): a piece that is itself
-        // a named site container (Buda Castle) is grouping structure in its
-        // own right — it never joins ANOTHER site's visit by coordinates.
-        // Source hierarchy still may place it inside one.
-        if (
-          evidence === "geo" &&
-          SAME_SITE_CONTAINER_PATTERN.test(childRawTitle)
-        ) {
-          continue;
-        }
-        memberEvidence.set(piece, evidence);
-      }
-      const children = dayPieces.filter((piece) => memberEvidence.has(piece));
-      if (children.length < 2) continue;
-
-      const containerId = candidateIdFor(container);
-      // Only children that actually made it into the decision count. The
-      // ledger, the decision and the claim text must agree on ONE number —
-      // counting `children` here while the decision carries `childIds` let
-      // a visit "spare" a member it never had, and survive with one stop.
-      const childEntries = children
-        .map((child) => ({ child, candidateId: candidateIdFor(child) }))
-        .filter(
-          (entry): entry is {
-            child: CanonicalEvidencePiece;
-            candidateId: string;
-          } => Boolean(entry.candidateId)
-        );
-      if (!containerId || childEntries.length < 2) continue;
-
-      // Call claims state the actual rule that fired (doctrine v3). A geo
-      // child is one admitted by the radius path (verified-only when the
-      // lane ran).
-      const state: SiteDecisionState = {
-        childCount: childEntries.length,
-        containerTitle,
-        geoChildCount: childEntries.filter(
-          (entry) => memberEvidence.get(entry.child) === "geo"
-        ).length,
-        radiusMeters: Math.round(membership.footprintKm * 1000),
-      };
-
-      // The container's own candidate id is part of the key: two same-named
-      // containers on one date used to collide on `decisionId`, leaving the
-      // second one's state to overwrite the first's while both decisions
-      // shipped.
-      const decisionId = `deterministic-site-${stableHash({ containerId, date, title: containerTitle })}`;
-      const decision: CanonicalGroupingDecision = {
-        callRequired: true,
-        candidateIds: [containerId, ...childEntries.map((entry) => entry.candidateId)],
-        claim: sameSiteClaimText(state),
-        containerCandidateId: containerId,
-        decisionId,
-        parentCandidateId: containerId,
-        parentTitle: `${containerTitle} visit`,
-        source: "canonical_resolver",
-        verificationPolicy: "strict_verified_coordinates",
-      };
-      decisions.push(decision);
-      decisionById.set(decisionId, decision);
-      siteDecisionState.set(decisionId, state);
-      // The claim is recorded WITH ITS STRENGTH. A stop the source or the
-      // geocoder places inside this site is not contestable; a stop that
-      // merely fell inside the radius can be released to the walk lane if
-      // this visit can spare it.
-      ledger.claim({
-        decisionId,
-        entries: [
-          { pieceId: container.id, strength: "hierarchy" },
-          ...childEntries.map((entry) => ({
-            pieceId: entry.child.id,
-            strength: memberEvidence.get(entry.child) ?? "geo",
-          })),
-        ],
-        lane: "same_site",
-      });
-    }
-
-    // DISCOVERED WALK: at most one per day, crowded unsequenced days only.
-    const visibleCount = dayPieces.length;
-    if (visibleCount <= CROWDED_DAY_VISIBLE_CARDS) continue;
-    if ((timedCounts.get(date) ?? 0) >= 3) continue;
-
-    const walkers = located.filter((piece) => {
-      // Arc G.3b: a piece another lane holds is not automatically out of
-      // reach — a proximity-only claim the holder can spare is contestable.
-      // Nothing is released here; this only decides who may be considered.
-      if (grouped.has(piece) && !contestable(piece)) return false;
-      if (timeFrom(piece.payload) || confirmationFrom(piece.payload)) {
-        return false;
-      }
-      if (pieceHasHedgeMarker(piece)) return false;
-      // A tour or ticketed experience is its own plan, never a walk stop
-      // (live-run 7.21.0: "Catacombs tour" was absorbed into the Charles
-      // Bridge walk).
-      if (/tours?_tickets/i.test(stringValue(piece.payload, "category") ?? "")) {
-        return false;
-      }
-      if (/\btour\b/i.test(stringValue(piece.payload, "title") ?? "")) {
-        return false;
-      }
-      // A source-narrated route ("walk by the Dancing House", "stop by the
-      // Astronomical Clock on the hour") is already authored by the maker —
-      // the system never re-parents it into an invented walk (approved
-      // answer key: the Jan-14 Old Town evening route ships as standalone
-      // cards, no call; the Malá Strana walk's members are a bare list).
-      if (pieceIsSourceNarratedRouteStop(piece)) {
-        return false;
-      }
-      const title = normalizedComparable(stringValue(piece.payload, "title"));
-      return Boolean(title) && !questionSubjects.has(title);
-    });
-    const byArea = new Map<string, CanonicalEvidencePiece[]>();
-    for (const piece of walkers) {
-      const area = stringValue(piece.payload, "area");
-      if (!area) continue;
-      const normalizedArea = normalizedComparable(area);
-      // A trip city or day-trip town is never a walking route.
-      if (!normalizedArea || tripCities.has(normalizedArea)) continue;
-      // Run5 PB-4: a walk member's area label must come from its OWN source
-      // context — a model-invented area cannot pull a Nové Město sight into
-      // an "Old Town walk".
-      if (!pieceAreaSourceSupported(piece)) continue;
-      const group = byArea.get(normalizedArea);
-      if (group) group.push(piece);
-      else byArea.set(normalizedArea, [piece]);
-    }
-
-    const bestWalk = [...byArea.values()]
-      .filter((group) => group.length >= 3)
-      .filter((group) => {
-        // Run5 PB-4: the 15-minute-walk radius is only meaningful on
-        // precise coordinates. Live-run 7.21.0 hardening: the parser now
-        // fabricates precise-LOOKING coordinates, so when the geocode lane
-        // ran on this build (any verified member exists), the radius test
-        // accepts only VERIFIED coordinates; with the lane disabled the
-        // precise-parser fallback stands (no behavior change without a
-        // key), because the walk still demands per-member source-supported
-        // area labels as independent evidence.
-        const coords = group
-          .map(precisePieceCoordinates)
-          .filter(
-            (value): value is { lat: number; lng: number; verified: boolean } =>
-              Boolean(value)
-          );
-        const usable = geocodeLaneRan
-          ? coords.filter((value) => value.verified)
-          : coords;
-        return (
-          usable.length === group.length &&
-          maxPairwiseKm(usable) <= WALK_RADIUS_KM
-        );
-      })
-      .sort((left, right) => right.length - left.length)[0];
-
-    if (!bestWalk) continue;
-
-    // The walk has been chosen. Plan the releases WITHOUT mutating
-    // anything, and only commit them if a walk still forms — otherwise a
-    // walk that fails its own three-member test would have ejected stops
-    // from a perfectly good site visit on the way out.
-    // Every guard that can still kill the walk runs BEFORE any release is
-    // committed — including the candidate-id filter. A walk that dies at
-    // its last check must not have taken stops out of a healthy site visit
-    // on the way, which is the whole point of the plan/commit split.
-    const plannedMembers = planReleases(bestWalk).filter((piece) =>
-      Boolean(candidateIdFor(piece))
-    );
-    if (plannedMembers.length < 3) continue;
-    const walkMembers = plannedMembers.filter((piece) => commitRelease(piece));
-    if (walkMembers.length < 3) continue;
-
-    const walkIds = walkMembers
-      .map(candidateIdFor)
-      .filter((value): value is string => Boolean(value));
-    const areaLabel = stringValue(walkMembers[0].payload, "area") ?? "Walking";
-
-    const walkDecisionId = `deterministic-walk-${stableHash({ areaLabel, date })}`;
-    const walkDecision: CanonicalGroupingDecision = {
-      callRequired: true,
-      candidateIds: walkIds,
-      claim: `discovered walk: this day has ${visibleCount} cards, and ${walkIds.length} untimed sights sit within a 15-minute walk in ${areaLabel}, so they read cleaner as one route`,
-      containerCandidateId: null,
-      decisionId: walkDecisionId,
-      parentCandidateId: walkIds[0],
-      parentTitle: `${areaLabel} walk`,
-      source: "canonical_resolver",
-      verificationPolicy: "strict_verified_coordinates",
-    };
-    decisions.push(walkDecision);
-    decisionById.set(walkDecisionId, walkDecision);
-    ledger.claim({
-      decisionId: walkDecisionId,
-      entries: walkMembers.map((piece) => ({
-        pieceId: piece.id,
-        strength: "geo" as const,
-      })),
-      lane: "walk",
-    });
-  }
-
-  // A same-site decision that lost members to a contest can fall below the
-  // two-stop minimum. Drop it and release what it still holds, so the
-  // ledger never reports a claim behind a group that will not exist.
-  const survivingDecisions = decisions.filter((decision) => {
-    const decisionId = decision.decisionId;
-    if (!decisionId) return true;
-    const state = siteDecisionState.get(decisionId);
-    if (!state) return true;
-    if (state.childCount >= 2) return true;
-    ledger.releaseDecision(decisionId);
-    return false;
-  });
-
-  return {
-    decisions: survivingDecisions,
-    telemetry: ledger.telemetry(),
-  };
-}
-
-// --- Researched-but-uncommitted list question (RW-REV-001, 2026-07-17) ---
-//
-// Two or more same-day untimed, unbooked activities whose source text carries
-// research metadata (prices, opening hours) but no commitment do not reveal
-// intent: researched effort alone is not a strong enough planned signal. They
-// generate ONE question — "planned for this day, or just ideas?" — instead of
-// silently becoming activities or city notes.
-
-// Phase 1 (audit B5): the price marker now comes from the shared detector in
-// traveler-text.ts — the private copy here was missing £/gbp entirely.
-const PRICE_MARKER_PATTERN = PRICE_SIGNAL_PATTERN;
 
 function createResearchedListQuestions(
   pieces: CanonicalEvidencePiece[],
@@ -16410,11 +14741,9 @@ export function clusterExtractedEvidence({
   );
   const containmentAuthority = runPieceWriter(
     "containment",
-    "createCanonicalContainmentAuthority",
+    "createSourceAuthoredContainmentAuthority",
     ["containmentLedger[]"],
-    () => createCanonicalContainmentAuthority({
-      existingDecisions: groupingDecisions,
-      missingDetails,
+    () => createSourceAuthoredContainmentAuthority({
       observations,
       pieces,
     })

@@ -207,7 +207,7 @@ export default async function run() {
     );
   });
 
-  await test("run7 PC-2: verified coordinates still group a true same-site visit when the lane ran", () => {
+  await test("run7 PC-2: verified coordinates never invent same-site containment", () => {
     const verified = (lat: number, lng: number) => ({
       _geoVerified: true,
       verifiedLatitude: lat,
@@ -251,14 +251,15 @@ export default async function run() {
     const draft = result.draft as {
       activities: Array<Record<string, unknown>>;
     };
-    const parent = draft.activities.find(
-      (item) => String(item.title) === "Schönbrunn Palace"
-    );
     const kids = draft.activities.filter(
       (item) => item._canonicalParentPieceId
     );
-    assert.ok(parent, "the palace container survives");
-    assert.equal(kids.length, 2, "both verified stops join the visit");
+    const activityTitles = draft.activities
+      .filter((item) => item.itemType !== "note")
+      .map((item) => String(item.title));
+    assert.ok(activityTitles.includes("Schönbrunn Palace"));
+    assert.ok(activityTitles.includes("Palm House at Schönbrunn"));
+    assert.equal(kids.length, 0, "coordinates do not authorize nesting");
   });
 
   await test("run7 geocode lane: site containers and crowded-day members are verified even with precise-looking parser coordinates", () => {

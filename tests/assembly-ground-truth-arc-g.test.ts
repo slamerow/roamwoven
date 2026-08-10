@@ -363,36 +363,10 @@ export default async function run() {
           members: ["Old Square", "Historic Quarter"],
           relation: "authored_route",
         },
-        {
-          call: "required",
-          members: ["Changing of the Guard at Hill Castle", "Cathedral"],
-          relation: "same_site",
-        },
-        {
-          call: "required",
-          members: [
-            "Kafka statue",
-            "John Lennon Wall",
-            "Vinarna Certovka",
-            "Novy Svet",
-          ],
-          relation: "source_area_walk",
-        },
-        {
-          call: "required",
-          members: [
-            "Gloriette",
-            "Orangerie at Garden Palace",
-            "Palm House at Garden Palace",
-            "Strudel Show",
-            "Panorama Train",
-          ],
-          relation: "same_site",
-        },
       ]
     );
     const containmentTrace = result.summary.stageWriterTrace.find(
-      (entry) => entry.writer === "createCanonicalContainmentAuthority"
+      (entry) => entry.writer === "createSourceAuthoredContainmentAuthority"
     );
     assert.equal(containmentTrace?.decisionDomain, "containment");
     assert.equal(containmentTrace?.changed, false);
@@ -423,12 +397,7 @@ export default async function run() {
     );
   });
 
-  await test("arc G.3a: Schönbrunn groups all six stops — the geocoder's own address reaches the Gloriette the 300 m radius refuses", () => {
-    // Gloriette is ~790 m from the palace. The locked same-site radius is
-    // 300 m and refuses it BY DESIGN (next-session.md line ~1133), and it
-    // carries no "at Schönbrunn" title token either. Its ADDRESS names the
-    // estate — which is the whole point of keeping the formatted address
-    // instead of parsing it away.
+  await test("Loop 4: a same-site-looking Schönbrunn list stays losslessly ungrouped without a source-authored parent relation", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -520,20 +489,29 @@ export default async function run() {
 
     const draft = result.draft as Draft;
     const { children, parent } = parentedTitles(draft, /schönbrunn palace/i);
+    const visibleTitles = draft.activities.map((item) => String(item.title));
 
-    assert.ok(parent, "the palace container survives as the parent card");
+    assert.ok(parent, "the palace container survives as a top-level card");
     assert.equal(
       children.length,
-      5,
-      `all five stops join the visit (got: ${children.join(", ")})`
+      0,
+      "addresses and proximity do not authorize nesting"
     );
+    for (const expected of [
+      /gloriette/i,
+      /orangeriegarten/i,
+      /palm house/i,
+      /apple strudel show/i,
+      /panorama train/i,
+    ]) {
+      assert.ok(
+        visibleTitles.some((title) => expected.test(title)),
+        `ungrouping preserves ${expected}`
+      );
+    }
     assert.ok(
-      children.some((title) => /gloriette/i.test(title)),
-      "the Gloriette joins on its formatted address, ~790 m out"
-    );
-    assert.ok(
-      children.every((title) => !/mumok|natural history/i.test(title)),
-      "a Vienna museum 4 km away never joins the palace visit"
+      visibleTitles.some((title) => /modern art museum or design museum/i.test(title)),
+      "the unrelated venue also remains independent"
     );
   });
 
@@ -597,11 +575,7 @@ export default async function run() {
     );
   });
 
-  await test("arc G.3: Prague Castle groups, and the Malá Strana walk still forms on the same day", () => {
-    // Both lanes fire on Jan 16 in the answer key. This is the case the
-    // claim ledger has to get right: the same-site visit takes its own
-    // stops and the walk lane still gets the four adjacent untimed sights
-    // it is entitled to, rather than whatever the site lane left behind.
+  await test("Loop 4: Prague Castle and Malá Strana remain independent without source-authored membership", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -741,60 +715,33 @@ export default async function run() {
     const draft = result.draft as Draft;
     const castle = parentedTitles(draft, /prague castle/i);
     assert.ok(castle.parent, "the castle container survives");
-    assert.ok(
-      castle.children.length >= 2,
-      `the castle visit owns its stops (got: ${castle.children.join(", ")})`
+    assert.deepEqual(castle.children, [], "the castle borrows no children");
+    assert.equal(
+      draft.activities.filter((item) => item._canonicalParentPieceId).length,
+      0,
+      "no same-site or broad-area walk group is inferred"
     );
-
-    const walkParent = draft.activities.find((item) =>
-      /walk/i.test(String(item.title ?? ""))
-    );
-    const walkChildren = walkParent
-      ? draft.activities.filter(
-          (item) => item._canonicalParentPieceId === walkParent._canonicalPieceId
-        )
-      : [];
-    assert.ok(
-      walkParent,
-      "the Malá Strana walk can form — the site lane no longer starves it"
-    );
-    assert.ok(
-      walkChildren.length >= 2,
-      "the walk owns the adjacent untimed sights"
-    );
-    assert.ok(
-      !castle.children.some((title) => /lennon|kafka|čertovka|nový svět/i.test(title)),
-      "walk members never end up inside the castle visit"
-    );
+    const visible = draft.activities.map((item) => String(item.title));
+    for (const expected of [
+      /st\. vitus/i,
+      /changing of the guard/i,
+      /golden lane/i,
+      /kafka/i,
+      /lennon/i,
+      /čertovka/i,
+      /nový svět/i,
+    ]) {
+      assert.ok(visible.some((title) => expected.test(title)), `preserves ${expected}`);
+    }
   });
 
 
   await test("arc G.3: the Jan-15 walking tour still groups its two stops", () => {
-    // Not a same-site visit and not a discovered walk — this is the
-    // resolver lane: a BOOKED tour that owns the stops the source names
-    // inside it. The unified membership context must not disturb it, so
-    // the third grouping path in the product gets an explicit guard.
-    //
-    // The stop is titled "Josefov", the source's own name for the Jewish
-    // Quarter, deliberately: a card titled "Jewish Quarter" is folded into
-    // this tour by the title-containment alias lane BEFORE grouping ever
-    // sees it, which is a separate (and defensible) behavior — noted here
-    // so a future reader does not mistake it for a grouping failure.
+    // Positive control: the source heading itself names a walking tour, the
+    // booked parent is fixed, and the two untimed records follow it before
+    // any independent timed item. No resolver claim is needed.
     const decisionId = "resolver-walking-tour-jan15";
     const result = clusterExtractedEvidence({
-      groupingDecisions: [
-        {
-          callRequired: true,
-          candidateIds: ["tour-1", "tour-2", "tour-3"],
-          claim:
-            "the source books this walking tour and names its two stops, so one route card owns them",
-          containerCandidateId: null,
-          decisionId,
-          parentCandidateId: "tour-1",
-          parentTitle: "Old Town and Jewish Quarter Hidden Secrets walking tour",
-          source: "canonical_resolver",
-        },
-      ],
       sourceTransportAnchors: [],
       stages: [
         stage(
@@ -807,9 +754,13 @@ export default async function run() {
                   "Booked walking tour, L272-181125-2, 395 CZK. Old Town Square, Josefov.",
                 extra: {
                   _canonicalGroupingDecisionIds: [decisionId],
+                  _canonicalSourcePosition: sourcePosition(10, 4),
                   _resolverCandidateId: "tour-1",
                   city: "Prague",
                   confirmation: "L272-181125-2",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
                 },
                 startTime: "09:00",
                 title: "Old Town and Jewish Quarter Hidden Secrets walking tour",
@@ -817,13 +768,27 @@ export default async function run() {
               activity({
                 date: "2019-01-15",
                 description: "Old Town Square.",
-                extra: { _resolverCandidateId: "tour-2", city: "Prague" },
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(20, 4),
+                  _resolverCandidateId: "tour-2",
+                  city: "Prague",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
                 title: "Old Town Square",
               }),
               activity({
                 date: "2019-01-15",
                 description: "The Jewish Quarter.",
-                extra: { _resolverCandidateId: "tour-3", city: "Prague" },
+                extra: {
+                  _canonicalSourcePosition: sourcePosition(30, 4),
+                  _resolverCandidateId: "tour-3",
+                  city: "Prague",
+                  sourceSectionLabel:
+                    "Tuesday, January 15th // booked walking tour",
+                  sourceSectionType: "dated_itinerary",
+                },
                 title: "Josefov",
               }),
             ],
@@ -1211,12 +1176,7 @@ export default async function run() {
     );
   });
 
-  await test("arc G.3b: a walk that fails to form never ejects a stop from a site visit", () => {
-    // The two-phase rule. The walk lane may consider proximity-only
-    // members another lane holds, but releases are planned first and
-    // committed only if a walk actually forms. Here the site can spare
-    // exactly one stop and the walk needs two, so the walk dies — and the
-    // site must be untouched, not one stop poorer for nothing.
+  await test("Loop 4: nearby castle and area records remain losslessly ungrouped", () => {
     const inCourtyard = (title: string, lat: number, lng: number, area: string | null) =>
       activity({
         area,
@@ -1269,24 +1229,24 @@ export default async function run() {
     const draft = result.draft as Draft;
     const castle = parentedTitles(draft, /prague castle/i);
     assert.ok(castle.parent, "the castle visit survives");
-    assert.equal(
-      castle.children.length,
-      3,
-      `the site keeps every stop when no walk forms (got: ${castle.children.join(", ")})`
-    );
+    assert.deepEqual(castle.children, [], "proximity creates no castle children");
     assert.equal(
       draft.activities.filter((item) => /\bwalk\b/i.test(String(item.title ?? ""))).length,
       0,
       "and no walk was invented"
     );
+    const visible = draft.activities.map((item) => String(item.title));
+    for (const expected of [
+      /st\. vitus/i,
+      /old royal hall/i,
+      /st\. george/i,
+      /nový svět/i,
+    ]) {
+      assert.ok(visible.some((title) => expected.test(title)), `preserves ${expected}`);
+    }
   });
 
-  await test("arc G.3: one geo-verified piece elsewhere cannot silently delete a resolver-proposed group", () => {
-    // Geocoding is budget-limited and fail-soft, so partial verification is
-    // normal. The deterministic lane refuses unverified parser coordinates
-    // once the lane has run; a resolver decision was never built under that
-    // rule, and applying it during verification deleted valid groups with
-    // no call and no question.
+  await test("Loop 4: a resolver same-site proposal cannot authorize grouping", () => {
     const decisionId = "resolver-site-jan16";
     const result = clusterExtractedEvidence({
       groupingDecisions: [
@@ -1371,11 +1331,14 @@ export default async function run() {
     const draft = result.draft as Draft;
     const castle = parentedTitles(draft, /prague castle/i);
     assert.ok(castle.parent, "the resolver's container survives");
-    assert.equal(
-      castle.children.length,
-      2,
-      `the resolver group is verified under the rule it was built with (got: ${castle.children.join(", ")})`
+    assert.deepEqual(
+      castle.children,
+      [],
+      "a resolver claim without source-authored containment is ignored"
     );
+    const visible = draft.activities.map((item) => String(item.title));
+    assert.ok(visible.some((title) => /st\. vitus/i.test(title)));
+    assert.ok(visible.some((title) => /golden lane/i.test(title)));
   });
 
   await test("arc G.1: the 16-day count — a stray note never mints a day of its own", () => {

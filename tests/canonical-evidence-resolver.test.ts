@@ -81,7 +81,7 @@ function cluster({
 const noRoleDecisions: CanonicalEvidenceResolution["roleDecisions"] = [];
 
 export default async function run() {
-  await test("verified same-site components become one auditable Call", () => {
+  await test("verified same-site resolver proposals remain non-authoritative", () => {
     const titles = [
       "Schonbrunn Palace",
       "Gloriette",
@@ -116,20 +116,19 @@ export default async function run() {
 
     const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
     const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
-    assert.deepEqual(roots.map((item) => item.title), ["Schonbrunn Palace"]);
-    assert.equal(stops.length, 5);
-    assert.deepEqual(stops.map((item) => item.title), titles.slice(1));
+    assert.deepEqual(roots.map((item) => item.title), titles);
+    assert.equal(stops.length, 0);
     assert.equal(
       roots[0]?.description?.includes("Gloriette") ?? false,
       false
     );
     assert.equal(
       draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? "")).length,
-      1
+      0
     );
   });
 
-  await test("first-class grouping compiles to one traveler card with ordered stops", () => {
+  await test("a resolver grouping proposal cannot collapse traveler cards", () => {
     const titles = ["Schonbrunn Palace", "Gloriette", "Palm House"];
     const input = stage(
       titles,
@@ -153,11 +152,11 @@ export default async function run() {
     const traveler = createTravelerAppViewModel(records);
 
     assert.equal(records.items.length, 3);
-    assert.equal(records.items.filter((item) => !item.parentItemId).length, 1);
-    assert.equal(records.items.filter((item) => item.parentItemId).length, 2);
-    assert.equal(traveler.cards.length, 1);
-    assert.deepEqual(traveler.cards[0]?.stops.map((stop) => stop.title), titles.slice(1));
-    assert.equal(createGeneratedTripSummaryView(records).counts.activities, 1);
+    assert.equal(records.items.filter((item) => !item.parentItemId).length, 3);
+    assert.equal(records.items.filter((item) => item.parentItemId).length, 0);
+    assert.equal(traveler.cards.length, 3);
+    assert.ok(traveler.cards.every((card) => card.stops.length === 0));
+    assert.equal(createGeneratedTripSummaryView(records).counts.activities, 3);
   });
 
   await test("an inconclusive relationship preserves a clean three-stop day", () => {
@@ -451,7 +450,7 @@ export default async function run() {
     assert.equal(draft.activities[0]?.itemType, "note");
   });
 
-  await test("cross-chunk grouping uses shared source evidence and an atomic parent", () => {
+  await test("cross-chunk resolver grouping cannot create containment", () => {
     const sourceText = [
       "Schonbrunn Palace complex includes:",
       "Schonbrunn Palace",
@@ -496,12 +495,17 @@ export default async function run() {
 
     const roots = draft.activities.filter((item) => !item._canonicalParentPieceId);
     const stops = draft.activities.filter((item) => item._canonicalParentPieceId);
-    assert.deepEqual(roots.map((item) => item.title), ["Schonbrunn Palace"]);
-    assert.equal(stops.length, 4);
+    assert.deepEqual(roots.map((item) => item.title), [
+      "Schonbrunn Palace",
+      "Gloriette",
+      "Palm House",
+      "Apple Strudel Show",
+    ]);
+    assert.equal(stops.length, 0);
     assert.equal(
       draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? ""))
         .length,
-      1
+      0
     );
     assert.deepEqual(application.groupingDecisions[0]?.candidateIds, [
       "stage-2-item-1",
@@ -511,7 +515,7 @@ export default async function run() {
     ]);
   });
 
-  await test("a source-authored dated route needs no assembly Call", () => {
+  await test("route prose plus a resolver proposal cannot authorize grouping", () => {
     const sourceText = [
       "Old Town walking route",
       "Charles Bridge",
@@ -543,7 +547,7 @@ export default async function run() {
 
     assert.equal(
       draft.activities.filter((item) => !item._canonicalParentPieceId).length,
-      1
+      2
     );
     assert.equal(
       draft.missingDetails.filter((detail) => /one activity card/i.test(detail.prompt ?? ""))
