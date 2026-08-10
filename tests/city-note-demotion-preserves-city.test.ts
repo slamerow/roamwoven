@@ -223,7 +223,7 @@ export default async function run() {
   );
 
   await test(
-    "Loop 6: one final safety/conservation ledger preserves public numbers and excludes private access without unresolved facts",
+    "Loop 3: the final privacy ledger preserves public numbers and excludes private access",
     () => {
       const result = clusterResult([
         {
@@ -275,10 +275,14 @@ export default async function run() {
         0
       );
       assert.ok(
-        result.summary.finalProjectionSafety.contentCarrierDecisions.some(
-          (decision) => decision.outcome === "explicitly_excluded"
+        result.pieces.some((piece) =>
+          piece.actions.some((action) =>
+            /excluded from traveler notes|protected-class content excluded/i.test(
+              action.reason
+            )
+          )
         ),
-        "the protected segment receives a durable exclusion disposition"
+        "the single composer records the protected segment exclusion"
       );
     }
   );

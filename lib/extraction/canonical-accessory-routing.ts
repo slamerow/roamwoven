@@ -49,70 +49,6 @@ function splitEvidenceSegments(value: unknown) {
     .filter(Boolean);
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function factualActivityDetail(
-  segment: string,
-  activity: CanonicalEvidencePiece
-) {
-  const title = stringValue(activity.payload, "title");
-  let detail = segment.trim();
-
-  if (title) {
-    detail = detail
-      .replace(
-        new RegExp(`^(?:[^:]{1,30}:\\s*)?${escapeRegExp(title)}\\s*(?:[-—,:]|\\bis\\b)?\\s*`, "i"),
-        ""
-      )
-      .trim();
-  }
-
-  if (
-    !detail ||
-    normalizeText(detail) === normalizeText(title) ||
-    !/\b(?:architecture|built|cuisine|designed|dish(?:es)?|famous|founded|historic|history|known for|located|michelin|opened|popular dishes?|serves|speciali[sz]es|traditional|wine)\b/i.test(
-      detail
-    )
-  ) {
-    return null;
-  }
-
-  if (detail.length > 220) {
-    const shortened = detail.slice(0, 220).replace(/\s+\S*$/, "").trim();
-    detail = `${shortened}.`;
-  }
-
-  return detail;
-}
-
-function attachActivityDetail({
-  actions,
-  activity,
-  detail,
-  note,
-}: {
-  actions: RoutingActions;
-  activity: CanonicalEvidencePiece;
-  detail: string;
-  note: CanonicalEvidencePiece;
-}) {
-  const existing = stringValue(activity.payload, "description");
-
-  if (existing && normalizeText(existing).includes(normalizeText(detail))) {
-    return;
-  }
-
-  activity.payload.description = [existing, detail].filter(Boolean).join(" ");
-  actions.addAction(activity, {
-    absorbedTitles: [],
-    observationIds: [...note.observationIds],
-    reason: "moved one useful source detail from a duplicate city-note mention",
-    type: "attached",
-  });
-}
-
 function sourceStructuredDate(
   payload: Record<string, unknown>,
   tripYear: number | null
@@ -313,6 +249,17 @@ function routeDatedNoteEvidence({
   pieces: CanonicalEvidencePiece[];
   tripYear: number | null;
 }) {
+  // A source-authored City Note is already a coherent content block. Record
+  // identity elsewhere in the trip does not authorize this accessory pass to
+  // split, redistribute, or copy its prose into cards. The City Note composer
+  // later applies booking/access/privacy exclusions to the block once.
+  if (
+    stringValue(note.payload, "evidenceRole") === "city_note_candidate" ||
+    stringValue(note.payload, "sourceSectionType") === "city_reference"
+  ) {
+    return;
+  }
+
   const city = stringValue(note.payload, "city");
   const date = sourceStructuredDate(note.payload, tripYear);
 
@@ -419,20 +366,6 @@ function routeDatedNoteEvidence({
         reason: "explicit station or airport directions attached to inbound travel",
         type: "attached",
       });
-    }
-
-    if (activityMention && matchingNoteOwnedNotes.length === 0) {
-      if (matchingActivities.length === 1) {
-        const detail = factualActivityDetail(segment, matchingActivities[0]);
-        if (detail) {
-          attachActivityDetail({
-            actions,
-            activity: matchingActivities[0],
-            detail,
-            note,
-          });
-        }
-      }
     }
 
     // Recommendation prose IS note content (live-run 7.21.0, run7 PC-7:

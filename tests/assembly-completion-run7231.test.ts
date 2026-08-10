@@ -81,6 +81,14 @@ export default async function run() {
               description: "Charles Bridge walk.",
             },
           ],
+          places: [
+            {
+              arriveDate: "2019-01-13",
+              city: "Prague",
+              country: "Czech Republic",
+              leaveDate: "2019-01-18",
+            },
+          ],
         })),
       ],
       tripOverview: TRIP_OVERVIEW,

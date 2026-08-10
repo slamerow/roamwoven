@@ -766,6 +766,71 @@ export default async function run() {
     assert.deepEqual(draft.activities.map((item) => item.title), ["Vienna Notes & Tips"]);
   });
 
+  await test("city-note composition keeps a detail line with its parent and drops a day heading", () => {
+    const draft = cluster(emptyStage({
+      activities: [
+        {
+          category: "scenic_ride",
+          city: "Vienna",
+          description: "Ferris wheel (free-10)\nOpen until 11:45pm",
+          evidence: "Ferris wheel (free-10)\nOpen until 11:45pm",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "dated_itinerary",
+          title: "Ferris wheel",
+        },
+        {
+          category: "art_culture",
+          city: "Vienna",
+          description: "We Explore Vienna",
+          evidence: "We Explore Vienna",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "dated_itinerary",
+          title: "Vienna day heading",
+        },
+        {
+          category: "art_culture",
+          city: "Vienna",
+          description: "Museum of Illusions. Mozarthaus.",
+          evidence: "Museum of Illusions. Mozarthaus.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Vienna museum ideas",
+        },
+        {
+          category: "admin_logistics",
+          city: "Vienna",
+          description:
+            "From Vienna station take the metro to Central Square. From Central Square take the tram to the hostel buzzer 25.",
+          evidence:
+            "From Vienna station take the metro to Central Square. From Central Square take the tram to the hostel buzzer 25.",
+          evidenceRole: "city_note_candidate",
+          itemType: "note",
+          sourceSectionType: "city_reference",
+          title: "Hostel access directions",
+        },
+      ],
+      places: [{
+        arriveDate: "2019-01-18",
+        city: "Vienna",
+        leaveDate: "2019-01-21",
+      }],
+    }));
+    const note = draft.activities.find((item) => item.title === "Vienna Notes & Tips");
+
+    assert.ok(note);
+    assert.match(
+      note.description ?? "",
+      /Ferris wheel \(free-10\) — Open until 11:45pm/
+    );
+    assert.doesNotMatch(note.description ?? "", /• Open until/i);
+    assert.doesNotMatch(note.description ?? "", /We Explore Vienna/i);
+    assert.match(note.description ?? "", /Museum of Illusions\.\n• Mozarthaus\./);
+    assert.doesNotMatch(note.description ?? "", /Central Square|buzzer/i);
+  });
+
   await test("concrete activities and lodging details are removed from city notes", () => {
     const draft = cluster(emptyStage({
       activities: [
@@ -807,7 +872,7 @@ export default async function run() {
     );
   });
 
-  await test("a scheduled venue cannot also survive in a city-note list", () => {
+  await test("a coherent city-note list is not split to remove a scheduled mention", () => {
     const draft = cluster(emptyStage({
       activities: [
         {
@@ -839,16 +904,12 @@ export default async function run() {
     const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
 
     assert.ok(note);
-    assert.equal(
-      /Borkonyha/i.test(note.description ?? ""),
-      false,
-      String(note.description ?? "")
-    );
+    assert.match(note.description ?? "", /Borkonyha/);
     assert.match(note.description ?? "", /Rosenstein/);
     assert.match(note.description ?? "", /Menza/);
   });
 
-  await test("one useful duplicate note fact moves to the scheduled activity", () => {
+  await test("city-note prose is not copied into a scheduled activity", () => {
     const draft = cluster(emptyStage({
       activities: [
         {
@@ -881,9 +942,12 @@ export default async function run() {
     const activity = draft.activities.find((item) => item.title === "Borkonyha");
     const note = draft.activities.find((item) => item.title === "Budapest Notes & Tips");
 
-    assert.match(activity?.description ?? "", /traditional Hungarian restaurant/i);
+    assert.doesNotMatch(
+      activity?.description ?? "",
+      /traditional Hungarian restaurant/i
+    );
     assert.match(note?.description ?? "", /Ruin bars/i);
-    assert.equal(/Borkonyha/i.test(note?.description ?? ""), false);
+    assert.match(note?.description ?? "", /Borkonyha/i);
   });
 
   await test("accessory flight evidence cannot become a second activity card", () => {
@@ -977,6 +1041,7 @@ export default async function run() {
         date: "2019-01-17",
         description: "Pick up and return the rental car in Prague.",
         itemType: "activity",
+        startTime: "09:00",
         title: "Prague rental car pickup",
       }],
       transport: [{
@@ -987,6 +1052,11 @@ export default async function run() {
         departureDate: "2019-01-17",
         title: "Prague rental car pickup",
         type: "rental_car",
+      }],
+      places: [{
+        arriveDate: "2019-01-14",
+        city: "Prague",
+        leaveDate: "2019-01-18",
       }],
     }));
     const records = createStructuredTripRecordsFromDraft({
@@ -1117,6 +1187,7 @@ export default async function run() {
           date: "2019-01-19",
           description: "Free-12.90. Open til 6.",
           itemType: "activity",
+          startTime: "15:00",
           title: "Albertina",
         },
         {
@@ -1124,6 +1195,7 @@ export default async function run() {
           date: "2019-01-19",
           description: "Albertina museum (free-12.90). Open til 6.",
           itemType: "activity",
+          startTime: "15:00",
           title: "Albertina",
         },
       ],

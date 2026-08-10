@@ -6,7 +6,6 @@ import { clusterExtractedEvidence } from "@/lib/extraction/evidence-clustering";
 import {
   applySourceFactAssemblyAuthorityV1,
   isSourceFactAssemblyAuthorityEnabled,
-  recoverMissingSourceFactCityNoteMembersV1,
   recoverMissingSourceFactCompositePlanMembersV1,
   recoverMissingSourceFactRelationshipMembersV1,
 } from "@/lib/extraction/source-fact-assembly-authority";
@@ -158,7 +157,10 @@ export default function run() {
 
   const recommendation = buildFixture("recommendation_heavy");
     const recommendationTitles = visibleTitles(recommendation);
-    assert.ok(recommendationTitles.cityNotes.includes("Design Museum"));
+    assert.ok(
+      recommendationTitles.cityNotes.includes("Maybe visit the design museum"),
+      "the source-authored recommendation block survives without a synthetic member record"
+    );
     assert.ok(recommendationTitles.activities.includes("Design Tour"));
     assert.equal(
       recommendation.authority.metrics.unresolvedBehaviorCandidateCount,
@@ -177,7 +179,9 @@ export default function run() {
 
     const freeform = buildFixture("freeform");
     assert.ok(
-      visibleTitles(freeform).cityNotes.includes("Old Observatory"),
+      visibleTitles(freeform).cityNotes.includes(
+        "Maybe visit Old Observatory if weather is clear"
+      ),
       "a source hedge must remain a city note"
     );
     assert.equal(freeform.authority.groupingDecisions.length, 1);
@@ -352,102 +356,6 @@ export default function run() {
       ).activities[0];
       assert.equal(record.title, "Museum of Illusions");
       assert.equal(record._canonicalRoleDecision, "city_note");
-    }
-
-    {
-      const sourceUploadId = "source-city-note-recovery";
-      const text = [
-        "Wednesday, January 16th",
-        "Explore Example City",
-        "Popular spots for beer are Known Bar, Missing Cafe, and Third Tavern.",
-        "Customer: Private Person",
-        "Address: 123 Private Street",
-        "Food recommendations from a friend:",
-        "Old Town: Bistro One or Bistro Two",
-        "River District: Cafe Three",
-        "Walk to the station, turn left, and take the tram.",
-      ].join("\n");
-      const material = {
-        filename: "source-city-note-recovery.txt",
-        sourceProvenance: "sanitized_test",
-        sourceUploadId,
-        text,
-        type: "text",
-      };
-      const index = buildSourceDocumentIndexV1([material]);
-      const stages = [
-        {
-          label: "Wednesday, January 16th",
-          source: "model_chunk" as const,
-          sourceFilename: material.filename,
-          sourceProvenance: material.sourceProvenance,
-          sourceSpanIds: index.spans.map((span) => span.spanId),
-          sourceText: text,
-          sourceUploadId,
-          stage: {
-            activities: [
-              {
-                category: "food_dining",
-                city: "Example City",
-                date: null,
-                evidence: "Known Bar",
-                evidenceRole: "city_note_candidate",
-                itemType: "note",
-                title: "Known Bar",
-              },
-            ],
-          },
-        },
-      ];
-      const recovered = recoverMissingSourceFactCityNoteMembersV1({
-        index,
-        materials: [material],
-        stages,
-      });
-      const recoveredActivities = (
-        recovered.stages[0].stage as {
-          activities: Array<Record<string, unknown>>;
-        }
-      ).activities.filter(
-        (activity) => activity._sourceFactCityNoteRecovery === true
-      );
-      assert.deepEqual(
-        recoveredActivities.map((activity) => activity.title),
-        [
-          "Missing Cafe",
-          "Third Tavern",
-          "Bistro One",
-          "Bistro Two",
-          "Cafe Three",
-        ],
-        "explicit named recommendation lists recover only missing atomic City Note facts"
-      );
-      assert.equal(
-        recoveredActivities.every(
-          (activity) =>
-            activity.itemType === "note" &&
-            activity.evidenceRole === "city_note_candidate" &&
-            activity.city === "Example City"
-        ),
-        true
-      );
-      assert.doesNotMatch(
-        JSON.stringify(recoveredActivities),
-        /Private Person|Private Street|Walk to the station/,
-        "contact details, addresses, and arbitrary directions cannot mint note facts"
-      );
-      assert.equal(recovered.recoveredCandidateCount, 5);
-      assert.equal(recovered.recoveredCollectionCount, 3);
-      const repeated = recoverMissingSourceFactCityNoteMembersV1({
-        index,
-        materials: [material],
-        stages: recovered.stages,
-      });
-      assert.equal(
-        repeated.recoveredCandidateCount,
-        0,
-        "deterministic City Note recovery is idempotent"
-      );
     }
 
     {

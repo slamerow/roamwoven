@@ -311,7 +311,6 @@ function collisionKeeperRank(piece: CanonicalEvidencePiece) {
   return (
     (piece.payload._canonicalGroupRole === "parent" ? 8 : 0) +
     (piece.outputEligible ? 4 : 0) +
-    (piece.payload._canonicalNoteEntry === true ? 0 : 2) +
     (piece.role === "atomic_candidate" ? 1 : 0)
   );
 }

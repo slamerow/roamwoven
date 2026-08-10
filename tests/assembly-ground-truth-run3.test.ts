@@ -332,7 +332,7 @@ export default async function run() {
     );
   });
 
-  await test("ground truth run3 (RW-CLS-001): the Jan 20 planned St. Stephen's visit beats the Jan 19 idea-list note copy", () => {
+  await test("Loop 3: the Jan 20 St. Stephen's visit stays planned without cutting the source-authored idea list", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
@@ -383,8 +383,11 @@ export default async function run() {
     assert.equal(cathedralCards[0]?.date, "2019-01-20");
     const notes = draft.activities.filter((item) => item.itemType === "note");
     const noteText = notes.map((note) => `${note.title} ${note.description ?? ""}`).join(" ");
-    assert.doesNotMatch(noteText, /stephen/i, "the idea-list copy is removed");
-    assert.match(noteText, /Leopold Museum/i, "other ideas keep their note home");
+    assert.match(
+      noteText,
+      /Museum of Illusions, Mozarthaus, Ring Tram Tour, the Prater, Leopold Museum, St\. Stephen's Cathedral\./i,
+      "the coherent source list keeps its punctuation and remains intact"
+    );
   });
 
   await test("ground truth run3 (RW-AUD-001): a Costs-section route line mints no transport anchor", () => {

@@ -364,17 +364,11 @@ const relationshipRecovery =
     index: sourceDocumentIndex,
     stages: preGeocodeStages,
   });
-const cityNoteRecovery =
-  sourceAuthorityModule.recoverMissingSourceFactCityNoteMembersV1({
-    index: sourceDocumentIndex,
-    materials,
-    stages: relationshipRecovery.stages,
-  });
 
 if (donorGeocodePath && writeSourceGeocodePath) {
   const donorSeed = JSON.parse(fs.readFileSync(donorGeocodePath, "utf8"));
   const candidates = geocode.selectGeocodeCandidates(
-    cityNoteRecovery.stages
+    relationshipRecovery.stages
   );
   const originalRowsByCandidateId = new Map(
     (geocodeSeed.usage?.candidates ?? []).map((row) => [row.candidateId, row])
@@ -482,7 +476,7 @@ if (sourceGeocodePath) {
         maxLookups: 150,
         timeoutMs: 1,
       },
-      stages: cityNoteRecovery.stages,
+      stages: relationshipRecovery.stages,
     })
   );
   assert.equal(
@@ -499,7 +493,7 @@ if (sourceGeocodePath) {
 const compositePlanRecovery =
   sourceAuthorityModule.recoverMissingSourceFactCompositePlanMembersV1({
     index: sourceDocumentIndex,
-    stages: cityNoteRecovery.stages,
+    stages: relationshipRecovery.stages,
   });
 let capturedSourceResolution = null;
 const originalApplyCanonicalEvidenceResolution =

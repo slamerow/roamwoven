@@ -735,7 +735,7 @@ export default async function run() {
     assert.equal(decision.disposition?.outcome, "declared_detail");
   });
 
-  await test("city-note lists preserve hidden entry identity without overlapping activities", () => {
+  await test("Loop 3: a city-note list stays one source block without synthetic member records", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [{
@@ -783,27 +783,18 @@ export default async function run() {
       (piece) => piece.payload._canonicalNoteEntry === true
     );
 
-    assert.equal(entryPieces.length, 3);
-    assert.equal(entryPieces.every((piece) => !piece.outputEligible), true);
+    assert.equal(entryPieces.length, 0);
     assert.equal(
-      entryPieces.some(
-        (piece) =>
-          /Borkonyha/i.test(String(piece.payload.title)) &&
-          !piece.outputEligible
-      ),
-      true
+      note?.description,
+      "Food: • Restaurants: Borkonyha Winekitchen, Rosenstein, Menza"
     );
-    assert.equal(/Borkonyha/i.test(String(note?.description)), false);
-    // 2026-07-17 evening: city notes render Eli-approved universal sections;
-    // the source's "Restaurants" list lands in the Food section.
-    assert.equal(note?.description, "Food: Rosenstein, Menza");
     assert.equal(
       result.observations.some(
         (observation) =>
           observation.kind === "context" &&
           Array.isArray(observation.payload._canonicalNoteEntries)
       ),
-      true
+      false
     );
   });
 
@@ -1290,7 +1281,7 @@ export default async function run() {
       sourceTransportAnchors: [],
       stages: [
         stage(
-          "vienna-grouping",
+          "Saturday, January 19th Vienna grouping",
           emptyStage({
             activities: [
               {
@@ -1317,6 +1308,7 @@ export default async function run() {
                 description: "Timed show inside the palace.",
                 _resolverCandidateId: "stage-1-item-3",
                 itemType: "activity",
+                startTime: "15:00",
                 title: "Apple Strudel Show",
               },
               {
@@ -1328,6 +1320,11 @@ export default async function run() {
                 title: "Hundertwasser House",
               },
             ],
+            places: [{
+              arriveDate: "2019-01-18",
+              city: "Vienna",
+              leaveDate: "2019-01-21",
+            }],
           })
         ),
       ],

@@ -221,21 +221,21 @@ export default async function run() {
       "the palace is the visit's parent"
     );
 
-    // Invariant A: the reference note is a MIXED list. Its Schönbrunn plan
-    // members are represented by surviving cards, but Ferris wheel and The
-    // Prater were explicitly folded into the note as their single home. The
-    // accessory router may remove the represented entries; it may not delete
-    // the whole segment and strand the note-owned entries with it.
+    // Loop 3: the reference note is one MIXED, comma-authored source block.
+    // It keeps the source punctuation intact even though some named members
+    // also have planned cards. Ferris wheel and The Prater still keep their
+    // only traveler home here; assembly does not manufacture member facts by
+    // cutting the source block apart.
     const viennaNote = draft.activities.find(
       (item) => item.itemType === "note" && /vienna/i.test(String(item.title))
     );
     assert.ok(viennaNote, "the Vienna City Note must survive the mixed list");
     assert.match(String(viennaNote.description ?? ""), /ferris wheel/i);
     assert.match(String(viennaNote.description ?? ""), /the prater/i);
-    assert.doesNotMatch(
+    assert.match(
       String(viennaNote.description ?? ""),
       /schönbrunn palace|gloriette|orangeriegarten|palm house/i,
-      "already-represented plan members must not duplicate into City Notes"
+      "the coherent source-authored list remains intact"
     );
     assert.equal(
       result.summary.terminalDisposalCountsByCode
