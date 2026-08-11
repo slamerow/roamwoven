@@ -69,6 +69,22 @@ function emptyStage(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function flight(overrides: Record<string, unknown>) {
+  return {
+    arrival: "BBB",
+    arrivalTime: "12:00",
+    confirmation: null,
+    date: "2030-01-01",
+    departure: "AAA",
+    departureTime: "09:00",
+    description: "Example Air EX 100",
+    provider: "Example Air",
+    title: "AAA to BBB",
+    type: "flight",
+    ...overrides,
+  };
+}
+
 function anchor(overrides: Partial<SourceTransportAnchor>): SourceTransportAnchor {
   return {
     anchorId: "anchor-1",
@@ -408,6 +424,98 @@ export default async function run() {
     });
 
     assert.equal((result.draft as { transport: unknown[] }).transport.length, 2);
+  });
+
+  await test("transport identity folds departure-day, wrong-date, and reversed copies", () => {
+    const clustered = (...transport: Array<Record<string, unknown>>) =>
+      clusterExtractedEvidence({
+        sourceTransportAnchors: [],
+        stages: transport.map((item, index) =>
+          stage(`source ${index + 1}`, emptyStage({ transport: [item] }))
+        ),
+        tripOverview: {},
+      }).draft as { transport: Array<Record<string, unknown>> };
+
+    const overnight = clustered(
+      flight({
+        arrival: "KEF", arrivalTime: "06:30", date: "2030-10-06",
+        departure: "IAD", departureTime: "20:30",
+        description: "Icelandair FI 644", provider: "Icelandair",
+        title: "Flight IAD to KEF",
+      }),
+      flight({
+        arrival: "KEF", arrivalTime: "06:25", date: "2030-10-05",
+        departure: "IAD", departureTime: "20:30",
+        description: "Icelandair FI 644, Economy Flex", provider: "Icelandair",
+        title: "Flight 1 IAD to KEF",
+      })
+    );
+    assert.equal(overnight.transport.length, 1);
+    assert.equal(overnight.transport[0]?.date, "2030-10-05");
+
+    const sparse = clustered(
+      flight({
+        arrival: "HNL", arrivalTime: "15:45", date: "2030-07-08",
+        departure: "OGG", departureTime: "15:04",
+        description: "AS 1145", provider: "Hawaiian Airlines",
+      }),
+      flight({
+        arrival: "HNL", arrivalTime: null, date: "2030-07-02",
+        departure: "OGG", departureTime: null,
+        description: "AS 1145", title: "AS 1145",
+      })
+    );
+    assert.equal(sparse.transport.length, 1);
+    assert.equal(sparse.transport[0]?.date, "2030-07-08");
+
+    const reversed = clustered(
+      flight({
+        arrival: "JFK", arrivalTime: "18:45", date: "2030-01-25",
+        departure: "FCO", departureTime: "14:45",
+        description: "Delta Flight 1043 from FCO to JFK", provider: "Delta",
+        title: "Delta Flight 1043",
+      }),
+      flight({
+        arrival: "FCO", arrivalTime: null, date: "2030-01-25",
+        departure: "JFK", departureTime: null,
+        description: "Delta Flight 1043", provider: null,
+        title: "Flight 1043",
+      })
+    );
+    assert.equal(reversed.transport.length, 1);
+    assert.equal(reversed.transport[0]?.departure, "FCO");
+    assert.equal(reversed.transport[0]?.arrival, "JFK");
+
+    assert.equal(
+      clustered(
+        flight({ date: "2030-10-05" }),
+        flight({ date: "2030-10-12" })
+      ).transport.length,
+      2,
+      "complete repeated flights on separate dates remain separate"
+    );
+  });
+
+  await test("a unique arrival fragment attaches after local transfers leave Travel", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [stage("arrival", emptyStage({ transport: [
+        flight({
+          arrival: "Tokyo Haneda", arrivalTime: "14:15",
+          date: "2030-10-07", departure: "BWI", departureTime: "06:30",
+          description: "Delta 121", provider: "Delta", title: "Flight to Japan",
+        }),
+        flight({
+          arrival: "Tokyo Haneda", arrivalTime: "14:15",
+          date: "2030-10-08", departure: null, departureTime: null,
+          description: "Arrive Tokyo Haneda", provider: null,
+          title: "Arrive Tokyo Haneda",
+        }),
+      ] }))],
+      tripOverview: {},
+    });
+
+    assert.equal((result.draft as { transport: unknown[] }).transport.length, 1);
   });
 
   await test("written and ISO transport dates cluster before assembly", () => {

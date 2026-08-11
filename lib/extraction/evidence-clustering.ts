@@ -1307,19 +1307,59 @@ function activityMatchReason(
     : null;
 }
 
-function transportNumber(record: Record<string, unknown>) {
-  if (typeof record.number === "string") {
-    const explicit = record.number.replace(/[^a-z0-9]/gi, "").toLowerCase();
+const TRANSPORT_DATE_IDENTITY_REASON =
+  "same transport occurrence stated on departure and arrival dates";
 
-    if (/^(?=.*\d)[a-z0-9]{2,10}$/.test(explicit)) {
-      return explicit;
+function transportNumber(record: Record<string, unknown>) {
+  const explicit =
+    typeof record.number === "string"
+      ? record.number.replace(/[^a-z0-9]/gi, "").toLowerCase()
+      : "";
+  if (/^(?=.*\d)[a-z0-9]{2,10}$/.test(explicit)) {
+    return explicit.replace(/\D/g, "");
+  }
+
+  const providerTokens = new Set(
+    normalizeText(typeof record.provider === "string" ? record.provider : "")
+      .split(/\s+/)
+      .filter((token) => token.length >= 2)
+  );
+  const text = [record.title, record.description]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  const matcher = /\b([a-z]+)\s*[- ]?(\d{2,5})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(text))) {
+    const rawPrefix = match[1];
+    const prefix = rawPrefix.toLowerCase();
+    if (
+      prefix === "flight" ||
+      providerTokens.has(prefix) ||
+      (rawPrefix === rawPrefix.toUpperCase() && rawPrefix.length <= 3)
+    ) {
+      return match[2];
     }
   }
 
-  const match = /\b([a-z]{1,3})\s*[- ]?(\d{2,5})\b/i.exec(
-    typeof record.title === "string" ? record.title : ""
-  );
-  return match ? `${match[1]}${match[2]}`.toLowerCase() : "";
+  return "";
+}
+
+function matchingTransportNumber(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  const leftNumber = transportNumber(left);
+  const rightNumber = transportNumber(right);
+  return Boolean(leftNumber && leftNumber === rightNumber);
+}
+
+function conflictingTransportNumber(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  const leftNumber = transportNumber(left);
+  const rightNumber = transportNumber(right);
+  return Boolean(leftNumber && rightNumber && leftNumber !== rightNumber);
 }
 
 function routeEndpoint(record: Record<string, unknown>, side: "arrival" | "departure") {
@@ -1349,16 +1389,68 @@ function endpointsConflict(
   );
 }
 
+function transportTimeCount(record: Record<string, unknown>) {
+  return [record.departureTime, record.arrivalTime].filter(
+    (value) => Boolean(normalizedClockTime(value))
+  ).length;
+}
+
+function transportScheduleSpecificity(record: Record<string, unknown>) {
+  return (
+    transportTimeCount(record) +
+    [routeEndpoint(record, "departure"), routeEndpoint(record, "arrival")].filter(
+      Boolean
+    ).length
+  );
+}
+
+function transportRecordQuality(record: Record<string, unknown>) {
+  const namedTitleTokens = identityTokens(record.title).filter(
+    (token) => !/^\d+$/.test(token)
+  ).length;
+  const descriptionLength =
+    typeof record.description === "string" ? record.description.length : 0;
+  return (
+    transportScheduleSpecificity(record) * 100 +
+    namedTitleTokens * 10 +
+    Math.min(descriptionLength, 99) / 100
+  );
+}
+
+function transportTimesConflict(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  return Boolean(
+    (normalizedClockTime(left.departureTime) &&
+      normalizedClockTime(right.departureTime) &&
+      normalizedClockTime(left.departureTime) !==
+        normalizedClockTime(right.departureTime)) ||
+      (normalizedClockTime(left.arrivalTime) &&
+        normalizedClockTime(right.arrivalTime) &&
+        normalizedClockTime(left.arrivalTime) !==
+          normalizedClockTime(right.arrivalTime))
+  );
+}
+
+function isoDateDistance(left: unknown, right: unknown) {
+  if (typeof left !== "string" || typeof right !== "string") return null;
+  const leftTime = Date.parse(`${left}T00:00:00.000Z`);
+  const rightTime = Date.parse(`${right}T00:00:00.000Z`);
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return null;
+  return Math.abs(leftTime - rightTime) / 86_400_000;
+}
+
 function transportMatchReason(
   left: Record<string, unknown>,
   right: Record<string, unknown>
 ) {
-  if (!sameOrMissingDate(left, right) || !compatibleField(left, right, "type")) {
+  if (!compatibleField(left, right, "type")) {
     return null;
   }
 
-  const leftNumber = transportNumber(left);
-  const rightNumber = transportNumber(right);
+  const datesMatch = sameOrMissingDate(left, right);
+  const sameNumber = matchingTransportNumber(left, right);
   const leftConfirmation = confirmationFrom(left);
   const rightConfirmation = confirmationFrom(right);
   const leftHasRoute = Boolean(
@@ -1386,12 +1478,56 @@ function transportMatchReason(
   const leftIdentityTitle = identityTokens(left.title).join(" ");
   const rightIdentityTitle = identityTokens(right.title).join(" ");
 
-  if (leftNumber && rightNumber && leftNumber !== rightNumber) {
+  if (conflictingTransportNumber(left, right)) {
     return null;
   }
 
-  if (leftNumber && leftNumber === rightNumber) {
-    return "same transport segment number";
+  if (!datesMatch) {
+    const adjacentDates = isoDateDistance(left.date, right.date) === 1;
+    const sameDepartureTime = Boolean(
+      normalizedClockTime(left.departureTime) &&
+        normalizedClockTime(left.departureTime) ===
+          normalizedClockTime(right.departureTime)
+    );
+    const sameArrivalTime = Boolean(
+      normalizedClockTime(left.arrivalTime) &&
+        normalizedClockTime(left.arrivalTime) ===
+          normalizedClockTime(right.arrivalTime)
+    );
+
+    const oneSideHasNoNumber = !transportNumber(left) || !transportNumber(right);
+    const sameIdentityTitle = Boolean(
+      leftIdentityTitle && leftIdentityTitle === rightIdentityTitle
+    );
+    const oneScheduleIsPartial =
+      Math.min(transportTimeCount(left), transportTimeCount(right)) < 2;
+
+    return adjacentDates &&
+      (sameNumber ||
+        (oneSideHasNoNumber && sameIdentityTitle && oneScheduleIsPartial)) &&
+      departureMatches &&
+      arrivalMatches &&
+      (sameDepartureTime || sameArrivalTime)
+      ? TRANSPORT_DATE_IDENTITY_REASON
+      : null;
+  }
+
+  if (sameNumber) {
+    const noTimedSchedule = Math.min(
+      transportTimeCount(left),
+      transportTimeCount(right)
+    ) === 0;
+    const bothRouteLess = !leftHasRoute && !rightHasRoute;
+    const sharedEndpoint = departureMatches || arrivalMatches;
+    if (
+      (!endpointsConflict(left, right) || noTimedSchedule) &&
+      (!transportTimesConflict(left, right) ||
+        sharedEndpoint ||
+        bothRouteLess ||
+        noTimedSchedule)
+    ) {
+      return "same transport segment number";
+    }
   }
 
   if (departureMatches && arrivalMatches) {
@@ -1426,7 +1562,7 @@ function transportMatchReason(
   if (
     leftConfirmation &&
     leftConfirmation === rightConfirmation &&
-    (leftNumber || rightNumber) &&
+    (transportNumber(left) || transportNumber(right)) &&
     (locationQuality(left.departure ?? left.departureLocation) < 2 ||
       locationQuality(right.departure ?? right.departureLocation) < 2 ||
       locationQuality(left.arrival ?? left.arrivalLocation) < 2 ||
@@ -1914,7 +2050,9 @@ function mergeObservationIntoPiece(
     } else if (field === "title") {
       if (
         (evidenceAuthority(incomingRank) > evidenceAuthority(existingRank) ||
-          (sameAuthority && titleQuality(value) > titleQuality(existing))) &&
+          (sameAuthority &&
+            reason !== TRANSPORT_DATE_IDENTITY_REASON &&
+            titleQuality(value) > titleQuality(existing))) &&
         (observation.source !== "source_anchor" || isGenericTitle(existing))
       ) {
         next[field] = value;
@@ -1922,6 +2060,18 @@ function mergeObservationIntoPiece(
       }
     } else if (field === "sourceFilename") {
       next[field] = existing ?? value;
+    } else if (
+      ["arrival", "arrivalLocation", "departure", "departureLocation"].includes(
+        field
+      ) &&
+      valuesConflict(existing, value) &&
+      piece.kind === "transport" &&
+      reason === "same transport segment number" &&
+      endpointsConflict(piece.payload, observation.payload) &&
+      transportScheduleSpecificity(observation.payload) <
+        transportScheduleSpecificity(next)
+    ) {
+      next[field] = existing;
     } else if (
       ["arrival", "arrivalLocation", "departure", "departureLocation"].includes(
         field
@@ -1990,6 +2140,26 @@ function mergeObservationIntoPiece(
       });
     } else if (
       field === "date" &&
+      piece.kind === "transport" &&
+      reason === TRANSPORT_DATE_IDENTITY_REASON &&
+      valuesConflict(existing, value)
+    ) {
+      const incomingSpecificity = transportScheduleSpecificity(
+        observation.payload
+      );
+      const existingSpecificity = transportScheduleSpecificity(next);
+      const incomingDate = typeof value === "string" ? value : "";
+      const existingDate = typeof existing === "string" ? existing : "";
+      const selectIncoming =
+        incomingSpecificity > existingSpecificity ||
+        (incomingSpecificity === existingSpecificity &&
+          Boolean(incomingDate && existingDate && incomingDate < existingDate));
+      if (selectIncoming) {
+        next[field] = value;
+        piece.fieldWinnerRanks[field] = incomingRank;
+      }
+    } else if (
+      field === "date" &&
       valuesConflict(existing, value) &&
       (incomingRank > existingRank ||
         (sameAuthority && evidenceSpecificity(observation.payload) > evidenceSpecificity(next)))
@@ -2005,6 +2175,15 @@ function mergeObservationIntoPiece(
         requiresReview: sameAuthority,
         value,
       });
+    } else if (
+      field === "provider" &&
+      observation.source === "source_anchor" &&
+      typeof existing === "string" &&
+      typeof value === "string" &&
+      existing.trim().length > value.trim().length &&
+      /^[a-z0-9]{2,3}$/i.test(value.trim())
+    ) {
+      next[field] = existing;
     } else if (
       valuesConflict(existing, value) &&
       ![
@@ -3192,31 +3371,99 @@ function mergeReclassifiedCanonicalPieces(pieces: CanonicalEvidencePiece[]) {
         candidate !== source &&
         candidate.outputEligible &&
         candidate.kind === source.kind &&
-        Boolean(matchReason(candidate.kind, candidate.payload, source.payload))
+        Boolean(
+          matchReason(candidate.kind, candidate.payload, source.payload) ??
+            (candidate.kind === "transport"
+              ? sparseCrossDateTransportMatchReason(
+                  candidate.payload,
+                  source.payload
+                )
+              : null)
+        )
     );
     if (!target) continue;
 
-    for (const [field, value] of Object.entries(source.payload)) {
+    let winner = target;
+    let absorbed = source;
+    if (
+      source.kind === "transport" &&
+      transportRecordQuality(source.payload) >
+        transportRecordQuality(target.payload)
+    ) {
+      winner = source;
+      absorbed = target;
+    }
+
+    for (const [field, value] of Object.entries(absorbed.payload)) {
       if (value === null || value === undefined || value === "") continue;
       if (field === "description") {
-        target.payload.description = uniqueDescription(
-          target.payload.description,
+        winner.payload.description = uniqueDescription(
+          winner.payload.description,
           value
         );
       } else if (
-        target.payload[field] === null ||
-        target.payload[field] === undefined ||
-        target.payload[field] === ""
+        winner.payload[field] === null ||
+        winner.payload[field] === undefined ||
+        winner.payload[field] === ""
       ) {
-        target.payload[field] = value;
+        winner.payload[field] = value;
       }
     }
     mergeCanonicalPieceInto({
       reason: "reclassified evidence merged into its canonical entity",
-      source,
-      target,
+      source: absorbed,
+      target: winner,
     });
   }
+}
+
+function sparseCrossDateTransportMatchReason(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+) {
+  const namedTitleCount = (record: Record<string, unknown>) =>
+    identityTokens(record.title).filter((token) => !/^\d+$/.test(token)).length;
+  if (
+    sameOrMissingDate(left, right) ||
+    !compatibleField(left, right, "type") ||
+    !matchingTransportNumber(left, right) ||
+    conflictingTransportNumber(left, right) ||
+    Math.min(namedTitleCount(left), namedTitleCount(right)) >= 2
+  ) {
+    return null;
+  }
+
+  const departureMatches = Boolean(
+    routeEndpoint(left, "departure") &&
+      locationsMatch(
+        left.departure ?? left.departureLocation,
+        right.departure ?? right.departureLocation
+      )
+  );
+  const arrivalMatches = Boolean(
+    routeEndpoint(left, "arrival") &&
+      locationsMatch(
+        left.arrival ?? left.arrivalLocation,
+        right.arrival ?? right.arrivalLocation
+      )
+  );
+  const sameConfirmation = Boolean(
+    confirmationFrom(left) &&
+      confirmationFrom(left) === confirmationFrom(right)
+  );
+
+  return departureMatches || arrivalMatches || sameConfirmation
+    ? "same numbered transport occurrence with one sparse source date"
+    : null;
+}
+
+function sharedLocationCode(left: unknown, right: unknown) {
+  const codes = (value: unknown) =>
+    new Set(
+      (typeof value === "string" ? value.toUpperCase().match(/\b[A-Z]{3}\b/g) : []) ?? []
+    );
+  const leftCodes = codes(left);
+  return [...codes(right)].some((code) => leftCodes.has(code));
 }
 
 function attachArrivalOnlyTransportPieces(pieces: CanonicalEvidencePiece[]) {
@@ -3234,7 +3481,7 @@ function attachArrivalOnlyTransportPieces(pieces: CanonicalEvidencePiece[]) {
         .filter(Boolean)
         .join(" ")
     );
-    if (!/\b(arriv|arrival|land|landing|reach)\b/.test(text)) continue;
+    if (!/\b(arrive|arrives|arrival|land|landing|reach)\b/.test(text)) continue;
 
     const arrivalDate = stringValue(arrivalOnly.payload, "date");
     const arrivalTime = normalizedClockTime(
@@ -3262,10 +3509,20 @@ function attachArrivalOnlyTransportPieces(pieces: CanonicalEvidencePiece[]) {
       const timeFits = Boolean(
         arrivalTime && candidateArrivalTime && arrivalTime === candidateArrivalTime
       );
+      const arrivalOnlyDestination =
+        arrivalOnly.payload.arrival ?? arrivalOnly.payload.arrivalLocation;
+      const candidateDestination =
+        candidate.payload.arrival ?? candidate.payload.arrivalLocation;
       const destination = normalizeText(
-        routeEndpoint(candidate.payload, "arrival")
+        typeof candidateDestination === "string" ? candidateDestination : ""
       );
-      const destinationFits = Boolean(destination && text.includes(destination));
+      const destinationFits = Boolean(
+        (normalizedLocation(arrivalOnlyDestination) &&
+          normalizedLocation(arrivalOnlyDestination) ===
+            normalizedLocation(candidateDestination)) ||
+          sharedLocationCode(arrivalOnlyDestination, candidateDestination) ||
+          (!arrivalOnlyDestination && destination && text.includes(destination))
+      );
 
       return timeFits || destinationFits;
     });
@@ -3907,8 +4164,9 @@ function suppressRepresentedTravelAndStayActivities(
     );
 
     if (
-      isTransportShapedActivityPayload(activity.payload) ||
-      sharesTransportConfirmation
+      (isTransportShapedActivityPayload(activity.payload) ||
+        sharesTransportConfirmation) &&
+      !isRentalCarPickupCandidate(activity.payload)
     ) {
       const movementKind = /\b(?:flight|fly)\b/.test(text)
         ? "flight"
@@ -14713,14 +14971,14 @@ export function clusterExtractedEvidence({
   runPieceWriter("pre_classification_mutation", "suppressUnsupportedModelInventions", ["pieces[].outputEligible", "pieces[].disposition"], () =>
     suppressUnsupportedModelInventions(pieces, observations)
   );
-  runPieceWriter("pre_classification_mutation", "attachArrivalOnlyTransportPieces", ["pieces[].payload", "pieces[].actions"], () =>
-    attachArrivalOnlyTransportPieces(pieces)
-  );
   runPieceWriter("pre_classification_mutation", "routeCanonicalTravelBoundaries", ["pieces[].kind", "pieces[].payload", "pieces[].actions"], () =>
     routeCanonicalTravelBoundaries(pieces)
   );
   runPieceWriter("pre_classification_mutation", "mergeReclassifiedCanonicalPieces:travel", ["pieces[].outputEligible", "pieces[].observationIds", "pieces[].actions"], () =>
     mergeReclassifiedCanonicalPieces(pieces)
+  );
+  runPieceWriter("pre_classification_mutation", "attachArrivalOnlyTransportPieces", ["pieces[].payload", "pieces[].actions"], () =>
+    attachArrivalOnlyTransportPieces(pieces)
   );
   runPieceWriter("pre_classification_mutation", "attachCanonicalAccessoryDetails", ["pieces[].kind", "pieces[].role", "pieces[].payload", "pieces[].outputEligible", "pieces[].disposition", "pieces[].actions"], () =>
     attachCanonicalAccessoryDetails(pieces)
