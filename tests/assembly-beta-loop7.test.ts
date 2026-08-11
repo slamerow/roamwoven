@@ -4,6 +4,8 @@ import {
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
 import { decideActivityCandidacy } from "@/lib/extraction/activity-classifier";
+import { applyReviewDecision } from "@/lib/generated-trip-decisions";
+import { createStructuredTripRecordsFromDraft } from "@/tests/helpers/canonical-structured-records";
 
 function stage(
   label: string,
@@ -260,6 +262,108 @@ export default async function run() {
         .map((option) => option.label)
         .sort(),
       ["Azure Baths", "Cedar Baths"]
+    );
+  });
+
+  await test("Loop 7 review: bath choices collapse aliases and reject the city name", () => {
+    const sourceText = [
+      "Monday, January 21st // Budapest Bathing",
+      "Baths",
+      "Gellert Baths",
+      "visit- Gellert Bath House",
+      "Budapest baths",
+      "Szechenyi Baths",
+    ].join("\n");
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("bathing-day", sourceText, [
+          activity("Baths", {
+            city: "Budapest",
+            description: "Baths.",
+            evidence: "Baths",
+            sourceHeadingPath: [
+              "Monday, January 21st",
+              "Budapest Bathing",
+            ],
+            sourceSectionLabel: "Budapest Bathing",
+          }),
+          activity("Gellert Baths", {
+            city: "Budapest",
+            description: "Gellert Baths.",
+            evidence: "Gellert Baths",
+          }),
+          activity("visit- Gellert Bath House", {
+            city: null,
+            description: "visit- Gellert Bath House.",
+            evidence: "visit- Gellert Bath House",
+          }),
+          activity("Budapest baths", {
+            city: null,
+            description: "Budapest baths.",
+            evidence: "Budapest baths",
+          }),
+          activity("Szechenyi Baths", {
+            city: "Budapest",
+            description: "Szechenyi Baths.",
+            evidence: "Szechenyi Baths",
+          }),
+        ]),
+      ],
+      tripOverview: { dateRange: "January 21-24, 2019" },
+    });
+    const draft = draftFor(result);
+    const bathQuestions = draft.missingDetails.filter(
+      (detail) => detail._canonicalQuestionKind === "day_label_slot"
+    );
+
+    assert.equal(bathQuestions.length, 1);
+    assert.deepEqual(
+      (bathQuestions[0].answerOptions as Array<Record<string, unknown>>).map(
+        (option) => option.label
+      ),
+      ["Gellert Baths", "Szechenyi Baths"]
+    );
+    assert.doesNotMatch(String(bathQuestions[0].prompt), /keep as ideas/i);
+    const bathCard = draft.activities.find((item) =>
+      /Gellert Baths/i.test(String(item.description)) &&
+      /Szechenyi Baths/i.test(String(item.description))
+    );
+    assert.ok(bathCard);
+    assert.match(String(bathCard.description), /Gellert Baths/);
+    assert.match(String(bathCard.description), /Szechenyi Baths/);
+    assert.doesNotMatch(
+      String(bathCard.description),
+      /visit-|Budapest baths|Bath House/i,
+      "rejected aliases and the city label never reach the traveler card"
+    );
+
+    const records = createStructuredTripRecordsFromDraft({
+      draft: result.draft,
+      fallbackTripName: "Budapest",
+      tripId: "bath-choice-alias-regression",
+    });
+    const question = records.reviewQuestions.find((item) =>
+      /which one\?/i.test(item.prompt)
+    );
+    assert.ok(question, "the material choice reaches the maker-facing records");
+    const answered = applyReviewDecision(records, {
+      action: "answer_question",
+      answerValue: "Szechenyi Baths",
+      createdAt: "2030-04-01T00:00:00.000Z",
+      id: "choose-szechenyi",
+      subjectId: question.id,
+      subjectType: "review_question",
+      tripId: "bath-choice-alias-regression",
+    });
+    assert.equal(
+      answered.reviewQuestions.find((item) => item.id === question.id)?.status,
+      "answered"
+    );
+    assert.match(
+      answered.items.find((item) => item.id === question.subjectId)
+        ?.description ?? "",
+      /Szechenyi Baths/
     );
   });
 

@@ -11919,7 +11919,10 @@ function piecePayloadAppendOption(
   payload.description = existing ? `${existing} ${optionLine}` : optionLine;
 }
 
-function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
+function bathVenueOptionLabels(
+  piece: CanonicalEvidencePiece,
+  tripCityNames: Set<string>
+) {
   const title = stringValue(piece.payload, "title") ?? "";
   const sourceText = [
     title,
@@ -11933,10 +11936,17 @@ function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
   const push = (raw: string) => {
     const cleaned = raw
       .replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "")
+      .replace(
+        /^(?:(?:go(?:ing)?|went)(?:\s+to)?|visit(?:ed|ing)?|take|try)\s*[-–—:]?\s+/iu,
+        ""
+      )
       .replace(/\s+/g, " ")
       .trim();
-    const comparable = normalizedComparable(cleaned);
-    const distinctiveVenueTokens = distinctiveTitleTokens(cleaned).filter(
+    const venueStem = cleaned
+      .replace(/\s+(?:thermal\s+)?baths?(?:\s+house)?$/iu, "")
+      .trim();
+    const comparable = normalizedComparable(venueStem);
+    const distinctiveVenueTokens = distinctiveTitleTokens(venueStem).filter(
       (token) =>
         !/^(?:bath|baths|house|thermal|spa|sample|city|public|local|go|to|visit|visited|went)$/.test(
           token
@@ -11945,6 +11955,7 @@ function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
     if (
       !comparable ||
       comparable === city ||
+      tripCityNames.has(comparable) ||
       /^(?:bath|baths|bath house|bath houses|thermal|thermal bath|thermal baths)$/.test(
         comparable
       ) ||
@@ -11952,7 +11963,7 @@ function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
     ) {
       return;
     }
-    labels.push(/\bbaths?(?:\s+house)?$/i.test(cleaned) ? cleaned : `${cleaned} Baths`);
+    labels.push(`${venueStem} Baths`);
   };
 
   for (const match of sourceText.matchAll(
@@ -11984,12 +11995,35 @@ function bathVenueOptionLabels(piece: CanonicalEvidencePiece) {
     .map(([, label]) => label);
 }
 
+function isGenericBathSlotLabel(value: string, tripCityNames: Set<string>) {
+  const comparable = normalizedComparable(value);
+  if (
+    /^(?:bath|baths|bathing|spa day|thermal|thermal bath|thermal baths)$/.test(
+      comparable
+    )
+  ) {
+    return true;
+  }
+  const venueStem = comparable
+    .replace(/\s+(?:thermal\s+)?baths?(?:\s+house)?$/, "")
+    .trim();
+  return Boolean(venueStem) && tripCityNames.has(venueStem);
+}
+
 function createDayLabelSlotQuestions(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
   missingDetails: unknown[]
 ) {
   const timedCounts = timedActivityCountsByDate(pieces);
+  const tripCityNames = new Set(
+    [...pieces, ...observations]
+      .flatMap((record) => {
+        const city = stringValue(record.payload, "city");
+        return city ? [normalizedComparable(city)] : [];
+      })
+      .filter(Boolean)
+  );
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const observationById = new Map(
     observations.map((observation) => [observation.id, observation])
@@ -12070,7 +12104,13 @@ function createDayLabelSlotQuestions(
     );
     const titles =
       slot === "bathing"
-        ? Array.from(new Set(candidates.flatMap(bathVenueOptionLabels)))
+        ? Array.from(
+            new Set(
+              candidates.flatMap((piece) =>
+                bathVenueOptionLabels(piece, tripCityNames)
+              )
+            )
+          )
         : candidateTitles;
     // The slot is committed (flavor 2): ONE flexible slot card owns the
     // choice, the other venue options fold into it as description options —
@@ -12086,6 +12126,20 @@ function createDayLabelSlotQuestions(
       return genericScore(leftTitle) - genericScore(rightTitle);
     });
     const subject = ordered[0];
+    if (slot === "bathing") {
+      const subjectTitle = stringValue(subject.payload, "title") ?? "";
+      if (isGenericBathSlotLabel(subjectTitle, tripCityNames)) {
+        const subjectDescription =
+          stringValue(subject.payload, "description") ?? "";
+        subject.payload.title = "Baths";
+        if (
+          normalizedComparable(subjectDescription) ===
+          normalizedComparable(subjectTitle)
+        ) {
+          subject.payload.description = "Baths.";
+        }
+      }
+    }
     // Alias dedupe before asking (second-audit finding on live run 7.18.1:
     // the baths question offered "Gellert Baths", "Baths", and "Gellert Bath
     // House" as if they were competing venues — they are one place). Count
@@ -12103,13 +12157,14 @@ function createDayLabelSlotQuestions(
     );
     for (const option of ordered.slice(1)) {
       if (slot === "bathing") {
-        for (const optionTitle of bathVenueOptionLabels(option)) {
+        for (const optionTitle of bathVenueOptionLabels(option, tripCityNames)) {
           piecePayloadAppendOption(subject.payload, optionTitle);
         }
-      }
-      const optionTitle = stringValue(option.payload, "title");
-      if (optionTitle) {
-        piecePayloadAppendOption(subject.payload, optionTitle);
+      } else {
+        const optionTitle = stringValue(option.payload, "title");
+        if (optionTitle) {
+          piecePayloadAppendOption(subject.payload, optionTitle);
+        }
       }
       mergeCanonicalPieceInto({
         reason:
@@ -12137,7 +12192,7 @@ function createDayLabelSlotQuestions(
       guessedValue: null,
       prompt: `The itinerary plans ${slot}, but ${
         titles.length > 1 ? `${titles.join(" and ")} both` : `${titles[0]} only`
-      } appear${titles.length > 1 ? "" : "s"} as options — which one, or keep as ideas?`,
+      } appear${titles.length > 1 ? "" : "s"} as options — which one?`,
       reason:
         "The source day title commits this slot but does not choose the venue.",
       relatedCanonicalPieceId: subject.id,
