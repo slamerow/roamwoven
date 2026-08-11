@@ -18,6 +18,10 @@ import { comparableTokens } from "@/lib/extraction/traveler-text";
 // recovery call.
 
 export type SourceCoverageUncoveredLine = {
+  // This is recovery evidence, not a display-only preview. It must preserve
+  // the complete source line: planSourceRecoveryBatch enforces the bounded
+  // request budget and counts any line it cannot include. Silently clipping
+  // here caused the recovery model to author visibly unfinished records.
   excerpt: string;
   lineIndex: number;
   // The clause(s) inside the line whose distinctive tokens no stage's
@@ -59,7 +63,9 @@ export type SourceCoverageSummary = {
   version: 3;
 };
 
-const EXCERPT_MAX_CHARS = 120;
+// Weak-credit findings are diagnostic previews only and may stay compact.
+// Uncovered-line excerpts are recovery input and must never use this cap.
+const DIAGNOSTIC_EXCERPT_MAX_CHARS = 120;
 
 // Run5 coverage calibration: OCR page markers and ticket boilerplate are
 // document plumbing, never meaningful day-section lines.
@@ -486,8 +492,8 @@ export function computeDaySectionSourceCoverage(
         weakCreditLines.push({
           clauses: weakCreditClauses,
           excerpt:
-            line.length > EXCERPT_MAX_CHARS
-              ? `${line.slice(0, EXCERPT_MAX_CHARS - 1)}…`
+            line.length > DIAGNOSTIC_EXCERPT_MAX_CHARS
+              ? `${line.slice(0, DIAGNOSTIC_EXCERPT_MAX_CHARS - 1)}…`
               : line,
           label: stageInput.label,
         });
@@ -501,10 +507,7 @@ export function computeDaySectionSourceCoverage(
       }
 
       uncoveredLines.push({
-        excerpt:
-          line.length > EXCERPT_MAX_CHARS
-            ? `${line.slice(0, EXCERPT_MAX_CHARS - 1)}…`
-            : line,
+        excerpt: line,
         lineIndex,
         uncoveredClauses,
       });

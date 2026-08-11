@@ -1748,6 +1748,26 @@ function uniqueDescription(left: unknown, right: unknown) {
   return `${leftText} ${rightText}`;
 }
 
+// Evidence is source support, not prose to concatenate. When two observations
+// of the same canonical record carry prefix-compatible evidence, identify the
+// complete value. This is especially load-bearing for bounded recovery: the
+// old 120-character recovery preview could merge before a later full source
+// carrier, leaving `evidence` clipped even though `description` was complete.
+// Returning null leaves unrelated evidence to the existing authority/conflict
+// rules below.
+function completeContainedEvidence(left: unknown, right: unknown) {
+  const leftText = typeof left === "string" ? left.trim() : "";
+  const rightText = typeof right === "string" ? right.trim() : "";
+
+  if (!leftText || !rightText) return null;
+
+  const leftComparable = normalizeText(leftText);
+  const rightComparable = normalizeText(rightText);
+  if (leftComparable.includes(rightComparable)) return leftText;
+  if (rightComparable.includes(leftComparable)) return rightText;
+  return null;
+}
+
 function evidenceSpecificity(record: Record<string, unknown>) {
   const description =
     typeof record.description === "string" ? record.description.trim() : "";
@@ -1880,9 +1900,17 @@ function mergeObservationIntoPiece(
     const existingRank = piece.fieldWinnerRanks[field] ?? 0;
     const sameAuthority =
       evidenceAuthority(incomingRank) === evidenceAuthority(existingRank);
+    const completeEvidence =
+      field === "evidence" ? completeContainedEvidence(existing, value) : null;
 
     if (field === "description") {
       next[field] = uniqueDescription(existing, value);
+    } else if (completeEvidence) {
+      next[field] = completeEvidence;
+      piece.fieldWinnerRanks[field] =
+        completeEvidence === (typeof value === "string" ? value.trim() : value)
+          ? incomingRank
+          : existingRank;
     } else if (field === "title") {
       if (
         (evidenceAuthority(incomingRank) > evidenceAuthority(existingRank) ||

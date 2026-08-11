@@ -75,6 +75,26 @@ export default async function run() {
     assert.match(coverage.stages[0].uncoveredLines[0].excerpt, /koscom/i);
   });
 
+  await test("recovery evidence preserves the complete source line instead of a 120-character diagnostic preview", () => {
+    const completeLine =
+      "You can either walk down the trails to the river's edge or take the funicular to the bottom (HUF 1,200 one way, HUF 1,800 return).";
+    assert.ok(completeLine.length > 120);
+    const coverage = computeDaySectionSourceCoverage([
+      chunkStage(
+        "Tuesday, January 22nd",
+        ["Tuesday, January 22nd", completeLine].join("\n"),
+        { activities: [] }
+      ),
+    ]);
+
+    assert.equal(coverage.uncoveredLineCount, 1);
+    assert.equal(coverage.stages[0].uncoveredLines[0].excerpt, completeLine);
+    assert.match(
+      coverage.stages[0].uncoveredLines[0].excerpt,
+      /HUF 1,800 return\)\.$/
+    );
+  });
+
   await test("run6 PB-3: cross-stage credit never spans clauses — koscom stays flagged when another stage covers communism museum", () => {
     const coverage = computeDaySectionSourceCoverage([
       chunkStage("Thursday, January 17th", KUTNA_HORA_SOURCE, {

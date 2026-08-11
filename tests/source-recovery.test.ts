@@ -105,6 +105,34 @@ export default async function run() {
     );
   });
 
+  await test("recovery plan receives the complete uncovered source line", () => {
+    const completeLine =
+      "You can either walk down the trails to the river's edge or take the funicular to the bottom (HUF 1,200 one way, HUF 1,800 return).";
+    const plan = planSourceRecoveryBatch({
+      coverage: coverageWith([
+        {
+          dayHeading: "Tuesday, January 22nd",
+          label: "Tuesday, January 22nd",
+          meaningfulLineCount: 1,
+          uncoveredLines: [
+            {
+              excerpt: completeLine,
+              lineIndex: 1,
+              uncoveredClauses: [completeLine],
+            },
+          ],
+        },
+      ]),
+      maxInputChars: 4000,
+      maxLines: 60,
+    });
+
+    assert.ok(plan);
+    assert.equal(plan.sections[0].excerpts[0], completeLine);
+    assert.ok(plan.input.includes(completeLine));
+    assert.doesNotMatch(plan.input, /one way, …/);
+  });
+
   await test("recovery call: exactly ONE model request, usage recorded separately, coverage reconciled", async () => {
     let calls = 0;
     const result = await runBoundedSourceRecovery({

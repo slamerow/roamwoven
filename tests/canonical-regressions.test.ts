@@ -831,6 +831,62 @@ export default async function run() {
     assert.doesNotMatch(note.description ?? "", /Central Square|buzzer/i);
   });
 
+  await test("a complete source carrier replaces clipped evidence for the same City Note record", () => {
+    const fullSource =
+      "If you want to see something unusual, check out the preserved historic object in its glass case.";
+    const clippedSource =
+      "If you want to see something unusual, check out the preserve…";
+    const draft = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        {
+          label: "source recovery",
+          source: "model_chunk" as const,
+          sourceText: fullSource,
+          stage: emptyStage({
+            activities: [
+              {
+                category: "local_tips",
+                city: "Budapest",
+                description: clippedSource,
+                evidence: clippedSource,
+                evidenceRole: "city_note_candidate",
+                itemType: "note",
+                title: "Historic object note",
+              },
+              {
+                category: "local_tips",
+                city: "Budapest",
+                description: fullSource,
+                evidence: fullSource,
+                evidenceRole: "city_note_candidate",
+                itemType: "note",
+                title: "Historic object note",
+              },
+            ],
+            places: [
+              {
+                arriveDate: "2019-01-21",
+                city: "Budapest",
+                leaveDate: "2019-01-24",
+              },
+            ],
+          }),
+        },
+      ],
+      tripOverview: { dateRange: "January 21-24, 2019" },
+    }).draft as {
+      activities: Array<{ description?: string | null; title: string }>;
+    };
+    const note = draft.activities.find(
+      (item) => item.title === "Budapest Notes & Tips"
+    );
+
+    assert.ok(note);
+    assert.match(note.description ?? "", /preserved historic object/);
+    assert.doesNotMatch(note.description ?? "", /preserve…/);
+  });
+
   await test("concrete activities and lodging details are removed from city notes", () => {
     const draft = cluster(emptyStage({
       activities: [
