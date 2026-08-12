@@ -5310,9 +5310,8 @@ function finalizeCanonicalPlaceFields(pieces: CanonicalEvidencePiece[]) {
 
     phases.forEach((phase, index) => {
       const leaveDate = phases[index + 1]?.arriveDate ?? tripEnd;
-      const existing = places.find((place) => {
+      const dateContainingPlace = (place: CanonicalEvidencePiece) => {
         if (usedPlaces.has(place)) return false;
-        const city = stringValue(place.payload, "city");
         const arriveDate =
           stringValue(place.payload, "arriveDate") ??
           stringValue(place.payload, "arrivalDate");
@@ -5320,15 +5319,34 @@ function finalizeCanonicalPlaceFields(pieces: CanonicalEvidencePiece[]) {
           stringValue(place.payload, "leaveDate") ??
           stringValue(place.payload, "departureDate");
         return Boolean(
-          city &&
-            locationsMatch(city, phase.city) &&
-            (!arriveDate || arriveDate <= phase.arriveDate) &&
+          (!arriveDate || arriveDate <= phase.arriveDate) &&
             (!currentLeave || phase.arriveDate < currentLeave)
         );
-      });
+      };
+      const existing =
+        places.find(
+          (place) =>
+            !usedPlaces.has(place) &&
+            (dateContainingPlace(place) ||
+              stringValue(place.payload, "arriveDate") === phase.arriveDate) &&
+            locationsMatch(stringValue(place.payload, "city"), phase.city)
+        ) ??
+        places.find(
+          (place) =>
+            dateContainingPlace(place) &&
+            locationsMatch(
+              stringValue(place.payload, "city"),
+              stringValue(phase.stay.payload, "city")
+            )
+        ) ??
+        places.find(dateContainingPlace);
 
       if (existing) {
         usedPlaces.add(existing);
+        if (!locationsMatch(stringValue(existing.payload, "city"), phase.city)) {
+          existing.payload.city = phase.city;
+          existing.payload._canonicalRecoveredFromStayPhase = true;
+        }
         if (leaveDate && stringValue(existing.payload, "leaveDate") !== leaveDate) {
           existing.payload.leaveDate = leaveDate;
           addCanonicalAction(existing, {
@@ -5525,11 +5543,40 @@ function applyCanonicalGuessedStayDates(
   }
 }
 
+function sourceNamedStayLocality(stay: CanonicalEvidencePiece) {
+  const stamped = stringValue(
+    stay.payload,
+    "_canonicalSourceNamedStayLocality"
+  );
+  if (stamped) return stamped;
+  const name = stringValue(stay.payload, "name");
+  const address = normalizedComparable(stay.payload.address);
+  if (!name || !address || !hasStreetAddressIdentity(stay.payload.address)) {
+    return null;
+  }
+  const locality =
+    /^(.+?) (?:airbnb|apartment|hostel|hotel|lodging|rental|stay)$/i.exec(name)?.[1]?.trim() ??
+    /^(?:airbnb|apartment|hostel|hotel|lodging|rental|stay) (?:around|in) (.+)$/i.exec(name)?.[1]?.trim() ??
+    null;
+  const explicitCity = stringValue(stay.payload, "city");
+  if (
+    !locality ||
+    !address.includes(normalizedComparable(locality)) ||
+    (explicitCity && locationsMatch(explicitCity, locality))
+  ) {
+    return null;
+  }
+  stay.payload._canonicalSourceNamedStayLocality = locality;
+  return locality;
+}
+
 function stayCity(
   stay: CanonicalEvidencePiece,
   places: CanonicalEvidencePiece[],
   allPieces: CanonicalEvidencePiece[] = places
 ) {
+  const sourceLocality = sourceNamedStayLocality(stay);
+  if (sourceLocality) return sourceLocality;
   const explicitCity = stringValue(stay.payload, "city");
   if (explicitCity) return explicitCity;
   const checkIn =
@@ -5608,6 +5655,7 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
     const name = stringValue(stay.payload, "name") ?? rawName;
     const city = stayCity(stay, places, pieces);
     if (city) stay.payload.city = city;
+    const sourceLocality = sourceNamedStayLocality(stay);
     const normalizedName = normalizeText(name);
     const normalizedCity = normalizeText(city);
     const localityTypeName =
@@ -5626,6 +5674,7 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
         ).test(normalizedName)
     );
     const generic =
+      !sourceLocality &&
       !sourceNamesMoreSpecificLocality &&
       (isGenericStayName(name) || isBooleanLikeStayName(name) || cityTypeGeneric);
     if (generic) {
@@ -6550,8 +6599,8 @@ function reconcileCanonicalStayIdentity(
     }
   }
 
-  // Pass 0b: two distinct source-addressed stays in one leg are sequential,
-  // not parallel duplicates. If a later stay starts before the earlier
+  // Pass 0b: two distinct source-addressed stays are sequential, not parallel
+  // duplicates. If a later stay starts before the earlier
   // parser-derived checkout, the later explicit check-in is the transition
   // boundary. Hawaii's sheet says "Depart July 8" for Maui as a whole but
   // explicitly moves from Kihei to a Hana rental on July 7.
@@ -6575,10 +6624,24 @@ function reconcileCanonicalStayIdentity(
     const earlierOut = stringValue(earlier.stay.payload, "checkOut");
     if (!earlierOut) continue;
     const later = sequential.find(
-      (candidate) =>
-        candidate.city === earlier.city &&
-        candidate.checkIn > earlier.checkIn &&
-        candidate.checkIn < earlierOut
+      (candidate) => {
+        const canonicalTransition =
+          places.some(
+            (place) =>
+              normalizeText(stringValue(place.payload, "city")) === earlier.city &&
+              stringValue(place.payload, "leaveDate") === candidate.checkIn
+          ) &&
+          places.some(
+            (place) =>
+              normalizeText(stringValue(place.payload, "city")) === candidate.city &&
+              stringValue(place.payload, "arriveDate") === candidate.checkIn
+          );
+        return Boolean(
+          (candidate.city === earlier.city || canonicalTransition) &&
+            candidate.checkIn > earlier.checkIn &&
+            candidate.checkIn < earlierOut
+        );
+      }
     );
     if (!later) continue;
     if (
@@ -15591,7 +15654,11 @@ export function clusterExtractedEvidence({
         _canonicalPieceId: piece.id,
       }));
   const activities = [...outputFor("activity"), ...outputFor("note")];
-  const places = outputFor("place");
+  const places = (outputFor("place") as Array<Record<string, unknown>>).sort((left, right) =>
+    String(left["arriveDate"] ?? "").localeCompare(
+      String(right["arriveDate"] ?? "")
+    )
+  );
   const stays = outputFor("stay");
   const transport = outputFor("transport");
   const canonicalSpineQuestions = runPieceWriter(

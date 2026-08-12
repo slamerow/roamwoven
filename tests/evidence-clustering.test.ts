@@ -6,6 +6,7 @@ import {
 } from "@/lib/extraction/evidence-clustering";
 import { prepareCanonicalEvidencePieces } from "@/lib/extraction/canonical-trip-assembly";
 import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
+import { createTravelerAppViewModel } from "@/lib/traveler-view-model";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -1730,6 +1731,7 @@ export default async function run() {
     });
     const draft = result.draft as {
       activities: Array<Record<string, unknown>>;
+      places: Array<Record<string, unknown>>;
       stays: Array<Record<string, unknown>>;
     };
 
@@ -1761,6 +1763,40 @@ export default async function run() {
       draft.activities.some((item) => /Hana rental/i.test(String(item.title))),
       false,
       "the lodging transition has one Stay home, not an Activity shadow"
+    );
+    assert.deepEqual(
+      draft.places.map((place) => ({
+        arriveDate: place.arriveDate,
+        city: place.city,
+        leaveDate: place.leaveDate,
+      })),
+      [
+        { arriveDate: "2031-07-02", city: "Kihei", leaveDate: "2031-07-07" },
+        { arriveDate: "2031-07-07", city: "Hana", leaveDate: "2031-07-08" },
+      ]
+    );
+    const structured = createStructuredTripRecordsFromDraft({
+      draft,
+      fallbackTripName: "Hawaii",
+      tripId: "hawaii-stay-phase-test",
+    });
+    assert.deepEqual(
+      structured.stays.map((stay) => [stay.name, stay.publicLocationLabel]),
+      [
+        ["Kihei Airbnb", "Kihei"],
+        ["Hana rental", "Hana"],
+      ]
+    );
+    assert.deepEqual(
+      createTravelerAppViewModel(structured).legs.map((leg) => [
+        leg.city,
+        leg.stayName,
+      ]),
+      [
+        ["Kihei", "Kihei Airbnb"],
+        ["Hana", "Hana rental"],
+      ],
+      "both source stays must be visible in the traveler app, not merely persisted"
     );
   });
 
