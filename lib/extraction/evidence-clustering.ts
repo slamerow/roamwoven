@@ -3595,6 +3595,9 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
       /\barrival directions\b|\bgetting there\b|\baccess details?\b/i.test(
         stringValue(accessory.payload, "title") ?? ""
       );
+    if (accessory.payload._sourceSupport === "unsupported" && !stayAccessShaped) {
+      continue;
+    }
     const accessoryDate = stringValue(accessory.payload, "date");
     const accessoryTime = timeFrom(accessory.payload);
     const titleTokens = identityTokens(accessory.payload.title);
@@ -9706,6 +9709,50 @@ function pieceNamedInDayHeading(piece: CanonicalEvidencePiece) {
   ]);
 }
 
+function isMultiSubjectDaySummary(
+  piece: CanonicalEvidencePiece,
+  pieces: CanonicalEvidencePiece[]
+) {
+  if (
+    piece.kind !== "activity" ||
+    timeFrom(piece.payload) ||
+    confirmationFrom(piece.payload)
+  ) {
+    return false;
+  }
+  const title = stringValue(piece.payload, "title") ?? "";
+  const description = stringValue(piece.payload, "description");
+  const segments = title
+    .split(/\s*\/\s*/)
+    .map((segment) => distinctiveTitleTokens(segment))
+    .filter((tokens) => tokens.length > 0);
+  if (
+    segments.length < 3 ||
+    (description && normalizedComparable(description) !== normalizedComparable(title))
+  ) {
+    return false;
+  }
+
+  const date = stringValue(piece.payload, "date");
+  const supportedSegments = segments.filter((segmentTokens) =>
+    pieces.some((candidate) => {
+      if (
+        candidate === piece ||
+        !candidate.outputEligible ||
+        candidate.kind !== "activity" ||
+        stringValue(candidate.payload, "date") !== date
+      ) {
+        return false;
+      }
+      return overlapCount(
+        segmentTokens,
+        distinctiveTitleTokens(stringValue(candidate.payload, "title") ?? "")
+      ) > 0;
+    })
+  );
+  return supportedSegments.length >= 2;
+}
+
 // B7 city-note integrity gap, live-run defect 2026-08-04 (R2D2; the Jan-19
 // Vienna idea list: St. Stephen's Cathedral, Ferris wheel, Apple Strudel
 // Show, Schönbrunn visit). mergeCanonicalCityNotes resolves a note's city
@@ -11016,7 +11063,6 @@ function resolveCanonicalIdentity({
     observations,
     doNotMerge
   );
-
   let unresolvedCarrierCount = 0;
   const decisions: CanonicalIdentityLedgerTelemetry["decisions"] = [];
   for (const prior of before) {
@@ -11984,6 +12030,7 @@ function applyIntentBlockClassification({
         piece.role,
       hasAuditedCommitment,
       intentBlockType: type,
+      isGenericOverview: isMultiSubjectDaySummary(piece, pieces),
       isRoutineTravelerStep:
         representedOwners.length > 0 ||
         isRoutineTravelerStepTitle(stringValue(piece.payload, "title")),
@@ -12269,6 +12316,27 @@ function createSourceAuthoredContainmentAuthority({
       piece.outputEligible &&
       Boolean(stringValue(piece.payload, "date"))
   );
+  const claimedPieceIds = new Set<string>();
+  const observationFor = (piece: CanonicalEvidencePiece) =>
+    piece.observationIds
+      .map((id) => observationById.get(id))
+      .find((observation) => observation?.kind === "activity") ?? null;
+  const blockIdsFor = (piece: CanonicalEvidencePiece) =>
+    new Set(piece.observationIds.flatMap((id) => {
+      const value = asRecord(
+        observationById.get(id)?.payload._canonicalSourcePosition
+      ).blockIds;
+      return Array.isArray(value)
+        ? value.filter((blockId): blockId is string => typeof blockId === "string")
+        : [];
+    }));
+
+  type RouteSectionEntry = {
+    evidence?: ContainmentEvidenceKind[];
+    observation: EvidenceObservation;
+    piece: CanonicalEvidencePiece;
+    routeOrder?: number;
+  };
 
   // Identity may never fold a source-supported site container into a named
   // component. This is a negative constraint only; it does not authorize a
@@ -12309,10 +12377,7 @@ function createSourceAuthoredContainmentAuthority({
   // plan in that section. The route ends before the next independently timed
   // or booked record. Shared day, area, proximity, geocoded address, and a
   // model grouping proposal are never sufficient.
-  const routeSections = new Map<
-    string,
-    Array<{ observation: EvidenceObservation; piece: CanonicalEvidencePiece }>
-  >();
+  const routeSections = new Map<string, RouteSectionEntry[]>();
   for (const piece of activityPieces) {
     for (const observationId of piece.observationIds) {
       const observation = observationById.get(observationId);
@@ -12347,9 +12412,74 @@ function createSourceAuthoredContainmentAuthority({
     }
   }
 
-  const claimedPieceIds = new Set<string>();
+  // Feed direct source membership ("Walking tour stop: ...") into the same
+  // route authority. This covers split parser chunks without creating a
+  // second grouping path. An unlabeled member may join only when it carries
+  // the complete source-block identity shared by every labeled stop.
+  for (const parent of activityPieces) {
+    const date = stringValue(parent.payload, "date");
+    const parentTitle = normalizedComparable(
+      stringValue(parent.payload, "title")
+    );
+    if (
+      !date ||
+      !parentTitle ||
+      !/\b(?:tour|walk)$/.test(parentTitle) ||
+      !hasIndependentActivityAnchor(parent.payload)
+    ) {
+      continue;
+    }
+    const labeled = activityPieces
+      .filter(
+        (candidate) =>
+          candidate !== parent &&
+          stringValue(candidate.payload, "date") === date &&
+          normalizedComparable(
+            stringValue(candidate.payload, "description") ??
+              stringValue(candidate.payload, "evidence")
+          ).startsWith(`${parentTitle} stop`)
+      );
+    if (labeled.length < 2) continue;
+
+    const sharedBlockIds = [...blockIdsFor(labeled[0])].filter((id) =>
+      labeled.every((member) => blockIdsFor(member).has(id))
+    );
+    const tail = activityPieces
+      .filter((candidate) => {
+        const position = asRecord(candidate.payload._canonicalSourcePosition);
+        const candidateBlocks = blockIdsFor(candidate);
+        return Boolean(
+          sharedBlockIds.length > 0 &&
+            candidate !== parent &&
+            !labeled.includes(candidate) &&
+            stringValue(candidate.payload, "date") === date &&
+            !timeFrom(candidate.payload) &&
+            !confirmationFrom(candidate.payload) &&
+            position.relationshipSignal === true &&
+            sharedBlockIds.every((id) => candidateBlocks.has(id))
+        );
+      });
+    const entries = [parent, ...labeled, ...tail].flatMap<RouteSectionEntry>(
+      (piece, routeOrder) => {
+        const observation = observationFor(piece);
+        if (!observation) return [];
+        const evidence: ContainmentEvidenceKind[] =
+          routeOrder === 0 || labeled.includes(piece)
+            ? ["source_hierarchy", "source_order"]
+            : ["source_bounded_extension", "source_order"];
+        return [{ evidence, observation, piece, routeOrder }];
+      }
+    );
+    if (entries.length >= 3) {
+      routeSections.set(`explicit|${date}|${parent.id}`, entries);
+    }
+  }
+
   for (const entries of routeSections.values()) {
     const ordered = entries.sort((left, right) => {
+      if (left.routeOrder !== undefined && right.routeOrder !== undefined) {
+        return left.routeOrder - right.routeOrder;
+      }
       const leftLine = Number(
         asRecord(left.observation.payload._canonicalSourcePosition).line
       );
@@ -12369,7 +12499,10 @@ function createSourceAuthoredContainmentAuthority({
     const rejections: ContainmentRejection[] = [];
     for (const entry of ordered.slice(parentIndex + 1)) {
       if (entry.piece.id === parent.id) continue;
-      if (timeFrom(entry.piece.payload) || confirmationFrom(entry.piece.payload)) {
+      if (
+        entry.routeOrder === undefined &&
+        (timeFrom(entry.piece.payload) || confirmationFrom(entry.piece.payload))
+      ) {
         rejections.push({
           pieceId: entry.piece.id,
           reasonCode: timeFrom(entry.piece.payload)
@@ -12380,13 +12513,13 @@ function createSourceAuthoredContainmentAuthority({
         break;
       }
       if (claimedPieceIds.has(entry.piece.id)) continue;
-      members.push(
-        containmentMemberDecision({
-          evidence: ["source_hierarchy", "source_order"],
-          observationById,
-          piece: entry.piece,
-        })
-      );
+      const member = containmentMemberDecision({
+        evidence: entry.evidence ?? ["source_hierarchy", "source_order"],
+        observationById,
+        piece: entry.piece,
+      });
+      if (entry.routeOrder !== undefined) member.sourceOrder = entry.routeOrder;
+      members.push(member);
     }
     if (members.length < 2) continue;
 

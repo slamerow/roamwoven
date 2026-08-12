@@ -397,6 +397,72 @@ export default async function run() {
     );
   });
 
+  await test("Loop 3: direct route-stop evidence feeds the one containment authority across parser chunks", () => {
+    const blockId = "source-block-walking-route";
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "Saturday, July 6th // Roma walking tour",
+          emptyStage({
+            activities: [
+              activity({
+                date: "2024-07-06",
+                startTime: "15:30",
+                title: "Walking tour",
+              }),
+            ],
+          })
+        ),
+        stage(
+          "Saturday, July 6th",
+          emptyStage({
+            activities: [
+              ...["First stop", "Second stop"].map((title, index) =>
+                activity({
+                  date: "2024-07-06",
+                  description: `Walking tour stop: ${title}.`,
+                  startTime: "15:30",
+                  title,
+                  extra: {
+                    _canonicalSourcePosition: {
+                      ...sourcePosition(index + 1, 2, true),
+                      blockIds: [blockId],
+                    },
+                    sourceSectionType: "dated_itinerary",
+                  },
+                })
+              ),
+              activity({
+                date: "2024-07-06",
+                title: "Final stop",
+                extra: {
+                  _canonicalSourcePosition: {
+                    ...sourcePosition(3, 3, true),
+                    blockIds: [blockId],
+                  },
+                  sourceSectionType: "dated_itinerary",
+                },
+              }),
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "July 6-7, 2024" },
+    });
+
+    const route = parentedTitles(result.draft as Draft, /^walking tour$/i);
+    assert.ok(route.parent, "the timed source route remains the parent card");
+    assert.deepEqual(route.children, ["First stop", "Second stop", "Final stop"]);
+    assert.equal(
+      result.summary.containmentLedger.decisions.filter(
+        (decision) => decision.containerTitle === "Walking tour"
+      ).length,
+      1,
+      "the relationship is handled by one containment decision"
+    );
+  });
+
   await test("Loop 4: a same-site-looking Schönbrunn list stays losslessly ungrouped without a source-authored parent relation", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],

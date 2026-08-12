@@ -254,6 +254,101 @@ export default async function run() {
     assert.match(String(restaurants[0].description), /three-course menu/i);
   });
 
+  await test("Loop 2: unsupported receipt prose cannot attach by a coincidental time", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage({
+          activities: [
+            {
+              category: "tours_tickets",
+              city: "Sample City",
+              date: "2030-04-12",
+              description: "Dawn canal tour.",
+              itemType: "activity",
+              startTime: "05:30",
+              title: "Dawn canal tour",
+            },
+            {
+              _sourceSupport: "unsupported",
+              category: "arrival_departure",
+              city: "Sample City",
+              date: "2030-04-12",
+              description: "Unrelated balloon receipt: 2 adults.",
+              evidenceRole: "accessory_detail",
+              itemType: "activity",
+              startTime: "05:30",
+              title: "Balloon receipt",
+            },
+          ],
+        }),
+      ],
+      tripOverview: { dateRange: "April 11-13, 2030" },
+    });
+
+    const tour = activities(result).find((item) => item.title === "Dawn canal tour");
+    assert.doesNotMatch(String(tour?.description), /balloon receipt/i);
+  });
+
+  await test("Loop 2: a broad slash-separated day summary does not duplicate its real plans", () => {
+    const summaryStage = stage({
+      activities: [
+        {
+          category: "nature_outdoors",
+          city: "Sample City",
+          date: "2030-04-12",
+          description: "Sunrise / Art Museums / Bird Sanctuary / Ballet",
+          itemType: "activity",
+          title: "Sunrise / Art Museums / Bird Sanctuary / Ballet",
+        },
+        {
+          category: "tours_tickets",
+          city: "Sample City",
+          date: "2030-04-12",
+          description: "Sunrise canal tour.",
+          itemType: "activity",
+          startTime: "05:30",
+          title: "Sunrise canal tour",
+        },
+        {
+          category: "art_culture",
+          city: "Sample City",
+          date: "2030-04-12",
+          description: "Visit the modern art museum.",
+          itemType: "activity",
+          startTime: "14:00",
+          title: "Modern Art Museum",
+        },
+      ],
+    });
+    summaryStage.sourceText = [
+      "Saturday, April 12th",
+      "Sunrise / Art Museums / Bird Sanctuary / Ballet",
+      "5:30 AM Sunrise canal tour",
+      "2:00 PM Modern Art Museum",
+    ].join("\n");
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [summaryStage],
+      tripOverview: { dateRange: "April 11-13, 2030" },
+    });
+
+    assert.equal(
+      activities(result).some((item) =>
+        String(item.title).includes("Bird Sanctuary / Ballet")
+      ),
+      false
+    );
+    assert.equal(
+      activities(result).some((item) => item.title === "Sunrise canal tour"),
+      true
+    );
+    assert.equal(
+      activities(result).some((item) => item.title === "Modern Art Museum"),
+      true
+    );
+  });
+
   await test("Loop 2: an exact private access twin follows the uniquely proven stay home", () => {
     const privateProse =
       "Arrival directions: collect the key from the locked box by the entrance.";

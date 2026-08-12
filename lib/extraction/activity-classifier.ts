@@ -382,6 +382,24 @@ export function isSiteComponentTitlePair(
   const right = normalizeText(rightTitle);
   if (!left || !right) return false;
 
+  // Bare route labels are possible parent identities, not site names. Their
+  // parent/member relationship must come from the containment decision, not
+  // from misreading a temporal "at" phrase in the named sibling.
+  if (
+    /^(?:guided |walking )?tour$|^(?:walk|stroll)$/.test(left) ||
+    /^(?:guided |walking )?tour$|^(?:walk|stroll)$/.test(right)
+  ) {
+    return false;
+  }
+
+  // A generic activity suffix does not turn a repeated title containing
+  // "at" into site structure ("Xochimilco at dawn" / "Xochimilco at dawn
+  // tour"). Without this identity guard, the temporal phrase is parsed as
+  // component-at-site and containment wrongly vetoes the duplicate fold.
+  const stripActivitySuffix = (value: string) =>
+    value.replace(/\s+(?:tour|visit|walk|stroll)$/, "").trim();
+  if (stripActivitySuffix(left) === stripActivitySuffix(right)) return false;
+
   const judge = (component: string, site: string) => {
     const match = COMPONENT_AT_SITE_PATTERN.exec(component);
     if (!match) return false;

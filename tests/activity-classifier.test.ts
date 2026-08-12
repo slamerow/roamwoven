@@ -454,6 +454,19 @@ export default async function run() {
       "the 7.17.2 meal-prefix alias fold keeps working"
     );
     assert.equal(
+      isSiteComponentTitlePair(
+        "Xochimilco at dawn tour",
+        "Xochimilco at dawn"
+      ),
+      false,
+      "a temporal at-phrase with a generic suffix is identity, not containment"
+    );
+    assert.equal(
+      isSiteComponentTitlePair("Tour", "Xochimilco at dawn tour"),
+      false,
+      "a bare route label cannot manufacture site containment"
+    );
+    assert.equal(
       isSiteComponentTitlePair("Prague Castle", "Charles Bridge"),
       false
     );
