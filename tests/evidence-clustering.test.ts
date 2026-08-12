@@ -5,6 +5,7 @@ import {
   type EvidenceStageInput,
 } from "@/lib/extraction/evidence-clustering";
 import { prepareCanonicalEvidencePieces } from "@/lib/extraction/canonical-trip-assembly";
+import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-structured-trip";
 import type { SourceTransportAnchor } from "@/lib/extraction/source-transport-anchors";
 
 async function test(name: string, fn: () => void | Promise<void>) {
@@ -1677,6 +1678,253 @@ export default async function run() {
         (stay) => stay.name
       ),
       ["Hotel Central", "Hotel Plaza"]
+    );
+  });
+
+  await test("distinct sequential local stays remain separate and end at the explicit transition", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "maui stays",
+          emptyStage({
+            activities: [
+              activity({
+                category: "accommodation",
+                city: "Maui",
+                date: "2031-07-07",
+                description:
+                  "Arrive in Hana and check into the rental for the night.",
+                sourceFilename: "hawaii.xlsx",
+                title: "Check in to Hana rental",
+              }),
+            ],
+            places: [
+              {
+                arriveDate: "2031-07-02",
+                city: "Maui",
+                country: "United States",
+                leaveDate: "2031-07-08",
+              },
+            ],
+            stays: [
+              {
+                address: "2495 South Kihei Road, Kihei, HI",
+                checkIn: "2031-07-02",
+                checkOut: "2031-07-08",
+                name: "Kihei Airbnb",
+                nights: 6,
+              },
+              {
+                address: "4816 Uakea Road, Hana, HI",
+                checkIn: "2031-07-07",
+                checkOut: "2031-07-08",
+                name: "Hana rental",
+                nights: 1,
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "July 2-8, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      stays: Array<Record<string, unknown>>;
+    };
+
+    assert.deepEqual(
+      draft.stays
+        .map((stay) => ({
+          checkIn: stay.checkIn,
+          checkOut: stay.checkOut,
+          name: stay.name,
+          nights: stay.nights,
+        }))
+        .sort((left, right) => String(left.checkIn).localeCompare(String(right.checkIn))),
+      [
+        {
+          checkIn: "2031-07-02",
+          checkOut: "2031-07-07",
+          name: "Kihei Airbnb",
+          nights: 5,
+        },
+        {
+          checkIn: "2031-07-07",
+          checkOut: "2031-07-08",
+          name: "Hana rental",
+          nights: 1,
+        },
+      ]
+    );
+    assert.equal(
+      draft.activities.some((item) => /Hana rental/i.test(String(item.title))),
+      false,
+      "the lodging transition has one Stay home, not an Activity shadow"
+    );
+  });
+
+  await test("dated lodging statements restore missing stay phases and source-backed cities", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage(
+          "japan spine",
+          emptyStage({
+            places: [
+              {
+                arriveDate: "2031-10-08",
+                city: "Tokyo",
+                country: "Japan",
+                leaveDate: "2031-10-20",
+              },
+            ],
+            stays: [
+              {
+                address: "1-24 Yotsuya, Shinjuku-ku, Tokyo, Japan",
+                checkIn: "2031-10-08",
+                checkOut: "2031-10-13",
+                name: "Keihan Tokyo Yotsuya",
+                nights: 5,
+              },
+              {
+                address: "17 Nishi Kujoin-machi, Minami-ku, Kyoto, Japan",
+                checkIn: "2031-10-15",
+                checkOut: "2031-10-19",
+                name: "Miyako Hotel Kyoto Hachijo",
+                nights: 4,
+              },
+            ],
+            transport: [
+              flight({
+                arrival: "BWI",
+                date: "2031-10-21",
+                departure: "Tokyo Haneda",
+                title: "Return flight",
+              }),
+            ],
+          })
+        ),
+        stage(
+          "dated japan plan",
+          emptyStage({
+            activities: [
+              activity({
+                category: "accommodation",
+                city: null,
+                date: "2031-10-13",
+                description: "Hotel around Takayama: Ascend Hotel Collection.",
+                sourceFilename: "Japan.docx",
+                title: "Hotel around Takayama",
+              }),
+              activity({
+                category: "food_dining",
+                city: "Kyoto",
+                date: "2031-10-15",
+                sourceFilename: "Japan.docx",
+                title: "Nishiki Market",
+              }),
+              {
+                ...activity({
+                  category: "accommodation",
+                  city: "Tokyo",
+                  date: "2031-10-20",
+                  description: "Hotel in Tokyo.",
+                  sourceFilename: "Japan.docx",
+                  title: "Hotel in Tokyo",
+                }),
+                evidenceRole: "context",
+                itemType: "placeholder",
+              },
+            ],
+          })
+        ),
+      ],
+      tripOverview: { dateRange: "October 7-21, 2031" },
+    });
+    const draft = result.draft as {
+      activities: Array<Record<string, unknown>>;
+      places: Array<Record<string, unknown>>;
+      stays: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(draft.stays.length, 4);
+    assert.deepEqual(
+      draft.stays
+        .map((stay) => ({
+          checkIn: stay.checkIn,
+          checkOut: stay.checkOut,
+          city: stay.city,
+          name: stay.name,
+          nights: stay.nights,
+        }))
+        .sort((left, right) => String(left.checkIn).localeCompare(String(right.checkIn))),
+      [
+        {
+          checkIn: "2031-10-08",
+          checkOut: "2031-10-13",
+          city: "Tokyo",
+          name: "Keihan Tokyo Yotsuya",
+          nights: 5,
+        },
+        {
+          checkIn: "2031-10-13",
+          checkOut: "2031-10-15",
+          city: "Takayama",
+          name: "Hotel around Takayama",
+          nights: 2,
+        },
+        {
+          checkIn: "2031-10-15",
+          checkOut: "2031-10-20",
+          city: "Kyoto",
+          name: "Miyako Hotel Kyoto Hachijo",
+          nights: 5,
+        },
+        {
+          checkIn: "2031-10-20",
+          checkOut: "2031-10-21",
+          city: "Tokyo",
+          name: "Hotel in Tokyo",
+          nights: 1,
+        },
+      ]
+    );
+    assert.equal(
+      draft.activities.some((item) =>
+        /Hotel around Takayama|Hotel in Tokyo/i.test(String(item.title))
+      ),
+      false
+    );
+    assert.deepEqual(
+      draft.places.map((place) => ({
+        arriveDate: place.arriveDate,
+        city: place.city,
+        leaveDate: place.leaveDate,
+      })),
+      [
+        { arriveDate: "2031-10-08", city: "Tokyo", leaveDate: "2031-10-13" },
+        { arriveDate: "2031-10-13", city: "Takayama", leaveDate: "2031-10-15" },
+        { arriveDate: "2031-10-15", city: "Kyoto", leaveDate: "2031-10-20" },
+        { arriveDate: "2031-10-20", city: "Tokyo", leaveDate: "2031-10-21" },
+      ]
+    );
+
+    const structured = createStructuredTripRecordsFromDraft({
+      draft,
+      fallbackTripName: "Japan",
+      tripId: "japan-stay-phase-test",
+    });
+    assert.deepEqual(
+      Object.fromEntries(
+        structured.stays.map((stay) => [stay.name, stay.publicLocationLabel])
+      ),
+      {
+        "Hotel around Takayama": "Takayama",
+        "Hotel in Tokyo": "Tokyo",
+        "Keihan Tokyo Yotsuya": "Tokyo",
+        "Miyako Hotel Kyoto Hachijo": "Kyoto",
+      }
     );
   });
 

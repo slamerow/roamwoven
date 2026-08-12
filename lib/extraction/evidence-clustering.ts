@@ -4817,6 +4817,77 @@ function isGenericStayName(value: unknown) {
   );
 }
 
+function isUnresolvedStayPlaceholderName(value: unknown) {
+  const title = normalizedComparable(value);
+  return (
+    isGenericStayName(value) ||
+    /^(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|resort|stay) (?:around|in) [a-z][a-z ]*$/.test(
+      title
+    )
+  );
+}
+
+const EXPLICIT_LODGING_NOUN_PATTERN =
+  /\b(?:accommodation|airbnb|apartment|hostel|hotel|lodge|lodging|rental|resort|room|stay)\b/i;
+
+function explicitStayNameFromActivity(payload: Record<string, unknown>) {
+  const rawTitle = stringValue(payload, "title")?.trim() ?? "";
+  if (!rawTitle || payload.address) return null;
+
+  // Narrow recovery boundary: only a whole dated lodging-PHASE statement
+  // that the parser otherwise left as Activity/context may create a Stay.
+  // Routine check-ins, "stay at" cards, and named/addressed hotels already
+  // have structured stays and remain details of that existing identity.
+  return /^(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|resort|stay)\s+(?:around|in)\s+\S/i.test(
+    rawTitle
+  ) && EXPLICIT_LODGING_NOUN_PATTERN.test(rawTitle)
+    ? rawTitle.replace(/[.:;,]+$/, "").trim()
+    : null;
+}
+
+function explicitStayPayloadFromActivity(payload: Record<string, unknown>) {
+  const checkIn = stringValue(payload, "date");
+  const name = explicitStayNameFromActivity(payload);
+  if (!checkIn || !/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !name) {
+    return null;
+  }
+
+  const title = stringValue(payload, "title") ?? "";
+  const locality =
+    /^(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|resort|stay)\s+(?:around|in)\s+([^,:;]+)/i.exec(
+      title
+    )?.[1]?.trim() ?? null;
+  const stayPayload: Record<string, unknown> = {
+    address: null,
+    checkIn,
+    checkInTime: payload.startTime ?? null,
+    checkOut: payload.checkOut ?? payload.endDate ?? null,
+    checkOutTime: payload.checkOutTime ?? null,
+    confirmation: null,
+    firstNightDate: checkIn,
+    name,
+    nights: payload.nights ?? null,
+    sourceFilename: payload.sourceFilename ?? null,
+    city: locality ?? payload.city ?? null,
+  };
+
+  // Preserve only source-lineage fields used by the existing authority.
+  // Activity presentation fields do not cross into the public Stay payload.
+  for (const [field, value] of Object.entries(payload)) {
+    if (field === "_resolverCandidateId" || field.startsWith("_canonical")) {
+      stayPayload[field] = value;
+    } else if (
+      ["sourceHeadingPath", "sourceSectionLabel", "sourceSectionType"].includes(
+        field
+      )
+    ) {
+      stayPayload[field] = value;
+    }
+  }
+
+  return stayPayload;
+}
+
 function isWeakStayFragmentName(value: unknown) {
   if (isGenericStayName(value)) return true;
   const raw = typeof value === "string" ? value : "";
@@ -5198,13 +5269,130 @@ function finalizeCanonicalPlaceFields(pieces: CanonicalEvidencePiece[]) {
       )
     );
 
-  places.forEach((place, index) => {
+  // A coarse parser spine can collapse a multi-city trip into one long leg
+  // even while dated, source-backed stays preserve the missing overnight
+  // phases. Recover those phases here, inside the existing Place authority,
+  // so final projection has real leg homes instead of filing every stay under
+  // the coarse city. Only a stay city absent from the Place spine opens this
+  // recovery lane; ordinary one-city and already-complete trips are untouched.
+  const stays = pieces
+    .filter((piece) => piece.kind === "stay" && piece.outputEligible)
+    .flatMap((stay) => {
+      const arriveDate =
+        stringValue(stay.payload, "firstNightDate") ??
+        stringValue(stay.payload, "checkIn");
+      const city = stayCity(stay, places, pieces);
+      return arriveDate && city ? [{ arriveDate, city, stay }] : [];
+    })
+    .sort((left, right) => left.arriveDate.localeCompare(right.arriveDate));
+  const phases = stays.filter(
+    (phase, index) =>
+      index === 0 ||
+      !locationsMatch(phase.city, stays[index - 1]?.city)
+  );
+  const hasMissingOvernightCity = phases.some(
+    (phase) =>
+      !places.some((place) =>
+        locationsMatch(phase.city, stringValue(place.payload, "city"))
+      )
+  );
+
+  if (hasMissingOvernightCity) {
+    const tripEnd = tripDateBounds(pieces).max;
+    const countries = Array.from(
+      new Set(
+        places
+          .map((place) => stringValue(place.payload, "country"))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const usedPlaces = new Set<CanonicalEvidencePiece>();
+
+    phases.forEach((phase, index) => {
+      const leaveDate = phases[index + 1]?.arriveDate ?? tripEnd;
+      const existing = places.find((place) => {
+        if (usedPlaces.has(place)) return false;
+        const city = stringValue(place.payload, "city");
+        const arriveDate =
+          stringValue(place.payload, "arriveDate") ??
+          stringValue(place.payload, "arrivalDate");
+        const currentLeave =
+          stringValue(place.payload, "leaveDate") ??
+          stringValue(place.payload, "departureDate");
+        return Boolean(
+          city &&
+            locationsMatch(city, phase.city) &&
+            (!arriveDate || arriveDate <= phase.arriveDate) &&
+            (!currentLeave || phase.arriveDate < currentLeave)
+        );
+      });
+
+      if (existing) {
+        usedPlaces.add(existing);
+        if (leaveDate && stringValue(existing.payload, "leaveDate") !== leaveDate) {
+          existing.payload.leaveDate = leaveDate;
+          addCanonicalAction(existing, {
+            absorbedTitles: [stringValue(phase.stay.payload, "name") ?? phase.city],
+            observationIds: [...phase.stay.observationIds],
+            reason: "dated overnight stays establish the canonical leg boundary",
+            type: "recovered",
+          });
+        }
+        return;
+      }
+
+      const payload: Record<string, unknown> = {
+        _canonicalRecoveredFromStayPhase: true,
+        arriveDate: phase.arriveDate,
+        city: phase.city,
+        country: countries.length === 1 ? countries[0] : null,
+        leaveDate,
+      };
+      pieces.push({
+        actions: [
+          {
+            absorbedTitles: [stringValue(phase.stay.payload, "name") ?? phase.city],
+            observationIds: [...phase.stay.observationIds],
+            reason: "source-backed overnight stay restores a missing canonical leg",
+            type: "recovered",
+          },
+        ],
+        confidence: phase.stay.confidence,
+        conflicts: [],
+        fieldSources: Object.fromEntries(
+          Object.keys(payload).map((field) => [field, [...phase.stay.observationIds]])
+        ),
+        fieldWinnerRanks: {},
+        id: `piece_${stableHash({
+          arriveDate: phase.arriveDate,
+          city: phase.city,
+          stayPieceId: phase.stay.id,
+          type: "overnight_place_phase",
+        })}`,
+        kind: "place",
+        mergeReasons: ["source-backed overnight stay phase"],
+        observationIds: [...phase.stay.observationIds],
+        outputEligible: true,
+        payload,
+        role: "atomic_candidate",
+      });
+    });
+  }
+
+  pieces
+    .filter((piece) => piece.kind === "place" && piece.outputEligible)
+    .sort((left, right) =>
+      String(left.payload.arriveDate ?? left.payload.arrivalDate ?? "").localeCompare(
+        String(right.payload.arriveDate ?? right.payload.arrivalDate ?? "")
+      )
+    )
+    .forEach((place, index, canonicalPlaces) => {
     const arriveDate = stringValue(place.payload, "arriveDate") ??
       stringValue(place.payload, "arrivalDate");
     const leaveDate = stringValue(place.payload, "leaveDate") ??
       stringValue(place.payload, "departureDate");
-    const nextArrival = stringValue(places[index + 1]?.payload ?? {}, "arriveDate") ??
-      stringValue(places[index + 1]?.payload ?? {}, "arrivalDate");
+    const nextArrival = stringValue(canonicalPlaces[index + 1]?.payload ?? {}, "arriveDate") ??
+      stringValue(canonicalPlaces[index + 1]?.payload ?? {}, "arrivalDate");
 
     if (!leaveDate && arriveDate && nextArrival && nextArrival > arriveDate) {
       place.payload.leaveDate = nextArrival;
@@ -5215,7 +5403,7 @@ function finalizeCanonicalPlaceFields(pieces: CanonicalEvidencePiece[]) {
         type: "recovered",
       });
     }
-  });
+    });
 }
 
 function applyCanonicalGuessedStayNames(
@@ -5339,13 +5527,34 @@ function applyCanonicalGuessedStayDates(
 
 function stayCity(
   stay: CanonicalEvidencePiece,
-  places: CanonicalEvidencePiece[]
+  places: CanonicalEvidencePiece[],
+  allPieces: CanonicalEvidencePiece[] = places
 ) {
   const explicitCity = stringValue(stay.payload, "city");
   if (explicitCity) return explicitCity;
   const checkIn =
     stringValue(stay.payload, "checkIn") ??
     stringValue(stay.payload, "firstNightDate");
+
+  // A stay name can carry a more specific source-backed locality than the
+  // coarse trip spine. Japan's only Place was Tokyo, but "Miyako Hotel
+  // Kyoto Hachijo" names Kyoto directly. Address-only locality text does
+  // not override the canonical place ("Ciudad de México" versus the
+  // existing "Mexico City" leg is the same stay, not a second city).
+  const stayText = ` ${normalizedComparable(
+    stay.payload.name
+  )} `;
+  const namedCity = Array.from(
+    new Map(
+      allPieces
+        .map((piece) => stringValue(piece.payload, "city"))
+        .filter((value): value is string => Boolean(value))
+        .map((value) => [normalizedComparable(value), value])
+    ).values()
+  )
+    .sort((left, right) => right.length - left.length)
+    .find((city) => stayText.includes(` ${normalizedComparable(city)} `));
+  if (namedCity) return namedCity;
 
   return places.find((place) => {
     const arriveDate =
@@ -5397,10 +5606,19 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
     }
 
     const name = stringValue(stay.payload, "name") ?? rawName;
-    const city = stayCity(stay, places);
+    const city = stayCity(stay, places, pieces);
     if (city) stay.payload.city = city;
     const normalizedName = normalizeText(name);
     const normalizedCity = normalizeText(city);
+    const localityTypeName =
+      /^(.+?) (?:airbnb|apartment|hostel|hotel|lodging|rental|stay)$/.exec(
+        normalizedName
+      );
+    const sourceNamesMoreSpecificLocality = Boolean(
+      localityTypeName &&
+        normalizedCity &&
+        localityTypeName[1] !== normalizedCity
+    );
     const cityTypeGeneric = Boolean(
       normalizedCity &&
         new RegExp(
@@ -5408,7 +5626,8 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
         ).test(normalizedName)
     );
     const generic =
-      isGenericStayName(name) || isBooleanLikeStayName(name) || cityTypeGeneric;
+      !sourceNamesMoreSpecificLocality &&
+      (isGenericStayName(name) || isBooleanLikeStayName(name) || cityTypeGeneric);
     if (generic) {
       const key = normalizeText(city) || "unknown";
       genericByCity.set(key, [...(genericByCity.get(key) ?? []), stay]);
@@ -5438,7 +5657,7 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
   for (const stay of stays) {
     const checkIn = stringValue(stay.payload, "checkIn") ??
       stringValue(stay.payload, "firstNightDate");
-    if (!checkIn || stringValue(stay.payload, "checkOut")) continue;
+    if (!checkIn) continue;
 
     const matchingPlaces = places.filter((place) => {
       const arriveDate = stringValue(place.payload, "arriveDate") ??
@@ -5459,16 +5678,71 @@ function finalizeCanonicalStayFields(pieces: CanonicalEvidencePiece[]) {
     );
     const leaveDate = stringValue(place?.payload ?? {}, "leaveDate") ??
       stringValue(place?.payload ?? {}, "departureDate");
+    const checkOut = stringValue(stay.payload, "checkOut");
+    const recoveredPhaseExtendsStay = Boolean(
+      place?.payload._canonicalRecoveredFromStayPhase === true &&
+        checkOut &&
+        leaveDate &&
+        checkOut < leaveDate
+    );
 
-    if (place && leaveDate && compatibleStays.length === 1) {
+    if (
+      place &&
+      leaveDate &&
+      compatibleStays.length === 1 &&
+      (!checkOut || recoveredPhaseExtendsStay)
+    ) {
       stay.payload.checkOut = leaveDate;
+      const recoveredNights = nightsBetweenIsoDates(checkIn, leaveDate);
+      if (recoveredNights !== null) stay.payload.nights = recoveredNights;
       addCanonicalAction(stay, {
         absorbedTitles: [],
         observationIds: [...stay.observationIds],
-        reason: "single canonical stay inherits its leg departure boundary",
+        reason: recoveredPhaseExtendsStay
+          ? "dated overnight phase transition outranks the coarse summary night count"
+          : "single canonical stay inherits its leg departure boundary",
         type: "recovered",
       });
     }
+  }
+
+  // Fill an otherwise missing checkout from the next source-backed stay,
+  // or from the trip's final structural boundary for the last stay. This is
+  // one sequential traveler party: it preserves a lodging phase without
+  // manufacturing an extra night or a second identity writer.
+  const tripEnd = tripDateBounds(pieces).max;
+  const datedStays = stays
+    .map((stay) => ({
+      checkIn:
+        stringValue(stay.payload, "checkIn") ??
+        stringValue(stay.payload, "firstNightDate"),
+      stay,
+    }))
+    .filter(
+      (entry): entry is { checkIn: string; stay: CanonicalEvidencePiece } =>
+        Boolean(entry.checkIn)
+    )
+    .sort((left, right) => left.checkIn.localeCompare(right.checkIn));
+  for (let index = 0; index < datedStays.length; index += 1) {
+    const { checkIn, stay } = datedStays[index];
+    if (stringValue(stay.payload, "checkOut")) continue;
+    const nextCheckIn = datedStays
+      .slice(index + 1)
+      .map((entry) => entry.checkIn)
+      .find((candidate) => candidate > checkIn);
+    const boundary = nextCheckIn ?? (tripEnd && tripEnd > checkIn ? tripEnd : null);
+    if (!boundary) continue;
+    stay.payload.checkOut = boundary;
+    const recoveredNights = nightsBetweenIsoDates(checkIn, boundary);
+    if (recoveredNights !== null) stay.payload.nights = recoveredNights;
+    addCanonicalAction(stay, {
+      absorbedTitles: [],
+      observationIds: [...stay.observationIds],
+      reason: nextCheckIn
+        ? "stay checkout recovered from the next source-backed lodging phase"
+        : "final stay checkout recovered from the trip's final structural boundary",
+      type: "recovered",
+    });
   }
 
   for (const group of genericByCity.values()) {
@@ -6088,6 +6362,11 @@ function stayRangesOverlapOrTouch(
   return leftIn <= rightOut && rightIn <= leftOut;
 }
 
+function hasStreetAddressIdentity(value: unknown) {
+  const address = normalizedComparable(value);
+  return Boolean(address && /\d/.test(address));
+}
+
 // Run-2 §3 / Task 3: the 6th stay. `Rome Stay` (Jan 12-14) shipped beside
 // `The Yellow` (Jan 13-14) on the same leg, because Pass 1 merges on VENUE
 // identity and the two names share no token — so the reconciler correctly
@@ -6252,7 +6531,7 @@ function reconcileCanonicalStayIdentity(
       )
     );
     if (observed.length < 2) continue;
-    const city = normalizeText(stayCity(stay, places));
+    const city = normalizeText(stayCity(stay, places, pieces));
     const legBoundary = legLeaveDates.get(city) ?? null;
     const reconciled =
       (legBoundary && observed.find((value) => value === legBoundary)) ??
@@ -6271,6 +6550,59 @@ function reconcileCanonicalStayIdentity(
     }
   }
 
+  // Pass 0b: two distinct source-addressed stays in one leg are sequential,
+  // not parallel duplicates. If a later stay starts before the earlier
+  // parser-derived checkout, the later explicit check-in is the transition
+  // boundary. Hawaii's sheet says "Depart July 8" for Maui as a whole but
+  // explicitly moves from Kihei to a Hana rental on July 7.
+  const sequential = stays()
+    .map((stay) => ({
+      checkIn:
+        stringValue(stay.payload, "checkIn") ??
+        stringValue(stay.payload, "firstNightDate"),
+      city: normalizeText(stayCity(stay, places, pieces)),
+      stay,
+    }))
+    .filter(
+      (entry): entry is {
+        checkIn: string;
+        city: string;
+        stay: CanonicalEvidencePiece;
+      } => Boolean(entry.checkIn && entry.city)
+    )
+    .sort((left, right) => left.checkIn.localeCompare(right.checkIn));
+  for (const earlier of sequential) {
+    const earlierOut = stringValue(earlier.stay.payload, "checkOut");
+    if (!earlierOut) continue;
+    const later = sequential.find(
+      (candidate) =>
+        candidate.city === earlier.city &&
+        candidate.checkIn > earlier.checkIn &&
+        candidate.checkIn < earlierOut
+    );
+    if (!later) continue;
+    if (
+      !hasStreetAddressIdentity(earlier.stay.payload.address) ||
+      !hasStreetAddressIdentity(later.stay.payload.address) ||
+      stayIdentityMatchReason(earlier.stay.payload, later.stay.payload)
+    ) {
+      continue;
+    }
+    earlier.stay.payload.checkOut = later.checkIn;
+    const recoveredNights = nightsBetweenIsoDates(
+      earlier.checkIn,
+      later.checkIn
+    );
+    if (recoveredNights !== null) earlier.stay.payload.nights = recoveredNights;
+    addCanonicalAction(earlier.stay, {
+      absorbedTitles: [],
+      observationIds: [...earlier.stay.observationIds],
+      reason:
+        "distinct source-addressed stay starts before the coarse leg checkout; prior stay ends at the explicit lodging transition",
+      type: "field_selected",
+    });
+  }
+
   // Pass 1: merge same-venue same-city overlapping stays.
   let merged = true;
   while (merged) {
@@ -6280,10 +6612,17 @@ function reconcileCanonicalStayIdentity(
       for (let j = i + 1; j < current.length; j += 1) {
         const left = current[i];
         const right = current[j];
-        const leftCity = normalizeText(stayCity(left, places));
-        const rightCity = normalizeText(stayCity(right, places));
+        const leftCity = normalizeText(stayCity(left, places, pieces));
+        const rightCity = normalizeText(stayCity(right, places, pieces));
         if (!leftCity || leftCity !== rightCity) continue;
         if (!stayRangesOverlapOrTouch(left.payload, right.payload)) continue;
+        if (
+          hasStreetAddressIdentity(left.payload.address) &&
+          hasStreetAddressIdentity(right.payload.address) &&
+          !stayIdentityMatchReason(left.payload, right.payload)
+        ) {
+          continue;
+        }
         const leftTokens = stayVenueIdentityTokens(left.payload);
         const rightTokens = stayVenueIdentityTokens(right.payload);
         const strippedName = (payload: Record<string, unknown>) =>
@@ -6370,10 +6709,10 @@ function reconcileCanonicalStayIdentity(
       stringValue(fragment.payload, "checkIn") ??
       stringValue(fragment.payload, "firstNightDate");
     if (!fragmentIn) continue;
-    const fragmentCity = normalizeText(stayCity(fragment, places));
+    const fragmentCity = normalizeText(stayCity(fragment, places, pieces));
     const covering = survivors.find((stay) => {
       if (stay === fragment || !stay.outputEligible) return false;
-      if (normalizeText(stayCity(stay, places)) !== fragmentCity) return false;
+      if (normalizeText(stayCity(stay, places, pieces)) !== fragmentCity) return false;
       const checkIn = stringValue(stay.payload, "checkIn");
       const checkOut = stringValue(stay.payload, "checkOut");
       return Boolean(
@@ -6424,7 +6763,7 @@ function reconcileCanonicalStayIdentity(
     ) {
       continue;
     }
-    const placeholderCity = stayCity(placeholder, places);
+    const placeholderCity = stayCity(placeholder, places, pieces);
     if (!placeholderCity) continue;
     if (
       stayVenueIdentityBeyondCity(placeholder.payload, placeholderCity).length >
@@ -6436,11 +6775,11 @@ function reconcileCanonicalStayIdentity(
       (candidate) =>
         candidate !== placeholder &&
         candidate.outputEligible &&
-        normalizeText(stayCity(candidate, places)) ===
+        normalizeText(stayCity(candidate, places, pieces)) ===
           normalizeText(placeholderCity) &&
         stayVenueIdentityBeyondCity(
           candidate.payload,
-          stayCity(candidate, places)
+          stayCity(candidate, places, pieces)
         ).length > 0 &&
         stayRangesOverlapOrTouch(placeholder.payload, candidate.payload)
     );
@@ -6712,6 +7051,15 @@ function shiftIsoDate(value: string, days: number) {
 
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function nightsBetweenIsoDates(checkIn: string, checkOut: string) {
+  const start = new Date(`${checkIn}T00:00:00.000Z`).getTime();
+  const end = new Date(`${checkOut}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return null;
+  }
+  return Math.round((end - start) / 86_400_000);
 }
 
 function recoverOutOfRangePieces(pieces: CanonicalEvidencePiece[]) {
@@ -13239,9 +13587,11 @@ function unresolvedMissingDetails({
         return cityFits && dateFits;
       });
 
-      const resolvedStayName = normalizeText(
-        stringValue(compatibleStays[0]?.payload ?? {}, "name")
-      )
+      const resolvedStayNameValue = stringValue(
+        compatibleStays[0]?.payload ?? {},
+        "name"
+      );
+      const resolvedStayName = normalizeText(resolvedStayNameValue)
         .replace(
           /\b(?:accommodation|airbnb|apartment|hostel|hotel|lodging|rental|stay)\b/g,
           " "
@@ -13249,7 +13599,11 @@ function unresolvedMissingDetails({
         .replace(/\s+/g, " ")
         .trim();
 
-      if (compatibleStays.length === 1 && resolvedStayName.length >= 3) {
+      if (
+        compatibleStays.length === 1 &&
+        resolvedStayName.length >= 3 &&
+        !isUnresolvedStayPlaceholderName(resolvedStayNameValue)
+      ) {
         return false;
       }
     }
@@ -14663,9 +15017,13 @@ export function clusterExtractedEvidence({
             stageInput.sourceText ?? null
           );
         }
+        const explicitStayPayload =
+          collection === "activities"
+            ? explicitStayPayloadFromActivity(payload)
+            : null;
         ordinal += 1;
         const intakeDecision =
-          collection === "activities"
+          collection === "activities" && !explicitStayPayload
             ? activityCandidacyDecisionForPayload(
                 payload,
                 hasSourceBackedIntakeCommitment(payload)
@@ -14695,21 +15053,26 @@ export function clusterExtractedEvidence({
           };
           payload.evidenceRole = intakeDecision.evidenceRole;
         }
-        const kind = intakeDecision
-          ? intakeDecision.destination === "activity"
-            ? "activity"
-            : intakeDecision.destination === "city_note"
-              ? "note"
-              : "context"
-          : defaultKind;
-        const role =
-          intakeDecision?.evidenceRole ?? evidenceRoleFromPayload(payload, kind);
+        const kind = explicitStayPayload
+          ? "stay"
+          : intakeDecision
+            ? intakeDecision.destination === "activity"
+              ? "activity"
+              : intakeDecision.destination === "city_note"
+                ? "note"
+                : "context"
+            : defaultKind;
+        const observationPayload = explicitStayPayload ?? payload;
+        const role = explicitStayPayload
+          ? "atomic_candidate"
+          : intakeDecision?.evidenceRole ??
+            evidenceRoleFromPayload(observationPayload, kind);
         pushUniqueObservation(
           observations,
           createObservation({
             kind,
             ordinal,
-            payload,
+            payload: observationPayload,
             role,
             source: stageInput.source,
             sourceFilename:
@@ -14722,7 +15085,7 @@ export function clusterExtractedEvidence({
             sourceUploadId: stageInput.sourceUploadId ?? null,
           })
         );
-        if (collection === "activities") {
+        if (collection === "activities" && !explicitStayPayload) {
           for (const clausePayload of splitExplicitPlanFromHedgedReference(
             payload
           )) {
