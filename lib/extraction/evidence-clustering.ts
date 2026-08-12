@@ -2387,9 +2387,19 @@ function reconcileCanonicalConflicts(
       );
       if (ranked.length < 2) return [];
 
+      const endpointAliases =
+        piece.kind === "transport" &&
+        ["arrival", "arrivalLocation", "departure", "departureLocation"].includes(
+          conflict.field
+        ) &&
+        transportEndpointValuesAreAliases(
+          ranked.map((value) => value.display)
+        );
+
       return [{
         ...conflict,
-        requiresReview: ranked[0].rank === ranked[1].rank,
+        requiresReview:
+          !endpointAliases && ranked[0].rank === ranked[1].rank,
         values: ranked.map((value) => value.display),
       }];
     });
@@ -3467,6 +3477,59 @@ function sharedLocationCode(left: unknown, right: unknown) {
     );
   const leftCodes = codes(left);
   return [...codes(right)].some((code) => leftCodes.has(code));
+}
+
+function transportEndpointValuesAreAliases(values: string[]) {
+  if (values.length < 2) {
+    return false;
+  }
+
+  const locationCodes = new Set(
+    values.flatMap(
+      (value) => value.toUpperCase().match(/\b[A-Z]{3}\b/g) ?? []
+    )
+  );
+  if (locationCodes.size > 1) {
+    return false;
+  }
+
+  const preciseValues = values.filter((value) => locationQuality(value) >= 4);
+  for (let left = 0; left < preciseValues.length; left += 1) {
+    for (let right = left + 1; right < preciseValues.length; right += 1) {
+      if (
+        !locationsMatch(preciseValues[left], preciseValues[right]) &&
+        !sharedLocationCode(preciseValues[left], preciseValues[right])
+      ) {
+        return false;
+      }
+    }
+  }
+
+  // Endpoint wording often moves between broad destination, city/airport,
+  // and code forms across the same source (for example Maui,
+  // Kahului/Maui (OGG), and Kahului Airport, OGG).  Those values form one
+  // connected meaning even when the broad and precise endpoints do not
+  // match directly: the middle source wording supplies the bridge.  Keep
+  // every raw value in the conflict ledger, but do not turn richer wording
+  // for one endpoint into a maker decision.
+  const visited = new Set([0]);
+  const pending = [0];
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (current === undefined) break;
+    for (let candidate = 0; candidate < values.length; candidate += 1) {
+      if (visited.has(candidate)) continue;
+      if (
+        locationsMatch(values[current], values[candidate]) ||
+        sharedLocationCode(values[current], values[candidate])
+      ) {
+        visited.add(candidate);
+        pending.push(candidate);
+      }
+    }
+  }
+
+  return visited.size === values.length;
 }
 
 function attachArrivalOnlyTransportPieces(pieces: CanonicalEvidencePiece[]) {

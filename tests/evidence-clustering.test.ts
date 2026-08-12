@@ -498,6 +498,133 @@ export default async function run() {
     );
   });
 
+  await test("transport endpoint aliases keep the precise value without asking the maker", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("flight summary", emptyStage({ transport: [
+          flight({
+            arrival: "Kahului Airport, OGG",
+            confirmation: "MLYBEH",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Alaska 223 from Seattle to Kahului Airport, OGG.",
+            number: "223",
+            provider: "Alaska",
+            title: "Seattle to Maui",
+          }),
+        ] })),
+        stage("arrival row", emptyStage({ transport: [
+          flight({
+            arrival: "Kahului/Maui (OGG)",
+            confirmation: "MLYBEH",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Alaska 223 arrival into Kahului/Maui (OGG).",
+            number: "223",
+            provider: "Alaska",
+            title: "Seattle to Maui",
+          }),
+        ] })),
+        stage("day plan", emptyStage({ transport: [
+          flight({
+            arrival: "Maui",
+            confirmation: "MLYBEH",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Fly Alaska 223 from Seattle to Maui.",
+            number: "223",
+            provider: "Alaska",
+            title: "Seattle to Maui",
+          }),
+        ] })),
+      ],
+      tripOverview: { dateRange: "July 2-8, 2030" },
+    });
+    const draft = result.draft as {
+      missingDetails: Array<Record<string, unknown>>;
+      transport: Array<Record<string, unknown>>;
+    };
+    const piece = result.pieces.find(
+      (candidate) => candidate.kind === "transport" && candidate.outputEligible
+    );
+
+    assert.equal(draft.transport.length, 1);
+    assert.equal(draft.transport[0]?.arrival, "Kahului Airport, OGG");
+    assert.equal(
+      draft.missingDetails.some(
+        (detail) =>
+          detail._canonicalReviewDisposition === "question" &&
+          detail.targetField === "arrival"
+      ),
+      false,
+      "one endpoint expressed at different levels of detail is assembly work"
+    );
+    assert.deepEqual(
+      piece?.conflicts.find((conflict) => conflict.field === "arrival")?.values,
+      ["Kahului Airport, OGG", "Kahului/Maui (OGG)", "Maui"],
+      "the raw source variants remain auditable"
+    );
+    assert.equal(
+      piece?.conflicts.find((conflict) => conflict.field === "arrival")
+        ?.requiresReview,
+      false
+    );
+  });
+
+  await test("a broad city cannot hide a genuine same-flight airport conflict", () => {
+    const result = clusterExtractedEvidence({
+      sourceTransportAnchors: [],
+      stages: [
+        stage("ticket", emptyStage({ transport: [
+          flight({
+            arrival: "London Heathrow Airport (LHR)",
+            confirmation: "SAME123",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Example 223 from Seattle to London Heathrow.",
+            number: "223",
+            title: "Example 223",
+          }),
+        ] })),
+        stage("broad itinerary", emptyStage({ transport: [
+          flight({
+            arrival: "London",
+            confirmation: "SAME123",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Example 223 from Seattle to London.",
+            number: "223",
+            title: "Example 223",
+          }),
+        ] })),
+        stage("itinerary", emptyStage({ transport: [
+          flight({
+            arrival: "London Gatwick Airport (LGW)",
+            confirmation: "SAME123",
+            date: "2030-07-02",
+            departure: "Seattle (SEA)",
+            description: "Example 223 from Seattle to London Gatwick.",
+            number: "223",
+            title: "Example 223",
+          }),
+        ] })),
+      ],
+      tripOverview: { dateRange: "July 2-8, 2030" },
+    });
+    const draft = result.draft as {
+      missingDetails: Array<Record<string, unknown>>;
+    };
+    const questions = draft.missingDetails.filter(
+      (detail) =>
+        detail._canonicalReviewDisposition === "question" &&
+        detail.targetField === "arrival"
+    );
+
+    assert.equal(questions.length, 1);
+    assert.match(String(questions[0]?.prompt), /Which arrival should/i);
+  });
+
   await test("a unique arrival fragment attaches after local transfers leave Travel", () => {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
