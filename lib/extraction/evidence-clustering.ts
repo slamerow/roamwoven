@@ -71,6 +71,7 @@ import {
   classifyOwnTextEvidence,
   decideActivityCandidacy,
   DAY_PLAN_LABEL_PATTERN,
+  isRoutineTravelerStepTitle,
   isRecommendationActivityCategory,
   resolveMentionCommitment,
   SITE_CONTAINER_NOUN_PATTERN,
@@ -672,6 +673,7 @@ function activityCandidacyDecisionForPayload(
     hasAuditedCommitment?: boolean;
     intentBlockType?: IntentBlockType | null;
     isGenericOverview?: boolean;
+    isRoutineTravelerStep?: boolean;
   } = {}
 ): ActivityCandidacyDecision {
   const recoveryDecision = asRecord(
@@ -737,6 +739,7 @@ function activityCandidacyDecisionForPayload(
       (stringValue(payload, "_intentBlockType") as IntentBlockType | null),
     isGenericOverview:
       overrides.isGenericOverview ?? payload._canonicalSourceContainer === true,
+    isRoutineTravelerStep: overrides.isRoutineTravelerStep === true,
     itemType,
   });
 }
@@ -3572,6 +3575,9 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
   const stayTargets = pieces.filter(
     (piece) => piece.kind === "stay" && piece.outputEligible
   );
+  const transportTargets = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
 
   // Preserve the established matching behavior first. The conservation pass
   // below handles only records this pass cannot already place.
@@ -3712,6 +3718,21 @@ function attachCanonicalAccessoryDetails(pieces: CanonicalEvidencePiece[]) {
           prose
         )
     );
+    const representedTravelOwners = representedTravelStepOwners(
+      accessory.payload,
+      transportTargets
+    );
+    if (representedTravelOwners.length > 0) {
+      suppressCanonicalPiece(
+        accessory,
+        "routine travel step represented by canonical transport",
+        {
+          kind: "survivors",
+          survivorIds: representedTravelOwners.map((owner) => owner.id),
+        }
+      );
+      continue;
+    }
     const candidates = pieces.filter((candidate) => {
       if (!candidate.outputEligible || candidate === accessory) return false;
       const candidateDate =
@@ -4092,6 +4113,58 @@ function attachRentalCarReturns(pieces: CanonicalEvidencePiece[]) {
 // confirmation code with any canonical transport segment.
 const TRANSPORT_SHAPE_WORD_PATTERN = /\b(?:flight|fly|train|bus|ferry|transfer)\b/;
 const FLIGHT_CODE_PATTERN = /\b[A-Z]{2} ?\d{3,4}\b/;
+
+const REPRESENTED_TRAVEL_STEP_TITLE_PATTERN =
+  /^(?:(?:call )?(?:didi|uber|didi uber|taxi)|(?:arrive|arrival) at (?:the )?(?:airport|location)|(?:land|landing)(?: at| in)? [a-z0-9 ]+|clear customs|check ?in with [a-z0-9 ]+ airlines?|home|home we go|in (?:an? )?(?:uber|taxi) home|(?:back|head|go) home)$/;
+
+function representedTravelStepOwners(
+  payload: Record<string, unknown>,
+  transports: CanonicalEvidencePiece[]
+) {
+  const title = normalizedComparable(stringValue(payload, "title"));
+  if (!REPRESENTED_TRAVEL_STEP_TITLE_PATTERN.test(title)) return [];
+
+  const date = stringValue(payload, "date");
+  const arrivalStep = /^(?:land|landing|clear customs|home|home we go|in |back home|go home)/.test(
+    title
+  );
+
+  return transports.filter((transport) => {
+    const departureDate = stringValue(transport.payload, "date");
+    return Boolean(
+      date &&
+        departureDate &&
+        (tripDatesMatch(date, departureDate) ||
+          (arrivalStep && shiftIsoDate(departureDate, 1) === date))
+    );
+  });
+}
+
+function representedStayStepOwners(
+  payload: Record<string, unknown>,
+  stays: CanonicalEvidencePiece[]
+) {
+  const title = normalizedComparable(stringValue(payload, "title"));
+  if (
+    !/^(?:(?:head|go) to (?:the )?(?:hotel|hostel|airbnb|lodging|room)(?: (?:or )?(?:hotel|hostel|airbnb|lodging|room))?|check ?in|check ?out)$/.test(
+      title
+    )
+  ) {
+    return [];
+  }
+
+  const date = stringValue(payload, "date");
+  return stays.filter((stay) => {
+    const checkIn =
+      stringValue(stay.payload, "checkIn") ??
+      stringValue(stay.payload, "firstNightDate");
+    const checkOut = stringValue(stay.payload, "checkOut");
+    return Boolean(date && (
+      (checkIn && tripDatesMatch(date, checkIn)) ||
+      (checkOut && tripDatesMatch(date, checkOut))
+    ));
+  });
+}
 
 function rawActivityTransportText(record: Record<string, unknown>) {
   return [record.title, record.description]
@@ -11841,6 +11914,12 @@ function applyIntentBlockClassification({
   }
 
   const result = classifyIntentBlocks(entries, { geocodeVerificationRan });
+  const activeTransports = pieces.filter(
+    (piece) => piece.kind === "transport" && piece.outputEligible
+  );
+  const activeStays = pieces.filter(
+    (piece) => piece.kind === "stay" && piece.outputEligible
+  );
   const blockByMember = new Map<string, IntentBlockDecision>();
   for (const block of result.blocks) {
     for (const memberId of block.memberIds) blockByMember.set(memberId, block);
@@ -11891,6 +11970,13 @@ function applyIntentBlockClassification({
         : null,
     ].filter((value): value is string => Boolean(value));
     const hasAuditedCommitment = commitmentSignals.length > 0;
+    const representedOwners = [
+      ...representedTravelStepOwners(piece.payload, activeTransports),
+      ...representedStayStepOwners(piece.payload, activeStays),
+    ].filter(
+      (owner, index, owners) =>
+        owners.findIndex((candidate) => candidate.id === owner.id) === index
+    );
     const inputDecision = asRecord(piece.payload._canonicalIntakeCandidacyDecision);
     const decision = activityCandidacyDecisionForPayload(piece.payload, {
       evidenceRole:
@@ -11898,6 +11984,9 @@ function applyIntentBlockClassification({
         piece.role,
       hasAuditedCommitment,
       intentBlockType: type,
+      isRoutineTravelerStep:
+        representedOwners.length > 0 ||
+        isRoutineTravelerStepTitle(stringValue(piece.payload, "title")),
     });
     const canonicalCandidacyDecision = {
       ...decision,
@@ -11976,6 +12065,12 @@ function applyIntentBlockClassification({
       // but grouping/identity can never resurrect a traveler card.
       piece.kind = "context";
       piece.outputEligible = false;
+      if (representedOwners.length > 0) {
+        disposeCanonicalPiece(piece, {
+          kind: "survivors",
+          survivorIds: representedOwners.map((owner) => owner.id),
+        });
+      }
       addCanonicalAction(piece, {
         absorbedTitles: [],
         observationIds: [...piece.observationIds],

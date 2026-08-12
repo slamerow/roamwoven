@@ -65,7 +65,8 @@ export type ActivityCandidacyReasonCode =
   | "ITEM_TYPE_ADMIN"
   | "ITEM_TYPE_NOTE"
   | "LOOSE_REFERENCE"
-  | "MODEL_ACTIVITY_DEFAULT";
+  | "MODEL_ACTIVITY_DEFAULT"
+  | "ROUTINE_TRAVELER_STEP";
 
 export type ActivityCandidacyDecision = {
   activityCandidate: boolean;
@@ -86,6 +87,7 @@ export type ActivityCandidacyInput = DraftActivityCardInput & {
   hasAuditedCommitment?: boolean;
   intentBlockType?: IntentBlockType | null;
   isGenericOverview?: boolean;
+  isRoutineTravelerStep?: boolean;
   sourceSectionType?: string | null;
 };
 
@@ -99,6 +101,22 @@ const ADMIN_ITEM_TYPE_PATTERN =
 // proof must not be misread as permission to mint a generic Activity.
 const GENERIC_BOOKING_LABEL_PATTERN =
   /^(?:(?:guided|private|public|standard|general)\s+)?(?:admission|entry|pass|service|ticket|tour|voucher)(?:\s*\/\s*[\p{L}\s-]{2,40})?$/iu;
+
+export function isRoutineTravelerStepTitle(title: string | null | undefined) {
+  const normalized = normalizeText(title);
+
+  return (
+    /^(?:wake|get) up(?: early)?$/.test(normalized) ||
+    /(?:^| )(?:freshen up(?: (?:and )?(?:relax|rest)| quick nap| rest)?|quick nap|chill and relax)$/.test(
+      normalized
+    ) ||
+    /^arrive at (?:the )?location$/.test(normalized) ||
+    /^(?:the )?(?:hotel|hostel|airbnb|lodging|room) at \d{1,2}(?: \d{2})? (?:am|pm)(?: tired probably)?$/.test(
+      normalized
+    ) ||
+    /^change (?:the )?baby and (?:in|go to) bed\b/.test(normalized)
+  );
+}
 
 export function decideActivityCandidacy(
   input: ActivityCandidacyInput
@@ -155,6 +173,17 @@ export function decideActivityCandidacy(
   }
   if (explicitRole === "context") {
     return refused("context", "context", "EXPLICIT_CONTEXT", "source_structure");
+  }
+  // A clock time proves that a line belongs in the day's sequence; it does
+  // not make a personal routine or a represented travel/stay step a
+  // standalone traveler subject.
+  if (input.isRoutineTravelerStep) {
+    return refused(
+      "context",
+      "context",
+      "ROUTINE_TRAVELER_STEP",
+      "source_structure"
+    );
   }
   if (input.isGenericOverview || classifyDraftActivityCard(input).isOverviewActivity) {
     return refused("context", "context", "GENERIC_OVERVIEW", "source_structure");

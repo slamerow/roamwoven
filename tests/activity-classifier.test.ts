@@ -6,6 +6,7 @@ import {
   classifyRecoveredLineRole,
   decideActivityCandidacy,
   decideRecoveredActivityCandidacy,
+  isRoutineTravelerStepTitle,
   isSiteComponentTitlePair,
   resolveMentionCommitment,
   type IdeaListEntry,
@@ -152,6 +153,29 @@ export default async function run() {
           itemType: "activity",
         },
       },
+      {
+        expected: ["context", "ROUTINE_TRAVELER_STEP", false],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          hasAuditedCommitment: true,
+          isRoutineTravelerStep: true,
+          itemType: "activity",
+          startTime: "06:00",
+          title: "Wake up",
+        },
+      },
+      {
+        expected: ["activity", "AUDITED_COMMITMENT", false],
+        input: {
+          ...base,
+          evidenceRole: "atomic_candidate",
+          hasAuditedCommitment: true,
+          itemType: "activity",
+          startTime: "09:00",
+          title: "Wake up pastries from Panaderia Rosetta",
+        },
+      },
     ] as const;
     for (const row of matrix) {
       const decision = decideActivityCandidacy(row.input);
@@ -160,6 +184,11 @@ export default async function run() {
         row.expected
       );
     }
+    assert.equal(isRoutineTravelerStepTitle("Freshen up / quick nap"), true);
+    assert.equal(
+      isRoutineTravelerStepTitle("Wake up pastries from Panaderia Rosetta"),
+      false
+    );
   });
 
   await test("activity candidacy: recovery and primary agree on note and accessory refusals", () => {
