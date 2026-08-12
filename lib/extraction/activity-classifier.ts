@@ -564,6 +564,13 @@ export type IntentBlockEntry = {
   // context/note material. A date heading alone is never a boundary or an
   // intent signal.
   boundaryBefore: boolean;
+  // True when the traveler-authored source starts a new paragraph/list
+  // block. This boundary comes from source layout, not parser ordering.
+  authoredBlockStart: boolean;
+  // True when a dated traveler section is authored as one item per source
+  // paragraph. Parser presentation categories cannot turn that day list
+  // into recommendations by majority vote.
+  authoredDayList: boolean;
   category: string | null;
   date: string;
   hasExplicitChoice: boolean;
@@ -615,7 +622,6 @@ export type IntentBlockClassification = {
 };
 
 const INTENT_BLOCK_RADIUS_KM = 2;
-const DENSITY_REEVALUATION_FLOOR = 7;
 const LOGISTICS_PATTERN = /admin|logistics|errand|laundry/i;
 const EVIDENCE_PATTERN = /accessory|evidence|receipt|ticket_detail/i;
 
@@ -794,6 +800,7 @@ function recommendationMajority(entries: IntentBlockEntry[]) {
   const candidates = entries.filter(
     (entry) => strongIntent(entry) !== "logistics" && strongIntent(entry) !== "evidence"
   );
+  if (candidates.some((entry) => entry.authoredDayList)) return false;
   if (candidates.length < 3) return false;
   if (!candidates.every((entry) => entry.hasSourceStructure)) return false;
   const recommendationCount = candidates.filter((entry) =>
@@ -813,21 +820,6 @@ export function classifyIntentBlocks(
   const entryTypes = new Map<string, IntentBlockType>();
   const blocks: IntentBlockDecision[] = [];
   const datedCandidates = entries.filter((entry) => Boolean(entry.date));
-  const strongPlanDates = new Set(
-    datedCandidates
-      .filter((entry) => strongIntent(entry) === "plan")
-      .map((entry) => entry.date)
-  );
-  const candidateCountByDate = new Map<string, number>();
-  for (const entry of datedCandidates) {
-    const strong = strongIntent(entry);
-    if (strong === "logistics" || strong === "evidence") continue;
-    candidateCountByDate.set(
-      entry.date,
-      (candidateCountByDate.get(entry.date) ?? 0) + 1
-    );
-  }
-
   const components = sourceSegments(datedCandidates).flatMap((segment) =>
     geographicComponents(segment, geocodeVerificationRan)
   );
@@ -854,6 +846,9 @@ export function classifyIntentBlocks(
     const hasIdeaAnchor = component.some(
       (entry) => strongById.get(entry.id) === "ideas"
     );
+    const hasSitePlanAnchor = component.some(
+      (entry) => entry.hasSourceSupportedPlan
+    );
     const researchCount = component.filter(
       (entry) => entry.hasResearchEvidence
     ).length;
@@ -864,6 +859,22 @@ export function classifyIntentBlocks(
       neutralType = "plan";
       neutralReason =
         "source-contiguous block inherits fixed, sequenced, explicit-choice, or source-supported site-plan evidence";
+    } else if (component[0].authoredBlockStart) {
+      neutralType = "ideas";
+      neutralReason =
+        "a separate traveler-authored source block carries no commitment evidence";
+    } else if (component.some((entry) => entry.authoredDayList)) {
+      neutralType = "plan";
+      neutralReason =
+        "traveler authored the entries as a dated day list with no hedge or reference-list signal";
+    } else if (
+      component.some(
+        (entry) => entry.hasDayPlanMembership || entry.hasSequencedDayPlan
+      )
+    ) {
+      neutralType = "plan";
+      neutralReason =
+        "source-contiguous parser Activities carry day-plan membership or sequenced-day evidence with no contrary source-block boundary";
     } else if (hasIdeaAnchor || recommendationMajority(component)) {
       neutralType = "ideas";
       neutralReason =
@@ -872,21 +883,10 @@ export function classifyIntentBlocks(
       neutralType = "ambiguous";
       neutralReason =
         "multiple researched alternatives carry no source-supported selection; preserve pending one consolidated decision";
-    } else if (
-      component.some(
-        (entry) => entry.hasDayPlanMembership || entry.hasSequencedDayPlan
-      )
-    ) {
-      neutralType = "plan";
-      neutralReason =
-        "source-contiguous parser Activities carry day-plan membership or sequenced-day evidence with no contrary idea, hedge, or research evidence";
-    } else if (
-      strongPlanDates.has(date) &&
-      (candidateCountByDate.get(date) ?? 0) >= DENSITY_REEVALUATION_FLOOR
-    ) {
+    } else if (hasSitePlanAnchor) {
       neutralType = "ideas";
       neutralReason =
-        "density re-evaluation found a separate uncommitted block beside a source-supported plan block";
+        "source-supported site commitment is item-scoped and does not extend to a neighboring venue";
     } else {
       neutralType = "ambiguous";
       neutralReason =

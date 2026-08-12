@@ -91,6 +91,29 @@ export default async function run() {
     assert.equal(injectVerbatimActivityEvidence(noSource, null), null);
   });
 
+  await test("injection: a uniquely matching line on another dated day is not borrowed", () => {
+    const multiDaySource = [
+      "Saturday, January 19th",
+      "Schönbrunn Palace",
+      "",
+      "Sunday, January 20th",
+      "Cafe Central breakfast",
+    ].join("\n");
+    const wrongDay = payload({ date: "2019-01-19", title: "Cafe Central" });
+    assert.equal(
+      injectVerbatimActivityEvidence(wrongDay, multiDaySource),
+      "absent"
+    );
+    assert.equal(wrongDay.evidence, null);
+
+    const sourceDay = payload({ date: "2019-01-20", title: "Cafe Central" });
+    assert.equal(
+      injectVerbatimActivityEvidence(sourceDay, multiDaySource),
+      "line_match_injected"
+    );
+    assert.equal(sourceDay.evidence, "Cafe Central breakfast");
+  });
+
   await test("injection end-to-end: own-text stamping judges the injected quote — castle survives absorbed hedges, R2D2 still demotes", () => {
     const stage: EvidenceStageInput = {
       label: "Wednesday, January 16th",

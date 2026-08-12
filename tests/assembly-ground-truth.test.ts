@@ -4,6 +4,7 @@ import { createStructuredTripRecordsFromDraft } from "@/lib/extraction/draft-to-
 import type { StructuredTripRecords } from "@/lib/generated-trip-model";
 import {
   createCentralEuropeGroundTruthDraft,
+  createCentralEuropeGroundTruthSourceText,
   groundTruthChecks,
 } from "@/tests/fixtures/central-europe-ground-truth";
 
@@ -25,12 +26,12 @@ function assembleGroundTruthRecords(): StructuredTripRecords {
       {
         label: "Central Europe ground-truth source",
         source: "model_spine",
+        sourceText: createCentralEuropeGroundTruthSourceText(),
         stage: draft,
       },
     ],
     tripOverview: draft.tripOverview,
   });
-
   return createStructuredTripRecordsFromDraft({
     draft: clustered.draft,
     fallbackTripName: "Central Europe",

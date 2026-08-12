@@ -122,7 +122,10 @@ export default async function run() {
     const { draft, records } = clusterAndCompile([
       stage({
         label: "florence-clean",
-        sourceText: activities.map((item) => item.title).join("\n\n"),
+        sourceText: [
+          "Sunday, May 2nd",
+          ...activities.map((item) => item.title),
+        ].join("\n\n"),
         value: emptyStage({
           activities,
           places: [{

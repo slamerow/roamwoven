@@ -33,6 +33,8 @@ function stage(label: string, value: Record<string, unknown>): EvidenceStageInpu
     label,
     source: "model_chunk",
     sourceFilename: `${label}.txt`,
+    sourceText:
+      typeof value.sourceText === "string" ? value.sourceText : null,
     stage: value,
   };
 }
@@ -470,6 +472,17 @@ export default async function run() {
         stage(
           "Saturday, January 19th",
           emptyStage({
+            sourceText: [
+              "Saturday, January 19th",
+              "Schönbrunn Palace visit",
+              "Gloriette",
+              "Orangeriegarten at Schönbrunn",
+              "Palm House at Schönbrunn",
+              "Apple Strudel Show",
+              "Panorama Train",
+              "",
+              "Modern Art Museum or Design Museum",
+            ].join("\n"),
             activities: [
               activity({
                 date: "2019-01-19",
@@ -556,7 +569,6 @@ export default async function run() {
     const draft = result.draft as Draft;
     const { children, parent } = parentedTitles(draft, /schönbrunn palace/i);
     const visibleTitles = draft.activities.map((item) => String(item.title));
-
     assert.ok(parent, "the palace container survives as a top-level card");
     assert.equal(
       children.length,

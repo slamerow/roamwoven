@@ -49,11 +49,16 @@ function activity({
   };
 }
 
-function stage(label: string, value: Record<string, unknown>): EvidenceStageInput {
+function stage(
+  label: string,
+  value: Record<string, unknown>,
+  sourceText: string | null = null
+): EvidenceStageInput {
   return {
     label,
     source: "model_chunk",
     sourceFilename: "czech-out.pdf",
+    sourceText,
     stage: value,
   };
 }
@@ -164,13 +169,27 @@ export default async function run() {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
-        stage(JAN_19_LABEL, emptyStage({ activities: dayPlanActivities })),
+        stage(
+          JAN_19_LABEL,
+          emptyStage({ activities: dayPlanActivities }),
+          [
+            JAN_19_LABEL,
+            "Schönbrunn Palace",
+            "Gloriette",
+            "Orangeriegarten at Schönbrunn",
+            "Palm House at Schönbrunn",
+            "Apple Strudel Show",
+            "Panorama Train pass",
+            "",
+            "Ferris wheel",
+            "The Prater",
+          ].join("\n")
+        ),
         notesBlobStage,
       ],
       tripOverview: { dateRange: "January 12-25, 2019" },
     });
     const draft = result.draft as Draft;
-
     // The source commits the site family to the day plan, so every member
     // survives as a dated card even though the source does not author enough
     // containment to nest them.

@@ -56,6 +56,8 @@ function stage(label: string, value: Record<string, unknown>): EvidenceStageInpu
     label,
     source: "model_chunk",
     sourceFilename: `${label}.txt`,
+    sourceText:
+      typeof value.sourceText === "string" ? value.sourceText : null,
     stage: value,
   };
 }
@@ -219,6 +221,12 @@ export default async function run() {
         stage(
           "jan-19",
           emptyStage({
+            sourceText: [
+              "Saturday, January 19th",
+              "Schönbrunn Palace",
+              "Gloriette",
+              "Palm House at Schönbrunn",
+            ].join("\n"),
             activities: [
               activity({
                 title: "Schönbrunn Palace",

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -14,20 +15,6 @@ const rootDir = path.resolve(
   ".."
 );
 const originalResolveFilename = Module._resolveFilename;
-const asynchronousFailures = [];
-
-// Several suites use node:test internally while this repository's outer
-// runner invokes exported test functions. An assertion scheduled by an
-// inner suite can otherwise fire after that suite reports complete and Node
-// may print the uncaught error while still returning success. A dark-factory
-// gate must turn every such late failure into a non-zero result.
-process.on("uncaughtException", (error) => {
-  asynchronousFailures.push(error);
-});
-process.on("unhandledRejection", (error) => {
-  asynchronousFailures.push(error);
-});
-
 Module._resolveFilename = function resolveAlias(request, parent, isMain, options) {
   if (request.startsWith("@/")) {
     return originalResolveFilename.call(
@@ -100,6 +87,9 @@ function listTestFiles(dir) {
 
 const require = Module.createRequire(import.meta.url);
 const testFiles = listTestFiles(path.join(rootDir, "tests"));
+const fileArgumentIndex = process.argv.indexOf("--file");
+const selectedFile =
+  fileArgumentIndex >= 0 ? process.argv[fileArgumentIndex + 1] : null;
 
 if (testFiles.length === 0) {
   // Zero tests is a broken gate, never a pass (dark-factory honesty).
@@ -107,7 +97,7 @@ if (testFiles.length === 0) {
   process.exit(1);
 }
 
-for (const file of testFiles) {
+async function runFile(file) {
   if (file.endsWith(".mjs")) {
     const module = await import(file);
     const run = module.default ?? module.run;
@@ -123,16 +113,34 @@ for (const file of testFiles) {
       await run();
     }
   }
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-if (asynchronousFailures.length > 0) {
-  for (const failure of asynchronousFailures) {
-    console.error(failure instanceof Error ? failure.stack : failure);
+if (selectedFile) {
+  if (!testFiles.includes(selectedFile)) {
+    console.error(`Unknown test file: ${selectedFile}`);
+    process.exit(1);
   }
-  throw new Error(
-    `${asynchronousFailures.length} asynchronous test failure(s) escaped their suite.`
-  );
+  await runFile(selectedFile);
+} else {
+  // Each file gets its own process. Some suites use node:test while older
+  // suites throw assertions directly; mixing both styles in one process lets
+  // node:test attribute a later file's assertion to an already-finished test.
+  // Process isolation makes the exit status honest and keeps the runner small.
+  const failedFiles = [];
+  for (const file of testFiles) {
+    const child = spawnSync(
+      process.execPath,
+      [fileURLToPath(import.meta.url), "--file", file],
+      { cwd: rootDir, env: process.env, stdio: "inherit" }
+    );
+    if (child.error) throw child.error;
+    if (child.status !== 0) failedFiles.push(file);
+  }
+  if (failedFiles.length > 0) {
+    console.error(
+      `Failed ${failedFiles.length} test file${failedFiles.length === 1 ? "" : "s"}:\n${failedFiles.join("\n")}`
+    );
+    process.exit(1);
+  }
+  console.log(`Passed ${testFiles.length} test file${testFiles.length === 1 ? "" : "s"}.`);
 }
-
-console.log(`Passed ${testFiles.length} test file${testFiles.length === 1 ? "" : "s"}.`);

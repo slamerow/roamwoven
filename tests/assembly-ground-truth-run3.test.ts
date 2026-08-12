@@ -36,8 +36,12 @@ function emptyStage(value: Record<string, unknown>) {
   };
 }
 
-function stage(label: string, stageValue: Record<string, unknown>) {
-  return { label, source: "model_chunk" as const, stage: stageValue };
+function stage(
+  label: string,
+  stageValue: Record<string, unknown>,
+  sourceText?: string
+) {
+  return { label, source: "model_chunk" as const, sourceText, stage: stageValue };
 }
 
 type Draft = {
@@ -353,24 +357,32 @@ export default async function run() {
             { arriveDate: "2019-01-18", city: "Vienna", country: "Austria", leaveDate: "2019-01-21" },
           ],
         })),
-        stage("Sunday, January 20th", emptyStage({
-          activities: [
-            {
-              category: "art_culture",
-              date: "2019-01-20",
-              description: "St Stephens Cathedral",
-              itemType: "activity",
-              title: "St. Stephen's Cathedral",
-            },
-            {
-              category: "food_dining",
-              date: "2019-01-20",
-              description: "Breakfast at Cafe Central.",
-              itemType: "activity",
-              title: "Cafe Central breakfast",
-            },
-          ],
-        })),
+        stage(
+          "Sunday, January 20th",
+          emptyStage({
+            activities: [
+              {
+                category: "art_culture",
+                date: "2019-01-20",
+                description: "St Stephens Cathedral",
+                itemType: "activity",
+                title: "St. Stephen's Cathedral",
+              },
+              {
+                category: "food_dining",
+                date: "2019-01-20",
+                description: "Breakfast at Cafe Central.",
+                itemType: "activity",
+                title: "Cafe Central breakfast",
+              },
+            ],
+          }),
+          [
+            "Sunday, January 20th",
+            "St. Stephen's Cathedral",
+            "Cafe Central breakfast",
+          ].join("\n")
+        ),
       ],
       tripOverview: TRIP_OVERVIEW,
     });

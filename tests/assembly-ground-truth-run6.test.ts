@@ -36,8 +36,12 @@ function emptyStage(value: Record<string, unknown>) {
   };
 }
 
-function stage(label: string, stageValue: Record<string, unknown>) {
-  return { label, source: "model_chunk" as const, stage: stageValue };
+function stage(
+  label: string,
+  stageValue: Record<string, unknown>,
+  sourceText?: string
+) {
+  return { label, source: "model_chunk" as const, sourceText, stage: stageValue };
 }
 
 type Draft = {
@@ -563,28 +567,35 @@ export default async function run() {
             { arriveDate: "2019-01-18", city: "Vienna", country: "Austria", leaveDate: "2019-01-21" },
           ],
         })),
-        stage("Sunday, January 20th", emptyStage({
-          activities: [
-            {
-              category: "art_culture",
-              city: "Vienna",
-              date: "2019-01-20",
-              description: "St. Stephen's Cathedral.",
-              itemType: "activity",
-              sourceSectionLabel: "Sunday, January 20th",
-              title: "St. Stephen's Cathedral",
-            },
-            {
-              category: "art_culture",
-              city: "Vienna",
-              date: null,
-              description: "St Stephens Cathedral.",
-              itemType: "activity",
-              sourceSectionLabel: "Sunday, January 20th",
-              title: "St. Stephen's Cathedral",
-            },
-          ],
-        })),
+        stage(
+          "Sunday, January 20th",
+          emptyStage({
+            activities: [
+              {
+                category: "art_culture",
+                city: "Vienna",
+                date: "2019-01-20",
+                description: "St. Stephen's Cathedral.",
+                itemType: "activity",
+                sourceSectionLabel: "Sunday, January 20th",
+                title: "St. Stephen's Cathedral",
+              },
+              {
+                category: "art_culture",
+                city: "Vienna",
+                date: null,
+                description: "St Stephens Cathedral.",
+                itemType: "activity",
+                sourceSectionLabel: "Sunday, January 20th",
+                title: "St. Stephen's Cathedral",
+              },
+            ],
+          }),
+          [
+            "Sunday, January 20th",
+            "St. Stephen's Cathedral",
+          ].join("\n")
+        ),
       ],
       tripOverview: TRIP_OVERVIEW,
     });

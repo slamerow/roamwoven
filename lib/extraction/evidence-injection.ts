@@ -27,6 +27,7 @@
 //     observations, never changes dispositions (RW-EVD-001), never retries.
 
 import { isBoilerplateSourceLine, distinctiveLineTokens } from "@/lib/extraction/source-coverage";
+import { normalizeTripDate } from "@/lib/extraction/traveler-text";
 
 export type EvidenceProvenance =
   | "model_verbatim"
@@ -35,6 +36,8 @@ export type EvidenceProvenance =
   | "absent";
 
 const MAX_INJECTED_EVIDENCE_CHARS = 500;
+const SOURCE_DATE_HEADING_PATTERN =
+  /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}/i;
 
 function foldForMatch(value: string) {
   return value
@@ -105,9 +108,24 @@ export function injectVerbatimActivityEvidence(
 
   const matches: number[] = [];
   const lineTokenSets = lines.map((line) => new Set(distinctiveLineTokens(line)));
+  const payloadDate = stringField(payload, "date");
+  const defaultYear = payloadDate
+    ? Number(/^(?:19|20)\d{2}/.exec(payloadDate)?.[0] ?? "") || null
+    : null;
+  let activeSourceDate: string | null = null;
+  const lineDates = lines.map((line) => {
+    if (SOURCE_DATE_HEADING_PATTERN.test(line)) {
+      activeSourceDate = normalizeTripDate(line, defaultYear) ?? activeSourceDate;
+    }
+    return activeSourceDate;
+  });
   lines.forEach((line, index) => {
     const tokens = lineTokenSets[index];
-    if (titleTokens.every((token) => tokens.has(token))) {
+    const sourceDate = lineDates[index];
+    if (
+      titleTokens.every((token) => tokens.has(token)) &&
+      (!payloadDate || !sourceDate || sourceDate === payloadDate)
+    ) {
       matches.push(index);
     }
   });

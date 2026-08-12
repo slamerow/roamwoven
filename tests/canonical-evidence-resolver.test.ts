@@ -326,7 +326,10 @@ export default async function run() {
 
   await test("blank-separated source blocks cannot be collapsed by lookup", () => {
     const titles = ["Schonbrunn Palace", "Prater Ferris Wheel", "Albertina"];
-    const input = stage(titles, titles.join("\n\n"));
+    const input = stage(
+      titles,
+      ["Wednesday, April 2nd", ...titles].join("\n\n")
+    );
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [{
         candidateIds: ["stage-1-item-1", "stage-1-item-2", "stage-1-item-3"],

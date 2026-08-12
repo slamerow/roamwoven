@@ -1162,14 +1162,7 @@ function timeFrom(record: Record<string, unknown>) {
 }
 
 function isRentalPickup(record: Record<string, unknown>) {
-  if (isSourceFactAssemblyAuthorityEnabled()) {
-    return isRentalCarPickupCandidate(record);
-  }
-  return /\b(?:pick\s*up|pickup).{0,30}\b(?:rental\s*)?car\b|\brental\s*car.{0,30}\b(?:pick\s*up|pickup)\b/.test(
-    normalizeText(
-      [record.title, record.description].filter(Boolean).join(" ")
-    )
-  );
+  return isRentalCarPickupCandidate(record);
 }
 
 function activityMatchReason(
@@ -1181,7 +1174,6 @@ function activityMatchReason(
   const datesMatch = sameOrMissingDate(left, right);
 
   if (
-    isSourceFactAssemblyAuthorityEnabled() &&
     datesMatch &&
     (!leftTime || !rightTime || leftTime === rightTime) &&
     isRentalPickup(left) &&
@@ -1219,15 +1211,6 @@ function activityMatchReason(
 
   if (leftConfirmation && leftConfirmation === rightConfirmation) {
     return "shared booking identity";
-  }
-
-  if (
-    !isSourceFactAssemblyAuthorityEnabled() &&
-    datesMatch &&
-    isRentalPickup(left) &&
-    isRentalPickup(right)
-  ) {
-    return "same rental-car pickup";
   }
 
   const leftDate = stringValue(left, "date");
@@ -3198,7 +3181,6 @@ function mergeCanonicalPieceInto({
     }
   }
   if (
-    isSourceFactAssemblyAuthorityEnabled() &&
     target.kind === "activity" &&
     source.kind === "activity" &&
     isRentalCarPickupCandidate(target.payload) &&
@@ -3261,6 +3243,9 @@ function convertCanonicalTransportToActivity(
   reason: string
 ) {
   const scenicRide = isScenicRideCandidate(travelBoundaryRecord(piece));
+  const rentalPickup = isRentalCarPickupCandidate(
+    travelBoundaryRecord(piece)
+  );
   piece.kind = "activity";
   piece.role = "atomic_candidate";
   piece.payload = {
@@ -3281,14 +3266,18 @@ function convertCanonicalTransportToActivity(
     endTime:
       piece.payload.endTime ??
       piece.payload.dropOffTime ??
-      piece.payload.arrivalTime ??
+      (rentalPickup
+        ? piece.payload.departureTime ?? piece.payload.arrivalTime
+        : piece.payload.arrivalTime) ??
       null,
     evidenceRole: "atomic_candidate",
     itemType: "activity",
     startTime:
       piece.payload.startTime ??
       piece.payload.pickupTime ??
-      piece.payload.departureTime ??
+      (rentalPickup
+        ? piece.payload.arrivalTime ?? piece.payload.departureTime
+        : piece.payload.departureTime) ??
       piece.payload.time ??
       null,
   };
@@ -4566,8 +4555,11 @@ function suppressRepresentedTravelAndStayActivities(
     }
 
     const sameDateStays = stays.filter((stay) => {
-      const checkIn = stringValue(stay.payload, "checkIn") ??
-        stringValue(stay.payload, "firstNightDate");
+      // A stay may carry an administrative check-in date inherited from the
+      // overnight arrival while its first covered night is the next calendar
+      // day. Routine bag-drop/check-in flow belongs to that covered night.
+      const checkIn = stringValue(stay.payload, "firstNightDate") ??
+        stringValue(stay.payload, "checkIn");
       const activityDate = stringValue(activity.payload, "date");
 
       return Boolean(
@@ -9423,6 +9415,24 @@ function tokenEditDistance(left: string, right: string) {
   return previous[right.length];
 }
 
+function titleTokensApproximatelyContain(
+  container: string[],
+  contained: string[]
+) {
+  return (
+    contained.length > 0 &&
+    contained.every((token) =>
+      container.some(
+        (candidate) =>
+          token === candidate ||
+          (Math.min(token.length, candidate.length) >= 5 &&
+            token.slice(-2) === candidate.slice(-2) &&
+            tokenEditDistance(token, candidate) <= 2)
+      )
+    )
+  );
+}
+
 function collapseCrossReferencedSameDayVenueAliases(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
@@ -9476,6 +9486,8 @@ function collapseCrossReferencedSameDayVenueAliases(
           stringValue(right.payload, "title")
         );
         if (!leftTitle || !rightTitle || leftTitle === rightTitle) continue;
+        const leftTitleTokens = identityTokens(leftTitle);
+        const rightTitleTokens = identityTokens(rightTitle);
         // A site container that names one of its stops in prose is describing
         // containment, not declaring a localized/alternate name. Identity is
         // deliberately blind to that parent/component edge; the grouping
@@ -9528,7 +9540,15 @@ function collapseCrossReferencedSameDayVenueAliases(
         const rightOwnText = identityOwnedObservationText(right, rightTitle);
         const crossReferenced =
           leftOwnText.some((text) => text.includes(rightTitle)) ||
-          rightOwnText.some((text) => text.includes(leftTitle));
+          rightOwnText.some((text) => text.includes(leftTitle)) ||
+          (titleTokensApproximatelyContain(
+            leftTitleTokens,
+            rightTitleTokens
+          ) &&
+            titleTokensApproximatelyContain(
+              rightTitleTokens,
+              leftTitleTokens
+            ));
         if (!crossReferenced) continue;
         const sourceVerbatimTitleScore = (
           piece: CanonicalEvidencePiece,
@@ -10027,8 +10047,8 @@ function sourceOccurrencesForPiece(
 //
 // - the source must contain a named site container;
 // - at least two later titles must literally say "at/inside/within <site>";
-// - an unqualified tail is admitted only when the source itself closes the
-//   run with an independently researched/available next record;
+// - an unqualified member is admitted only when an atomic site record names
+//   it; a model grouping proposal cannot widen the scope;
 // - no coordinate, address, shared-day density, or model grouping proposal
 //   participates.
 //
@@ -10100,33 +10120,17 @@ function sourceSequencedSiteVisitPlanPieceIds(
       const explicitLines = new Set(explicitMembers.map((entry) => entry.line));
       if (explicitLines.size < 2) continue;
 
-      const lastExplicitLine = Math.max(...explicitLines);
-      const boundary = lane.find((entry) => {
-        if (entry.line <= lastExplicitLine) return false;
-        const ownText = [
-          stringValue(entry.piece.payload, "title"),
-          stringValue(entry.piece.payload, "description"),
-          stringValue(entry.piece.payload, "evidence"),
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const classification = classifyDraftActivityCard(
-          activityInput(entry.piece.payload)
+      planned.add(container.piece.id);
+      for (const entry of lane.slice(containerIndex + 1)) {
+        const memberTitle = normalizedComparable(
+          stringValue(entry.piece.payload, "title")
         );
-        return Boolean(
-          /\b(?:open(?:ing)?(?: hours?)?|closes?|closed|last (?:entry|tour)|until|hours?:)\b/i.test(
-            ownText
-          ) ||
-            classification.hasWeakRecommendationMarker ||
-            hasLooseTipVocabulary(ownText)
-        );
-      });
-      const exclusiveEndLine = boundary?.line ?? lastExplicitLine + 1;
-
-      for (const entry of lane) {
         if (
-          entry.line >= container.line &&
-          entry.line < exclusiveEndLine
+          explicitMembers.includes(entry) ||
+          (memberTitle &&
+            normalizedComparable(
+              stringValue(container.piece.payload, "description") ?? ""
+            ).includes(memberTitle))
         ) {
           planned.add(entry.piece.id);
         }
@@ -10180,8 +10184,6 @@ function sourceSequencedIdentityDate(
   const candidacy = canonicalCandidacyDecision(piece);
   const classifiedDate = stringValue(candidacy, "classifiedDate");
   const exactPlannedOccurrence =
-    isSourceFactAssemblyAuthorityEnabled() &&
-    piece.observationIds.length === 1 &&
     stringValue(candidacy, "reasonCode") === "BLOCK_PLAN" &&
     Boolean(stringValue(candidacy, "referenceNoteObservationId")) &&
     classifiedDate
@@ -10262,6 +10264,16 @@ function hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
   observationById: Map<string, EvidenceObservation>
 ) {
   if (authoritativeActivityCommitment(piece) !== "sequenced") return false;
+  // This fallback exists for a source-backed day plan whose exact line
+  // telemetry was lost. Parser adjacency alone is not source authority: a
+  // loose venue beside timed cards must not become the chosen occurrence of
+  // an otherwise uncommitted cross-day repeat.
+  const hasSourceSupport = piece.observationIds.some(
+    (observationId) =>
+      observationById.get(observationId)?.payload._sourceSupport ===
+      "supported"
+  );
+  if (!hasSourceSupport) return false;
   const classifiedDate = stringValue(
     canonicalCandidacyDecision(piece),
     "classifiedDate"
@@ -10302,50 +10314,56 @@ function pieceHasSourceSupportedPeerPlanShape(
       (!date || !stringValue(candidate.payload, "date") ||
         stringValue(candidate.payload, "date") === date)
   );
-  if (
-    peers.some((candidate) =>
-      containmentTitleConflict(
-        title,
-        stringValue(candidate.payload, "title")
-      )
-    )
-  ) {
-    return true;
-  }
   const comparableTitle = normalizedComparable(title);
+  if (!comparableTitle) return false;
+
   if (
-    comparableTitle &&
-    peers.some((candidate) => {
-      const candidateTitle = stringValue(candidate.payload, "title") ?? "";
-      const isNamedSite = peers.some(
-        (other) =>
-          other !== candidate &&
-          containmentTitleConflict(
-            candidateTitle,
-            stringValue(other.payload, "title")
-          )
-      );
-      return (
-        isNamedSite &&
-        normalizedComparable(
-          stringValue(candidate.payload, "description") ?? ""
-        ).includes(comparableTitle)
-      );
-    })
+    SITE_CONTAINER_NOUN_PATTERN.test(title) &&
+    peers.filter(
+      (candidate) =>
+        candidate.role !== "grouping_proposal" &&
+        candidate.payload._sourceSupport !== "unsupported" &&
+        containmentTitleConflict(
+          stringValue(candidate.payload, "title"),
+          title
+        )
+    ).length >= 2
   ) {
     return true;
   }
 
-  const area = normalizedComparable(stringValue(piece.payload, "area"));
-  if (!area || !date || !pieceAreaSourceSupported(piece)) return false;
-  return (
-    pieces.filter(
-      (candidate) =>
-        candidate.kind === "activity" &&
-        stringValue(candidate.payload, "date") === date &&
-        normalizedComparable(stringValue(candidate.payload, "area")) === area &&
-        pieceAreaSourceSupported(candidate)
-    ).length >= 3
+  const namedSite = peers.find((candidate) => {
+    if (
+      candidate.role === "grouping_proposal" ||
+      !SITE_CONTAINER_NOUN_PATTERN.test(
+        stringValue(candidate.payload, "title") ?? ""
+      )
+    ) {
+      return false;
+    }
+    return peers.some(
+      (other) =>
+        other !== candidate &&
+        containmentTitleConflict(
+          stringValue(candidate.payload, "title"),
+          stringValue(other.payload, "title")
+        )
+    );
+  });
+  if (!namedSite) return false;
+
+  // Explicit "X at Site" wording is direct source membership. Otherwise an
+  // unqualified component is protected only when the atomic site's own
+  // description names it. A model grouping proposal is intentionally never
+  // allowed to widen that scope.
+  return Boolean(
+    containmentTitleConflict(
+      title,
+      stringValue(namedSite.payload, "title")
+    ) ||
+      normalizedComparable(
+        stringValue(namedSite.payload, "description") ?? ""
+      ).includes(comparableTitle)
   );
 }
 
@@ -10372,6 +10390,60 @@ function authoritativeActivityCommitment(piece: CanonicalEvidencePiece) {
   return "none" as const;
 }
 
+function activityIdentityCommitment(piece: CanonicalEvidencePiece) {
+  const commitment = authoritativeActivityCommitment(piece);
+  if (commitment !== "fixed") return commitment;
+
+  const signals = canonicalCandidacyDecision(piece).commitmentSignals;
+  // A bare entry in a traveler-authored day list proves that the item belongs
+  // to the itinerary, but it does not prove two independent visits when the
+  // same identity is listed on two days. Keep that distinction local to
+  // repeat resolution: times, bookings, meal slots, and explicit source
+  // language remain genuinely fixed commitments.
+  return Array.isArray(signals) &&
+    signals.length > 0 &&
+    signals.every((signal) => signal === "authored_day_list")
+    ? ("sequenced" as const)
+    : commitment;
+}
+
+function hasExactSourceOccurrenceOnClassifiedDate(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  const classifiedDate = stringValue(
+    canonicalCandidacyDecision(piece),
+    "classifiedDate"
+  );
+  if (!classifiedDate) return false;
+
+  return piece.observationIds.some((observationId) => {
+    const observation = observationById.get(observationId);
+    if (!observation) return false;
+    const position = asRecord(observation.payload._canonicalSourcePosition);
+    const line = Number(position.line);
+    const stageIndex = Number(position.stageIndex);
+    const sourceIdentityHash = stringValue(position, "sourceIdentityHash");
+    const occurrences = observation.payload._canonicalSourceOccurrences;
+    return Boolean(
+      Number.isFinite(line) &&
+        Number.isFinite(stageIndex) &&
+        sourceIdentityHash &&
+        Array.isArray(occurrences) &&
+        occurrences.some((rawOccurrence) => {
+          const occurrence = asRecord(rawOccurrence);
+          return (
+            stringValue(occurrence, "date") === classifiedDate &&
+            Number(occurrence.line) === line &&
+            Number(occurrence.stageIndex) === stageIndex &&
+            stringValue(occurrence, "sourceIdentityHash") ===
+              sourceIdentityHash
+          );
+        })
+    );
+  });
+}
+
 function activityHasIdentityWinningEvidence({
   note,
   observationById,
@@ -10392,18 +10464,37 @@ function activityHasIdentityWinningEvidence({
       stringValue(pieceDecision, "classifiedDate") ===
       stringValue(noteDecision, "classifiedDate")
   );
+  const identityOccurrences = sourceOccurrencesForPiece(
+    piece,
+    observationById,
+    { identityTitleOnly: true }
+  );
+  const deliberatePlanCanDefeatRepeat = Boolean(
+    identityOccurrences.length <= 1 ||
+      identityTokens(stringValue(piece.payload, "title")).length <= 1
+  );
+  const authoredDayListPlan = Boolean(
+    authoritativeActivityCommitment(piece) === "fixed" &&
+      Array.isArray(pieceDecision.commitmentSignals) &&
+      pieceDecision.commitmentSignals.includes("authored_day_list")
+  );
   // A single dated day-plan occurrence may defeat a duplicate reference
   // note. Once the same identity appears on multiple dates, block-inherited
   // `plan` is only placement evidence: the venue needs its own fixed or
   // source-sequenced proof before it can defeat the City Note home.
   return Boolean(
-    authoritativeActivityCommitment(piece) === "fixed" ||
+    (authoritativeActivityCommitment(piece) === "fixed" &&
+      (!authoredDayListPlan || deliberatePlanCanDefeatRepeat)) ||
       sourceSequencedIdentityDate(piece, observationById) ||
       sameAuthoritativeOccurrence ||
-      hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
-        piece,
-        observationById
-      )
+      (deliberatePlanCanDefeatRepeat &&
+        authoritativeActivityCommitment(piece) === "sequenced" &&
+        hasExactSourceOccurrenceOnClassifiedDate(piece, observationById)) ||
+      (deliberatePlanCanDefeatRepeat &&
+        hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
+          piece,
+          observationById
+        ))
   );
 }
 
@@ -10538,7 +10629,7 @@ function resolveUncommittedRepeatMentions(
 
     const ranked = group
       .map((piece) => ({
-        commitment: authoritativeActivityCommitment(piece),
+        commitment: activityIdentityCommitment(piece),
         piece,
       }))
       .sort(
@@ -10655,6 +10746,10 @@ function resolveUncommittedRepeatMentions(
     if (!committedMentionPieceCandidate(piece)) continue;
     const title = normalizedComparable(stringValue(piece.payload, "title"));
     if (!title || questionSubjects.has(title)) continue;
+    // A single already-collapsed piece keeps its fixed classified date. The
+    // softer authored-day-list treatment above is only for choosing between
+    // two actual dated records; occurrence telemetry alone may include an
+    // earlier prose mention that was never its own Activity.
     if (authoritativeActivityCommitment(piece) === "fixed") continue;
     if (authoritativeActivityCommitment(piece) === "sequenced") {
       const classifiedDate = stringValue(
@@ -11311,6 +11406,258 @@ function intentSourceKey(observation: EvidenceObservation) {
   ].join("|");
 }
 
+type AuthoredSourceBlock = {
+  dayIdea: boolean;
+  endLine: number;
+  id: string;
+  ideaList: boolean;
+  paginationContinuation: boolean;
+  singletonDayList: boolean;
+  sourceDate: string | null;
+  startLine: number;
+  text: string;
+};
+
+// Source paragraphs are semantic boundaries supplied by the traveler. Keep
+// them available to the intent classifier instead of asking geocodes, parser
+// array adjacency, or a model-authored summary to rediscover those blocks.
+// Line numbers use the same 1-based convention as _canonicalSourcePosition.
+function authoredSourceBlocksForStage(
+  stageIndex: number,
+  stageInput: EvidenceStageInput,
+  tripYear: number | null
+) {
+  const blocks: AuthoredSourceBlock[] = [];
+  const lines = (stageInput.sourceText ?? "").split(/\r?\n/);
+  let startLine: number | null = null;
+
+  const close = (endLine: number) => {
+    if (startLine === null || endLine < startLine) return;
+    const sourceIdentity = normalizeText(
+      stageInput.sourceUploadId ??
+        stageInput.sourceFilename ??
+        stageInput.sourceProvenance ??
+        stageInput.label
+    );
+    const text = lines.slice(startLine - 1, endLine).join("\n");
+    blocks.push({
+      dayIdea: false,
+      endLine,
+      id: `authored-source-block-${stableHash({
+        sourceIdentity,
+        stageIndex,
+        startLine,
+        text: normalizeText(text),
+      })}`,
+      ideaList: false,
+      paginationContinuation: /^\s*===\s*page\s+\d+\s*===/i.test(text),
+      singletonDayList: false,
+      sourceDate: null,
+      startLine,
+      text,
+    });
+    startLine = null;
+  };
+
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    if (!line.trim()) {
+      close(lineNumber - 1);
+      return;
+    }
+    if (startLine === null) startLine = lineNumber;
+  });
+  close(lines.length);
+
+  // Keep each paragraph tied to the latest source-authored day heading. A
+  // parser card dated Jan 19 must not borrow a uniquely matching Jan 20 line
+  // and then treat that borrowed line as proof of a Jan 19 commitment.
+  let activeSourceDate = normalizeTripDate(stageInput.label, tripYear);
+  for (const block of blocks) {
+    const firstLine = block.text.split(/\r?\n/, 1)[0]?.trim() ?? "";
+    const headingDate = DAY_PLAN_LABEL_PATTERN.test(normalizeText(firstLine))
+      ? normalizeTripDate(firstLine, tripYear)
+      : null;
+    if (headingDate) activeSourceDate = headingDate;
+    block.sourceDate = activeSourceDate;
+  }
+
+  // PDF pagination is not traveler intent, but its exception is local. The
+  // block that starts with `=== Page N ===` may continue a source list across
+  // the page boundary; later paragraphs on that same day do not inherit that
+  // status. Treating the rest of the document as one continuation promoted
+  // unrelated reference prose such as Budapest language notes into cards.
+
+  const datedHeadingIndex = blocks.findIndex((block) =>
+    DAY_PLAN_LABEL_PATTERN.test(normalizeText(block.text))
+  );
+  const dayBlocks =
+    datedHeadingIndex >= 0 ? blocks.slice(datedHeadingIndex + 1) : [];
+  const substantiveDayBlocks = dayBlocks.filter(
+    (block) =>
+      normalizeText(block.text).length > 1 &&
+      !/^===\s*page\b|^\[(?:no readable text|embedded image)/i.test(
+        block.text.trim()
+      )
+  );
+  const singleLineDayBlockCount = substantiveDayBlocks.filter(
+    (block) => block.startLine === block.endLine
+  ).length;
+  const singletonDayList = Boolean(
+    singleLineDayBlockCount >= 3 &&
+      singleLineDayBlockCount >= substantiveDayBlocks.length - 1
+  );
+  if (singletonDayList) {
+    for (const block of substantiveDayBlocks) block.singletonDayList = true;
+  }
+
+  // Some source readers preserve a day as one paragraph with a heading on
+  // the first line and one itinerary item on each following line. That is
+  // the same traveler-authored list shape as blank-separated singletons, not
+  // a prose recommendation block. Recognize each such dated block directly
+  // so a multi-day source stage and a single-day chunk behave identically.
+  for (const block of blocks) {
+    const blockLines = block.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (
+      blockLines.length >= 4 &&
+      DAY_PLAN_LABEL_PATTERN.test(normalizeText(blockLines[0]))
+    ) {
+      block.singletonDayList = true;
+    }
+  }
+
+  // A dated list whose first authored subject is explicitly uncertain is an
+  // ideas day, even when later parser records lose that question mark. This
+  // covers source shapes such as "Nikko?" followed by candidate stops and
+  // "Day trip Nara? / Osaka?" without teaching the classifier venue names.
+  const firstDaySubject = substantiveDayBlocks[0];
+  if (
+    firstDaySubject &&
+    (/\?/.test(firstDaySubject.text) ||
+      hasWeakRecommendationLanguage(firstDaySubject.text))
+  ) {
+    for (const block of dayBlocks) block.dayIdea = true;
+  }
+
+  // A run of numbered source paragraphs is a reference list when at least
+  // one numbered member explicitly says it is optional/recommended. Keep
+  // that source-authored list boundary intact even when the parser drops the
+  // leading number or hedge from an individual child record.
+  const numbered = blocks.filter((block) => /^\s*\d+\)/.test(block.text));
+  if (
+    numbered.length >= 2 &&
+    numbered.some((block) => hasLooseTipVocabulary(block.text))
+  ) {
+    for (const block of numbered) block.ideaList = true;
+  }
+
+  return blocks;
+}
+
+function stampAuthoredSourceBlocks(
+  stages: EvidenceStageInput[],
+  observations: EvidenceObservation[],
+  tripYear: number | null
+) {
+  const blocksByStage = new Map(
+    stages.map((stageInput, stageIndex) => [
+      stageIndex,
+      authoredSourceBlocksForStage(stageIndex, stageInput, tripYear),
+    ])
+  );
+
+  const matchesObservationDate = (
+    observation: EvidenceObservation,
+    block: AuthoredSourceBlock
+  ) => {
+    const observationDate = stringValue(observation.payload, "date");
+    return (
+      !observationDate ||
+      !block.sourceDate ||
+      tripDatesMatch(observationDate, block.sourceDate)
+    );
+  };
+
+  const stamp = (
+    observation: EvidenceObservation,
+    block: AuthoredSourceBlock
+  ) => {
+    observation.payload._canonicalAuthoredSourceBlockId = block.id;
+    observation.payload._canonicalAuthoredSourceTitleMatch = tokenSetContains(
+      identityTokens(block.text),
+      identityTokens(stringValue(observation.payload, "title"))
+    );
+    if (block.dayIdea) {
+      observation.payload._canonicalAuthoredSourceDayIdea = true;
+    }
+    if (block.ideaList) {
+      observation.payload._canonicalAuthoredSourceIdeaList = true;
+    }
+    if (block.paginationContinuation) {
+      observation.payload._canonicalAuthoredSourcePaginationContinuation =
+        true;
+    }
+    if (block.singletonDayList) {
+      observation.payload._canonicalAuthoredSourceSingletonDayList = true;
+    }
+  };
+
+  for (const observation of observations) {
+    const position = asRecord(observation.payload._canonicalSourcePosition);
+    const line = Number(position.line);
+    const stageIndex = Number(position.stageIndex);
+    if (Number.isFinite(line) && Number.isFinite(stageIndex)) {
+      const block = (blocksByStage.get(stageIndex) ?? []).find(
+        (candidate) =>
+          line >= candidate.startLine &&
+          line <= candidate.endLine &&
+          matchesObservationDate(observation, candidate)
+      );
+      if (block) {
+        stamp(observation, block);
+        continue;
+      }
+    }
+
+    // Some parser records preserve an exact source sentence but lose their
+    // line telemetry. Recover only an unambiguous same-lane paragraph match;
+    // no fuzzy title inference participates.
+    const evidence = normalizeText(
+      stringValue(observation.payload, "evidence")
+    );
+    const titleTokens = identityTokens(
+      stringValue(observation.payload, "title")
+    );
+    if (evidence.length < 20 && titleTokens.length === 0) continue;
+    const exactLabelStageIndexes = stages.flatMap(
+      (stage, candidateIndex) =>
+        stage.label === observation.sourceLabel ? [candidateIndex] : []
+    );
+    const candidateStageIndexes =
+      exactLabelStageIndexes.length > 0
+        ? exactLabelStageIndexes
+        : stages.flatMap((stage, candidateIndex) =>
+            stage.sourceFilename &&
+            stage.sourceFilename === observation.sourceFilename
+              ? [candidateIndex]
+              : []
+          );
+    const matches = candidateStageIndexes.flatMap((candidateIndex) =>
+      (blocksByStage.get(candidateIndex) ?? []).filter(
+        (block) =>
+          matchesObservationDate(observation, block) &&
+          (evidence.length >= 20
+            ? normalizeText(block.text).includes(evidence)
+            : tokenSetContains(identityTokens(block.text), titleTokens))
+      )
+    );
+    if (matches.length === 1) stamp(observation, matches[0]);
+  }
+}
+
 function finitePayloadNumber(
   record: Record<string, unknown>,
   key: string
@@ -11531,10 +11878,11 @@ function referenceNoteObservationForPiece(
           .join(" ")
       );
       const textTokens = identityTokens(text);
-      if (
-        overlapCount(titleTokens, textTokens) <
-        Math.min(2, titleTokens.length)
-      ) {
+      // A reference note must name this entity, not merely share generic
+      // venue words. "Ulua Beach or Makena Landing Park" is not a reference
+      // home for "Kamaole Beach Park III" just because both contain beach
+      // and park.
+      if (!tokenSetContains(textTokens, titleTokens)) {
         return false;
       }
       const noteCity = normalizedComparable(
@@ -11598,6 +11946,7 @@ function applyIntentBlockClassification({
     sourceSequencedSiteVisitPlanPieceIds(pieces, observationById);
   const sourceSupportedVenueAddressPieceIds = new Set<string>();
   const sourceCommittedDaySlotPieceIds = new Set<string>();
+  const firstAuthoredBlockIdByDateAndSource = new Map<string, string>();
   const entries: IntentBlockEntry[] = [];
 
   for (const piece of pieces) {
@@ -11628,8 +11977,7 @@ function applyIntentBlockClassification({
     // detected source relationship; a merely sequenced list mention (for
     // example an idea-list venue) is intentionally insufficient.
     const hasExactSourceRelationshipPlanOccurrence = Boolean(
-      isSourceFactAssemblyAuthorityEnabled() &&
-        localObservations.some((observation) => {
+      localObservations.some((observation) => {
           const position = asRecord(
             observation.payload._canonicalSourcePosition
           );
@@ -11669,7 +12017,7 @@ function applyIntentBlockClassification({
                 );
               })
           );
-        })
+      })
     );
     const primaryCandidates = localObservations
       .filter(
@@ -11679,6 +12027,27 @@ function applyIntentBlockClassification({
       );
     const primary = primaryCandidates
       .sort((left, right) => {
+        const exactSourceOccurrenceRank = (
+          observation: EvidenceObservation
+        ) => {
+          const position = asRecord(
+            observation.payload._canonicalSourcePosition
+          );
+          const occurrences = observation.payload._canonicalSourceOccurrences;
+          return Array.isArray(occurrences) &&
+            occurrences.some((rawOccurrence) => {
+              const occurrence = asRecord(rawOccurrence);
+              return (
+                stringValue(occurrence, "date") === date &&
+                Number(occurrence.line) === Number(position.line) &&
+                Number(occurrence.stageIndex) === Number(position.stageIndex) &&
+                stringValue(occurrence, "sourceIdentityHash") ===
+                  stringValue(position, "sourceIdentityHash")
+              );
+            })
+            ? 1
+            : 0;
+        };
         const dayPlanRank = (observation: EvidenceObservation) => {
           const labels = [
             observation.sourceLabel,
@@ -11689,10 +12058,25 @@ function applyIntentBlockClassification({
             ? 1
             : 0;
         };
-        return dayPlanRank(right) - dayPlanRank(left) ||
+        return exactSourceOccurrenceRank(right) -
+          exactSourceOccurrenceRank(left) ||
+          dayPlanRank(right) - dayPlanRank(left) ||
           left.ordinal - right.ordinal;
       })[0];
     if (!primary) continue;
+    const authoredBlockId = stringValue(
+      primary.payload,
+      "_canonicalAuthoredSourceBlockId"
+    );
+    const authoredBlockDayKey = `${date}|${intentSourceKey(primary)}`;
+    const firstAuthoredBlockId =
+      firstAuthoredBlockIdByDateAndSource.get(authoredBlockDayKey);
+    if (authoredBlockId && !firstAuthoredBlockId) {
+      firstAuthoredBlockIdByDateAndSource.set(
+        authoredBlockDayKey,
+        authoredBlockId
+      );
+    }
     const verifiedObservation = localObservations.find(
       (observation) =>
         finitePayloadNumber(observation.payload, "verifiedLatitude") !== null &&
@@ -11713,6 +12097,15 @@ function applyIntentBlockClassification({
         stringValue(observation.payload, "evidence") ?? "",
       ])
       .join(" ");
+    const authoredSourceIdeaList = localObservations.some(
+      (observation) =>
+        observation.payload._canonicalAuthoredSourceIdeaList === true ||
+        observation.payload._canonicalAuthoredSourceDayIdea === true
+    );
+    const authoredSingletonDayList = localObservations.some(
+      (observation) =>
+        observation.payload._canonicalAuthoredSourceSingletonDayList === true
+    );
     // A stage/source label identifies the parser lane (tests use values such
     // as `jan-19` and production uses chunk labels); it is useful when it
     // actually contains a dated day heading, but its mere presence is not a
@@ -11803,17 +12196,47 @@ function applyIntentBlockClassification({
         !hasIndependentActivityAnchor(piece.payload) &&
         !publicVenueAddressEvidence
     );
+    const explicitChoiceHasReferenceHome = Boolean(
+      referenceNoteObservation &&
+        /\S+\s+or\s+\S+/i.test(
+          ownEvidenceText.trim() ? ownEvidenceText : ownText
+        ) &&
+        !sourceIntent.hasExplicitPlanMention &&
+        !hasIndependentActivityAnchor(piece.payload)
+    );
     if (sourceSupportedPublicVenueAddress) {
       sourceSupportedVenueAddressPieceIds.add(piece.id);
     }
     sourceIntentByPieceId.set(piece.id, sourceIntent);
-    const priorLaneObservations = localObservations.flatMap((ownObservation) => {
+    // Only the occurrence selected as primary may inherit local paragraph
+    // context. A broad summary lane can share a huge PDF paragraph with an
+    // earlier optional stop; that summary is supporting evidence, not
+    // authority to retype an exact later occurrence in its own source block.
+    const priorLaneObservations = [primary].flatMap((ownObservation) => {
+      const ownBlockId = stringValue(
+        ownObservation.payload,
+        "_canonicalAuthoredSourceBlockId"
+      );
+      const ownPosition = asRecord(
+        ownObservation.payload._canonicalSourcePosition
+      );
+      const ownStageIndex = Number(ownPosition.stageIndex);
+      const ownLine = Number(ownPosition.line);
       const previous = observations
         .filter(
           (observation) =>
             observation.ordinal < ownObservation.ordinal &&
             stringValue(observation.payload, "date") === date &&
-            intentSourceKey(observation) === intentSourceKey(ownObservation)
+            intentSourceKey(observation) === intentSourceKey(ownObservation) &&
+            stringValue(
+              observation.payload,
+              "_canonicalAuthoredSourceBlockId"
+            ) === ownBlockId &&
+            Number(
+              asRecord(observation.payload._canonicalSourcePosition).stageIndex
+            ) === ownStageIndex &&
+            Number(asRecord(observation.payload._canonicalSourcePosition).line) <
+              ownLine
         )
         .sort((left, right) => right.ordinal - left.ordinal)[0];
       return previous ? [previous] : [];
@@ -11868,6 +12291,9 @@ function applyIntentBlockClassification({
       activityText(piece.payload),
       stringValue(piece.payload, "evidence") ?? "",
     ].join(" ");
+    const leadingAlternative = /^(?:or|alternatively)\b/i.test(
+      ownEvidenceText.trim() ? ownEvidenceText : ownText
+    );
     const inputEvidenceRole = stringValue(primary.payload, "evidenceRole");
     const hasDayPlanMembership = Boolean(
       normalizeText(stringValue(piece.payload, "itemType")) === "activity" &&
@@ -11883,6 +12309,8 @@ function applyIntentBlockClassification({
           ...primary.sourceStructure.headingPath,
         ].some((label) => DAY_PLAN_LABEL_PATTERN.test(label)) &&
         !labels.some((label) => hasLooseTipVocabulary(label)) &&
+        !authoredSourceIdeaList &&
+        !leadingAlternative &&
         !sourceIntent.hasHedgedMention &&
         !ideaContextObservation &&
         !hasLooseTipVocabulary(ownText) &&
@@ -11895,9 +12323,8 @@ function applyIntentBlockClassification({
           inputEvidenceRole === "atomic_candidate" ||
           inputEvidenceRole === "grouping_proposal") &&
         (timedCounts.get(date) ?? 0) >= 3 &&
-        !isRecommendationActivityCategory(
-          stringValue(piece.payload, "category")
-        ) &&
+        !authoredSourceIdeaList &&
+        !leadingAlternative &&
         !sourceIntent.hasHedgedMention &&
         !ideaContextObservation &&
         !hasLooseTipVocabulary(ownText)
@@ -11905,18 +12332,36 @@ function applyIntentBlockClassification({
     const auditedFixedEvidence = Boolean(
       timeFrom(piece.payload) ||
         confirmationFrom(piece.payload) ||
-        sourceIntent.hasExplicitPlanMention ||
+        (!authoredSourceIdeaList && sourceIntent.hasExplicitPlanMention) ||
         canonicalSourceDecisions(piece.payload).length > 0 ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
         matchesCommittedDetailSubject(title) ||
         sourceSupportedPublicVenueAddress ||
-        /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(title)
+        /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(title) ||
+        // The model may shorten "Breakfast Cafe Central" to the venue name.
+        // Preserved source evidence, unlike model prose, may still prove the
+        // deliberate meal slot that anchors the short day block.
+        (!explicitChoiceHasReferenceHome &&
+          /\b(?:breakfast|brunch|lunch|dinner|supper)\b/i.test(
+            ownEvidenceText
+          ))
     );
 
     entries.push({
       approxLatitude: finitePayloadNumber(piece.payload, "approxLatitude"),
       approxLongitude: finitePayloadNumber(piece.payload, "approxLongitude"),
+      authoredBlockStart: Boolean(
+        !authoredSingletonDayList &&
+          !localObservations.some(
+            (observation) =>
+              observation.payload
+                ._canonicalAuthoredSourcePaginationContinuation === true
+          ) &&
+          authoredBlockId && firstAuthoredBlockId &&
+          authoredBlockId !== firstAuthoredBlockId
+      ),
+      authoredDayList: authoredSingletonDayList,
       boundaryBefore: false,
       category: stringValue(piece.payload, "category"),
       date,
@@ -11927,11 +12372,16 @@ function applyIntentBlockClassification({
       // because it mentions an unrelated "or" (production's `Buy wine`).
       hasExplicitChoice:
         !uncommittedReferenceIdea &&
-        (/\bor\b/i.test(title) ||
+        !explicitChoiceHasReferenceHome &&
+        !leadingAlternative &&
+        (/\S+\s+or\s+\S+/i.test(title) ||
+          /\(\s*or\s+[^)]+\)/i.test(ownEvidenceText) ||
           (!isRecommendationActivityCategory(
             stringValue(piece.payload, "category")
           ) &&
-            /\bor\b/i.test(ownEvidenceText.trim() ? ownEvidenceText : ownText))),
+            /\S+\s+or\s+\S+/i.test(
+              ownEvidenceText.trim() ? ownEvidenceText : ownText
+            ))),
       hasFixedEvidence: auditedFixedEvidence,
       hasHedgeMarker:
         classifyOwnTextEvidence(
@@ -11947,6 +12397,9 @@ function applyIntentBlockClassification({
           ? ideaContextObservation.id
           : null,
       hasIdeaSignal:
+        authoredSourceIdeaList ||
+        leadingAlternative ||
+        explicitChoiceHasReferenceHome ||
         notesBlobSignal ||
         hasLooseTipVocabulary(ownText) ||
         (isRecommendationActivityCategory(
@@ -11963,8 +12416,9 @@ function applyIntentBlockClassification({
       hasSequencedDayPlan,
       hasSourceSupportedPlan:
         hasExactSourceRelationshipPlanOccurrence ||
+        hasSequencedDayPlan ||
         sourceSequencedSiteVisitPieceIds.has(piece.id) ||
-        sourceIntent.hasExplicitPlanMention ||
+        (!authoredSourceIdeaList && sourceIntent.hasExplicitPlanMention) ||
         pieceNamedInDayHeading(piece) ||
         namedInObservedDayHeading ||
         sourceCommittedDaySlot ||
@@ -11980,7 +12434,13 @@ function applyIntentBlockClassification({
       id: piece.id,
       itemType: stringValue(piece.payload, "itemType"),
       observationIds: [...piece.observationIds],
-      sourceKey: intentSourceKey(primary),
+      sourceKey: [
+        intentSourceKey(primary),
+        authoredSingletonDayList
+          ? "(authored-singleton-day-list)"
+          : stringValue(primary.payload, "_canonicalAuthoredSourceBlockId") ??
+            "(no-authored-block)",
+      ].join("|"),
       sourceOrder: primary.ordinal,
       title,
       verifiedLatitude: verifiedObservation
@@ -12013,7 +12473,7 @@ function applyIntentBlockClassification({
           observation.ordinal > previous.sourceOrder &&
           observation.ordinal < current.sourceOrder &&
           stringValue(observation.payload, "date") === current.date &&
-          intentSourceKey(observation) === current.sourceKey &&
+          current.sourceKey.startsWith(`${intentSourceKey(observation)}|`) &&
           (observation.kind === "context" ||
             observation.kind === "note" ||
             observation.role === "context" ||
@@ -12040,9 +12500,24 @@ function applyIntentBlockClassification({
     if (!piece || !block) continue;
     piece.payload._intentBlockId = block.blockId;
     piece.payload._intentBlockType = type;
+    const classifiedEntry = entries.find((entry) => entry.id === pieceId);
     const sourceIntent = sourceIntentByPieceId.get(pieceId);
+    const authoredSourceIdeaList = piece.observationIds.some(
+      (observationId) =>
+        observationById.get(observationId)?.payload
+          ._canonicalAuthoredSourceIdeaList === true ||
+        observationById.get(observationId)?.payload
+          ._canonicalAuthoredSourceDayIdea === true
+    );
     const commitmentSignals = [
-      sourceIntent?.hasExplicitPlanMention ? "explicit_source_plan" : null,
+      type === "plan" &&
+      classifiedEntry?.authoredDayList === true &&
+      !authoredSourceIdeaList
+        ? "authored_day_list"
+        : null,
+      sourceIntent?.hasExplicitPlanMention && !authoredSourceIdeaList
+        ? "explicit_source_plan"
+        : null,
       timeFrom(piece.payload) ? "time" : null,
       confirmationFrom(piece.payload) ? "confirmation" : null,
       canonicalSourceDecisions(piece.payload).length > 0
@@ -12624,7 +13099,8 @@ function createSourceAuthoredContainmentAuthority({
 
 function createResearchedListQuestions(
   pieces: CanonicalEvidencePiece[],
-  missingDetails: unknown[]
+  missingDetails: unknown[],
+  observations: EvidenceObservation[] = []
 ) {
   const questionSubjects = reviewSubjectTitles(missingDetails);
   const byDate = new Map<string, CanonicalEvidencePiece[]>();
@@ -12637,6 +13113,20 @@ function createResearchedListQuestions(
 
   for (const piece of pieces) {
     const candidacy = canonicalCandidacyDecision(piece);
+    const commitmentSignals = Array.isArray(candidacy.commitmentSignals)
+      ? candidacy.commitmentSignals.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    // A plain dated source list proves placement, not selection among a
+    // cluster of price/hour research options. Keep that narrow placement
+    // signal eligible for the planned-or-ideas review; any second commitment
+    // signal (time, booking, explicit plan, site structure) still wins.
+    const onlyAuthoredDayListPlacement = Boolean(
+      candidacy.hasAuditedCommitment === true &&
+        commitmentSignals.length === 1 &&
+        commitmentSignals[0] === "authored_day_list"
+    );
     const classifiedDate = stringValue(candidacy, "classifiedDate");
     const researchText = [
       activityText(piece.payload),
@@ -12652,7 +13142,8 @@ function createResearchedListQuestions(
     const retainedResearchCandidate = Boolean(
       (piece.kind === "activity" || piece.kind === "note") &&
         classifiedDate &&
-        candidacy.hasAuditedCommitment !== true &&
+        (candidacy.hasAuditedCommitment !== true ||
+          onlyAuthoredDayListPlacement) &&
         hasResearchEvidence
     );
     if (!committedMentionPieceCandidate(piece) && !retainedResearchCandidate) {
@@ -12705,7 +13196,10 @@ function createResearchedListQuestions(
     // source-plan block into ideas merely because the parser also captured
     // prices/hours. Albertina is the production-shaped guard for this
     // boundary.
-    if (candidacy.hasAuditedCommitment === true) continue;
+    if (
+      candidacy.hasAuditedCommitment === true &&
+      !onlyAuthoredDayListPlacement
+    ) continue;
     if (pieceHasHedgeMarker(piece)) continue;
     // Research markers can sit in any parser text field (live run 7.17.1
     // carried the trio's prices in `evidence`, not description).
@@ -12727,6 +13221,82 @@ function createResearchedListQuestions(
         piece,
       ])
     ).values()];
+    // Identity can legitimately collapse a researched venue that occurs in
+    // both the dated list and a later city-reference list. Review still owns
+    // the original dated decision. Recover a missing option only from an
+    // exact source occurrence on this date that carries its own price/hours;
+    // no model summary or fuzzy venue inference participates.
+    const existingTitles = new Set(
+      group.map((piece) =>
+        normalizedComparable(stringValue(piece.payload, "title"))
+      )
+    );
+    const recoveredResearchOptions = observations.filter((observation) => {
+      const title = stringValue(observation.payload, "title");
+      if (!title || existingTitles.has(normalizedComparable(title))) {
+        return false;
+      }
+      const observationCandidacy = asRecord(
+        observation.payload._canonicalCandidacyDecision
+      );
+      if (
+        observationCandidacy.hasAuditedCommitment === true ||
+        stringValue(observationCandidacy, "reasonCode") ===
+          "AUDITED_COMMITMENT"
+      ) {
+        return false;
+      }
+      const sourcePosition = asRecord(
+        observation.payload._canonicalSourcePosition
+      );
+      const occurrenceMatchesDate = Array.isArray(
+        observation.payload._canonicalSourceOccurrences
+      ) &&
+        observation.payload._canonicalSourceOccurrences.some(
+          (rawOccurrence) => {
+            const occurrence = asRecord(rawOccurrence);
+            return (
+              stringValue(occurrence, "date") === date &&
+              Number(occurrence.line) === Number(sourcePosition.line) &&
+              Number(occurrence.stageIndex) ===
+                Number(sourcePosition.stageIndex) &&
+              stringValue(occurrence, "sourceIdentityHash") ===
+                stringValue(sourcePosition, "sourceIdentityHash")
+            );
+          }
+        );
+      const researchText = [
+        stringValue(observation.payload, "description"),
+        stringValue(observation.payload, "evidence"),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return Boolean(
+        occurrenceMatchesDate &&
+          (PRICE_MARKER_PATTERN.test(researchText) ||
+            classifyDraftActivityCard(activityInput(observation.payload))
+              .hasAvailabilityMarker)
+      );
+    });
+    for (const observation of recoveredResearchOptions) {
+      const title = stringValue(observation.payload, "title");
+      if (!title) continue;
+      existingTitles.add(normalizedComparable(title));
+      group.push({
+        actions: [],
+        confidence: "high",
+        conflicts: [],
+        fieldSources: {},
+        fieldWinnerRanks: {},
+        id: `review-source-option-${observation.id}`,
+        kind: "note",
+        mergeReasons: [],
+        observationIds: [observation.id],
+        outputEligible: false,
+        payload: { ...observation.payload, date },
+        role: "city_note_candidate",
+      });
+    }
     if (group.length < 2) continue;
 
     // An explicit source container such as "Explore Vienna" already states
@@ -12998,6 +13568,16 @@ function isGenericBathSlotLabel(value: string, tripCityNames: Set<string>) {
   return Boolean(venueStem) && tripCityNames.has(venueStem);
 }
 
+function uniqueOptionLabels(labels: string[]) {
+  const seen = new Set<string>();
+  return labels.filter((label) => {
+    const key = normalizedComparable(label);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function createDayLabelSlotQuestions(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
@@ -13058,6 +13638,28 @@ function createDayLabelSlotQuestions(
         mentionCommitment(piece, timedCounts) === "none"
       );
     });
+    const sourceOptionLabels =
+      slot === "bathing"
+        ? observations.flatMap((observation) => {
+            const text = [
+              stringValue(observation.payload, "title"),
+              stringValue(observation.payload, "description"),
+              stringValue(observation.payload, "evidence"),
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return stems.test(text)
+              ? bathVenueOptionLabels(
+                  { payload: observation.payload } as CanonicalEvidencePiece,
+                  tripCityNames
+                )
+              : [];
+          })
+        : [];
+    const recoveredSourceOptions =
+      slot === "bathing"
+        ? uniqueOptionLabels(sourceOptionLabels)
+        : [];
     // Slot override (run5 PB-6, 6th-run baths defect): a committed day
     // title RESERVES its venue options. Options an earlier pass demoted to
     // city notes (doubt demotion, idea-list, researched-hold) still count —
@@ -13092,13 +13694,12 @@ function createDayLabelSlotQuestions(
     );
     const titles =
       slot === "bathing"
-        ? Array.from(
-            new Set(
-              candidates.flatMap((piece) =>
-                bathVenueOptionLabels(piece, tripCityNames)
-              )
-            )
-          )
+        ? uniqueOptionLabels([
+            ...candidates.flatMap((piece) =>
+              bathVenueOptionLabels(piece, tripCityNames)
+            ),
+            ...recoveredSourceOptions,
+          ])
         : candidateTitles;
     // The slot is committed (flavor 2): ONE flexible slot card owns the
     // choice, the other venue options fold into it as description options —
@@ -13126,6 +13727,9 @@ function createDayLabelSlotQuestions(
         ) {
           subject.payload.description = "Baths.";
         }
+      }
+      for (const optionTitle of recoveredSourceOptions) {
+        piecePayloadAppendOption(subject.payload, optionTitle);
       }
     }
     // Alias dedupe before asking (second-audit finding on live run 7.18.1:
@@ -13205,6 +13809,32 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
   const tripCities = observations
     .filter((observation) => observation.kind === "place")
     .map((observation) => stringValue(observation.payload, "city"));
+  const deliberateAdminPlan = (observation: EvidenceObservation) => {
+    const intake = asRecord(
+      observation.payload._canonicalIntakeCandidacyDecision
+    );
+    const inputItemType = stringValue(intake, "inputItemType");
+    const inputEvidenceRole = stringValue(intake, "inputEvidenceRole");
+    if (
+      !/^(?:admin|administrative|logistics)$/i.test(inputItemType ?? "") ||
+      inputEvidenceRole !== "atomic_candidate" ||
+      observation.sourceStructure.sectionType !== "dated_itinerary" ||
+      !stringValue(observation.payload, "date") ||
+      !stringValue(observation.payload, "_canonicalAuthoredSourceBlockId")
+    ) {
+      return false;
+    }
+    return observations.filter(
+      (candidate) =>
+        candidate.id !== observation.id &&
+        candidate.sourceLabel === observation.sourceLabel &&
+        stringValue(candidate.payload, "date") ===
+          stringValue(observation.payload, "date") &&
+        stringValue(candidate.payload, "_canonicalAuthoredSourceBlockId") ===
+          stringValue(observation.payload, "_canonicalAuthoredSourceBlockId") &&
+        candidate.kind === "activity"
+    ).length >= 2;
+  };
 
   const stampObservationDecision = (
     observation: EvidenceObservation,
@@ -13233,6 +13863,47 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
   };
 
   for (const observation of observations) {
+    const originalRecoveryInputs = originalActivityCandidacyInputs(
+      observation.payload
+    );
+    const recoveryOnlyProviderLabel = Boolean(
+      observation.sourceLabel
+        .toLowerCase()
+        .startsWith(SOURCE_RECOVERY_LABEL_PREFIX) &&
+        observation.sourceStructure.sectionType === "booking_detail" &&
+        originalRecoveryInputs.itemType === "activity" &&
+        originalRecoveryInputs.evidenceRole === "atomic_candidate" &&
+        /^[A-Z][A-Z0-9]{3,}$/.test(
+          stringValue(observation.payload, "title") ?? ""
+        ) &&
+        identityTokens(stringValue(observation.payload, "title") ?? "")
+          .length === 1 &&
+        !hasIndependentActivityAnchor(observation.payload) &&
+        !stringValue(observation.payload, "address")
+    );
+    if (recoveryOnlyProviderLabel) {
+      observation.payload.itemType = "evidence";
+      observation.payload.evidenceRole = "accessory_detail";
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          evidenceRole: "accessory_detail",
+        })
+      );
+      continue;
+    }
+    if (deliberateAdminPlan(observation)) {
+      observation.payload.itemType = "activity";
+      observation.payload.evidenceRole = "atomic_candidate";
+      stampObservationDecision(
+        observation,
+        activityCandidacyDecisionForPayload(observation.payload, {
+          evidenceRole: "atomic_candidate",
+          hasAuditedCommitment: true,
+        })
+      );
+      continue;
+    }
     const intakeDecision = asRecord(
       observation.payload._canonicalIntakeCandidacyDecision
     );
@@ -13333,10 +14004,28 @@ function reclassifySourceContainers(observations: EvidenceObservation[]) {
       // already demoted upstream by parser-artifact normalization
       // (`heading_fragment_card`), so this does not need to re-judge them.
       const containerTitle = stringValue(observation.payload, "title");
+      const sourcePosition = asRecord(
+        observation.payload._canonicalSourcePosition
+      );
+      const sourceLine = sourcePosition.line;
+      const hasDirectSourceAnchor = Boolean(
+        (sourceLine !== null &&
+          sourceLine !== undefined &&
+          Number.isFinite(Number(sourceLine))) ||
+          (Array.isArray(observation.payload._canonicalSourceOccurrences) &&
+            observation.payload._canonicalSourceOccurrences.length > 0) ||
+          (observation.payload._sourceSupport === "supported" &&
+            stringValue(
+              observation.payload,
+              "_canonicalAuthoredSourceBlockId"
+            ) &&
+            observation.payload._canonicalAuthoredSourceTitleMatch === true)
+      );
       if (
         observation.kind === "activity" &&
         containerTitle &&
         stringValue(observation.payload, "date") &&
+        hasDirectSourceAnchor &&
         SAME_SITE_CONTAINER_PATTERN.test(containerTitle)
       ) {
         stampObservationDecision(
@@ -13933,12 +14622,25 @@ function unresolvedMissingDetails({
         const checkOut = stringValue(candidate.payload, "checkOut");
         const city = normalizeText(stringValue(candidate.payload, "city"));
         const cityFits = Boolean(city && normalizedDetailText.includes(city));
+        const stayIdentityText = normalizeText(
+          [candidate.payload.name, candidate.payload.address]
+            .filter(Boolean)
+            .join(" ")
+        );
+        const relatedIdentity = normalizeText(relatedTitle);
+        const identityFits = Boolean(
+          relatedIdentity &&
+            (stayIdentityText.includes(relatedIdentity) ||
+              relatedIdentity.includes(
+                normalizeText(stringValue(candidate.payload, "name"))
+              ))
+        );
         const dateFits = !detailDate || Boolean(
           checkIn &&
             (tripDatesMatch(detailDate, checkIn) ||
               (checkOut && detailDate >= checkIn && detailDate < checkOut))
         );
-        return cityFits && dateFits;
+        return (cityFits || identityFits) && dateFits;
       });
 
       const resolvedStayNameValue = stringValue(
@@ -13952,11 +14654,13 @@ function unresolvedMissingDetails({
         )
         .replace(/\s+/g, " ")
         .trim();
-
       if (
         compatibleStays.length === 1 &&
-        resolvedStayName.length >= 3 &&
-        !isUnresolvedStayPlaceholderName(resolvedStayNameValue)
+        Boolean(
+          (resolvedStayName.length >= 3 &&
+            !isUnresolvedStayPlaceholderName(resolvedStayNameValue)) ||
+            stringValue(compatibleStays[0]?.payload ?? {}, "address")
+        )
       ) {
         return false;
       }
@@ -15512,10 +16216,17 @@ export function clusterExtractedEvidence({
       after: () => stableHash(observations),
       before: () => observationHashBefore,
       decisionDomain: "source_normalization",
-      writer: "reclassifySourceContainers",
-      writes: ["observations[].kind", "observations[].role"],
+      writer: "stampAuthoredBlocksAndReclassifySourceContainers",
+      writes: [
+        "observations[].payload._canonicalAuthoredSourceBlockId",
+        "observations[].kind",
+        "observations[].role",
+      ],
     },
-    () => reclassifySourceContainers(observations)
+    () => {
+      stampAuthoredSourceBlocks(normalizedStages, observations, tripYear);
+      reclassifySourceContainers(observations);
+    },
   );
 
   for (const anchor of sourceTransportAnchors) {
@@ -15847,7 +16558,7 @@ export function clusterExtractedEvidence({
     "review",
     "createResearchedListQuestions",
     ["reviewDetails[]"],
-    () => createResearchedListQuestions(pieces, missingDetails)
+    () => createResearchedListQuestions(pieces, missingDetails, observations)
   );
   const ambiguousIntentHomes = runPieceWriter(
     "review",

@@ -1122,7 +1122,42 @@ export default async function run() {
     });
 
     assert.equal(records.transport.length, 0);
-    assert.deepEqual(records.items.map((item) => item.title), ["Prague rental car pickup"]);
+    assert.deepEqual(records.items.map((item) => item.title), ["Pick up rental car"]);
+  });
+
+  await test("same-day rental transport uses pickup time before return time when folding into an activity", () => {
+    const draft = cluster(emptyStage({
+      activities: [{
+        category: "arrival_departure",
+        city: "Prague",
+        date: "2019-01-17",
+        description: "Pick up the car at 9:00 AM. Return at 8:00 PM.",
+        endTime: "20:00",
+        itemType: "activity",
+        startTime: "09:00",
+        title: "Car pickup at Prague Downtown",
+      }],
+      transport: [{
+        arrival: "Prague Downtown",
+        arrivalTime: "09:00",
+        confirmation: "81486",
+        date: "2019-01-17",
+        departure: "Prague Downtown",
+        departureTime: "20:00",
+        description: "Car pickup and return at the same location.",
+        title: "Car rental pickup at Prague Downtown",
+        type: "rental_car",
+      }],
+      places: [{
+        arriveDate: "2019-01-14",
+        city: "Prague",
+        leaveDate: "2019-01-18",
+      }],
+    }));
+
+    assert.equal(draft.activities.length, 1);
+    assert.equal((draft.activities[0] as Record<string, unknown>).startTime, "09:00");
+    assert.equal((draft.activities[0] as Record<string, unknown>).endTime, "20:00");
   });
 
   await test("same-day car-pickup aliases fold into one rental activity", () => {

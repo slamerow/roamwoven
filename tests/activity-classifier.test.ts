@@ -48,6 +48,8 @@ function blockEntry(
   return {
     approxLatitude: null,
     approxLongitude: null,
+    authoredBlockStart: false,
+    authoredDayList: false,
     boundaryBefore: false,
     category: "art_culture",
     date: "2019-01-19",
@@ -237,6 +239,7 @@ export default async function run() {
         verifiedLongitude: 16.3087,
       }),
       blockEntry({
+        hasIdeaSignal: true,
         hasResearchEvidence: true,
         id: "far-option-a",
         sourceOrder: 4,
@@ -244,6 +247,7 @@ export default async function run() {
         verifiedLongitude: 16.3959,
       }),
       blockEntry({
+        hasIdeaSignal: true,
         id: "far-option-b",
         sourceOrder: 5,
         verifiedLatitude: 48.2073,
@@ -265,12 +269,14 @@ export default async function run() {
       }),
       blockEntry({
         boundaryBefore: true,
+        hasIdeaSignal: true,
         id: "city-reference-a",
         sourceOrder: 20,
         verifiedLatitude: 48.2082,
         verifiedLongitude: 16.375,
       }),
       blockEntry({
+        hasIdeaSignal: true,
         id: "city-reference-b",
         sourceOrder: 21,
         verifiedLatitude: 48.2026,
@@ -314,6 +320,70 @@ export default async function run() {
       assert.equal(result.entryTypes.get(id), "plan", id);
     }
     assert.equal(result.entryTypes.get("laundry"), "logistics");
+  });
+
+  await test("intent blocks: a later traveler-authored block needs its own commitment; pagination continuation does not create that boundary", () => {
+    const laterBlock = classifyIntentBlocks(
+      [
+        blockEntry({ hasFixedEvidence: true, id: "day-plan", sourceOrder: 1 }),
+        blockEntry({
+          authoredBlockStart: true,
+          id: "later-uncommitted-venue",
+          sourceKey: "source-day-jan-19|later-block",
+          sourceOrder: 2,
+        }),
+      ],
+      { geocodeVerificationRan: true }
+    );
+    assert.equal(laterBlock.entryTypes.get("day-plan"), "plan");
+    assert.equal(laterBlock.entryTypes.get("later-uncommitted-venue"), "ideas");
+
+    const pageContinuation = classifyIntentBlocks(
+      [
+        blockEntry({ hasFixedEvidence: true, id: "car-pickup", sourceOrder: 1 }),
+        blockEntry({
+          hasDayPlanMembership: true,
+          id: "venue-after-page-break",
+          sourceKey: "source-day-jan-17|continued-block",
+          sourceOrder: 2,
+        }),
+      ],
+      { geocodeVerificationRan: true }
+    );
+    assert.equal(
+      pageContinuation.entryTypes.get("venue-after-page-break"),
+      "plan",
+      "a PDF page break cannot turn the continuing dated itinerary into ideas"
+    );
+  });
+
+  await test("intent blocks: one-item-per-paragraph day lists ignore parser recommendation-category majority", () => {
+    const result = classifyIntentBlocks(
+      [
+        blockEntry({
+          authoredDayList: true,
+          category: "food_dining",
+          hasFixedEvidence: true,
+          id: "breakfast",
+          sourceOrder: 1,
+        }),
+        blockEntry({
+          authoredDayList: true,
+          category: "food_dining",
+          id: "market",
+          sourceOrder: 2,
+        }),
+        blockEntry({
+          authoredDayList: true,
+          category: "shopping_tailor",
+          id: "shops",
+          sourceOrder: 3,
+        }),
+      ],
+      { geocodeVerificationRan: true }
+    );
+    assert.equal(result.entryTypes.get("market"), "plan");
+    assert.equal(result.entryTypes.get("shops"), "plan");
   });
 
   await test("intent blocks: missing source telemetry remains ambiguous rather than inventing commitment", () => {

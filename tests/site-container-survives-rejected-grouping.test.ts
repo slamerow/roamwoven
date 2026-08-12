@@ -47,7 +47,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
 
 function cluster(
   activities: Array<Record<string, unknown>>,
-  missingDetails: Array<Record<string, unknown>> = []
+  missingDetails: Array<Record<string, unknown>> = [],
+  sourceText?: string
 ) {
   return clusterExtractedEvidence({
     sourceTransportAnchors: [],
@@ -55,6 +56,7 @@ function cluster(
       {
         label: "USE FOR TESTING CZECH.pdf notes",
         source: "model_chunk",
+        sourceText,
         stage: {
           activities,
           missingDetails,
@@ -92,25 +94,35 @@ export default async function run() {
   await test(
     "run-2 root cause: a dated NAMED SITE container survives a rejected grouping proposal, as a dated card",
     () => {
-      const draft = cluster([
-        {
-          ...DATED_SECTION,
-          date: "2019-01-16",
-          description:
-            "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
-          evidenceRole: "grouping_proposal",
-          title: "Prague Castle visit",
-        },
-        {
-          ...DATED_SECTION,
-          date: "2019-01-16",
-          description:
-            "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
-          evidenceRole: "atomic_candidate",
-          startTime: "12:00",
-          title: "Changing of the Guard",
-        },
-      ]);
+      const draft = cluster(
+        [
+          {
+            ...DATED_SECTION,
+            date: "2019-01-16",
+            description:
+              "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
+            evidenceRole: "grouping_proposal",
+            title: "Prague Castle visit",
+          },
+          {
+            ...DATED_SECTION,
+            date: "2019-01-16",
+            description:
+              "Changing of the Guard - 12:00 PM. Need to decide which ticket to get.",
+            evidenceRole: "atomic_candidate",
+            startTime: "12:00",
+            title: "Changing of the Guard",
+          },
+        ],
+        [],
+        [
+          "Wednesday, January 16th",
+          "Lesser Town & Prague Castle",
+          "Prague Castle (2 hours)",
+          "Changing of the Guard - 12:00 PM",
+          "Need to decide which ticket to get",
+        ].join("\n")
+      );
 
       // Regression coverage for Task A (2026-08-04): the sibling above needs
       // a real description — near-identical to the container's own — or
@@ -164,6 +176,27 @@ export default async function run() {
         ),
         false,
         "this branch is load-bearing against day-heading cards and must stay so"
+      );
+    }
+  );
+
+  await test(
+    "negative control: a model-only named site container is not rescued without source text",
+    () => {
+      const draft = cluster([
+        {
+          ...DATED_SECTION,
+          date: "2019-01-16",
+          evidenceRole: "grouping_proposal",
+          title: "Sample Castle visit",
+        },
+      ]);
+
+      assert.equal(
+        draft.activities.some((activity) =>
+          /sample castle/i.test(activity.title)
+        ),
+        false
       );
     }
   );
@@ -250,7 +283,15 @@ export default async function run() {
             subjectType: "item",
             targetField: "ticketType",
           },
-        ]
+        ],
+        [
+          "Wednesday, January 16th",
+          "Lesser Town & Prague Castle",
+          "Prague Castle (2 hours)",
+          "Changing of the Guard - 12:00 PM",
+          "Need to decide which ticket to get",
+          "St. Vitus Cathedral (stained glass inside) get tour?",
+        ].join("\n")
       );
 
       // The card half IS fixed: all three survive as dated Jan-16 activities,
