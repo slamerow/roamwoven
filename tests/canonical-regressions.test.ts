@@ -836,9 +836,23 @@ export default async function run() {
       "If you want to see something unusual, check out the preserved historic object in its glass case.";
     const clippedSource =
       "If you want to see something unusual, check out the preserve…";
-    const draft = clusterExtractedEvidence({
+    const clustered = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
+        {
+          label: "trip spine",
+          source: "model_spine" as const,
+          sourceText: "Budapest, January 21-24, 2019",
+          stage: emptyStage({
+            places: [
+              {
+                arriveDate: "2019-01-21",
+                city: "Budapest",
+                leaveDate: "2019-01-24",
+              },
+            ],
+          }),
+        },
         {
           label: "source recovery",
           source: "model_chunk" as const,
@@ -864,18 +878,12 @@ export default async function run() {
                 title: "Historic object note",
               },
             ],
-            places: [
-              {
-                arriveDate: "2019-01-21",
-                city: "Budapest",
-                leaveDate: "2019-01-24",
-              },
-            ],
           }),
         },
       ],
       tripOverview: { dateRange: "January 21-24, 2019" },
-    }).draft as {
+    });
+    const draft = clustered.draft as {
       activities: Array<{ description?: string | null; title: string }>;
     };
     const note = draft.activities.find(

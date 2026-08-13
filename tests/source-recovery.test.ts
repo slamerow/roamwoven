@@ -371,7 +371,7 @@ export default async function run() {
       {
         activities: [
           {
-            category: "art_culture",
+            category: "admin_logistics",
             city: "Prague",
             date: "2019-01-17",
             description: "go to koscom",
@@ -440,13 +440,26 @@ export default async function run() {
     });
     const draft = result.draft as {
       activities: Array<Record<string, unknown>>;
+      missingDetails: Array<Record<string, unknown>>;
     };
     const koscom = draft.activities.find((item) =>
       /koscom/i.test(String(item.title))
     );
 
-    assert.ok(koscom, "the recovered koscom line becomes a normal card");
+    assert.ok(koscom, "the recovered koscom action remains visible");
     assert.equal(koscom.date, "2019-01-17");
+    assert.match(String(koscom.title), /^Unidentified plan:/i);
+    assert.equal(koscom._recoveryRequired, true);
+    assert.equal(
+      draft.missingDetails.some(
+        (question) =>
+          question.relatedCanonicalPieceId === koscom._canonicalPieceId &&
+          question.targetField === "title" &&
+          /koscom/i.test(String(question.prompt))
+      ),
+      true,
+      "the recovery lane does not invent an identity for the token"
+    );
     assert.equal(
       draft.activities.some((item) => /fabricated/i.test(String(item.title))),
       false,

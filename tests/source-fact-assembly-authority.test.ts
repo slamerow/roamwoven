@@ -514,6 +514,11 @@ export default function run() {
                 title: "North Gallery",
               },
             ],
+            places: [{
+              arriveDate: "2019-01-19",
+              city: "Example City",
+              leaveDate: "2019-01-20",
+            }],
           },
         },
       ];

@@ -1239,6 +1239,11 @@ export default async function run() {
                 title: "Great Synagogue / Jewish History",
               }),
             ],
+            places: [{
+              arriveDate: "2019-01-21",
+              city: "Sample City",
+              leaveDate: "2019-01-24",
+            }],
           })
         ),
       ],
@@ -1696,6 +1701,11 @@ export default async function run() {
             _resolverCandidateId: "stage-1-item-3",
           },
         ],
+        places: [{
+          arriveDate: "2031-04-01",
+          city: "Sample City",
+          leaveDate: "2031-04-05",
+        }],
       }))],
       tripOverview: { dateRange: "April 1-5, 2031" },
     });
@@ -2705,6 +2715,11 @@ export default async function run() {
                 evidence: sourceLine,
               },
             ],
+            places: [{
+              arriveDate: "2019-01-21",
+              city: "Budapest",
+              leaveDate: "2019-01-24",
+            }],
           }),
         },
       ],

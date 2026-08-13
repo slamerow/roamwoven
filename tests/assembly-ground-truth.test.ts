@@ -261,8 +261,21 @@ const evaluators: Record<string, CheckEvaluator> = {
   },
   "koscom-activity": (records) => {
     const cards = activityCards(records, /koscom/i);
-    assert.equal(cards.length, 1, "koscom is an activity card");
+    assert.equal(cards.length, 1, "the intended koscom action remains visible");
     assert.equal(cards[0].date, "2019-01-17");
+    assert.match(cards[0].title, /^Unidentified plan:/i);
+    assert.equal(cards[0].reviewRequired, true);
+    assert.equal(
+      records.reviewQuestions.some(
+        (question) =>
+          question.status === "open" &&
+          question.subjectId === cards[0].id &&
+          question.targetField === "title" &&
+          /koscom/i.test(question.prompt)
+      ),
+      true,
+      "the unresolved token is an applicable maker question on the plan"
+    );
   },
   "tour-rome-activity": (records) => {
     const cards = activityCards(records, /tour rome/i);

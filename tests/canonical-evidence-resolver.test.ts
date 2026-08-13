@@ -415,6 +415,11 @@ export default async function run() {
     stagedActivity.evidenceRole = "city_note_candidate";
     stagedActivity.itemType = "note";
     stagedActivity.sourceSectionType = "city_reference";
+    (input.stage as { places: Array<Record<string, unknown>> }).places.push({
+      arriveDate: "2031-04-01",
+      city: "Vienna",
+      leaveDate: "2031-04-04",
+    });
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [],
       roleDecisions: [{
@@ -438,6 +443,11 @@ export default async function run() {
     const stagedActivity = (input.stage as { activities: Array<Record<string, unknown>> })
       .activities[0];
     stagedActivity.startTime = "18:00";
+    (input.stage as { places: Array<Record<string, unknown>> }).places.push({
+      arriveDate: "2031-04-01",
+      city: "Vienna",
+      leaveDate: "2031-04-04",
+    });
     const application = applyCanonicalEvidenceResolution([input], {
       groupings: [],
       roleDecisions: [{

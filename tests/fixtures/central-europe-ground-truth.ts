@@ -356,6 +356,21 @@ export function createCentralEuropeGroundTruthDraft() {
       // city-leg guess plus a date question.
       {
         address: null,
+        category: "arrival_departure",
+        date: "2019-01-17",
+        description: "Pick up the rental car at 9:00 AM and return it at 8:00 PM.",
+        endTime: "20:00",
+        evidence: "Pick up car at 9 am. Return at 8 pm.",
+        itemType: "activity",
+        sourceFilename,
+        sourceHeadingPath: ["Thursday, January 17th - Kutna Hora day trip"],
+        sourceSectionLabel: "Thursday, January 17th - Kutna Hora day trip",
+        sourceSectionType: "dated_itinerary",
+        startTime: "09:00",
+        title: "Rental car pickup for Kutna Hora",
+      },
+      {
+        address: null,
         category: "temple_shrine",
         date: "2019-01-17",
         description: "Sedlec Ossuary.",
@@ -392,17 +407,18 @@ export function createCentralEuropeGroundTruthDraft() {
       },
       {
         address: null,
-        category: "shopping_tailor",
-        date: null,
+        category: "admin_logistics",
+        date: "2019-01-17",
         description: "Be back by 5 to go to koscom.",
+        evidence: "Be back by 5 to go to koscom.",
         endTime: null,
         itemType: "activity",
         sourceFilename,
         sourceHeadingPath: ["Thursday, January 17th - Kutna Hora day trip"],
         sourceSectionLabel: "Thursday, January 17th - Kutna Hora day trip",
-        sourceSectionType: "unknown",
+        sourceSectionType: "dated_itinerary",
         startTime: null,
-        title: "Koscom",
+        title: "koscom",
       },
       // Jan 18 — Vienna arrival.
       {
@@ -1240,7 +1256,7 @@ export const groundTruthChecks: GroundTruthCheck[] = [
   { contract: "RW-GRP-001", id: "mala-strana-group", label: "Kafka/Lennon/Certovka/Novy Svet survive top-level; no invented walk parent", status: "enforced" },
   { contract: "RW-CLS-001", id: "museum-source-separate-notes", label: "Mumok and Natural History remain separate Vienna City Note ideas", status: "enforced" },
   { contract: "RW-CLS-001", id: "trdelnik-activity", label: "Trdelnik breakfast is an untimed activity card", status: "enforced" },
-  { contract: "RW-EVD-001", id: "koscom-activity", label: "Koscom is an activity on Jan 17 from source sequencing", status: "enforced" },
+  { contract: "RW-EVD-001", id: "koscom-activity", label: "The Jan 17 koscom action stays visible but provisional until the token is identified", status: "enforced" },
   { contract: "RW-CLS-001", id: "tour-rome-activity", label: "'Tour Rome in afternoon/evening' is an activity card", status: "enforced" },
   // 2026-07-17 evening pass — live-run 7.17.2 defect fixtures.
   { contract: "RW-ASM-001", id: "castle-survives-stay-shadow", label: "Bare 'Prague Castle' is never a Prague Airbnb lodging shadow", status: "enforced" },

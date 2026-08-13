@@ -819,6 +819,7 @@ export function canonicalPiecePublicPayload(
     _canonicalNoteEntries,
     _canonicalNoteEntry,
     _canonicalRoleDecision,
+    _canonicalUnresolvedPlanToken,
     _canonicalProvisionalFields,
     _canonicalRepairedTransportFields,
     _canonicalSourceDecisions,
@@ -1198,6 +1199,32 @@ function activityMatchReason(
       stringValue(left, "title"),
       stringValue(right, "title")
     )
+  ) {
+    return null;
+  }
+
+  // A fixed, source-described route that explicitly lists multiple stops is
+  // not an alias for any one stop. This veto has to run during initial
+  // clustering, before the containment ledger exists; otherwise identity can
+  // erase the parent that containment needs to express the route. Copies of
+  // the route may still deduplicate with each other.
+  const sourceAuthoredMultiStopRoute = (record: Record<string, unknown>) => {
+    const title = stringValue(record, "title") ?? "";
+    const description = stringValue(record, "description") ?? "";
+    const text = `${title} ${description}`;
+    return Boolean(
+      (timeFrom(record) ||
+        confirmationFrom(record) ||
+        /\b(?:booked|booking|reservation|ticket|voucher|paid)\b/i.test(text)) &&
+        /\b(?:tour|route|walk(?:ing)?)\b/i.test(text) &&
+        /\b(?:includes?|covers?|stops?\s+(?:at|include))\b[^.!?\n]{1,180}\b(?:and|then)\b/i.test(
+          description
+        )
+    );
+  };
+  if (
+    sourceAuthoredMultiStopRoute(left) !==
+    sourceAuthoredMultiStopRoute(right)
   ) {
     return null;
   }
@@ -7828,6 +7855,12 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
 
   for (const note of notes) {
     const explicitCity = stringValue(note.payload, "city");
+    const canonicalExplicitCity = places.find(
+      (place) =>
+        place.city &&
+        explicitCity &&
+        normalizedComparable(place.city) === normalizedComparable(explicitCity)
+    )?.city;
     const headingDate = (() => {
       const headingPath = Array.isArray(note.payload.sourceHeadingPath)
         ? note.payload.sourceHeadingPath.filter(
@@ -7847,19 +7880,38 @@ function mergeCanonicalCityNotes(pieces: CanonicalEvidencePiece[]) {
     const text = normalizeText(
       [note.payload.title, note.payload.description].filter(Boolean).join(" ")
     );
+    const sourceText = normalizeText(
+      [
+        note.payload.evidence,
+        note.payload.sourceSectionLabel,
+        ...(Array.isArray(note.payload.sourceHeadingPath)
+          ? note.payload.sourceHeadingPath
+          : []),
+      ]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+    );
+    const dateCity = places.find(
+      (place) =>
+        date &&
+        place.arriveDate &&
+        date >= place.arriveDate &&
+        (!place.leaveDate || date < place.leaveDate)
+    )?.city;
+    const sourceConfirmedDateCity =
+      stringValue(note.payload, "sourceSectionType") === "dated_itinerary" &&
+      dateCity &&
+      sourceText.includes(normalizeText(dateCity))
+        ? dateCity
+        : null;
     const city =
-      explicitCity ??
+      sourceConfirmedDateCity ??
+      canonicalExplicitCity ??
       places.find(
         (place) =>
           place.city && normalizeText(place.city) && text.includes(normalizeText(place.city))
       )?.city ??
-      places.find(
-        (place) =>
-          date &&
-          place.arriveDate &&
-          date >= place.arriveDate &&
-          (!place.leaveDate || date < place.leaveDate)
-      )?.city ??
+      dateCity ??
       null;
 
     if (!city) {
@@ -8344,6 +8396,61 @@ function suppressUnresolvedIsolatedTerms({
       sourceObservations.every(
         (observation) => observation.sourceStructure.sectionType === "unknown"
       );
+    const sourceText = sourceObservations
+      .flatMap((observation) => [
+        stringValue(observation.payload, "evidence"),
+        stringValue(observation.payload, "description"),
+      ])
+      .filter((value): value is string => Boolean(value))
+      .join(" ");
+    const normalizedTitle = normalizedComparable(title);
+    const normalizedSourceText = normalizedComparable(sourceText);
+    const unresolvedPlannedToken = Boolean(
+      piece.kind === "activity" &&
+        title &&
+        /^[a-z][a-z0-9'’-]{3,}$/.test(title.trim()) &&
+        identityTokens(title).length === 1 &&
+        /^(?:admin|admin_logistics|administrative|logistics)$/i.test(
+          stringValue(piece.payload, "category") ?? ""
+        ) &&
+        stringValue(piece.payload, "date") &&
+        !stringValue(piece.payload, "address") &&
+        finitePayloadNumber(piece.payload, "verifiedLatitude") === null &&
+        finitePayloadNumber(piece.payload, "verifiedLongitude") === null &&
+        !timeFrom(piece.payload) &&
+        !confirmationFrom(piece.payload) &&
+        sourceObservations.some(
+          (observation) =>
+            observation.sourceStructure.sectionType === "dated_itinerary"
+        ) &&
+        normalizedTitle &&
+        (normalizedSourceText.includes(`go to ${normalizedTitle}`) ||
+          normalizedSourceText.includes(`head to ${normalizedTitle}`) ||
+          normalizedSourceText.includes(`stop at ${normalizedTitle}`))
+    );
+    if (unresolvedPlannedToken && title) {
+      piece.payload._canonicalUnresolvedPlanToken = title;
+      piece.payload._canonicalProvisionalFields = Array.from(
+        new Set([
+          ...(Array.isArray(piece.payload._canonicalProvisionalFields)
+            ? piece.payload._canonicalProvisionalFields.filter(
+                (value): value is string => typeof value === "string"
+              )
+            : []),
+          "title",
+        ])
+      );
+      piece.payload._recoveryRequired = true;
+      piece.payload.title = `Unidentified plan: ${title}`;
+      addCanonicalAction(piece, {
+        absorbedTitles: [],
+        observationIds: [...piece.observationIds],
+        reason:
+          "source-backed action retained provisionally because the source token does not identify what it refers to",
+        type: "recovered",
+      });
+      continue;
+    }
     if (
       !title ||
       title.split(/\s+/).length > 3 ||
@@ -9433,6 +9540,132 @@ function titleTokensApproximatelyContain(
   );
 }
 
+const ANAPHORIC_SITE_NOUNS = new Set([
+  "basilica",
+  "castle",
+  "cathedral",
+  "church",
+  "gallery",
+  "garden",
+  "market",
+  "memorial",
+  "monument",
+  "mosque",
+  "museum",
+  "palace",
+  "shrine",
+  "synagogue",
+  "temple",
+  "tower",
+]);
+
+function sourceBlockIdsForIdentity(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  return new Set(
+    piece.observationIds.flatMap((id) => {
+      const position = asRecord(
+        observationById.get(id)?.payload._canonicalSourcePosition
+      );
+      return Array.isArray(position.blockIds)
+        ? position.blockIds.filter(
+            (blockId): blockId is string => typeof blockId === "string"
+          )
+        : [];
+    })
+  );
+}
+
+function anaphoricSiteKind(
+  piece: CanonicalEvidencePiece,
+  observationById: Map<string, EvidenceObservation>
+) {
+  const title = stringValue(piece.payload, "title") ?? "";
+  const titleTokens = identityTokens(title);
+  const siteKinds = titleTokens.filter((token) =>
+    ANAPHORIC_SITE_NOUNS.has(token)
+  );
+  if (siteKinds.length !== 1) return null;
+  const distinguishingTokens = titleTokens.filter(
+    (token) => !ANAPHORIC_SITE_NOUNS.has(token)
+  );
+  if (distinguishingTokens.length === 0) return null;
+  const siteKind = siteKinds[0];
+  const sourceTexts = piece.observationIds
+    .map((id) => observationById.get(id))
+    .filter(
+      (observation): observation is EvidenceObservation =>
+        Boolean(observation && observation.kind === "activity")
+    )
+    .map((observation) =>
+      normalizedComparable(
+        `${stringValue(observation.payload, "evidence") ?? ""} ${
+          stringValue(observation.payload, "description") ?? ""
+        }`
+      )
+    )
+    .filter(Boolean);
+  const anaphorPattern = new RegExp(
+    `\\b(?:check out|climb|enter|explore|see|tour|visit)\\s+(?:inside\\s+)?the\\s+(?:[a-z]+\\s+){0,2}${siteKind}\\b`,
+    "i"
+  );
+
+  return sourceTexts.some((text) => {
+    const sourceTokens = new Set(identityTokens(text));
+    return (
+      anaphorPattern.test(text) &&
+      distinguishingTokens.every((token) => !sourceTokens.has(token))
+    );
+  })
+    ? siteKind
+    : null;
+}
+
+function sameBlockAnaphoricSiteAlias({
+  candidates,
+  left,
+  observationById,
+  right,
+}: {
+  candidates: CanonicalEvidencePiece[];
+  left: CanonicalEvidencePiece;
+  observationById: Map<string, EvidenceObservation>;
+  right: CanonicalEvidencePiece;
+}) {
+  const leftKind = anaphoricSiteKind(left, observationById);
+  const rightKind = anaphoricSiteKind(right, observationById);
+  if (Boolean(leftKind) === Boolean(rightKind)) return null;
+  const source = leftKind ? left : right;
+  const target = source === left ? right : left;
+  const siteKind = leftKind ?? rightKind;
+  if (!siteKind) return null;
+  const targetTitleTokens = identityTokens(
+    stringValue(target.payload, "title")
+  );
+  if (!targetTitleTokens.includes(siteKind)) return null;
+  const sourceBlocks = sourceBlockIdsForIdentity(source, observationById);
+  const sharesBlock = (candidate: CanonicalEvidencePiece) =>
+    [...sourceBlockIdsForIdentity(candidate, observationById)].some((id) =>
+      sourceBlocks.has(id)
+    );
+  if (!sharesBlock(target)) return null;
+
+  const namedPeers = candidates.filter(
+    (candidate) =>
+      candidate !== source &&
+      sameCanonicalDate(candidate.payload, source.payload) &&
+      sharesBlock(candidate) &&
+      identityTokens(stringValue(candidate.payload, "title")).includes(
+        siteKind
+      ) &&
+      !anaphoricSiteKind(candidate, observationById)
+  );
+  return namedPeers.length === 1 && namedPeers[0] === target
+    ? { source, target }
+    : null;
+}
+
 function collapseCrossReferencedSameDayVenueAliases(
   pieces: CanonicalEvidencePiece[],
   observations: EvidenceObservation[],
@@ -9440,6 +9673,9 @@ function collapseCrossReferencedSameDayVenueAliases(
 ) {
   const timedCounts = timedActivityCountsByDate(pieces);
   const tripCities = pieceTripCityNames(pieces);
+  const observationById = new Map(
+    observations.map((observation) => [observation.id, observation])
+  );
   let changed = true;
   while (changed) {
     changed = false;
@@ -9464,6 +9700,12 @@ function collapseCrossReferencedSameDayVenueAliases(
         ) {
           continue;
         }
+        const anaphoricAlias = sameBlockAnaphoricSiteAlias({
+          candidates,
+          left,
+          observationById,
+          right,
+        });
         const leftCategory = canonicalCategoryId({
           category: stringValue(left.payload, "category"),
           description: stringValue(left.payload, "description"),
@@ -9476,7 +9718,12 @@ function collapseCrossReferencedSameDayVenueAliases(
           itemType: "activity",
           title: stringValue(right.payload, "title"),
         });
-        if (leftCategory && rightCategory && leftCategory !== rightCategory) {
+        if (
+          leftCategory &&
+          rightCategory &&
+          leftCategory !== rightCategory &&
+          !anaphoricAlias
+        ) {
           continue;
         }
         const leftTitle = normalizedComparable(
@@ -9539,6 +9786,7 @@ function collapseCrossReferencedSameDayVenueAliases(
         const leftOwnText = identityOwnedObservationText(left, leftTitle);
         const rightOwnText = identityOwnedObservationText(right, rightTitle);
         const crossReferenced =
+          Boolean(anaphoricAlias) ||
           leftOwnText.some((text) => text.includes(rightTitle)) ||
           rightOwnText.some((text) => text.includes(leftTitle)) ||
           (titleTokensApproximatelyContain(
@@ -9604,8 +9852,9 @@ function collapseCrossReferencedSameDayVenueAliases(
         // A localized/parser-rephrased alias may enrich a venue, but it may
         // not overwrite the title the source itself spells out. This keeps
         // canonical naming source-backed without any venue alias table.
-        const target =
-          leftVerbatim !== rightVerbatim
+        const target = anaphoricAlias
+          ? anaphoricAlias.target
+          : leftVerbatim !== rightVerbatim
             ? leftVerbatim > rightVerbatim
               ? left
               : right
@@ -9619,7 +9868,9 @@ function collapseCrossReferencedSameDayVenueAliases(
         const source = target === left ? right : left;
         mergeCanonicalPieceInto({
           reason:
-            "same-day venue identity: one source occurrence explicitly names the alternate venue title",
+            anaphoricAlias
+              ? "same-day venue identity: an anaphoric site detail in the same source block belongs to the one named visit"
+              : "same-day venue identity: one source occurrence explicitly names the alternate venue title",
           source,
           target,
         });
@@ -10141,36 +10392,46 @@ function sourceSequencedSiteVisitPlanPieceIds(
   return planned;
 }
 
+function classifiedBlockTypesForSourceOccurrence(
+  piece: CanonicalEvidencePiece,
+  occurrence: CanonicalSourceOccurrence,
+  observationById: Map<string, EvidenceObservation>
+) {
+  const types = new Set<string>();
+  const pieceTitleTokens = identityTokens(stringValue(piece.payload, "title"));
+  for (const observation of observationById.values()) {
+    const observationTitleTokens = identityTokens(
+      stringValue(observation.payload, "title")
+    );
+    const position = asRecord(observation.payload._canonicalSourcePosition);
+    if (
+      stringValue(observation.payload, "date") !== occurrence.date ||
+      stringValue(position, "sourceIdentityHash") !==
+        occurrence.sourceIdentityHash ||
+      Number(position.stageIndex) !== occurrence.stageIndex ||
+      Number(position.line) !== occurrence.line ||
+      observationTitleTokens.length === 0 ||
+      pieceTitleTokens.length === 0 ||
+      overlapCount(observationTitleTokens, pieceTitleTokens) <
+        Math.min(2, observationTitleTokens.length, pieceTitleTokens.length)
+    ) {
+      continue;
+    }
+    const reason = stringValue(
+      asRecord(observation.payload._canonicalCandidacyDecision),
+      "reasonCode"
+    );
+    if (reason === "BLOCK_IDEAS") types.add("ideas");
+    if (reason === "BLOCK_PLAN") types.add("plan");
+    if (reason === "BLOCK_AMBIGUOUS") types.add("ambiguous");
+  }
+  return types;
+}
+
 function sourceSequencedIdentityDate(
   piece: CanonicalEvidencePiece,
   observationById: Map<string, EvidenceObservation>
 ) {
-  const pieceTitleTokens = identityTokens(stringValue(piece.payload, "title"));
-  const classifiedBlockTypesForDate = (date: string) => {
-    const types = new Set<string>();
-    for (const observation of observationById.values()) {
-      const observationTitleTokens = identityTokens(
-        stringValue(observation.payload, "title")
-      );
-      if (
-        stringValue(observation.payload, "date") !== date ||
-        observationTitleTokens.length === 0 ||
-        pieceTitleTokens.length === 0 ||
-        overlapCount(observationTitleTokens, pieceTitleTokens) <
-          Math.min(2, observationTitleTokens.length, pieceTitleTokens.length)
-      ) {
-        continue;
-      }
-      const decision = asRecord(
-        observation.payload._canonicalCandidacyDecision
-      );
-      const reason = stringValue(decision, "reasonCode");
-      if (reason === "BLOCK_IDEAS") types.add("ideas");
-      if (reason === "BLOCK_PLAN") types.add("plan");
-      if (reason === "BLOCK_AMBIGUOUS") types.add("ambiguous");
-    }
-    return types;
-  };
   const allOccurrences = sourceOccurrencesForPiece(piece, observationById, {
     identityTitleOnly: true,
   });
@@ -10198,12 +10459,23 @@ function sourceSequencedIdentityDate(
   // A deliberate plan occurrence outranks an earlier reference-list
   // occurrence. Only when no occurrence was classified as a plan do we
   // fall back to the earliest sequenced mention that was not ideas-only.
+  // Decisions are occurrence-scoped, not date-scoped: a broad parser
+  // re-emission elsewhere on the same day cannot turn an exact source line
+  // that classification typed as ideas into a traveler Activity.
   return (
     occurrences.find((occurrence) =>
-      classifiedBlockTypesForDate(occurrence.date).has("plan")
+      classifiedBlockTypesForSourceOccurrence(
+        piece,
+        occurrence,
+        observationById
+      ).has("plan")
     )?.date ??
     occurrences.find((occurrence) => {
-      const classified = classifiedBlockTypesForDate(occurrence.date);
+      const classified = classifiedBlockTypesForSourceOccurrence(
+        piece,
+        occurrence,
+        observationById
+      );
       return classified.has("plan") || classified.size === 0;
     })?.date ??
     null
@@ -10284,6 +10556,19 @@ function hasDeliberatePlanWithoutMatchingOccurrenceTelemetry(
     observationById,
     { identityTitleOnly: true }
   );
+  // This fallback cannot overrule an exact source occurrence that the intent
+  // classifier placed in ideas. That evidence is not "lost telemetry"; it is
+  // the authoritative source line, and a broader parser copy is the loser.
+  const hasIdeasOnlySourceOccurrence = occurrences.some((occurrence) => {
+    if (occurrence.date !== classifiedDate) return false;
+    const types = classifiedBlockTypesForSourceOccurrence(
+      piece,
+      occurrence,
+      observationById
+    );
+    return types.has("ideas") && !types.has("plan");
+  });
+  if (hasIdeasOnlySourceOccurrence) return false;
   const hasMatchingOccurrence = occurrences.some(
     (occurrence) => occurrence.date === classifiedDate
   );
@@ -11037,10 +11322,17 @@ function reconcileCardsAgainstCityNotes(
         // A source-authored aggregate note is context for several distinct
         // identities, not an atomic identity twin of each one. It may still
         // keep ambiguous/uncommitted ideas in City Notes, but it cannot
-        // overrule the classifier's explicit plan decision for a named card.
+        // overrule the classifier's explicit plan decision for a named card
+        // when that card is anchored to its own exact source occurrence.
+        // A broad parser re-emission elsewhere on the same day is not that
+        // source proof, even if it inherited a plan-shaped block.
         // This replaces the accidental protection grouping used to provide:
         // lossless ungrouping must not make planned site records disappear.
         (authoritativeActivityCommitment(piece) === "sequenced" &&
+          (hasExactSourceOccurrenceOnClassifiedDate(piece, observationById) ||
+            sourceOccurrencesForPiece(piece, observationById, {
+              identityTitleOnly: true,
+            }).length === 0) &&
           noteListsMultipleActivityIdentities(matchingNote))
     );
 
@@ -14847,7 +15139,11 @@ function unresolvedMissingDetails({
       subjectType === "item" &&
       /^(?:address|name|title)$/.test(targetField) &&
       piece.kind === "activity" &&
-      !isGenericTitle(piece.payload.title)
+      !isGenericTitle(piece.payload.title) &&
+      !(
+        Array.isArray(piece.payload._canonicalProvisionalFields) &&
+        piece.payload._canonicalProvisionalFields.includes("title")
+      )
     ) {
       return false;
     }
@@ -15232,6 +15528,31 @@ function createCanonicalOwnedQuestions(pieces: CanonicalEvidencePiece[]) {
 
     const title = stringValue(piece.payload, "title") ?? "this item";
     const description = stringValue(piece.payload, "description");
+    const unresolvedPlanToken = stringValue(
+      piece.payload,
+      "_canonicalUnresolvedPlanToken"
+    );
+
+    if (piece.kind === "activity" && unresolvedPlanToken) {
+      return [{
+        _canonicalReviewDisposition: "question",
+        answerOptions: [],
+        answerType: "text",
+        confidence: "medium",
+        evidence:
+          stringValue(piece.payload, "evidence") ??
+          description ??
+          unresolvedPlanToken,
+        guessedValue: null,
+        prompt: `What does “${unresolvedPlanToken}” refer to in this plan?`,
+        reason:
+          "The source preserves this intended action but does not identify what the token means.",
+        relatedCanonicalPieceId: piece.id,
+        relatedTitle: title,
+        subjectType: "item",
+        targetField: "title",
+      }];
+    }
 
     // Disjunction rule (2026-07-17 ground truth, supersedes the automatic
     // alternative-slot question): an explicit "or" slot stays ONE flexible

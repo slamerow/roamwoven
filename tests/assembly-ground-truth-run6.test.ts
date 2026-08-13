@@ -278,8 +278,61 @@ export default async function run() {
     );
   });
 
-  await test("ground truth run6 (PB-4, RW-CLS-001): the Jan-21 recommendation dump stays city notes — no dated activity cards", () => {
+  await test("ground truth run6 (PB-4, RW-CLS-001): the standalone Jan-21 recommendation blocks stay city notes", () => {
     const JAN21_HEADING = "Monday, January 21st Train to Budapest // Budapest Bathing";
+    const JAN21_SOURCE_TEXT = [
+      "Monday, January 21st",
+      "Train to Budapest // Budapest Bathing",
+      "",
+      "10:42 Train To Budapest",
+      "Wien HBF",
+      "Booking Code: VXFHXKCQEPHPUSNT",
+      "",
+      "=== Page 10 ===",
+      "Outbound - Jan 21, 2019",
+      "",
+      "10:42 — Wien Hbf",
+      "02:37h",
+      "ÖBB I D 143",
+      "",
+      "13:19 — Budapest Keleti",
+      "",
+      "$20 USD = 5600 Hungarian Forint (HUF)",
+      "$1 USD = ~280 HUF",
+      "",
+      "Find a space to go hear gypsy music",
+      "",
+      "Ehr-nee-zhest (excuse me)",
+      "Kuh-suhnem (thank you)",
+      "",
+      "Popped up statue",
+      "",
+      "Asking for paprika: sweet: ey-desh spicy: eroh-sh",
+      "Thank you: kuhzi (thanks)",
+      "",
+      "Great Synagogue/ Jewish History",
+      "Bath houses (Gellert Baths)",
+      "Pinball Museum",
+      "",
+      "Konyv Bar and drink Tokaji",
+      "",
+      "*Mazel Tov restaurant",
+      "",
+      "Wine Cellar in the Hilton",
+      "Oldest pastry shop (Ruszwerm- roosworm)- serve lots of strudel",
+      "",
+      "S = sh Sz = s (hungarian) Gy = j",
+      "",
+      "Sleep:",
+      "Vitae Hostel",
+      "Reservation Number: 43145-412325267",
+      "Erzsebet korut 50, Budapest, Hungary",
+      "",
+      "=== Page 11 ===",
+      "From Keleti International train station: Take Red Metro Line (M2) towards Deli station 1 stop to Blaha Lujza Ter.",
+      "From Blaha Lujza ter take the 4 or 6 tram towards Szell Kalman ter 2 stops and get of at Kiraly Utca.",
+      "We are number 50 Erzsebet Korut and the buzzer number is 25",
+    ].join("\n");
     const listCard = (title: string, category: string, description: string) => ({
       category,
       city: "Budapest",
@@ -293,27 +346,29 @@ export default async function run() {
     const result = clusterExtractedEvidence({
       sourceTransportAnchors: [],
       stages: [
-        stage("Monday, January 21st", emptyStage({
-          activities: [
-            listCard("Great Synagogue/ Jewish History", "art_culture", "Great Synagogue and Jewish history."),
-            listCard("Hear gypsy music", "social", "Find a space to go hear gypsy music."),
-            listCard("Konyv Bar", "food_dining", "Konyv Bar and drink Tokaji."),
-            listCard("Mazel Tov restaurant", "food_dining", "Mazel Tov restaurant."),
-            listCard("Oldest pastry shop", "food_dining", "Oldest pastry shop (Ruszwerm - roosworm) - serve lots of strudel."),
-            listCard("Wine Cellar in the Hilton", "food_dining", "Wine Cellar in the Hilton."),
-            listCard("Pinball Museum", "nightlife_entertainment", "Pinball Museum."),
-            listCard("Popped up statue", "art_culture", "Popped up statue."),
-          ],
-          places: [
-            { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
-          ],
-        })),
+        stage(
+          "Monday, January 21st",
+          emptyStage({
+            activities: [
+              listCard("Hear gypsy music", "social", "Find a space to go hear gypsy music."),
+              listCard("Konyv Bar", "food_dining", "Konyv Bar and drink Tokaji."),
+              listCard("Mazel Tov restaurant", "food_dining", "Mazel Tov restaurant."),
+              listCard("Oldest pastry shop", "food_dining", "Oldest pastry shop (Ruszwerm - roosworm) - serve lots of strudel."),
+              listCard("Wine Cellar in the Hilton", "food_dining", "Wine Cellar in the Hilton."),
+              listCard("Popped up statue", "art_culture", "Popped up statue."),
+            ],
+            places: [
+              { arriveDate: "2019-01-21", city: "Budapest", country: "Hungary", leaveDate: "2019-01-24" },
+            ],
+          }),
+          JAN21_SOURCE_TEXT
+        ),
       ],
       tripOverview: TRIP_OVERVIEW,
     });
     const draft = result.draft as Draft;
     const promoted = draft.activities.filter((item) =>
-      /synagogue|gypsy|konyv|mazel|pastry|wine cellar|pinball|popped/i.test(
+      /gypsy|konyv|mazel|pastry|wine cellar|popped/i.test(
         String(item.title)
       )
     );
