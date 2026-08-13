@@ -9,7 +9,6 @@ import {
   normalizeText,
   normalizeTripDate,
 } from "@/lib/extraction/traveler-text";
-import { isSourceFactAssemblyAuthorityEnabled } from "@/lib/extraction/source-fact-assembly-config";
 
 const CANONICAL_RESOLVER_VERSION = 7;
 const MAX_RESOLVER_WINDOW_CANDIDATES = 24;
@@ -1098,9 +1097,7 @@ function applyResolution({
         line: containmentSourceLine(
           candidate.title,
           stageInput?.sourceText,
-          isSourceFactAssemblyAuthorityEnabled()
-            ? stringValue(item, "evidence")
-            : null
+          null
         ),
         relationshipSignal: candidate.sourceRelationshipSignal,
         sourceIdentityHash,

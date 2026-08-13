@@ -2054,40 +2054,6 @@ ASSERTIONS.push(
     },
   },
   {
-    id: "SOURCE-AUTHORITY-RELEASE-GATE",
-    entry: "RW-ADL-001",
-    tier: 1,
-    clause: "Only an applied source-fact authority with zero unresolved behavior can prove Loop 10",
-    claim: "The private run telemetry proves source authority applied completely and exposes only allowlisted aggregates",
-    run: (ctx) => {
-      const authority = ctx.report.extraction?.sourceFactAssemblyAuthority;
-      if (!authority) {
-        return { state: "NOT_CHECKABLE", field: "report.extraction.sourceFactAssemblyAuthority", detail: "this run predates or disabled source-fact authority" };
-      }
-      const allowed = [
-        "authorityHash", "behaviorSignalCandidateCount", "candidateCount",
-        "compositePlanRecoveredCandidateCount", "failureClass", "mappedCandidateCount",
-        "relationshipDecisionCount", "relationshipRecoveredCandidateCount",
-        "relationshipRecoveryStageCount", "relationshipUnresolvedCount",
-        "roleDecisionCount", "schemaVersion", "status",
-        "tailReferenceRecoveredCandidateCount", "unresolvedBehaviorCandidateCount",
-        "unresolvedSourceBindingCount",
-      ];
-      const unexpected = Object.keys(authority).filter((key) => !allowed.includes(key));
-      const ok = authority.status === "applied" &&
-        authority.schemaVersion === 1 &&
-        /^[0-9a-f]{64}$/i.test(authority.authorityHash ?? "") &&
-        authority.unresolvedBehaviorCandidateCount === 0 &&
-        authority.mappedCandidateCount <= authority.candidateCount &&
-        unexpected.length === 0;
-      return {
-        ok,
-        field: "report.extraction.sourceFactAssemblyAuthority",
-        detail: `status=${authority.status}; unresolved behavior=${authority.unresolvedBehaviorCandidateCount}; mapped=${authority.mappedCandidateCount}/${authority.candidateCount}; unexpected aggregate keys=${unexpected.join(",") || "none"}`,
-      };
-    },
-  },
-  {
     id: "SFL-INTEGRITY",
     entry: "RW-SFL-001",
     tier: 1,

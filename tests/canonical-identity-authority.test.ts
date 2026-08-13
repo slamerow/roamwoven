@@ -72,13 +72,7 @@ function timedPeer(title: string, date: string, startTime: string) {
 
 export default async function run() {
   await test("an exact day-plan occurrence replaces only its explicitly linked reference note", () => {
-    const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-    const priorOfflineAudit =
-      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
-    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
-    try {
-      const result = clusterExtractedEvidence({
+    const result = clusterExtractedEvidence({
         sourceTransportAnchors: [],
         stages: [
           stage("Wednesday, April 2nd", [
@@ -147,28 +141,10 @@ export default async function run() {
         0,
         "the replaced reference note does not keep a second home"
       );
-    } finally {
-      if (priorFlag === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
-      }
-      if (priorOfflineAudit === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = priorOfflineAudit;
-      }
-    }
   });
 
   await test("a later plan without a reference-note link cannot overrule an earlier sequenced occurrence", () => {
-    const priorFlag = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-    const priorOfflineAudit =
-      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
-    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
-    try {
-      const result = clusterExtractedEvidence({
+    const result = clusterExtractedEvidence({
         sourceTransportAnchors: [],
         stages: [
           stage("Thursday, April 3rd", [
@@ -213,18 +189,6 @@ export default async function run() {
         "2031-04-02",
         "without an explicit reference-note relationship, the existing sequenced-date rule remains authoritative"
       );
-    } finally {
-      if (priorFlag === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = priorFlag;
-      }
-      if (priorOfflineAudit === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = priorOfflineAudit;
-      }
-    }
   });
 
   await test("identity keeps one same-day venue alias while a next-day component remains distinct", () => {

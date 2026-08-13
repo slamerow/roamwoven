@@ -122,56 +122,6 @@ const PRODUCTION_MATERIAL_QUESTION: Detail = {
   targetField: "ticketType",
 };
 
-const SOURCE_ANSWERABLE_REFERENCE_QUESTION: Detail = {
-  answerType: "text",
-  confidence: "medium",
-  evidence: "Reference-like code appears in the booking excerpt.",
-  guessedValue: null,
-  prompt: "What is the booking/reference code?",
-  reason: "A reference-like alphanumeric code is present in the excerpt.",
-  targetField: "confirmation",
-};
-
-const SOURCE_ANSWERABLE_VENDOR_QUESTION: Detail = {
-  answerType: "text",
-  confidence: "medium",
-  evidence: "The booking excerpt names the vendor.",
-  guessedValue: null,
-  prompt: "What is the vendor name?",
-  reason: "The vendor name is explicitly stated in the excerpt.",
-  targetField: "name",
-};
-
-const IDENTITY_CLEANUP_HOME_QUESTION: Detail = {
-  answerType: "text",
-  confidence: "medium",
-  evidence: "Home",
-  guessedValue: null,
-  prompt: "Which city should the 'Home' line be associated with, if any?",
-  reason: "The chunk contains a standalone Home line.",
-  targetField: "city",
-};
-
-const MISSING_SOURCE_COMPLETION_QUESTION: Detail = {
-  answerType: "text",
-  confidence: "medium",
-  evidence: "Afternoon/evening: Rome activities",
-  guessedValue: null,
-  prompt: "What specific Rome activity is planned for the afternoon/evening?",
-  reason: "The source gives a broad placeholder only and no concrete venue.",
-  targetField: "description",
-};
-
-const MISSING_OPTIONAL_PROVIDER_QUESTION: Detail = {
-  answerType: "text",
-  confidence: "medium",
-  evidence: "Reservation 81486; pickup location recorded.",
-  guessedValue: null,
-  prompt: "Which car company/provider is associated with reservation 81486?",
-  reason: "The operating provider is not named in the extracted line set.",
-  targetField: "provider",
-};
-
 // The live 7.25.0 identity ask, in the same production shape.
 const PRODUCTION_IDENTITY_QUESTION: Detail = {
   answerType: "text",
@@ -226,56 +176,6 @@ function gateReasonFor(details: Detail[], pattern: RegExp) {
 }
 
 export default async function run() {
-  test("source authority dismisses source-answerable metadata, identity cleanup, and missing-source completion asks", () => {
-    const previous = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-    const previousOfflineAudit =
-      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
-    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
-    try {
-      const details = draftDetails([
-        SOURCE_ANSWERABLE_REFERENCE_QUESTION,
-        SOURCE_ANSWERABLE_VENDOR_QUESTION,
-        IDENTITY_CLEANUP_HOME_QUESTION,
-        MISSING_SOURCE_COMPLETION_QUESTION,
-        MISSING_OPTIONAL_PROVIDER_QUESTION,
-      ]);
-      assert.equal(details.length, 5, "dismissals remain auditable in the draft");
-      assert.ok(
-        details.every(
-          (detail) => detail._canonicalReviewDisposition === "dismissed"
-        )
-      );
-      assert.match(
-        String(details[0]?._canonicalQuestionGate ?? ""),
-        /source-answerable fields/i
-      );
-      assert.match(
-        String(details[2]?._canonicalQuestionGate ?? ""),
-        /identity cleanup/i
-      );
-      assert.match(
-        String(details[3]?._canonicalQuestionGate ?? ""),
-        /technical recovery/i
-      );
-      assert.match(
-        String(details[4]?._canonicalQuestionGate ?? ""),
-        /optional provider label/i
-      );
-    } finally {
-      if (previous === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = previous;
-      }
-      if (previousOfflineAudit === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = previousOfflineAudit;
-      }
-    }
-  });
-
   test("the mode/type rule dismisses a parser-shaped missingDetail with a reason", () => {
     const details = draftDetails([PRODUCTION_TYPE_QUESTION]);
     const { detail, disposition, gate } = gateReasonFor(

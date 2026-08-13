@@ -13,7 +13,6 @@ import {
 } from "@/lib/extraction/source-coverage-v4";
 import { buildSourceFactLedgerV1 } from "@/lib/extraction/source-fact-ledger";
 import { SourceFactLedgerPersistenceError } from "@/lib/extraction/source-fact-ledger-store";
-import { AssemblyDecisionLedgerPersistenceError } from "@/lib/extraction/assembly-decision-carrier-ledger-store";
 import { buildRecoverySourceBindingSidecarV1 } from "@/lib/extraction/recovery-source-binding";
 import { sourceFactFixture } from "@/tests/fixtures/source-fact-ledger-v1";
 
@@ -223,11 +222,6 @@ export default async function run() {
   const persistedPieceIds: string[][] = [];
   const persistedPieceEligibility: boolean[][] = [];
   const sourceFactPersistenceCalls: Array<Record<string, unknown>> = [];
-  const assemblyDecisionBuildCalls: Array<Record<string, unknown>> = [];
-  const assemblyDecisionPersistenceCalls: Array<Record<string, unknown>> = [];
-  let assemblyDecisionShadowEnabled = false;
-  let assemblyDecisionPersistenceFails = false;
-  let assemblyDecisionEventFails = false;
   let sourceFactEventFails = false;
   let sourceFactPersistenceFails = false;
   const restore = [
@@ -299,53 +293,6 @@ export default async function run() {
         return { ledgerHash: ledger.metrics.ledgerHash, status: "inserted" };
       },
     }),
-    patchModule("@/lib/extraction/assembly-decision-carrier-builder", {
-      buildAssemblyDecisionCarrierLedgerV1: (input: Record<string, unknown>) => {
-        assemblyDecisionBuildCalls.push(input);
-        const sourceLedger = input.sourceLedger as {
-          factSet: { schemaVersion: 1; sourceFingerprint: string };
-          metrics: { ledgerHash: string };
-        };
-        return {
-          decisionSet: {
-            decisions: [],
-            factDispositions: [],
-            resolverRoleEvaluations: [],
-            schemaVersion: 1,
-            sourceFactLedgerHash: sourceLedger.metrics.ledgerHash,
-            sourceFactLedgerSchemaVersion:
-              sourceLedger.factSet.schemaVersion,
-            sourceFingerprint: sourceLedger.factSet.sourceFingerprint,
-          },
-          metrics: {
-            decisionCount: 0,
-            decisionSetHash: "d".repeat(64),
-            factDispositionCount: 0,
-            ledgerBuildMilliseconds: 4,
-            resolverEvaluationCount: 0,
-            schemaVersion: 1,
-            serializedByteSize: 200,
-            writerVersion: 1,
-          },
-        };
-      },
-    }),
-    patchModule("@/lib/extraction/assembly-decision-carrier-ledger-store", {
-      isAssemblyDecisionLedgerShadowEnabled: () =>
-        assemblyDecisionShadowEnabled,
-      persistAssemblyDecisionCarrierSetV1: async (
-        input: Record<string, unknown>
-      ) => {
-        assemblyDecisionPersistenceCalls.push(input);
-        if (assemblyDecisionPersistenceFails) {
-          throw new AssemblyDecisionLedgerPersistenceError(
-            "decision_set_insert_failed",
-            "sanitized decision store failure"
-          );
-        }
-        return { decisionSetHash: "d".repeat(64), status: "inserted" };
-      },
-    }),
     patchModule("@/lib/extraction/evidence-artifacts", {
       persistEvidenceArtifacts: async ({
         observations,
@@ -375,12 +322,6 @@ export default async function run() {
       recordTripProcessingEvent: async (event: Record<string, unknown>) => {
         if (sourceFactEventFails && event.stage === "source_fact_ledger") {
           throw new Error("sanitized source fact event failure");
-        }
-        if (
-          assemblyDecisionEventFails &&
-          event.stage === "assembly_decision_ledger"
-        ) {
-          throw new Error("sanitized assembly decision event failure");
         }
         events.push(clone(event));
       },
@@ -439,224 +380,6 @@ export default async function run() {
       const details = JSON.stringify(ledgerEvents[0]?.details ?? {});
       assert.doesNotMatch(details, /Prague Castle|Vinárna|Write postcards/i);
       assert.match(details, /ledgerHash/);
-      assert.equal(assemblyDecisionBuildCalls.length, 0);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 0);
-    });
-
-    await test("decision shadow requires the source flag and never creates an orphan", async () => {
-      parserResult = createParserResult();
-      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
-      assemblyDecisionShadowEnabled = true;
-      delete process.env.EXTRACTION_FACT_LEDGER_SHADOW;
-      assemblyDecisionBuildCalls.length = 0;
-      assemblyDecisionPersistenceCalls.length = 0;
-      completedCalls.length = 0;
-      failedCalls.length = 0;
-      events.length = 0;
-
-      const response = await POST(
-        new NextRequest(
-          "http://localhost/maker/trips/route-decision-source-off/data/extract"
-        ),
-        { params: Promise.resolve({ tripId: "route-decision-source-off" }) }
-      );
-      const decisionEvents = events.filter(
-        (event) => event.stage === "assembly_decision_ledger"
-      );
-      const usage = completedCalls[0]?.usage as Record<string, unknown>;
-      const openai = usage.openai as Record<string, unknown>;
-      const decisionUsage = openai.assemblyDecisionLedger as Record<
-        string,
-        unknown
-      >;
-
-      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
-      assert.equal(completedCalls.length, 1);
-      assert.equal(failedCalls.length, 0);
-      assert.equal(assemblyDecisionBuildCalls.length, 0);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 0);
-      assert.equal(decisionEvents.length, 1);
-      assert.equal(decisionEvents[0].status, "failed");
-      assert.equal(
-        (decisionEvents[0].details as Record<string, unknown>).failureClass,
-        "source_fact_dependency_unavailable"
-      );
-      assert.equal(
-        decisionUsage.failureClass,
-        "source_fact_dependency_unavailable"
-      );
-      assemblyDecisionShadowEnabled = false;
-      process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
-    });
-
-    await test("decision shadow never writes when source persistence fails", async () => {
-      parserResult = createParserResult();
-      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
-      assemblyDecisionShadowEnabled = true;
-      process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
-      sourceFactPersistenceFails = true;
-      sourceFactPersistenceCalls.length = 0;
-      assemblyDecisionBuildCalls.length = 0;
-      assemblyDecisionPersistenceCalls.length = 0;
-      completedCalls.length = 0;
-      failedCalls.length = 0;
-      events.length = 0;
-
-      const response = await POST(
-        new NextRequest(
-          "http://localhost/maker/trips/route-decision-source-failed/data/extract"
-        ),
-        {
-          params: Promise.resolve({
-            tripId: "route-decision-source-failed",
-          }),
-        }
-      );
-      const decisionEvents = events.filter(
-        (event) => event.stage === "assembly_decision_ledger"
-      );
-
-      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
-      assert.equal(sourceFactPersistenceCalls.length, 1);
-      assert.equal(assemblyDecisionBuildCalls.length, 0);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 0);
-      assert.equal(completedCalls.length, 1);
-      assert.equal(failedCalls.length, 0);
-      assert.deepEqual(
-        decisionEvents.map((event) => event.status),
-        ["failed"]
-      );
-      assert.equal(
-        (decisionEvents[0].details as Record<string, unknown>).failureClass,
-        "source_fact_dependency_unavailable"
-      );
-
-      sourceFactPersistenceFails = false;
-      assemblyDecisionShadowEnabled = false;
-    });
-
-    await test("decision shadow runs after terminal assembly and persists one companion row", async () => {
-      parserResult = createParserResult();
-      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
-      assemblyDecisionShadowEnabled = true;
-      process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
-      assemblyDecisionPersistenceFails = false;
-      assemblyDecisionBuildCalls.length = 0;
-      assemblyDecisionPersistenceCalls.length = 0;
-      completedCalls.length = 0;
-      failedCalls.length = 0;
-      events.length = 0;
-
-      const response = await POST(
-        new NextRequest(
-          "http://localhost/maker/trips/route-decision-success/data/extract"
-        ),
-        { params: Promise.resolve({ tripId: "route-decision-success" }) }
-      );
-      const decisionEvents = events.filter(
-        (event) => event.stage === "assembly_decision_ledger"
-      );
-      const assemblyCompletedIndex = events.findIndex(
-        (event) => event.stage === "assembly" && event.status === "completed"
-      );
-      const decisionIndex = events.findIndex(
-        (event) => event.stage === "assembly_decision_ledger"
-      );
-      const usage = completedCalls[0]?.usage as Record<string, unknown>;
-      const openai = usage.openai as Record<string, unknown>;
-      const decisionUsage = openai.assemblyDecisionLedger as Record<
-        string,
-        unknown
-      >;
-
-      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
-      assert.equal(completedCalls.length, 1);
-      assert.equal(failedCalls.length, 0);
-      assert.equal(assemblyDecisionBuildCalls.length, 1);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 1);
-      assert.equal(decisionEvents.length, 1);
-      assert.equal(decisionEvents[0].status, "completed");
-      assert.ok(decisionIndex > assemblyCompletedIndex);
-      assert.equal(decisionUsage.status, "built");
-      assert.equal(decisionUsage.persistenceStatus, "inserted");
-      assert.equal(
-        decisionUsage.outputFingerprintBefore,
-        decisionUsage.outputFingerprintAfter
-      );
-      assert.equal(decisionUsage.additionalModelCallCount, 0);
-      assert.equal(decisionUsage.additionalGeocodingLookupCount, 0);
-      assert.equal(decisionUsage.additionalRetryCount, 0);
-      const persistedInput = assemblyDecisionPersistenceCalls[0];
-      assert.ok(persistedInput.sourceFactPersistence);
-      assemblyDecisionShadowEnabled = false;
-    });
-
-    await test("decision persistence failure emits once and preserves the usable draft", async () => {
-      parserResult = createParserResult();
-      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
-      assemblyDecisionShadowEnabled = true;
-      process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
-      assemblyDecisionPersistenceFails = true;
-      assemblyDecisionBuildCalls.length = 0;
-      assemblyDecisionPersistenceCalls.length = 0;
-      completedCalls.length = 0;
-      failedCalls.length = 0;
-      events.length = 0;
-
-      const response = await POST(
-        new NextRequest(
-          "http://localhost/maker/trips/route-decision-fail/data/extract"
-        ),
-        { params: Promise.resolve({ tripId: "route-decision-fail" }) }
-      );
-      const decisionEvents = events.filter(
-        (event) => event.stage === "assembly_decision_ledger"
-      );
-      const records = readStructuredTripSnapshot(completedCalls[0]?.draftJson);
-
-      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
-      assert.equal(completedCalls.length, 1);
-      assert.equal(failedCalls.length, 0);
-      assert.equal(assemblyDecisionBuildCalls.length, 1);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 1);
-      assert.deepEqual(
-        decisionEvents.map((event) => event.status),
-        ["failed"]
-      );
-      assert.equal(
-        (decisionEvents[0].details as Record<string, unknown>).failureClass,
-        "decision_set_insert_failed"
-      );
-      assert.equal(records?.items.length, 1);
-      assemblyDecisionPersistenceFails = false;
-      assemblyDecisionShadowEnabled = false;
-    });
-
-    await test("decision event-store failure cannot abort a completed extraction", async () => {
-      parserResult = createParserResult();
-      parserResult.sourceFactLedger = createSourceFactLedgerShadow();
-      assemblyDecisionShadowEnabled = true;
-      process.env.EXTRACTION_FACT_LEDGER_SHADOW = "1";
-      assemblyDecisionEventFails = true;
-      assemblyDecisionBuildCalls.length = 0;
-      assemblyDecisionPersistenceCalls.length = 0;
-      completedCalls.length = 0;
-      failedCalls.length = 0;
-      events.length = 0;
-
-      const response = await POST(
-        new NextRequest(
-          "http://localhost/maker/trips/route-decision-event-fail/data/extract"
-        ),
-        { params: Promise.resolve({ tripId: "route-decision-event-fail" }) }
-      );
-      assert.match(response.headers.get("location") ?? "", /extraction=completed/);
-      assert.equal(completedCalls.length, 1);
-      assert.equal(failedCalls.length, 0);
-      assert.equal(assemblyDecisionBuildCalls.length, 1);
-      assert.equal(assemblyDecisionPersistenceCalls.length, 1);
-      assemblyDecisionEventFails = false;
-      assemblyDecisionShadowEnabled = false;
     });
 
     await test("source fact persistence failure is one internal event and never aborts extraction", async () => {
@@ -1091,7 +814,6 @@ export default async function run() {
       );
     });
   } finally {
-    assemblyDecisionShadowEnabled = false;
     if (originalSourceFactShadowEnv === undefined) {
       delete process.env.EXTRACTION_FACT_LEDGER_SHADOW;
     } else {

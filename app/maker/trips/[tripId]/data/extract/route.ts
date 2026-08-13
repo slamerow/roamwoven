@@ -45,18 +45,6 @@ import {
   persistSourceFactSetV1,
   type SourceFactSetPersistenceResultV1,
 } from "@/lib/extraction/source-fact-ledger-store";
-import { buildAssemblyDecisionCarrierLedgerV1 } from "@/lib/extraction/assembly-decision-carrier-builder";
-import {
-  ASSEMBLY_DECISION_CARRIER_LEDGER_SCHEMA_VERSION,
-  ASSEMBLY_DECISION_WRITER_VERSION,
-} from "@/lib/extraction/assembly-decision-carrier-ledger";
-import {
-  AssemblyDecisionLedgerPersistenceError,
-  createAssemblyDecisionLedgerTelemetryV1,
-  isAssemblyDecisionLedgerShadowEnabled,
-  persistAssemblyDecisionCarrierSetV1,
-} from "@/lib/extraction/assembly-decision-carrier-ledger-store";
-import { hashStableValue } from "@/lib/extraction/source-document-index";
 import {
   createTripExtractionMaterialsIdempotencyKey,
   getTripExtractionMaterialsWithSummary,
@@ -140,31 +128,6 @@ async function recordSourceFactLedgerEventFailSoft(
       tripId: event.tripId,
     });
   }
-}
-
-async function recordAssemblyDecisionLedgerEventFailSoft(
-  event: Parameters<typeof recordTripProcessingEvent>[0]
-) {
-  try {
-    await recordTripProcessingEvent(event);
-  } catch (error) {
-    console.error("trip_assembly_decision_ledger_event_failed", {
-      name: error instanceof Error ? error.name : "UnknownError",
-      processingRunId: event.processingRunId,
-      status: event.status,
-      tripId: event.tripId,
-    });
-  }
-}
-
-function withAssemblyDecisionLedgerUsage(
-  usage: unknown,
-  assemblyDecisionLedger: Record<string, unknown>
-) {
-  return {
-    ...(asRecord(usage) ?? {}),
-    assemblyDecisionLedger,
-  };
 }
 
 function summarizeMaterialCheckpoints(
@@ -722,144 +685,7 @@ export async function POST(
       tripId,
     });
 
-    let completedAssemblyUsage: unknown = finalAssemblyUsage;
-    if (isAssemblyDecisionLedgerShadowEnabled()) {
-      const outputFingerprintBefore = hashStableValue({
-        draft: completedDraft,
-        records: assembly.records,
-      });
-      const shadow =
-        result.sourceFactLedger?.status === "built"
-          ? result.sourceFactLedger
-          : null;
-      const dependencyAvailable =
-        isSourceFactLedgerShadowEnabled() &&
-        shadow !== null &&
-        sourceFactPersistence?.ledgerHash === shadow.ledger.metrics.ledgerHash;
-
-      if (!dependencyAvailable) {
-        const details = {
-          additionalGeocodingLookupCount: 0,
-          additionalModelCallCount: 0,
-          additionalRetryCount: 0,
-          failureClass: "source_fact_dependency_unavailable",
-          outputFingerprintAfter: outputFingerprintBefore,
-          outputFingerprintBefore,
-          schemaVersion: ASSEMBLY_DECISION_CARRIER_LEDGER_SCHEMA_VERSION,
-          sourceFactLedgerHash:
-            shadow?.ledger.metrics.ledgerHash ?? null,
-          status: "failed",
-          writerVersion: ASSEMBLY_DECISION_WRITER_VERSION,
-        };
-        completedAssemblyUsage = withAssemblyDecisionLedgerUsage(
-          completedAssemblyUsage,
-          details
-        );
-        await recordAssemblyDecisionLedgerEventFailSoft({
-          details,
-          processingRunId: run.id,
-          stage: "assembly_decision_ledger",
-          status: "failed",
-          tripId,
-        });
-      } else {
-        let attemptedTelemetry: ReturnType<
-          typeof createAssemblyDecisionLedgerTelemetryV1
-        > | null = null;
-        try {
-          const build = buildAssemblyDecisionCarrierLedgerV1({
-            index: shadow.companionContext.sourceDocumentIndex,
-            observations: persistedObservations,
-            pieces: currentPieces,
-            records: assembly.records,
-            recoverySourceBindings:
-              shadow.companionContext.recoverySourceBindings,
-            resolverMetadata: shadow.companionContext.resolverMetadata,
-            sourceLedger: shadow.ledger,
-            stages: shadow.companionContext.stages,
-          });
-          const outputFingerprintAfter = hashStableValue({
-            draft: completedDraft,
-            records: assembly.records,
-          });
-          if (outputFingerprintBefore !== outputFingerprintAfter) {
-            throw new Error(
-              "Assembly decision ledger shadow mutated terminal assembly output."
-            );
-          }
-          const telemetry = createAssemblyDecisionLedgerTelemetryV1({
-            build,
-            outputFingerprintAfter,
-            outputFingerprintBefore,
-          });
-          attemptedTelemetry = telemetry;
-          const persistence = await persistAssemblyDecisionCarrierSetV1({
-            build,
-            outputFingerprintAfter,
-            outputFingerprintBefore,
-            processingRunId: run.id,
-            sourceFactPersistence,
-            tripId,
-          });
-          const details = {
-            ...telemetry,
-            persistenceStatus: persistence.status,
-            status: "built",
-          };
-          completedAssemblyUsage = withAssemblyDecisionLedgerUsage(
-            completedAssemblyUsage,
-            details
-          );
-          await recordAssemblyDecisionLedgerEventFailSoft({
-            details,
-            processingRunId: run.id,
-            stage: "assembly_decision_ledger",
-            status: "completed",
-            tripId,
-          });
-        } catch (error) {
-          const failureClass =
-            error instanceof AssemblyDecisionLedgerPersistenceError
-              ? error.failureClass
-              : "decision_set_build_failed";
-          const outputFingerprintAfter = hashStableValue({
-            draft: completedDraft,
-            records: assembly.records,
-          });
-          const details = {
-            ...(attemptedTelemetry ?? {
-              additionalGeocodingLookupCount: 0,
-              additionalModelCallCount: 0,
-              additionalRetryCount: 0,
-            }),
-            failureClass,
-            outputFingerprintAfter,
-            outputFingerprintBefore,
-            schemaVersion: ASSEMBLY_DECISION_CARRIER_LEDGER_SCHEMA_VERSION,
-            sourceFactLedgerHash: shadow.ledger.metrics.ledgerHash,
-            status: "failed",
-            writerVersion: ASSEMBLY_DECISION_WRITER_VERSION,
-          };
-          console.error("trip_assembly_decision_ledger_failed", {
-            failureClass,
-            name: error instanceof Error ? error.name : "UnknownError",
-            runId: run.id,
-            tripId,
-          });
-          completedAssemblyUsage = withAssemblyDecisionLedgerUsage(
-            completedAssemblyUsage,
-            details
-          );
-          await recordAssemblyDecisionLedgerEventFailSoft({
-            details,
-            processingRunId: run.id,
-            stage: "assembly_decision_ledger",
-            status: "failed",
-            tripId,
-          });
-        }
-      }
-    }
+    const completedAssemblyUsage: unknown = finalAssemblyUsage;
 
     const persistedDraft = attachStructuredTripSnapshot({
       draft: completedDraft,

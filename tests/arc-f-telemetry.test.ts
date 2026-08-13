@@ -498,57 +498,6 @@ export default function run() {
     );
   });
 
-  test("Loop 10 source authority outcome survives the audit allowlist without source or candidate data", () => {
-    const summary = createExtractionSummary({
-      sourceFactAssemblyAuthority: {
-        authorityHash: "authority-hash",
-        behaviorSignalCandidateCount: 18,
-        candidateCount: 61,
-        candidateDiagnostics: [
-          { candidateId: "candidate-must-not-survive", title: "Private Place" },
-        ],
-        compositePlanRecoveredCandidateCount: 1,
-        mappedCandidateCount: 61,
-        relationshipDecisionCount: 4,
-        relationshipRecoveredCandidateCount: 5,
-        relationshipRecoveryStageCount: 1,
-        relationshipUnresolvedCount: 0,
-        roleDecisionCount: 61,
-        schemaVersion: 1,
-        sourceExcerpt: "source-must-not-survive",
-        status: "applied",
-        tailReferenceRecoveredCandidateCount: 2,
-        unresolvedBehaviorCandidateCount: 0,
-        unresolvedSourceBindingCount: 0,
-      },
-    });
-    assert.equal(summary.sourceFactAssemblyAuthority?.status, "applied");
-    assert.equal(
-      summary.sourceFactAssemblyAuthority?.unresolvedBehaviorCandidateCount,
-      0
-    );
-    assert.equal(
-      summary.sourceFactAssemblyAuthority?.relationshipDecisionCount,
-      4
-    );
-    assert.doesNotMatch(
-      JSON.stringify(summary),
-      /candidate-must-not-survive|Private Place|source-must-not-survive/i
-    );
-
-    const failed = createExtractionSummary({
-      sourceFactAssemblyAuthority: {
-        failureClass: "authority_build_failed",
-        status: "fallback",
-      },
-    });
-    assert.equal(failed.sourceFactAssemblyAuthority?.status, "fallback");
-    assert.equal(
-      failed.sourceFactAssemblyAuthority?.failureClass,
-      "authority_build_failed"
-    );
-  });
-
   test("Loop 9 assembly decision telemetry survives the audit allowlist without private or candidate data", () => {
     const summary = createExtractionSummary({
       assemblyDecisionLedger: {

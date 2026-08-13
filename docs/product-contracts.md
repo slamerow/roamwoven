@@ -1,8 +1,17 @@
 # Roamwoven Product Contracts
 
-Ledger version: 33
+Ledger version: 34
 
-Ledger date: 2026-08-09 (Loop 10 authority and quality-gate clarification.
+Ledger date: 2026-08-13 (Assembly simplification Loop 6. The customer
+extraction route no longer builds or persists the Assembly Decision & Carrier
+Ledger, and the disabled Source Fact Assembly Authority experiment, flag, and
+authority-only telemetry are removed. Historical database rows and migrations
+remain untouched. The deterministic ledger builder and compact representation
+remain available only to network-disabled offline comparison tools. Five frozen
+traveler packages must remain byte-for-byte identical; there is no replacement
+production ledger or semantic writer.)
+
+Prior: ledger version 33 (2026-08-09) — (Loop 10 authority and quality-gate clarification.
 Route-equivalent output under source-fact authority is an intermediate
 anti-regression proof, not the release result. The model resolver may be
 removed from the production authority path only after the source-fact engine
@@ -732,7 +741,7 @@ path is bypassed.
 
 ## RW-ADL-001 — Assembly decisions terminate in checkable carriers or states
 
-- Status: `LOCKED`
+- Status: `SUPERSEDED`
 - Decision date: `2026-08-09`
 - Enforcement: `PARTIAL`
 - Contract: Source Fact Ledger V1 is immutable. A separate append-only
@@ -772,30 +781,19 @@ path is bypassed.
   is an indexed linear pass; exhaustive resolver ablation is an offline release
   gate and never runs on a customer route.
 
-  The companion is default-off behind
-  `ASSEMBLY_DECISION_LEDGER_SHADOW=1`. It requires
-  `EXTRACTION_FACT_LEDGER_SHADOW=1` and an inserted or hash-confirmed matching
-  source-fact row. A missing/failed dependency, construction mismatch, or
-  persistence failure emits one privacy-safe internal event, performs no
-  orphan insert, makes no Question or Call, and leaves the usable draft exact.
-  It never silently enables either flag. The complete shadow path adds one
-  decision-set insert after assembly, for two bounded append-only writes total.
+  Loop 6 supersedes the runtime portion of this contract. The customer
+  extraction route may not import, build, persist, emit events for, or attach
+  usage telemetry from this ledger. `ASSEMBLY_DECISION_LEDGER_SHADOW` no longer
+  has a customer-route effect. Historical rows, migrations, schema definitions,
+  the deterministic builder, compact encoding, and network-disabled ablation
+  tooling remain available for offline comparison only. The served audit may
+  still decode aggregate-only decision-ledger telemetry from historical runs.
 
-  This ledger does not authorize resolver removal. An authority switch requires
-  a later behavior loop that proves every behavior-bearing judgment from source
-  facts, reaches zero unresolved behavior-bearing decisions, preserves every
-  carrier and ground-truth relationship/intent outcome, and reproduces the
-  current route-equivalent output before removing the resolver in that same
-  bounded loop. That reproduction is only the intermediate authority proof.
-  The final Loop 10 candidate must also correct the source-backed root causes
-  confirmed in fresh 8.7 while preserving every existing pass and negative
-  control. Only the improved candidate—not the defective parity state—may earn
-  deployment and one authorized fresh extraction. The private QA snapshot must
-  expose the authority status, version, aggregate decision counts, unresolved
-  behavior count, and authority hash through a fixed privacy allowlist. A fresh
-  run is not valid Loop 10 evidence unless authority status is `applied` and
-  unresolved behavior is zero; a fail-soft `fallback` run may remain usable but
-  may never be mistaken for authority proof.
+  The disabled Source Fact Assembly Authority experiment is deleted rather than
+  promoted or replaced. No authority flag, fallback path, production telemetry,
+  model call, geocode lookup, retry, Question, Call, or new semantic writer takes
+  its place. The active product proof is the final traveler projection and its
+  existing source-to-final conservation checks.
 - Evidence: Loop 8 exit audit found 161 accepted resolver role decisions on the
   8.6 candidate and 113 on fresh 8.7, with 223 and 150 raw proposals
   respectively. Individual offline ablation found 18 and 5 behavior-bearing
@@ -817,7 +815,9 @@ path is bypassed.
   an exact composite Source Fact foreign key, idempotent same-hash confirmation,
   terminal-route integration behind both default-off flags, aggregate-only QA
   telemetry, and one-event fail-soft recovery. No migration was applied and no
-  shadow flag was enabled. Closure evidence:
+  shadow flag was enabled. Loop 6 then removed that terminal-route integration
+  and the unused authority experiment while preserving the full five-package
+  traveler projection byte-for-byte. Closure evidence:
   `docs/assembly-decision-carrier-ledger-v1-closure-2026-08-09.md`.
 - Tests: `tests/assembly-decision-carrier-ledger-schema.test.ts`,
   `tests/resolver-role-evaluations.test.ts`,

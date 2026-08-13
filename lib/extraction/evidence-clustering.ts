@@ -98,7 +98,6 @@ import {
 } from "@/lib/trip-transport-policy";
 import { createCanonicalTripSpineReviewDetails } from "@/lib/extraction/trip-spine-validation";
 import { classifySensitiveText } from "@/lib/trip-privacy-policy";
-import { isSourceFactAssemblyAuthorityEnabled } from "@/lib/extraction/source-fact-assembly-config";
 
 export const EVIDENCE_CLUSTER_VERSION = 20;
 
@@ -2259,17 +2258,6 @@ function mergeObservationIntoPiece(
     );
   }
 
-  if (
-    isSourceFactAssemblyAuthorityEnabled() &&
-    reason === "same rental-car pickup"
-  ) {
-    // The source-backed identity is one rental pickup even when parser copies
-    // alternate between "car pickup" and "pick up car". Use one stable,
-    // traveler-readable canonical title instead of allowing the last copy to
-    // win by wording length.
-    next.title = "Pick up rental car";
-  }
-
   piece.payload = next;
   piece.conflicts = conflicts;
   piece.observationIds = Array.from(
@@ -2547,62 +2535,9 @@ function gateOffContractQuestions(
     const targetField = stringValue(record, "targetField") ?? "";
     const guessed = stringValue(record, "guessedValue");
     const evidence = stringValue(record, "evidence") ?? "";
-    const prompt = stringValue(record, "prompt") ?? "";
-    const reason = stringValue(record, "reason") ?? "";
     const subject = eligiblePieceById.get(
       stringValue(record, "relatedCanonicalPieceId") ?? ""
     );
-    if (isSourceFactAssemblyAuthorityEnabled()) {
-      const sourceAlreadyAnswers =
-        /\b(?:explicitly stated|is present|are present|source (?:states|provides|lists|names))\b/i.test(
-          `${reason} ${evidence}`
-        );
-      if (
-        /^(?:address|confirmation|name|provider)$/i.test(targetField) &&
-        sourceAlreadyAnswers
-      ) {
-        dismiss(
-          record,
-          "the question says the source already provides this metadata; source-answerable fields are assembly work, not maker decisions (RW-QUE-001)"
-        );
-        continue;
-      }
-      if (
-        /^provider$/i.test(targetField) &&
-        !guessed &&
-        /\b(?:provider|company)\b[^.]{0,60}\b(?:is not|isn't|not|was not|wasn't) (?:named|provided|stated)\b|\bmissing (?:the )?(?:provider|company)\b/i.test(
-          reason
-        )
-      ) {
-        dismiss(
-          record,
-          "an optional provider label that the source does not name is left blank; completing absent metadata is not a maker decision (RW-QUE-001)"
-        );
-        continue;
-      }
-      if (
-        /\bhome\b/i.test(prompt) &&
-        /\b(?:which|what) city\b|\bassociated with\b/i.test(prompt)
-      ) {
-        dismiss(
-          record,
-          "a standalone Home fragment is identity cleanup, not a material maker decision (RW-QUE-001)"
-        );
-        continue;
-      }
-      if (
-        /\bwhat specific\b[^?]{0,80}\b(?:activity|venue|plan)\b/i.test(prompt) &&
-        /\b(?:broad placeholder|no concrete (?:activity|venue|plan)|source (?:does not|doesn't) (?:name|provide|specify))\b/i.test(
-          reason
-        )
-      ) {
-        dismiss(
-          record,
-          "the source contains only a broad placeholder; asking the maker to invent missing source content is technical recovery, not a material decision (RW-QUE-001)"
-        );
-        continue;
-      }
-    }
     if (
       /address.?visibility/i.test(targetField) &&
       normalizeText(guessed) === "public" &&
@@ -3138,22 +3073,6 @@ function mergeCanonicalPieceInto({
     new Set([...target.mergeReasons, ...source.mergeReasons, reason])
   );
   target.actions = [...target.actions, ...source.actions];
-
-  // Note evidence is semantic input, not disposable parser metadata. A
-  // same-note identity merge can happen before the canonical City Note is
-  // rendered; preserve both source-backed evidence bodies so later section,
-  // privacy, and carrier classification sees every recommendation instead
-  // of only the winning parser summary.
-  if (
-    isSourceFactAssemblyAuthorityEnabled() &&
-    target.kind === "note" &&
-    source.kind === "note"
-  ) {
-    target.payload.evidence = uniqueDescription(
-      target.payload.evidence,
-      source.payload.evidence
-    );
-  }
 
   for (const [field, observationIds] of Object.entries(source.fieldSources)) {
     target.fieldSources[field] = Array.from(
@@ -12815,10 +12734,6 @@ function applyIntentBlockClassification({
       canonicalSourceDecisions(piece.payload).length > 0
         ? "source_ticket_choice"
         : null,
-      isSourceFactAssemblyAuthorityEnabled() &&
-      piece.payload._canonicalRoleDecision === "keep_activity"
-        ? "source_fact_authority"
-        : null,
       pieceNamedInDayHeading(piece) ? "day_heading" : null,
       sourceCommittedDaySlotPieceIds.has(piece.id)
         ? "day_heading_slot"
@@ -13081,9 +12996,6 @@ function containmentObservationPositions(
     .sort(
       (left, right) =>
         right.stageIndex - left.stageIndex ||
-        (isSourceFactAssemblyAuthorityEnabled()
-          ? Number(right.relationshipSignal) - Number(left.relationshipSignal)
-          : 0) ||
         left.line - right.line ||
         left.ordinal - right.ordinal
     );

@@ -147,6 +147,18 @@ export default function run() {
     /app\/maker\/trips|ASSEMBLY_DECISION_LEDGER_SHADOW/,
     "offline ablation cannot be imported into or enabled on a customer route"
   );
+  const customerRoute = fs.readFileSync(
+    path.join(
+      process.cwd(),
+      "app/maker/trips/[tripId]/data/extract/route.ts"
+    ),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    customerRoute,
+    /assembly-decision-carrier|ASSEMBLY_DECISION_LEDGER_SHADOW|assembly_decision_ledger/,
+    "the retired decision ledger must remain offline and outside the customer route"
+  );
 
   const built = Object.fromEntries(
     HETEROGENEOUS_ASSEMBLY_FIXTURES.map((fixture) => [

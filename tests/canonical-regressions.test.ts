@@ -1168,54 +1168,6 @@ export default async function run() {
     assert.equal((draft.activities[0] as Record<string, unknown>).endTime, "20:00");
   });
 
-  await test("same-day car-pickup aliases fold into one rental activity", () => {
-    const previous = process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-    const previousOfflineAudit =
-      process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-    process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = "1";
-    process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = "1";
-    try {
-      const draft = cluster(emptyStage({
-        activities: [
-          {
-            category: "arrival_departure",
-            city: "Prague",
-            date: "2019-01-17",
-            description: "Pick up car at Prague Downtown.",
-            itemType: "activity",
-            startTime: "09:00",
-            title: "Pick up car at Prague Downtown",
-          },
-          {
-            category: "arrival_departure",
-            city: "Prague",
-            date: "2019-01-17",
-            description: "Car pickup in Prague.",
-            itemType: "activity",
-            title: "Car pickup in Prague",
-          },
-        ],
-      }));
-      assert.deepEqual(
-        (draft.activities as Array<Record<string, unknown>>).map(
-          (item) => item.title
-        ),
-        ["Pick up rental car"]
-      );
-    } finally {
-      if (previous === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_AUTHORITY = previous;
-      }
-      if (previousOfflineAudit === undefined) {
-        delete process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT;
-      } else {
-        process.env.SOURCE_FACT_ASSEMBLY_OFFLINE_AUDIT = previousOfflineAudit;
-      }
-    }
-  });
-
   await test("place-type words cannot misattach or duplicate one semantic tour question", () => {
     const draft = cluster(emptyStage({
       activities: [

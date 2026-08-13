@@ -451,24 +451,6 @@ export type TripExtractionAuditReport = {
       sent: Record<string, number>;
       strippedCallCount: number;
     } | null;
-    sourceFactAssemblyAuthority: {
-      authorityHash: string | null;
-      behaviorSignalCandidateCount: number;
-      candidateCount: number;
-      compositePlanRecoveredCandidateCount: number;
-      failureClass: string | null;
-      mappedCandidateCount: number;
-      relationshipDecisionCount: number;
-      relationshipRecoveredCandidateCount: number;
-      relationshipRecoveryStageCount: number;
-      relationshipUnresolvedCount: number;
-      roleDecisionCount: number;
-      schemaVersion: number;
-      status: string;
-      tailReferenceRecoveredCandidateCount: number;
-      unresolvedBehaviorCandidateCount: number;
-      unresolvedSourceBindingCount: number;
-    } | null;
     sourceRecovery: {
       batchedLineCount: number;
       deterministicResidualLineCount: number;
